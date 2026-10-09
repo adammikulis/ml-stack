@@ -31,7 +31,7 @@ android {
             if (System.getenv('ANDROID_SIGNING_STORE')) {
                 storeFile file(System.getenv('ANDROID_SIGNING_STORE'))
                 storePassword System.getenv('ANDROID_SIGNING_PASSWORD')
-                keyAlias 'ml-stack-preview'
+                keyAlias 'poolhouse-preview'
                 keyPassword System.getenv('ANDROID_SIGNING_PASSWORD')
             }
         }

@@ -9,7 +9,7 @@ import io
 
 import pytest
 
-from ml_stack import chat, do, memory
+from poolhouse import chat, do, memory
 from tests import memory_keys
 from tests.test_chat import Model, registry
 from tests.test_memory import inject

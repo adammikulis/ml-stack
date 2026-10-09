@@ -2,7 +2,7 @@
 
 import pytest
 
-from ml_stack.fleet.onboard.human import HumanGrant, HumanRequired, mint
+from poolhouse.fleet.onboard.human import HumanGrant, HumanRequired, mint
 
 
 def typed(text):
@@ -20,7 +20,7 @@ def test_no_terminal_no_grant(terminal):
         mint("rotate", "abc", typed=typed("abc"), terminal=terminal, env={})
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"])
 def test_a_process_started_by_an_agent_gets_none_even_at_a_terminal(marker):
     with pytest.raises(HumanRequired, match="agent"):
         mint("rotate", "abc", typed=typed("abc"), terminal=(True, True), env={marker: "1"})

@@ -1,6 +1,6 @@
 """An agent acting on the owner's order deploys the runtime only while the `runtime.deploy` gate is delegated.
 
-Each test runs the real `ml-stack runtime` command in-process as an agent-started process against a temporary
+Each test runs the real `poolhouse runtime` command in-process as an agent-started process against a temporary
 git checkout and a temporary runtimes root; only the wheel build is replaced by the deploy tests' fake builder, and the activity log
 (silent under test) by a list that keeps what the command asked it to record.
 """
@@ -12,8 +12,8 @@ from types import SimpleNamespace
 import pytest
 from test_runtime_deploy import builder, commit, world  # noqa: F401
 
-from ml_stack import authority, runtime_cli, runtime_deploy, runtime_store, runtime_trust
-from ml_stack.activity import writer
+from poolhouse import authority, runtime_cli, runtime_deploy, runtime_store, runtime_trust
+from poolhouse.activity import writer
 
 pytestmark = pytest.mark.slow
 RECORDS: list[SimpleNamespace] = []
@@ -24,9 +24,9 @@ def lead(world, monkeypatch):  # noqa: F811
     """The deploy world as a lead agent's process: marked, naming the recorded checkout, building with the fake builder."""
     repo, launchers, _ = world
     monkeypatch.setenv("CLAUDECODE", "1")
-    # the scrub of ML_STACK_HOME has its own tests (test_runtime_trust); here the state root must stay the temporary one
+    # the scrub of POOLHOUSE_HOME has its own tests (test_runtime_trust); here the state root must stay the temporary one
     monkeypatch.setattr(runtime_trust, "ignore_redirects", lambda: [])
-    monkeypatch.delenv("ML_STACK_AUTHORITY_FLOOR", raising=False)
+    monkeypatch.delenv("POOLHOUSE_AUTHORITY_FLOOR", raising=False)
     runtime_deploy.prepare_root()
     runtime_store.write_state({"checkout": str(repo), "launchers": str(launchers)})
     RECORDS.clear()
@@ -97,11 +97,11 @@ def test_a_failed_smoke_under_a_delegated_deploy_leaves_the_selection_alone(lead
     repo, launchers, fake = lead
     first = commit(repo, "a")
     runtime_cli.main(["ensure"])
-    before = (launchers / "ml-stack-workspace").read_bytes()
+    before = (launchers / "poolhouse-workspace").read_bytes()
     commit(repo, "b")
     fake["build"] = builder(hook_code=3)
     assert runtime_cli.main(["ensure"]) == 1
-    assert selected() == first and (launchers / "ml-stack-workspace").read_bytes() == before
+    assert selected() == first and (launchers / "poolhouse-workspace").read_bytes() == before
     assert deploys()[-1].outcome == "failed"
 
 
@@ -109,14 +109,14 @@ def test_a_process_no_agent_started_is_not_gated(lead, monkeypatch):
     repo, _, _ = lead
     head = commit(repo, "a")
     monkeypatch.delenv("CLAUDECODE")
-    monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
+    monkeypatch.delenv("POOLHOUSE_WORKSPACE_AGENT")
     authority.set_state(["ALL"], authority.PERSON, by="lead")
     assert runtime_cli.main(["ensure"]) == 0 and selected() == head
 
 
 def test_dev_delegates_the_deploy_gate_and_prod_keeps_it_with_the_person(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
-    monkeypatch.delenv("ML_STACK_AUTHORITY_FLOOR", raising=False)
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
+    monkeypatch.delenv("POOLHOUSE_AUTHORITY_FLOOR", raising=False)
     assert authority.GATES["runtime.deploy"] == "runtime"
     assert "runtime.deploy" not in authority.PROD_DELEGATED
     assert authority.state_of("runtime.deploy") == authority.DELEGATED

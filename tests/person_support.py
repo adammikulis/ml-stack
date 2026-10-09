@@ -15,14 +15,14 @@ VERSION = "2.1.293"
 SESSION = "sess-person-1"
 PROPOSAL_TEXT = "The tests pass. I'll push main to origin now."
 ZERO = "0" * 40
-ENV_DROPPED = ("CLAUDECODE", "ML_STACK_NONINTERACTIVE", "CLAUDE_CODE_SESSION_ATTENDED", "ML_STACK_AGENT",
-               "ML_STACK_SESSION_ID", "MLSTACK_GUARD", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CONFIG_DIR")
+ENV_DROPPED = ("CLAUDECODE", "POOLHOUSE_NONINTERACTIVE", "CLAUDE_CODE_SESSION_ATTENDED", "POOLHOUSE_AGENT",
+               "POOLHOUSE_SESSION_ID", "POOLHOUSE_GUARD", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CONFIG_DIR")
 
 
 def environment(state: Path, **more: str) -> dict[str, str]:
-    """A child environment whose ml-stack state is ``state`` and whose Claude folder is beside it."""
+    """A child environment whose poolhouse state is ``state`` and whose Claude folder is beside it."""
     env = {k: v for k, v in os.environ.items() if k not in ENV_DROPPED}
-    env.update(ML_STACK_HOME=str(state), ML_STACK_NO_REAL_KEYSTORE="1",
+    env.update(POOLHOUSE_HOME=str(state), POOLHOUSE_NO_REAL_KEYSTORE="1",
                CLAUDE_CONFIG_DIR=str(state.parent / "claude"), **more)
     return env
 

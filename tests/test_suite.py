@@ -1,4 +1,4 @@
-"""`ml_stack.train.suite`: a measurement run over several seeds, and what its record carries.
+"""`poolhouse.train.suite`: a measurement run over several seeds, and what its record carries.
 
 Every suite here is invented and counts rather than computes, so the tests measure the
 harness and not a model. Nothing reads or writes outside ``tmp_path``.
@@ -12,8 +12,8 @@ from dataclasses import replace
 
 import pytest
 
-from ml_stack.lock import Busy, only_one
-from ml_stack.train import suite as suites
+from poolhouse.lock import Busy, only_one
+from poolhouse.train import suite as suites
 
 
 @pytest.fixture(autouse=True)
@@ -107,7 +107,7 @@ def test_the_reading_says_the_spread_the_failures_and_a_dirty_tree(lock):
 
 
 def test_a_run_reads_back_out_of_what_was_written(lock):
-    from ml_stack.bench.record import Measured
+    from poolhouse.bench.record import Measured
 
     counting()
     out = suites.run("counting", backend="counting", seeds=(0, 1), width=3, lock=lock)
@@ -192,9 +192,9 @@ def test_a_backend_that_reports_no_peak_is_zero_rather_than_an_error():
 
 
 def test_the_busy_reading_is_zero_when_no_vendor_tool_answers(monkeypatch):
-    monkeypatch.setattr("ml_stack.fleet.telemetry.gpu_telemetry", lambda: {})
+    monkeypatch.setattr("poolhouse.fleet.telemetry.gpu_telemetry", lambda: {})
     assert suites.busy_pct() == 0.0
-    monkeypatch.setattr("ml_stack.fleet.telemetry.gpu_telemetry",
+    monkeypatch.setattr("poolhouse.fleet.telemetry.gpu_telemetry",
                         lambda: {"gpu_util_pct": 73.5})
     assert suites.busy_pct() == 73.5
 
@@ -211,7 +211,7 @@ def a_module(tmp_path, monkeypatch, text):
 
 
 MODULE = '''
-from ml_stack.train.suite import register
+from poolhouse.train.suite import register
 
 @register("weighing", "the width it was given")
 def weighing(*, backend, seed, width=10, tight=False):
@@ -257,7 +257,7 @@ def test_run_says_what_went_wrong_rather_than_raising(tmp_path, monkeypatch, cap
 
 def test_a_failed_seed_makes_the_command_exit_nonzero(tmp_path, monkeypatch, capsys):
     name = a_module(tmp_path, monkeypatch, '''
-from ml_stack.train.suite import register
+from poolhouse.train.suite import register
 
 @register("flaky", "fails on the second seed")
 def flaky(*, backend, seed):

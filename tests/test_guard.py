@@ -6,12 +6,12 @@ import logging
 
 import pytest
 
-from ml_stack import guard as g
-from ml_stack.guard.loop import parse_call
-from ml_stack.guard.policy import Limits, ToolPolicyRail, check_arguments
-from ml_stack.guard.secrets import SecretRail, redact
-from ml_stack.guard.untrusted import UntrustedRail, fenced, injection_markers, unfenced
-from ml_stack.interventions import Base, Call, Context, Deny, Rewrite
+from poolhouse import guard as g
+from poolhouse.guard.loop import parse_call
+from poolhouse.guard.policy import Limits, ToolPolicyRail, check_arguments
+from poolhouse.guard.secrets import SecretRail, redact
+from poolhouse.guard.untrusted import UntrustedRail, fenced, injection_markers, unfenced
+from poolhouse.interventions import Base, Call, Context, Deny, Rewrite
 
 TOKEN = "hf_" + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"
 SCHEMAS = [
@@ -254,7 +254,7 @@ def test_turning_a_rail_off_is_named_needs_a_reason_and_is_logged(caplog, capsys
         g.rails(without=["secrets"])
     with pytest.raises(ValueError, match="no built-in rail"):
         g.rails(without=["nonsense"], because="x")
-    with caplog.at_level(logging.WARNING, logger="ml_stack.guard"):
+    with caplog.at_level(logging.WARNING, logger="poolhouse.guard"):
         kept = g.rails(without=["secrets"], because="the log is public already")
     assert [r.name for r in kept] == ["untrusted", "tool-policy", "taint"]
     assert "secrets turned off: the log is public already" in caplog.text
@@ -264,7 +264,7 @@ def test_turning_a_rail_off_is_named_needs_a_reason_and_is_logged(caplog, capsys
 
 def test_denials_are_logged_without_the_text(caplog):
     run = g.start(g.default(), offered=SCHEMAS)
-    with caplog.at_level(logging.WARNING, logger="ml_stack.guard"):
+    with caplog.at_level(logging.WARNING, logger="poolhouse.guard"):
         run.check_call(call("models_find", {"words": f"{TOKEN}"}))
     assert "secrets" in caplog.text and TOKEN not in caplog.text
 
@@ -306,8 +306,8 @@ class Withhold(Base):
 def test_a_result_a_rail_denies_never_reaches_the_model():
     import io
 
-    from ml_stack import chat, do, mcp
-    from ml_stack.testing import ScriptedModel
+    from poolhouse import chat, do, mcp
+    from poolhouse.testing import ScriptedModel
 
     def models_find(words: str) -> dict:
         return {"text": "SECRET-LISTING"}
@@ -325,7 +325,7 @@ def test_a_result_a_rail_denies_never_reaches_the_model():
 def test_the_system_prompt_tells_the_model_what_the_fence_means():
     import io
 
-    from ml_stack import chat, do
+    from poolhouse import chat, do
 
     for task in (False, True):
         sess = chat.Chat(None, do.Person(io.StringIO(), io.StringIO()), task=task)

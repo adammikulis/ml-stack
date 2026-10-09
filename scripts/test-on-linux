@@ -5,9 +5,9 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="3.13"
 # python:$PYTHON rather than -slim: a hundred tests shell out to git, which -slim has not.
-IMAGE="${ML_STACK_LINUX_IMAGE:-python:$PYTHON}"
-PLATFORM="${ML_STACK_LINUX_PLATFORM:-}"
-VOLUME="${ML_STACK_LINUX_VOLUME:-ml-stack-linux-suite}"
+IMAGE="${POOLHOUSE_LINUX_IMAGE:-python:$PYTHON}"
+PLATFORM="${POOLHOUSE_LINUX_PLATFORM:-}"
+VOLUME="${POOLHOUSE_LINUX_VOLUME:-poolhouse-linux-suite}"
 
 usage() {
   cat <<'HELP'
@@ -84,7 +84,7 @@ BROKER="${DEV_TEST_SLOTS_DIR:-$HOME/.cache/dev-test-slots}"
 mkdir -p "$BROKER"
 BROKER="$(cd "$BROKER" && pwd)"
 export DEV_TEST_SLOTS_DIR="$BROKER"
-export ML_STACK_LINUX_IMAGE="$IMAGE" ML_STACK_LINUX_VOLUME="$VOLUME" ML_STACK_LINUX_PLATFORM="$PLATFORM"
-export ML_STACK_LINUX_SINGLE="$SINGLE" ML_STACK_LINUX_REBUILD="$REBUILD"
-python3 "$REPO/scripts/testslots.py" pytest --container --want "$WANT" --min 1 --label "ml-stack: Linux tests" -- \
+export POOLHOUSE_LINUX_IMAGE="$IMAGE" POOLHOUSE_LINUX_VOLUME="$VOLUME" POOLHOUSE_LINUX_PLATFORM="$PLATFORM"
+export POOLHOUSE_LINUX_SINGLE="$SINGLE" POOLHOUSE_LINUX_REBUILD="$REBUILD"
+python3 "$REPO/scripts/testslots.py" pytest --container --want "$WANT" --min 1 --label "poolhouse: Linux tests" -- \
   "$(python3 -c 'import sys; print(sys.executable)')" -m pytest "${CLEAN_ARGS[@]}"

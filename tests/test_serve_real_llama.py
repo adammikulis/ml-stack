@@ -1,6 +1,6 @@
 """A real llama-server behind the broker and the request queue.
 
-Runs only on a machine with a llama-server binary, a small GGUF (``ML_STACK_TEST_GGUF``, else the
+Runs only on a machine with a llama-server binary, a small GGUF (``POOLHOUSE_TEST_GGUF``, else the
 smallest under the Hugging Face cache or ``~/.cache``), and no other llama-server running:
 starting a model beside someone else's work is what this library exists to prevent.
 """
@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import gate
-from ml_stack.client import Client
-from ml_stack.hub import header
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-from ml_stack.serve.process import every_server, pid_exists
+from poolhouse import gate
+from poolhouse.client import Client
+from poolhouse.hub import header
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from poolhouse.serve.process import every_server, pid_exists
 
 pytestmark = pytest.mark.slow
 SRC = str(Path(__file__).resolve().parent.parent / "src")
@@ -35,7 +35,7 @@ def generates(path: Path) -> bool:
 
 
 def small_gguf(account: Path) -> Path | None:
-    named = os.environ.get("ML_STACK_TEST_GGUF")
+    named = os.environ.get("POOLHOUSE_TEST_GGUF")
     if named:
         return Path(named)
     found = [p for root in (account / ".cache" / "huggingface" / "hub", account / ".cache")
@@ -48,10 +48,10 @@ def small_gguf(account: Path) -> Path | None:
 def llama_server(account: Path) -> Path | None:
     """The machine's own build, looked for under the account's home, which the suite moves
     away from the code under test."""
-    named = os.environ.get("ML_STACK_TEST_LLAMA_SERVER") or shutil.which("llama-server")
+    named = os.environ.get("POOLHOUSE_TEST_LLAMA_SERVER") or shutil.which("llama-server")
     if named:
         return Path(named)
-    builds = sorted((account / ".ml-stack" / "llama.cpp" / "builds").glob("*/llama-server"))
+    builds = sorted((account / ".poolhouse" / "llama.cpp" / "builds").glob("*/llama-server"))
     return builds[-1] if builds else None
 
 
@@ -63,7 +63,7 @@ def real(_real_home):
         pytest.skip("no llama-server binary on this machine")
     model = small_gguf(account)
     if model is None:
-        pytest.skip("no small GGUF to load; set ML_STACK_TEST_GGUF")
+        pytest.skip("no small GGUF to load; set POOLHOUSE_TEST_GGUF")
     if every_server():
         pytest.skip("another llama-server is running; a test does not load a model beside it")
     return binary, model
@@ -89,7 +89,7 @@ def test_a_real_server_is_leased_queued_and_stopped(real, monkeypatch):
                     seen.append([r.get("pid") for r in rows])
                 time.sleep(0.01)
 
-        code = ("import sys\nfrom ml_stack.client import Client\n"
+        code = ("import sys\nfrom poolhouse.client import Client\n"
                 "print(Client(sys.argv[1]).chat([{'role': 'user', 'content': 'Say hi.'}], "
                 "max_tokens=24).content)\n")
         watcher = threading.Thread(target=watch)
@@ -114,8 +114,8 @@ def test_a_real_server_is_leased_queued_and_stopped(real, monkeypatch):
 def test_a_decision_model_is_served_only_through_the_broker(real, monkeypatch, tmp_path):
     """Labelled `decision`, the smallest local model still takes a lease, and the decide
     package then asks the server that lease returned."""
-    from ml_stack.decide import router
-    from ml_stack.hub import kinds
+    from poolhouse.decide import router
+    from poolhouse.hub import kinds
 
     binary, model = real
     assert kinds.classify(path=model, held=[model.parent]) == "decision"
@@ -131,7 +131,7 @@ def test_a_decision_model_is_served_only_through_the_broker(real, monkeypatch, t
         # on llama.cpp 0.5.0), under the decider's 0.5 floor. Failing closed on such a model is the decider working as
         # designed, so the call may end either way; what this test pins is that the question reached the server this
         # lease returned, and that the only other outcome is the documented refusal.
-        from ml_stack.decide.types import DecideError
+        from poolhouse.decide.types import DecideError
 
         try:
             got = router.decide("Which letter comes first?", {}, ["a", "b"], config=config)

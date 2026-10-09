@@ -5,5 +5,5 @@ import sys
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    from ml_stack.fleet.frozen_dispatch import main
+    from poolhouse.fleet.frozen_dispatch import main
     sys.exit(main())

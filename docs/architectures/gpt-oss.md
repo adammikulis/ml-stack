@@ -1,7 +1,7 @@
 # gpt-oss -- gpt-oss-120b, gpt-oss-20b
 
 From the 120b header (`ggml-org/gpt-oss-120b-GGUF`, mxfp4). Memory figures are
-`ml-stack-serve fit` records from 2026-09-02; answering and draft figures are the runs in
+`poolhouse-serve fit` records from 2026-09-02; answering and draft figures are the runs in
 [`docs/report-2026-09-23.md`](../report-2026-09-23.md), which names its command and store.
 
 - 36 layers, 64 heads, 8 KV heads, head size 64; `attention.sliding_window 128` with no

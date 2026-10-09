@@ -10,22 +10,22 @@ from ._perfile import finder
 from ._util import calls, dotted, exempt, parse
 
 NAME = "home-paths"
-OWNER = "ml_stack.home"
+OWNER = "poolhouse.home"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/home.py",)
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/home.py",)
 
 
 def describe() -> str:
     return ("A home directory resolved in place, or the state root written as a literal path; "
-            "ml_stack.home names every directory once.")
+            "poolhouse.home names every directory once.")
 
 
 def state_literal(value: object) -> bool:
     """Whether a string constant names the state root as a path rather than asking for it."""
     if not isinstance(value, str):
         return False
-    return value in ("~/.ml-stack", ".ml-stack") or value.startswith(("~/.ml-stack/", ".ml-stack/"))
+    return value in ("~/.poolhouse", ".poolhouse") or value.startswith(("~/.poolhouse/", ".poolhouse/"))
 
 
 def scan(path: Path, where: str) -> list[Finding]:

@@ -1,12 +1,12 @@
 # Models on this machine
 
-`ml_stack.hub` finds every model installed by Hugging Face, llama.cpp, LM Studio, Ollama and
+`poolhouse.hub` finds every model installed by Hugging Face, llama.cpp, LM Studio, Ollama and
 the other tools below, downloads others with progress and resume, and says what serving one
 costs in memory.
 
 ```python
-from ml_stack import hub
-from ml_stack.serve import estimate, suggest
+from poolhouse import hub
+from poolhouse.serve import estimate, suggest
 
 for m in hub.discover():                              # id, name, path, format, size_bytes, ...
     print(m.id, m.size_bytes, m.quantization, m.source)
@@ -19,7 +19,7 @@ print(pick.verdict, pick.context, pick.lease())       # lease() are ServerSpec k
 print(estimate.estimate(path, context=16384).breakdown)  # bytes per part, for a meter
 ```
 
-`ml-stack-models` (or `ml-stack models`) has the same as commands, each with `--json`:
+`poolhouse-models` (or `poolhouse models`) has the same as commands, each with `--json`:
 `list`, `where`, `info`, `which`, `fit`, `suggest`, `pull`, `snapshot`, `search`, `recommend`,
 `machine`. `snapshot OWNER/REPO --repo-type model|dataset --revision REF` downloads a public
 Hub snapshot into the standard Hugging Face cache, outside the repository. It does not read a
@@ -28,7 +28,7 @@ Hugging Face token and excludes pickle-based weight files.
 For example:
 
 ```sh
-ml-stack-models snapshot StrandsAgents/strands-decider-2B-hobson-v21 \
+poolhouse-models snapshot StrandsAgents/strands-decider-2B-hobson-v21 \
   --revision 2b52a6235c1b8306bbfa30b00b9d4b74b63a39f5 --json
 ```
 
@@ -39,13 +39,13 @@ Files pass through the maintained download pipeline with the revision's size and
 
 ## Where models are searched
 
-`hub.places.places()` is the table; `ml-stack-models where` prints it for this machine with
+`hub.places.places()` is the table; `poolhouse-models where` prints it for this machine with
 what each folder holds. An environment variable that moves a tool's folder replaces that
 tool's default folders, as it does for the tool. A folder reached twice is read once.
 
 | Tool | Folder (macOS / Linux / Windows) | Moved by | Verified |
 | --- | --- | --- | --- |
-| ml-stack store | `<state>/models` | `ML_STACK_HOME` | yes |
+| Poolhouse store | `<state>/models` | `POOLHOUSE_HOME` | yes |
 | Hugging Face hub | `~/.cache/huggingface/hub` (all three) | `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `HF_HOME`/hub, `TRANSFORMERS_CACHE`, `XDG_CACHE_HOME`/huggingface/hub | macOS |
 | llama.cpp (`llama-server -hf`) | `~/Library/Caches/llama.cpp` / `$XDG_CACHE_HOME/llama.cpp` or `~/.cache/llama.cpp` / `%LOCALAPPDATA%\llama.cpp` | `LLAMA_CACHE` | macOS |
 | Ollama | `~/.ollama/models` (Linux service: `/usr/share/ollama/.ollama/models`) | `OLLAMA_MODELS` | macOS |
@@ -55,13 +55,13 @@ tool's default folders, as it does for the tool. A folder reached twice is read 
 | ModelScope | `~/.cache/modelscope/hub` | `MODELSCOPE_CACHE` | no |
 | KaggleHub | `~/.cache/kagglehub/models` | `KAGGLEHUB_CACHE` | no |
 | Manual | `~/models`, `~/Models`, `/opt/models` (`/srv/models` on Linux, `%LOCALAPPDATA%\models` on Windows), `~/Downloads` one level deep | | yes |
-| Extra | each folder in `ML_STACK_MODEL_PATHS` (path-separator list), any layout | | yes |
-| Volumes | `/Volumes/*/models` and `/Volumes/*/Models` on macOS, only with `ML_STACK_SCAN_VOLUMES=1` | | no |
+| Extra | each folder in `POOLHOUSE_MODEL_PATHS` (path-separator list), any layout | | yes |
+| Volumes | `/Volumes/*/models` and `/Volumes/*/Models` on macOS, only with `POOLHOUSE_SCAN_VOLUMES=1` | | no |
 
 "Verified" means the layout was read off a real install on the machine named; the other
 rows follow each tool's documentation and have not been run against an install. Msty,
 koboldcpp, text-generation-webui and Open WebUI keep models in a folder the person chose or
-(Open WebUI) in Ollama; put that folder in `ML_STACK_MODEL_PATHS`. Torch Hub holds no
+(Open WebUI) in Ollama; put that folder in `POOLHOUSE_MODEL_PATHS`. Torch Hub holds no
 language models and is not searched.
 
 Layouts read:
@@ -96,7 +96,7 @@ refresh=False) -> list[ModelInfo]`. `ModelInfo` has `id` (an `hf:owner/repo/file
 where the repository is known, `ollama:name:tag`, else `file:<name>`), `name`, `path`, `format`,
 `size_bytes` (all shards), `quantization`, `parameters`, `architecture`, `context_length`,
 `mmproj`, `source`, `repo`, `mtime`, `is_complete`, `shards`, `verified`, `copies` and `files` (the exact discovered members). A model
-installed twice is one row: complete before incomplete, then ml-stack store, extra folders,
+installed twice is one row: complete before incomplete, then Poolhouse store, extra folders,
 Hugging Face, llama.cpp, LM Studio, Jan, GPT4All, Ollama, then the rest, then newest; the other
 paths are in `copies`. Copies are the same when size, architecture and name in the header match;
 nothing is hashed. Header facts are read from the front of each file and kept under
@@ -107,7 +107,7 @@ the table below: 0.13 s cold, 0.03 s warm.
 
 Every row carries a `kind`, one of `hub.KINDS` (defined once, in `hub/kinds.py`): `chat`,
 `embedding`, `vision`, `speech`, `decision`. `discover(kind=...)` and
-`ml-stack-models list --kind decision` filter on it, and the listing has a KIND column.
+`poolhouse-models list --kind decision` filter on it, and the listing has a KIND column.
 The label comes from the header's architecture (`bert` embeds, `whisper` hears), a vision
 projector beside the weights, and, for `decision`, either an entry in the decider registry
 (`decide/registry.py`: the model sits in a registered decider's directory or is its local
@@ -142,12 +142,12 @@ token goes to the endpoint and not to the CDN host it redirects to.
 By default a pull asks the devices you paired before it goes to the Hub, on the local network
 or at an address you stored (a VPN or overlay such as a tailnet; never a public one). The
 stored devices are the peer book (`<state>/onboard/peers.json`, the `PeerBook` of
-`ml_stack.hub.peerbook`). **Pairing fills it**: when two devices pair (`fleet listen` / `fleet
+`poolhouse.hub.peerbook`). **Pairing fills it**: when two devices pair (`fleet listen` / `fleet
 pair`), each keeps the other's share address (the address the pairing used and the share port,
 `--share-port`, default 8773), pinned certificate, owner signing key and request key, learned from
 the grant and from an offer sealed under the exchange, so it is as authentic as the pairing; a
 device started with `--no-share` has no share address and no row is made for it. Revoking a
-device removes its rows. `ml-stack cluster peers add NAME --url https://host:port --certificate ...
+device removes its rows. `Poolhouse cluster peers add NAME --url https://host:port --certificate ...
 --signing-key ... [--device-secret ...]` stays as the manual path for a device paired some other
 way, with `remove`, `on` and `off`. A row that came from pairing names its device, and its route
 is chosen when the pull starts: the address on this network, else its tailnet address
@@ -159,7 +159,7 @@ file chunk by chunk, resumably, from several at once. `on_progress`, `CancelToke
 sentinel events work as for a Hub pull.
 
 **What is trusted.** Not the peer. The digest a file must have is the Hub's own listing
-(fetched through `ml_stack.net`); a peer whose manifest lists the file with another digest is
+(fetched through `poolhouse.net`); a peer whose manifest lists the file with another digest is
 not used, and a digest a peer states never replaces the pin. Only when the listing carries no
 digest does an entry of a manifest signed by your own pinned manifest key supply it. Every
 chunk is checked against the signed manifest, the whole file against the pin, and the result
@@ -170,7 +170,7 @@ and a critical `onboard.peer.bad_copy` event goes to the bus and to sentinel; th
 **Who may have what** is decided by the device that serves the file, not by the one asking:
 `never` (the licence forbids copies) is refused, `owner` (gated or licensed models) goes only to
 a device you marked as yours and only after you recorded accepting that licence on the serving
-device (who, when, which licence; keep it with `ml-stack cluster share`), `open` goes to any
+device (who, when, which licence; keep it with `poolhouse cluster share`), `open` goes to any
 paired device. A copy that sentinel holds in quarantine on the serving device is not served.
 Credentials such as `HF_TOKEN` never leave a device. A peer that has no copy, refuses or is
 unreachable costs a few seconds at most (each answer has 4 s) and the pull continues from the Hub.
@@ -178,14 +178,14 @@ unreachable costs a few seconds at most (each answer has 4 s) and the pull conti
 **Speed.** Each peer's rate is measured (bytes completed per second, kept in the peer book and
 blended with earlier transfers); peers are ranked by it, unmeasured ones first so that they get
 measured. A peer gets at most two requests at a time, and an optional bandwidth cap:
-`ml-stack cluster peers limit [NAME] [--rate 20MiB/s] [--streams N] [--metered on|off]` (no NAME
+`poolhouse cluster peers limit [NAME] [--rate 20MiB/s] [--streams N] [--metered on|off]` (no NAME
 means every peer; `--rate off` and `--streams 0` remove a limit; `--metered on` means the link to
 that device costs per byte, so it is not asked and the Hub is used). When the transfer as a whole
 stays under 2 MiB/s for a 15 s window it is given up, the partial bytes are kept for a resume and
 the Hub is used.
 
-**Serving the model store.** `ml-stack cluster share --models [--models-dir DIR ...]` serves the
-GGUF and safetensors files `ml-stack-models list` shows (or only those under the `--models-dir`
+**Serving the model store.** `poolhouse cluster share --models [--models-dir DIR ...]` serves the
+GGUF and safetensors files `poolhouse-models list` shows (or only those under the `--models-dir`
 folders), by file name with the repository, size and sha256, under the sharing levels above.
 Nothing outside the model roots is served: each path is resolved at every request and a symlink
 or `..` that leaves the roots is refused; a copy sentinel holds is neither listed nor served. A
@@ -195,18 +195,18 @@ licence is the repository unless `--licence` says otherwise; you confirm it once
 The manifest is signed with the owner key and its serial only rises.
 
 **What the downloading device keeps.** An append-only local record
-(`<state>/onboard/peer-downloads.jsonl`, `ml_stack.hub.origins`): when, which file (name, size,
+(`<state>/onboard/peer-downloads.jsonl`, `poolhouse.hub.origins`): when, which file (name, size,
 sha256), which peer, and for an `owner` model the acceptance it relied on (the licence, who
-accepted it and when, as the serving device reported it). `ml-stack-models list` shows it in the
+accepted it and when, as the serving device reported it). `poolhouse-models list` shows it in the
 FROM column and in `--json` as `from_peer`.
 
-**Turning it off.** `ml-stack-models pull --no-peers` or `fetch --no-peers` (or
-`pull(..., peers=False)`) for one pull; `ML_STACK_NO_PEERS=1` for a shell; `ml-stack cluster peers off`
+**Turning it off.** `poolhouse-models pull --no-peers` or `fetch --no-peers` (or
+`pull(..., peers=False)`) for one pull; `POOLHOUSE_NO_PEERS=1` for a shell; `poolhouse cluster peers off`
 for the machine. Nothing is contacted when it is off.
 
 `search(query, Filters(max_bytes, quant, owner, gated, limit, files))` returns `Repo` rows with
 their files; `Repo.builds()` is `(build, bytes, shards, quantization)` per build. Tests run
-against `ml_stack.testing.fakehub`.
+against `poolhouse.testing.fakehub`.
 
 ## Memory estimates
 
@@ -219,7 +219,7 @@ reserve_bytes=None)` is `green` below 80% of the memory the estimate lands in, `
 95%, `red` from 95% or when it does not fit, and `none` when the machine is unknown; the memory is the
 unified working-set limit or available RAM less the reserve (the larger of 2 GiB and a tenth of RAM), or
 a card's free VRAM for the GPU part, so 95% of it is the real limit. The two numbers are the ones
-`ml_stack.ui.verdict` uses. `meters(estimate, machine)` gives one `Meter` per pool with `segments`
+`poolhouse.ui.verdict` uses. `meters(estimate, machine)` gives one `Meter` per pool with `segments`
 (`[{label, value}]` in bytes), `capacity_bytes` and `verdict`, which `<ml-meter>` takes as `segments`,
 `capacity` and `verdict`. `max_context(model, machine, setup, max_verdict="yellow")` is the longest
 context in steps of 256.
@@ -241,7 +241,7 @@ query)` ranks installed models and, with `query`, what the Hub offers.
 ### Measured accuracy
 
 2026-10-02, Apple M4 Max 128 GB, llama.cpp 0.3.0 (build 10621, c1d0e7a), flash attention on, models
-from the Hugging Face cache. Each row serves the model with `ml_stack.serve.measuring.measure` and
+from the Hugging Face cache. Each row serves the model with `poolhouse.serve.measuring.measure` and
 compares `estimate()` with the file size plus the KV, recurrent and compute buffers in the load log
 (`tests/fixtures/estimate_logs.json` holds the logs and headers; `tests/test_serve_estimate.py` checks
 them).

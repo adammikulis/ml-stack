@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.windows_private import problem as windows_problem
-from ml_stack.workspace import Conflict, Denied, Workspace, agent_filter, claims
+from poolhouse.windows_private import problem as windows_problem
+from poolhouse.workspace import Conflict, Denied, Workspace, agent_filter, claims
 
 
 def directory_link(link: Path, target: Path) -> None:
@@ -285,15 +285,15 @@ def test_a_lead_can_release_an_agents_claim_and_claims_are_listed(kit):
 
 def test_two_processes_racing_for_a_port_have_exactly_one_winner(kit):
     tokens = [kit.agent(f"racer{i}") for i in range(4)]
-    code = ("import os,sys\nfrom ml_stack.workspace import Workspace, Conflict\n"
-            "try:\n Workspace().claim(os.environ['ML_STACK_WORKSPACE_TOKEN'],'port','9200')\n"
+    code = ("import os,sys\nfrom poolhouse.workspace import Workspace, Conflict\n"
+            "try:\n Workspace().claim(os.environ['POOLHOUSE_WORKSPACE_TOKEN'],'port','9200')\n"
             " print('won')\nexcept Conflict:\n print('lost')\n")
     from workspace_kit import SRC, STRIPPED
 
     procs = [subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True,
                               env={**{k: v for k, v in os.environ.items() if k not in STRIPPED},
-                                   "ML_STACK_WORKSPACE_HOME": str(kit.base), "PYTHONPATH": SRC,
-                                   "ML_STACK_WORKSPACE_TOKEN": t}) for t in tokens]
+                                   "POOLHOUSE_WORKSPACE_HOME": str(kit.base), "PYTHONPATH": SRC,
+                                   "POOLHOUSE_WORKSPACE_TOKEN": t}) for t in tokens]
     results = sorted(p.communicate(timeout=120)[0].strip() for p in procs)
     assert results == ["lost", "lost", "lost", "won"]
 
@@ -325,10 +325,10 @@ def test_renewing_says_which_claims_the_lifetime_cap_held_back(monkeypatch, tmp_
 
 
 def test_the_heartbeat_tool_reports_each_renewed_claim(kit, monkeypatch):
-    from ml_stack.workspace import tools
+    from poolhouse.workspace import tools
     a = kit.agent("alpha")
     kit.ws.claim(a, "port", "9302")
-    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a)
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_TOKEN", a)
     out = tools.workspace_heartbeat(600)
     assert out["renewed"] == 1 and out["capped"] == [] and out["claims"][0]["key"] == "9302"
     import json

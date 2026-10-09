@@ -25,9 +25,9 @@ from test_kernel_holder import Assets, ancestry, private_directory
 from test_kernel_lifecycle import observe_exit
 from test_kernel_regex import execute
 
-from ml_stack.sandbox import path_language
-from ml_stack.sandbox.policy import Net, Policy
-from ml_stack.sandbox.seatbelt import (
+from poolhouse.sandbox import path_language
+from poolhouse.sandbox.policy import Net, Policy
+from poolhouse.sandbox.seatbelt import (
     SYMLINKS,
     SYSTEM_READ,
     _ancestors,
@@ -289,7 +289,7 @@ def test_literal_source_grants_do_not_read_neighbor_files(tmp_path):
 @needs_confinement
 def test_inherited_credentials_and_loader_paths_are_removed():
     environment = isolation.filtered_environment({"PATH": "/usr/bin:/bin", "SSH_AUTH_SOCK": "/secret.sock",
-                                                  "ML_STACK_HOME": "/real-state", "PYTHONPATH": "/secret",
+                                                  "POOLHOUSE_HOME": "/real-state", "PYTHONPATH": "/secret",
                                                   "DEV_TEST_ARBITRARY_TOKEN": "private"})
     assert environment == {"PATH": "/usr/bin:/bin"}
 
@@ -444,13 +444,13 @@ def test_supervisor_storage_refuses_protected_temp_before_creation(tmp_path, mon
     monkeypatch.setattr(isolation.tempfile, "gettempdir", lambda: str(protected))
     monkeypatch.setattr(isolation, "protected_roots", lambda environment: (protected,))
     with pytest.raises(RuntimeError, match="storage overlaps"):
-        isolation.supervisor_storage({"ML_STACK_HOME": str(protected)})
+        isolation.supervisor_storage({"POOLHOUSE_HOME": str(protected)})
     assert list(protected.iterdir()) == []
 
 
 @needs_confinement
 def test_supervisor_storage_refuses_ancestors_of_protected_roots(tmp_path):
-    from ml_stack.activity.source_snapshot import validate_storage
+    from poolhouse.activity.source_snapshot import validate_storage
     protected = tmp_path / "protected"
     protected.mkdir()
     with pytest.raises(RuntimeError, match="storage overlaps"):
@@ -472,7 +472,7 @@ def test_source_inventory_does_not_execute_inherited_fsmonitor():
 def artifact_outputs(tmp_path, monkeypatch):
     from test_kernel_outputs import ArtifactOutputs
 
-    from ml_stack.activity import source_snapshot
+    from poolhouse.activity import source_snapshot
     protected = tmp_path / "protected"
     protected.mkdir()
     storage = tmp_path / "storage"
@@ -580,7 +580,7 @@ def test_namespace_only_probes_do_not_admit_immutable_runtime_assets(tmp_path, m
         ["tests/test_test_kernel_isolation.py::test_holder_namespace_allows_only_its_owned_unix_channels"],
         tmp_path, environment, (), ())
     assert assets is None and actual == channel and compilation == {"exit": 0}
-    assert "ML_STACK_TEST_HOLDER_MANIFEST" not in environment
+    assert "POOLHOUSE_TEST_HOLDER_MANIFEST" not in environment
     with pytest.raises(AssertionError, match="runtime inventory requested"):
         holder.prepare([next(iter(holder.RUNTIME_PROBES))], tmp_path, {}, (), ())
 
@@ -663,9 +663,9 @@ def test_exact_trie_refuses_ambiguous_or_control_path_text(path):
 
 @needs_confinement
 def test_verified_holder_inventory_runs_only_the_fixed_normal_interpreter():
-    manifest = json.loads(Path(os.environ["ML_STACK_TEST_HOLDER_MANIFEST"]).read_text())
+    manifest = json.loads(Path(os.environ["POOLHOUSE_TEST_HOLDER_MANIFEST"]).read_text())
     runtime = manifest["variants"]["normal"]["runtime"]
-    code = "import json,sys,ml_stack;print(json.dumps({'prefix':sys.prefix,'file':ml_stack.__file__,'version':ml_stack.__version__}))"
+    code = "import json,sys,poolhouse;print(json.dumps({'prefix':sys.prefix,'file':poolhouse.__file__,'version':poolhouse.__version__}))"
     result = execute([runtime["python"], "-I", "-c", code], dict(os.environ), time.monotonic() + 5)
     assert result["prefix"] == runtime["prefix"] and result["version"] == runtime["version"]
     assert Path(result["file"]).is_relative_to(Path(runtime["prefix"]))
@@ -760,10 +760,10 @@ def test_literal_experiment_preserves_exact_native_terminal_union(tmp_path):
 @needs_confinement
 def test_pinned_normal_package_identity_uses_only_verified_import_files():
     test_verified_holder_inventory_runs_only_the_fixed_normal_interpreter()
-    manifest = json.loads(Path(os.environ["ML_STACK_TEST_HOLDER_MANIFEST"]).read_text())
+    manifest = json.loads(Path(os.environ["POOLHOUSE_TEST_HOLDER_MANIFEST"]).read_text())
     prefix = Path(manifest["variants"]["normal"]["runtime"]["prefix"])
     with pytest.raises(PermissionError):
-        (prefix / "lib/python3.13/site-packages/ml_stack/serve/broker.py").read_bytes()
+        (prefix / "lib/python3.13/site-packages/poolhouse/serve/broker.py").read_bytes()
 
 
 @needs_confinement

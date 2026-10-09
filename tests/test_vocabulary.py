@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import page, vocabulary
-from ml_stack.fleet.vocabulary_strings import CATALOGUE
+from poolhouse.fleet import page, vocabulary
+from poolhouse.fleet.vocabulary_strings import CATALOGUE
 
 WEB = Path(page.__file__).parent / "web"
 #: ids the page builds from a template string, so no literal in a source names them
@@ -30,12 +30,12 @@ def test_the_default_vocabulary_is_professional():
 
 @pytest.mark.parametrize("value", ["friendly", " Friendly "])
 def test_the_environment_sets_the_server_default(value):
-    assert vocabulary.default_vocabulary({"ML_STACK_UI_VOCAB": value}) == "friendly"
+    assert vocabulary.default_vocabulary({"POOLHOUSE_UI_VOCAB": value}) == "friendly"
 
 
 @pytest.mark.parametrize("value", ["", "chatty", "poolhouse"])
 def test_an_environment_value_that_is_not_a_vocabulary_falls_back_to_the_default(value):
-    assert vocabulary.default_vocabulary({"ML_STACK_UI_VOCAB": value}) == "professional"
+    assert vocabulary.default_vocabulary({"POOLHOUSE_UI_VOCAB": value}) == "professional"
 
 
 def test_every_id_has_both_wordings():
@@ -59,7 +59,7 @@ def test_the_plain_words_the_owner_named_are_kept():
 def test_friendly_wording_never_swaps_out_a_command_or_a_flag():
     for key, row in CATALOGUE.items():
         for text in row:
-            assert "--" not in text and "ML_STACK" not in text, key
+            assert "--" not in text and "POOLHOUSE" not in text, key
 
 
 def test_every_id_a_screen_uses_is_in_the_catalogue():
@@ -77,7 +77,7 @@ def test_a_placeholder_in_a_wording_is_the_same_set_in_both():
 
 
 def test_the_embedded_payload_cannot_close_its_script_element():
-    body = vocabulary.payload({"ML_STACK_UI_VOCAB": "friendly"})
+    body = vocabulary.payload({"POOLHOUSE_UI_VOCAB": "friendly"})
     assert "<" not in body and ">" not in body
     data = json.loads(body)
     assert data["vocab"] == "friendly"
@@ -85,7 +85,7 @@ def test_the_embedded_payload_cannot_close_its_script_element():
 
 
 def test_the_rendered_page_carries_the_server_default_and_no_placeholder(monkeypatch):
-    monkeypatch.setenv("ML_STACK_UI_VOCAB", "friendly")
+    monkeypatch.setenv("POOLHOUSE_UI_VOCAB", "friendly")
     html = page.render()
     assert 'data-vocab="friendly"' in html
     assert "<title>Poolhouse</title>" in html and 'href="/ui/static/poolhouse.svg"' in html
@@ -94,6 +94,6 @@ def test_the_rendered_page_carries_the_server_default_and_no_placeholder(monkeyp
 
 def test_no_brand_switch_is_left_in_the_page_or_the_server():
     html = page.render()
-    for left in ("data-brand", "brandResolve", "ML_STACK_UI_BRAND", "pooltable"):
+    for left in ("data-brand", "brandResolve", "POOLHOUSE_UI_BRAND", "pooltable"):
         assert left not in html
     assert not (WEB / "brand-pooltable.css").exists()

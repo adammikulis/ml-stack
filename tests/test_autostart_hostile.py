@@ -9,8 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from ml_stack.fleet.autostart_apply import healthy
-from ml_stack.fleet.autostart_backends import run
+from poolhouse.fleet.autostart_apply import healthy
+from poolhouse.fleet.autostart_backends import run
 
 HOSTILE = "a b'c\"$x;`id`|&>\nz"
 

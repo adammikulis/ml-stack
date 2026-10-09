@@ -1,0 +1,147 @@
+<template>
+  <aside class="workspace-rail" aria-label="Workspace navigation">
+    <a class="poolhouse-mark" href="#chat" aria-label="Poolhouse home" title="Poolhouse home">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect x="31" y="35" width="27" height="19" rx="5" fill="var(--poolhouse-cyan)"/>
+        <path d="M34 42q3-3 6 0t6 0 6 0 4 0M34 48q3-3 6 0t6 0 6 0 4 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <path d="M5 31 19 15l14 16z" fill="var(--poolhouse-pink)" stroke="var(--poolhouse-pink)" stroke-width="2" stroke-linejoin="round"/>
+        <rect x="9" y="31" width="20" height="23" rx="2" fill="var(--poolhouse-yellow)"/>
+        <rect x="16" y="40" width="7" height="14" rx="1.5" fill="var(--poolhouse-navy)"/>
+      </svg>
+      <span class="wordmark">Poolhouse</span>
+    </a>
+    <div class="rail-main">
+      <nav class="primary-navigation" id="nav-tabs" aria-label="Main navigation"></nav>
+      <div class="rail-tools" role="group" aria-label="Workspace tools">
+      <button class="rail-link" data-color="yellow" id="nav-guide" type="button" aria-label="Explore Poolhouse" title="Explore Poolhouse"></button>
+      <button class="rail-link" data-color="cyan" id="nav-jobs" type="button" aria-label="Training jobs" title="Training jobs" hidden><span class="jobs-count" hidden></span></button>
+      </div>
+    </div>
+    <div class="rail-utilities">
+      <a class="rail-link" id="nav-settings" href="#settings" aria-label="Settings" title="Settings"></a>
+      <button class="rail-link" id="nav-signout" type="button" aria-label="Sign out" title="Sign out"></button>
+    </div>
+  </aside>
+  <nav class="context-navigation" id="nav-context" aria-label="Workspace pages"></nav>
+  <dialog id="nav-demo" aria-labelledby="demo-title">
+    <div class="demo-heading"><div><h1 id="demo-title">Explore Poolhouse</h1></div>
+      <button class="ghost small" id="demo-close" type="button" aria-label="Close demo guide">Close</button></div>
+    <div class="demo-grid" id="demo-slices"></div>
+  </dialog>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel, el = M.el;
+  const GROUPS = [
+    {id:"conversations", title:"Conversations", color:"pink", icon:"chat", pages:[["Model chats","chat"],["Team channels","board"]]},
+    {id:"studio", title:"Studio", color:"orange", icon:"studio", pages:[["Models","models"],["Fine-tune","training"],["Worlds","gym"],["Evaluate","benchmarks"],["Data","data"]]},
+    {id:"work", title:"Work", color:"yellow", icon:"work", pages:[["Tasks","tasks"],["Projects","projects"],["Tools","tools"],["Graph","knowledge"],["History","history"]]},
+    {id:"pool", title:"Pool", color:"cyan", icon:"pool", pages:[["Devices","cluster"],["Capacity","fit"]]},
+  ];
+  const ICONS = {
+    chat:["M4,5h16v11H9l-5,4V5", "M8,9h8M8,12h5"],
+    studio:["m12,3,9,5-9,5-9-5,9-5", "m3,12,9,5,9-5M3,16l9,5,9-5"],
+    work:["M7,5h10v3H7V5", "M7,6H4v15h16V6h-3M8,12h8M8,16h5"],
+    pool:["M3,4h7v6H3zM14,14h7v6h-7z", "M7,10v7h7M10,7h7v7"],
+    settings:["M9,3h6l1,3,3,1,2,5-2,5-3,1-1,3H9l-1-3-3-1-2-5,2-5,3-1,1-3", "M9,12a3,3,0,1,0,6,0,3,3,0,1,0-6,0"],
+    explore:["M12,3a9,9,0,1,0,0,18,9,9,0,1,0,0-18", "m15,9-2,4-4,2,2-4,4-2"],
+    jobs:["M4,5h16v14H4z", "m9,9,5,3-5,3V9"],
+    exit:["M10,4H4v16h6", "M9,12h12m-5-5,5,5-5,5"],
+  };
+  function icon(name) {
+    const ns="http://www.w3.org/2000/svg", svg=document.createElementNS(ns,"svg");
+    svg.setAttribute("viewBox","0 0 24 24"); svg.setAttribute("aria-hidden","true");
+    for (const d of ICONS[name]) { const path=document.createElementNS(ns,"path");path.setAttribute("d",d);svg.append(path); }
+    return svg;
+  }
+  const DEMOS = [
+    ["Chat with a model", "chat", "Choose a served model, send a question and watch its response arrive."],
+    ["Bring a team together", "board", "Follow channels, open threads and coordinate people and agents."],
+    ["Find the right model", "models", "Browse models, inspect variants and prepare a model for serving."],
+    ["Explore connected knowledge", "knowledge", "Inspect graph facts and follow their relationships."],
+    ["Turn plans into work", "tasks", "Inspect task claims, evidence and independent reviews."],
+    ["Fine-tune a model", "training", "Choose a recipe and dataset, then follow a training run."],
+    ["Train in a simulated world", "gym", "Explore an RL scenario, policy controls and recordings."],
+    ["Measure model quality", "benchmarks", "Run a benchmark and compare measured results."],
+    ["Explore your pool", "cluster", "Inspect connected machines and their available resources."],
+    ["Prepare your workspace", "settings", "Configure preferences, libraries and advanced options."],
+  ];
+
+  const LABELS = { Pool: "nav.pool", Devices: "nav.devices", Projects: "nav.projects" };
+  /** The wording of a rail label: the catalogue's when it has one, else the label as written. */
+  const word = (text) => (LABELS[text] ? M.t(LABELS[text]) : text);
+  const here = ([, name]) => !!document.querySelector(`${name}-view`);
+  class FleetNav extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired=true; this.remembered={};
+      this.tabs=this.querySelector("#nav-tabs"); this.context=this.querySelector("#nav-context");
+      this.guide=this.querySelector("#nav-demo");
+      this.querySelector("#nav-guide").append(icon("explore"),el("span",{},"Explore"));
+      this.querySelector("#nav-jobs").prepend(icon("jobs"),el("span",{},"Training"));
+      this.querySelector("#nav-settings").append(icon("settings"),el("span",{"data-t":"nav.settings"},"Settings"));
+      this.querySelector("#nav-signout").append(icon("exit"),el("span",{},"Sign out"));
+      this.querySelector("#nav-settings").onclick=e=>{e.preventDefault();M.go("settings");};
+      this.querySelector("#nav-signout").onclick=M.signOut;
+      this.querySelector("#nav-guide").onclick=()=>{
+        this.querySelector("#demo-slices").replaceChildren(...DEMOS.filter(([,route])=>here(["",route]))
+          .map(([title,route,description],index)=>el("button",{class:"demo-slice",type:"button",
+            "data-color":GROUPS.find(g=>g.pages.some(([,key])=>key===route))?.color||"pink",
+            onclick:()=>{this.guide.close();M.go(route);}},
+            el("span",{class:"demo-number"},String(index+1).padStart(2,"0")),
+            el("strong",{},title),el("span",{class:"demo-description"},description))));
+        this.guide.showModal();
+      };
+      this.querySelector("#demo-close").onclick=()=>this.guide.close();
+      this.jobs=this.querySelector("#nav-jobs");this.jobs.hidden=!document.querySelector("training-view");this.jobs.onclick=()=>M.go("training");
+      const skip=document.querySelector(".skip-link");
+      if(skip)skip.onclick=e=>{e.preventDefault();document.getElementById("workspace")?.focus();};
+      M.onRoute(route=>{this.route=route;this.paint(route);this.refreshJobs();});
+      window.addEventListener("vocabulary-change",()=>{if(this.route)this.paint(this.route);});
+      this.timer=setInterval(()=>this.refreshJobs(),5000);
+    }
+    disconnectedCallback() { clearInterval(this.timer); }
+    async refreshJobs() {
+      if(!document.querySelector("training-view")||document.querySelector("#app")?.hidden||this.refreshing)return;
+      this.refreshing=true;
+      try {
+        const result=await M.api("/ui/workspace/jobs");
+        if(!result.ok){this.jobsUnavailable();return;}
+        const jobs=result.jobs||[], running=jobs.filter(j=>j.state==="running").length,
+          queued=jobs.filter(j=>j.state==="queued").length;
+        const status=`Training jobs: ${running} running · ${queued} queued`;
+        this.jobs.title=status; this.jobs.setAttribute("aria-label",status); this.jobs.hidden=false;
+        const count=this.jobs.querySelector(".jobs-count");
+        count.textContent=String(running+queued); count.hidden=running+queued===0;
+      } catch { this.jobsUnavailable(); }
+      finally { this.refreshing=false; }
+    }
+    jobsUnavailable() {
+      const status="Training jobs: status unavailable";
+      this.jobs.title=status;this.jobs.setAttribute("aria-label",status);
+      this.jobs.querySelector(".jobs-count").hidden=true;
+    }
+    paint(route) {
+      const groups=GROUPS.filter(g=>g.pages.some(here));
+      const active=groups.find(g=>g.pages.some(([,key])=>key===route));
+      if(active)this.remembered[active.id]=route;
+      const app=document.getElementById("app");
+      if(app){app.dataset.workspace=active?.id||"settings";app.dataset.color=active?.color||"pink";}
+      this.tabs.replaceChildren(...groups.map(g=>{
+        const key=this.remembered[g.id]||g.pages.find(here)[1];
+        return el("a",{class:`rail-link${active===g?" on":""}`,href:`#${key}`,"data-workspace":g.id,
+          "data-color":g.color,"aria-label":word(g.title),"aria-current":active===g?"page":null,title:word(g.title),
+          onclick:e=>{e.preventDefault();M.go(key);}},icon(g.icon),el("span",{},g.id === "conversations" ? "Chats" : word(g.title)));
+      }));
+      const settings=this.querySelector("#nav-settings");
+      settings.classList.toggle("on",route==="settings");
+      if(route==="settings")settings.setAttribute("aria-current","page");else settings.removeAttribute("aria-current");
+      this.context.replaceChildren(...(active?.pages.filter(here)||[]).map(([name,key])=>
+        el("a",{class:`context-link${key===route?" on":""}`,href:`#${key}`,"aria-current":key===route?"page":null,
+          onclick:e=>{e.preventDefault();M.go(key);}},word(name))));
+      this.context.hidden=!active || active.id === "conversations";
+    }
+  }
+  customElements.define("fleet-nav",FleetNav);
+})();
+</script>

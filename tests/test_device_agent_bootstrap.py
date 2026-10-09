@@ -9,25 +9,25 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import private_path
-from ml_stack.fleet import device_auth
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.onboard.requests import Device
-from ml_stack.fleet.onboard.web import Call
-from ml_stack.fleet.remote import Peer
-from ml_stack.http import Server, ServerError
-from ml_stack.workspace import (
+from poolhouse import private_path
+from poolhouse.fleet import device_auth
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.onboard.requests import Device
+from poolhouse.fleet.onboard.web import Call
+from poolhouse.fleet.remote import Peer
+from poolhouse.http import Server, ServerError
+from poolhouse.workspace import (
     coordinator,
     coordinator_client,
     coordinator_config,
     device_sessions,
     tokens,
 )
-from ml_stack.workspace.coordination import workspace_id
-from ml_stack.workspace.coordinator_client import Remote
-from ml_stack.workspace.identity import AGENT, Denied
-from ml_stack.workspace.remote_host import WorkspaceHost
+from poolhouse.workspace.coordination import workspace_id
+from poolhouse.workspace.coordinator_client import Remote
+from poolhouse.workspace.identity import AGENT, Denied
+from poolhouse.workspace.remote_host import WorkspaceHost
 
 
 @pytest.fixture
@@ -117,7 +117,7 @@ def test_http_device_session_recovery_and_revocation(enrolled, tmp_path, monkeyp
     kit, device, projects, document = enrolled
     identity = workspace_id(kit.ws)
     coordinator_config.save(kit.base, {'mode': 'host', 'workspace': identity})
-    monkeypatch.setattr('ml_stack.fleet.api.entry_points', lambda **kwargs: [
+    monkeypatch.setattr('poolhouse.fleet.api.entry_points', lambda **kwargs: [
         SimpleNamespace(name='workspace', load=lambda: coordinator.route)])
     runner = JobRunner(tmp_path / 'runner')
     server = Server(('127.0.0.1', 0), make_handler(Daemon(
@@ -198,7 +198,7 @@ def test_concurrent_recovery_keeps_the_persisted_session_valid(enrolled, tmp_pat
     def request(method, path, *, data, headers):
         incoming = json.loads(data)
         name, token = device_sessions.ensure(
-            kit.ws, device, projects, incoming, headers['X-ML-Stack-Workspace-Token'])
+            kit.ws, device, projects, incoming, headers['X-Poolhouse-Workspace-Token'])
         with counter_lock:
             counter[0] += 1
             number = counter[0]
@@ -252,7 +252,7 @@ def test_existing_session_loses_access_when_hosted_project_authorization_ends(en
             return host.answer(document['project']['key'], 'board', {
                 'agent_token': token, 'operation': 'whoami', 'args': [], 'kwargs': {}}, device=device)
         body = json.dumps({'workspace': identity, 'request_id': 'c' * 32, 'argv': ['outbox']}).encode()
-        call = Call('POST', '/workspace/v1/call', {'X-ML-Stack-Workspace-Token': token},
+        call = Call('POST', '/workspace/v1/call', {'X-Poolhouse-Workspace-Token': token},
                     '127.0.0.1', True, lambda most: body)
         return coordinator.answer(kit.ws, call, device=device, projects=projects)
 
@@ -296,7 +296,7 @@ def test_delegated_session_cannot_outlive_or_widen_root_authorization(enrolled, 
 
 @pytest.fixture
 def saved_project_actor(tmp_path, monkeypatch):
-    from ml_stack.workspace import device_agent, onboard, project
+    from poolhouse.workspace import device_agent, onboard, project
 
     monkeypatch.setattr(device_agent, 'device_id', lambda: 'abcdef0123456789')
     root = tmp_path / 'project'
@@ -309,7 +309,7 @@ def saved_project_actor(tmp_path, monkeypatch):
 
 
 def test_saved_setup_standard_agent_has_project_access_without_worker_device_rights(saved_project_actor):
-    from ml_stack.workspace import device_agent
+    from poolhouse.workspace import device_agent
 
     kit, root, token = saved_project_actor
     before = kit.ws.registry.path.read_bytes()
@@ -325,7 +325,7 @@ def test_saved_setup_standard_agent_has_project_access_without_worker_device_rig
 @pytest.mark.parametrize('attack', ['revoked', 'expired', 'copied', 'id', 'symlink', 'owner',
                                   'child', 'lead', 'person', 'device', 'project'])
 def test_saved_standard_project_session_preserves_identity_scope_and_storage(saved_project_actor, tmp_path, monkeypatch, attack):
-    from ml_stack.workspace import device_agent, project
+    from poolhouse.workspace import device_agent, project
 
     kit, root, token = saved_project_actor
     requested = 'worker'
@@ -372,7 +372,7 @@ def test_saved_standard_project_session_preserves_identity_scope_and_storage(sav
 
 
 def test_saved_project_scope_accepts_its_primary_worktree_equivalent(saved_project_actor, tmp_path, monkeypatch):
-    from ml_stack.workspace import device_agent
+    from poolhouse.workspace import device_agent
 
     kit, primary, token = saved_project_actor
     checkout = tmp_path / 'worktree'
@@ -419,7 +419,7 @@ def test_malformed_registration_device_cannot_create_identity(enrolled):
 
 @pytest.mark.parametrize('mode', ['dev', 'paired'])
 def test_cached_delegated_token_returns_without_root_registration(enrolled, mode):
-    from ml_stack.workspace.remote import RemoteWorkspace
+    from poolhouse.workspace.remote import RemoteWorkspace
     kit, device, projects, document = enrolled
     _name, parent = device_sessions.ensure(kit.ws, device, projects, document)
     child = kit.ws.delegate(parent, 'helper')

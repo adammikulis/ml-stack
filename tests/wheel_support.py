@@ -40,12 +40,12 @@ def fresh_wheel(repo: Path, build: Callable[[Path], None] = build_with_packaging
     dist, wanted = repo / "dist", digest(repo)
     stamp = dist / STAMP
     held = stamp.read_text(encoding="utf-8").strip() if stamp.is_file() else ""
-    wheels = sorted(dist.glob("ml_stack-*.whl"), key=lambda p: p.stat().st_mtime)
+    wheels = sorted(dist.glob("poolhouse-*.whl"), key=lambda p: p.stat().st_mtime)
     if not wheels or held != wanted:
         build(repo)
-        wheels = sorted(dist.glob("ml_stack-*.whl"), key=lambda p: p.stat().st_mtime)
+        wheels = sorted(dist.glob("poolhouse-*.whl"), key=lambda p: p.stat().st_mtime)
         if not wheels:
-            raise FileNotFoundError(f"{dist} holds no ml_stack wheel after the build")
+            raise FileNotFoundError(f"{dist} holds no poolhouse wheel after the build")
         dist.mkdir(exist_ok=True)
         stamp.write_text(wanted + "\n", encoding="utf-8")
     return wheels[-1]

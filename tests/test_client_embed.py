@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ml_stack.client.embed import DOCUMENT, QUERY, TASK
+from poolhouse.client.embed import DOCUMENT, QUERY, TASK
 
 
 def test_the_question_and_document_prefixes_differ():
@@ -17,7 +17,7 @@ def test_stands_out_separates_a_question_from_a_greeting():
     These are the numbers that were measured: a greeting scores higher than a real question
     and is still the flatter field, which is why a threshold on the score cannot work.
     """
-    from ml_stack.client.embed import stands_out
+    from poolhouse.client.embed import stands_out
 
     greeting = [0.754, 0.751, 0.744, 0.739, 0.731, 0.728]     # "hi"
     question = [0.740, 0.681, 0.652, 0.640, 0.633, 0.629]     # "someone who can sell things"
@@ -28,7 +28,7 @@ def test_stands_out_separates_a_question_from_a_greeting():
 
 
 def test_stands_out_on_nothing_and_with_the_gate_off():
-    from ml_stack.client.embed import stands_out
+    from poolhouse.client.embed import stands_out
 
     assert not stands_out([])
     assert stands_out([], margin=0)                # off means everything passes, even nothing

@@ -10,13 +10,13 @@ import sys
 
 import pytest
 
-from ml_stack.serve import admission, broker_cli, lease_cli, ops, status_cli, unmanaged
-from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
-from ml_stack.serve.broker import Ask, Broker, BrokerError, Held
-from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.manager import ServerManager
-from ml_stack.serve.process import kill_process_tree, offloaded_layers
-from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
+from poolhouse.serve import admission, broker_cli, lease_cli, ops, status_cli, unmanaged
+from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
+from poolhouse.serve.broker import Ask, Broker, BrokerError, Held
+from poolhouse.serve.leases import recorded_servers
+from poolhouse.serve.manager import ServerManager
+from poolhouse.serve.process import kill_process_tree, offloaded_layers
+from poolhouse.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 LLAMA = {"pid": 4242, "ip": "127.0.0.1", "uid": os.getuid(), "user": "me",
          "exe": "/opt/llama.cpp/build/bin/llama-server", "rss": 1024 ** 3}

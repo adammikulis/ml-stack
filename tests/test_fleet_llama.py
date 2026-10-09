@@ -11,8 +11,8 @@ import zipfile
 
 import pytest
 
-from ml_stack.fleet import llama
-from ml_stack.http import Server
+from poolhouse.fleet import llama
+from poolhouse.http import Server
 
 pytestmark = pytest.mark.usefixtures("loopback_net")
 

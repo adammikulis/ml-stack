@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_stack.backend import get_backend
-from ml_stack.backend.ops import ArrayOps
-from ml_stack.testing import (
+from poolhouse.backend import get_backend
+from poolhouse.backend.ops import ArrayOps
+from poolhouse.testing import (
     ParityError,
     assert_grad_parity,
     copy_torch_weights_to_mlx,
@@ -18,8 +18,8 @@ from ml_stack.testing import (
     run_pair,
     torch_grad_norms,
 )
-from ml_stack.train.parity import ATOL, CASES, check_all, check_op, table
-from ml_stack.train.step import step_for
+from poolhouse.train.parity import ATOL, CASES, check_all, check_op, table
+from poolhouse.train.step import step_for
 
 STEP_ATOL = 1e-5
 """Loss and gradient-norm agreement over several optimiser steps."""
@@ -84,7 +84,7 @@ class Stub:
 
 def test_a_disagreeing_operation_is_reported_not_raised(monkeypatch):
     """The command prints a table rather than stopping at the first failure."""
-    from ml_stack.train import parity
+    from poolhouse.train import parity
 
     monkeypatch.setitem(parity.CASES, "invented", lambda b, o: b.value)
     result = parity.check_op("invented", Stub("torch", np.zeros(2)), Stub("mlx", np.ones(2)))
@@ -96,7 +96,7 @@ def test_a_disagreeing_operation_is_reported_not_raised(monkeypatch):
 
 
 def test_an_operation_that_raises_is_a_failure_not_a_crash(monkeypatch):
-    from ml_stack.train import parity
+    from poolhouse.train import parity
 
     monkeypatch.setitem(parity.CASES, "explodes", lambda b, o: 1 / 0)
     result = parity.check_op("explodes", Stub("torch", None), Stub("mlx", None))
@@ -106,7 +106,7 @@ def test_an_operation_that_raises_is_a_failure_not_a_crash(monkeypatch):
 
 
 def test_a_serving_mismatch_is_a_failure(monkeypatch):
-    from ml_stack.train import parity
+    from poolhouse.train import parity
 
     monkeypatch.setitem(parity.CASES, "reshaped", lambda b, o: b.value)
     result = parity.check_op("reshaped", Stub("torch", np.zeros((2, 3))),
@@ -287,7 +287,7 @@ def test_the_recipes_ask_mlx_for_the_optimizer_torch_gives():
     import re
     from pathlib import Path
 
-    import ml_stack.train.recipes as recipes
+    import poolhouse.train.recipes as recipes
 
     call = re.compile(r"(?<![\w.])optim\.Adam[W]?\((?:[^()]|\([^()]*\))*\)", re.S)
     found = 0
@@ -312,7 +312,7 @@ def test_divergent_gradients_are_caught_rather_than_averaged_away():
 
 @needs_both
 def test_the_command_prints_a_row_per_operation_and_exits_zero():
-    from ml_stack.train.run import parity
+    from poolhouse.train.run import parity
 
     said: list[str] = []
     code = parity(say=said.append)
@@ -327,8 +327,8 @@ def test_the_command_prints_a_row_per_operation_and_exits_zero():
 
 @needs_both
 def test_the_command_exits_one_when_an_operation_disagrees(monkeypatch):
-    from ml_stack.train import parity as checks
-    from ml_stack.train.run import parity
+    from poolhouse.train import parity as checks
+    from poolhouse.train.run import parity
 
     monkeypatch.setitem(checks.CASES, "invented",
                         lambda b, o: o.array(np.zeros(2, dtype=np.float32) if b.name == "torch"
@@ -344,7 +344,7 @@ def test_the_command_exits_one_when_an_operation_disagrees(monkeypatch):
 @needs_torch
 def test_the_command_says_so_when_a_backend_is_missing():
     """Naming a backend that cannot be built here exits 2 and says which."""
-    from ml_stack.train.run import parity
+    from poolhouse.train.run import parity
 
     said: list[str] = []
     assert parity(say=said.append, second="jax") == 2
@@ -352,6 +352,6 @@ def test_the_command_says_so_when_a_backend_is_missing():
 
 
 def test_parity_is_one_of_the_words_the_command_takes_instead_of_flags():
-    from ml_stack.train.run import WORDS
+    from poolhouse.train.run import WORDS
 
     assert "parity" in WORDS

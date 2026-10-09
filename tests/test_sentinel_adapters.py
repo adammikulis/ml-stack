@@ -8,15 +8,15 @@ import sys
 
 import pytest
 
-from ml_stack.sentinel import Mode, Sentinel, State
-from ml_stack.sentinel.adapters import (
+from poolhouse.sentinel import Mode, Sentinel, State
+from poolhouse.sentinel.adapters import (
     GuardLogHandler,
     agent_gate,
     broker_listener,
     note_refusal,
     serve_hooks,
 )
-from ml_stack.serve.process import kill_process_tree, pid_exists
+from poolhouse.serve.process import kill_process_tree, pid_exists
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def node(tmp_path):
 
 
 def test_guard_warnings_become_findings_for_the_session(node):
-    logger = logging.getLogger("ml_stack.guard")
+    logger = logging.getLogger("poolhouse.guard")
     handler = GuardLogHandler(node, session=lambda: "s1")
     logger.addHandler(handler)
     try:
@@ -42,7 +42,7 @@ def test_guard_warnings_become_findings_for_the_session(node):
 
 def test_unrelated_log_records_are_ignored(node):
     handler = GuardLogHandler(node)
-    record = logging.LogRecord("ml_stack.guard", logging.WARNING, __file__, 1,
+    record = logging.LogRecord("poolhouse.guard", logging.WARNING, __file__, 1,
                                "plain message %s", ("only one",), None)
     handler.emit(record)
     assert node.bus.recent(kind="guard.") == []
@@ -66,7 +66,7 @@ def test_a_refused_fetch_is_an_event(node):
 def test_the_agent_gate_refuses_sentinel_verbs_frozen_sessions_and_disabled_tools(node):
     gate = agent_gate(node)
     assert gate("read_file", {"path": "notes.md"}, session="s1") == ""
-    assert gate("shell", {"command": "ml-stack security mode off"}, session="s1")
+    assert gate("shell", {"command": "poolhouse security mode off"}, session="s1")
     node.store.quarantine(("tool", "shell"), "abuse", None)
     assert "disabled" in gate("shell", {"command": "ls"}, session="s1")
     node.store.quarantine(("session", "s2"), "steered", None)

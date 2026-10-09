@@ -28,7 +28,7 @@ def test_owner_creates_copies_revokes_and_expires_scoped_invitation(joined, open
         if request.method == "DELETE":
             route.fulfill(json={"revoked": True})
         else:
-            route.fulfill(json={"id": "fixture", "invite": "ml-stack://enroll?data=opaque-fixture",
+            route.fulfill(json={"id": "fixture", "invite": "poolhouse://enroll?data=opaque-fixture",
                 "address": "https://fixture.invalid", "expires": expires[0],
                 "qr": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnLz4="})
 
@@ -36,13 +36,13 @@ def test_owner_creates_copies_revokes_and_expires_scoped_invitation(joined, open
     page.evaluate("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.copiedInvite = text;}}})")
     panel.get_by_role("button", name="Create invite", exact=True).click()
     field = panel.get_by_label("Created invitation", exact=True)
-    expect(field).to_have_value("ml-stack://enroll?data=opaque-fixture")
+    expect(field).to_have_value("poolhouse://enroll?data=opaque-fixture")
     expect(panel.get_by_role("img", name="Invitation QR code")).to_be_visible()
     assert calls[0][1] == {"group": "home", "kind": "computer"}
     page.evaluate("document.querySelector('cluster-view').draw()")
-    expect(field).to_have_value("ml-stack://enroll?data=opaque-fixture")
+    expect(field).to_have_value("poolhouse://enroll?data=opaque-fixture")
     panel.get_by_role("button", name="Copy invite", exact=True).click()
-    page.wait_for_function("() => window.copiedInvite === 'ml-stack://enroll?data=opaque-fixture'")
+    page.wait_for_function("() => window.copiedInvite === 'poolhouse://enroll?data=opaque-fixture'")
     panel.get_by_role("button", name="Revoke invite", exact=True).click()
     expect(panel).to_contain_text("Invite revoked.")
     assert calls[-1] == ("DELETE", {"id": "fixture"})
@@ -56,14 +56,14 @@ def test_owner_creates_copies_revokes_and_expires_scoped_invitation(joined, open
     assert calls[-1][1]["kind"] == "computer"
     expires[0] = time.time() + 120
     panel.get_by_role("button", name="Create invite", exact=True).click()
-    expect(field).to_have_value("ml-stack://enroll?data=opaque-fixture")
+    expect(field).to_have_value("poolhouse://enroll?data=opaque-fixture")
     page.evaluate("window.fleetModel.go('models')")
     expect(field).to_have_count(0)
     expect(panel.get_by_label("Invitation", exact=True)).to_have_value("")
     assert panel.get_by_role("img", name="Invitation QR code").count() == 0
     page.evaluate("window.fleetModel.go('cluster')")
     panel.get_by_role("button", name="Create invite", exact=True).click()
-    expect(field).to_have_value("ml-stack://enroll?data=opaque-fixture")
+    expect(field).to_have_value("poolhouse://enroll?data=opaque-fixture")
     page.locator("#nav-signout").click()
     expect(page.locator("#signin")).to_be_visible()
     expect(field).to_have_count(0)
@@ -78,7 +78,7 @@ def test_invite_join_refuses_expired_then_clears_success_without_leaking_to_stor
     button = panel.get_by_role("button", name="Join with invite", exact=True)
     expect(button).to_be_disabled()
     invite = panel.get_by_label("Invitation", exact=True)
-    invite.fill("ml-stack://enroll?data=opaque-fixture")
+    invite.fill("poolhouse://enroll?data=opaque-fixture")
     asked = []
     succeeds = [False]
 
@@ -90,12 +90,12 @@ def test_invite_join_refuses_expired_then_clears_success_without_leaking_to_stor
     page.route("**/ui/fleet/join-invite", answer)
     button.click()
     expect(panel).to_contain_text("This invite has expired.")
-    expect(invite).to_have_value("ml-stack://enroll?data=opaque-fixture")
+    expect(invite).to_have_value("poolhouse://enroll?data=opaque-fixture")
     expect(button).to_be_enabled()
     succeeds[0] = True
     button.click()
     expect(invite).to_have_value("")
-    assert asked == [{"invite": "ml-stack://enroll?data=opaque-fixture"}] * 2
+    assert asked == [{"invite": "poolhouse://enroll?data=opaque-fixture"}] * 2
     assert page.evaluate("JSON.stringify(localStorage) + JSON.stringify(sessionStorage)").find("opaque-fixture") == -1
     assert not errors
 

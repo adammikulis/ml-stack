@@ -7,7 +7,7 @@
 | `agent/redteam-integ` | older red-team integration branch | superseded by the coverage map; check for anything not already on `0.2dev` before deleting |
 | `feat/test-speed` | one commit (`-rfE` so FAILED/ERROR lines always print) | in flight: lands after Codex's scheduler fix |
 
-Codex's worktrees (`/private/tmp/ml-stack-*`, branches `feat/gym-*`, `feat/ui-*`, `feat/world-*`,
+Codex's worktrees (`/private/tmp/poolhouse-*`, branches `feat/gym-*`, `feat/ui-*`, `feat/world-*`,
 `feat/board-person-participation`, `feat/chat-workspace-v3`, `feat/workspace-*`,
 `feat/vision-discovery`, `feat/native-world-construction`, `feat/studio-gym-docs`) belong to Codex:
 it lists and removes its own. `feat/scheduler` is merged: that worktree can go.

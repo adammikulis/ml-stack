@@ -14,15 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import jobs, sandbox, sentinel
-from ml_stack.agent import Agent, Done, FunctionTools, McpTools
-from ml_stack.agent.compact import Compaction, compact
-from ml_stack.agent.sources import McpBlocked
-from ml_stack.agent.summarise import model_summarizer
-from ml_stack.agent.watched import Watch
-from ml_stack.client import Client
-from ml_stack.sentinel import Mode, Sentinel, State, human
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse import jobs, sandbox, sentinel
+from poolhouse.agent import Agent, Done, FunctionTools, McpTools
+from poolhouse.agent.compact import Compaction, compact
+from poolhouse.agent.sources import McpBlocked
+from poolhouse.agent.summarise import model_summarizer
+from poolhouse.agent.watched import Watch
+from poolhouse.client import Client
+from poolhouse.sentinel import Mode, Sentinel, State, human
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 from tests.sandbox_kit import no_sandbox_here, policy, seatbelt  # noqa: F401
 
 LEAK = "here is a key: hf_aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG"

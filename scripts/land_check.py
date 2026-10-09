@@ -17,7 +17,7 @@ import affected
 import land_git as lg
 import testslots
 
-from ml_stack.activity.gate import Run, evidence, record_run, tree_hash
+from poolhouse.activity.gate import Run, evidence, record_run, tree_hash
 
 FULL_FILES = 120
 FULL_LINES = 4000

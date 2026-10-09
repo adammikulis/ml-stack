@@ -1,4 +1,4 @@
-"""The Claude Code hook that refuses shells which should have been ml-stack commands.
+"""The Claude Code hook that refuses shells which should have been poolhouse commands.
 
 Every rule it enforces was written after the thing it refuses cost real time, and the guard
 itself has one property worth testing hard: it must not fire on text being *written*. It
@@ -54,25 +54,25 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('git push --tags', "a tag is a release"),
     ('git push origin --delete work', "a deletion is not a push of the development branch"),
     ('git merge --ff-only work && git push origin main', "still main after a merge"),
-    ('ML_STACK_PUSH_MAIN=yes git push origin main', "the variable an agent can set opens nothing"),
-    ('git merge --ff-only 0.2dev && ML_STACK_PUSH_MAIN=yes git push origin main', "nor after a merge"),
-    ('ML_STACK_PUSH_MAIN=yes git push --force origin main',
+    ('POOLHOUSE_PUSH_MAIN=yes git push origin main', "the variable an agent can set opens nothing"),
+    ('git merge --ff-only 0.2dev && POOLHOUSE_PUSH_MAIN=yes git push origin main', "nor after a merge"),
+    ('POOLHOUSE_PUSH_MAIN=yes git push --force origin main',
      "the opener opens a push of main, never a forced one"),
-    ('ML_STACK_PUSH_MAIN=yes git push --all origin', "nor every branch at once"),
-    ('ML_STACK_PUSH_MAIN=yes git push origin --delete main', "nor a deletion"),
-    ('ML_STACK_PUSH_MAIN=1 git push origin main', "and only the word yes opens it"),
+    ('POOLHOUSE_PUSH_MAIN=yes git push --all origin', "nor every branch at once"),
+    ('POOLHOUSE_PUSH_MAIN=yes git push origin --delete main', "nor a deletion"),
+    ('POOLHOUSE_PUSH_MAIN=1 git push origin main', "and only the word yes opens it"),
     ('FOO=1 git push --force origin main', "an assignment in front is still a forced push"),
     ('FOO=1 git add -A', "and still stages everything"),
     ('CUDA_VISIBLE_DEVICES=0 llama-server -m model.gguf', "and still starts a server by hand"),
-    ('FOO=1 nohup ml-stack-bench run &', "and still backgrounds a job nobody watches"),
+    ('FOO=1 nohup poolhouse-bench run &', "and still backgrounds a job nobody watches"),
     ('./build/bin/llama-server -m x.gguf --port 8081', "a built binary run by hand"),
     ('sudo llama-server -m x.gguf', "through sudo"),
     ('exec llama-server', "no arguments at all"),
     ('cd x && llama-server -m a.gguf', "after a cd"),
-    ('ML_STACK_BROKER_LOCAL=1 ml-stack-serve up m.gguf', "a private broker with no queue"),
-    ('ml-stack-serve up m.gguf --anyway', "a flag that skipped the lease"),
-    ('ml-stack-serve up m.gguf --context 256k --direct', "a direct start"),
-    ('ml-stack-serve up m.gguf --no-broker', "a start that skips the broker"),
+    ('POOLHOUSE_BROKER_LOCAL=1 poolhouse-serve up m.gguf', "a private broker with no queue"),
+    ('poolhouse-serve up m.gguf --anyway', "a flag that skipped the lease"),
+    ('poolhouse-serve up m.gguf --context 256k --direct', "a direct start"),
+    ('poolhouse-serve up m.gguf --no-broker', "a start that skips the broker"),
 ])
 def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     assert guard(command) == BLOCKED, why
@@ -81,11 +81,11 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
 @pytest.mark.parametrize("command", [
     'git status',
     'python3 -m pytest tests -q',
-    'ml-stack-serve up model.gguf --port 8080',
-    'ml-stack-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0 --no-wait',
-    'ml-stack-serve down Qwen3.8-27B',
+    'poolhouse-serve up model.gguf --port 8080',
+    'poolhouse-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0 --no-wait',
+    'poolhouse-serve down Qwen3.8-27B',
     'ls /opt/homebrew/bin/llama-server',
-    'ml-stack-bench sweep --serve foo.gguf --smoke',
+    'poolhouse-bench sweep --serve foo.gguf --smoke',
     'pgrep -fl llama-server',
     'grep -rn llama-server src/',
     'ls ~/.cache/huggingface',
@@ -100,7 +100,7 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git log --oneline origin/main..main',
     'git rev-list --left-right --count origin/main...main',
     'PYTHONPATH=src python3 -m pytest tests -q -n 4',
-    'ML_STACK_WINDOW_POSITION=3460,20 ml-stack-scrape look https://example.invalid',
+    'POOLHOUSE_WINDOW_POSITION=3460,20 poolhouse-scrape look https://example.invalid',
 ])
 def test_ordinary_work_is_not_refused(command):
     """A guard that fires on ordinary commands is a guard that gets switched off."""
@@ -129,8 +129,8 @@ def test_only_bash_is_guarded():
 
 
 def test_the_guard_can_be_switched_off_for_a_session():
-    """MLSTACK_GUARD=off is the escape hatch; needing it means a rule is wrong, but it must work."""
-    assert guard("pkill -f llama-server", MLSTACK_GUARD="off") == ALLOWED
+    """POOLHOUSE_GUARD=off is the escape hatch; needing it means a rule is wrong, but it must work."""
+    assert guard("pkill -f llama-server", POOLHOUSE_GUARD="off") == ALLOWED
 
 
 
@@ -139,4 +139,4 @@ def test_the_refusal_names_the_command_that_leases():
         [str(GUARD)], text=True, capture_output=True,
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "llama-server -m x"}}))
     assert done.returncode == BLOCKED
-    assert "ml-stack-serve up MODEL" in done.stderr and "ml-stack-serve down" in done.stderr
+    assert "poolhouse-serve up MODEL" in done.stderr and "poolhouse-serve down" in done.stderr

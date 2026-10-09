@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import trees, trees_notice
+from poolhouse import trees, trees_notice
 
 REPO = Path(__file__).resolve().parent.parent
 HOUR = 3600.0
@@ -191,7 +191,7 @@ def test_the_gate_checker_reports_a_late_orphan_and_reads_the_grace_from_the_env
     commit(path, "f1")
     trees.finish(main, "a", 1.0)
     assert len(orphan_trees.find(main)) == 1          # stopped long ago by the real clock
-    monkeypatch.setenv("ML_STACK_TREES_GRACE_H", "1e9")
+    monkeypatch.setenv("POOLHOUSE_TREES_GRACE_H", "1e9")
     assert orphan_trees.find(main) == []
     assert orphan_trees.HARD and orphan_trees.NAME == "orphan-trees"
 
@@ -218,8 +218,8 @@ def test_behind_and_age_thresholds_and_policy_overrides(main, monkeypatch):
         commit(main, f"m{i}")
     assert trees_notice.notify(main, start + 60)[0].keys == ["behind"]
     assert trees_notice.notify(main, start + 5 * HOUR)[0].keys == ["age"]       # behind is unchanged: not told again
-    monkeypatch.setenv("ML_STACK_TREES_MAX_BEHIND", "100")
-    monkeypatch.setenv("ML_STACK_TREES_MAX_AGE_H", "100")
+    monkeypatch.setenv("POOLHOUSE_TREES_MAX_BEHIND", "100")
+    monkeypatch.setenv("POOLHOUSE_TREES_MAX_AGE_H", "100")
     later = trees_notice.notify(main, start + 8 * HOUR)       # still inside the owner's 12 hour sign of life
     assert later == []
 

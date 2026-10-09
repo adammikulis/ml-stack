@@ -7,16 +7,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from ml_stack.fleet import invite_client, tls
-from ml_stack.fleet.discovery import DiscoveryError, Membership
-from ml_stack.fleet.invites import Invitations, decode, encode
+from poolhouse.fleet import invite_client, tls
+from poolhouse.fleet.discovery import DiscoveryError, Membership
+from poolhouse.fleet.invites import Invitations, decode, encode
 
 
 def payload(**changes):
     data = {'v': 1, 'endpoint': 'https://192.168.2.59:8770', 'fingerprint': 'a' * 64,
                 'id': 'b' * 32, 'secret': encode(b's' * 32), 'expires': 1600, 'kind': 'computer'}
     data.update(changes)
-    return 'ml-stack://enroll?data=' + encode(json.dumps(data).encode())
+    return 'poolhouse://enroll?data=' + encode(json.dumps(data).encode())
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def test_malformed_invites_are_refused(lan_dns, changes):
 def test_duplicate_json_fields_are_not_accepted(lan_dns):
     raw = decode(payload().split('data=')[1]).decode().replace('"v": 1', '"v": 1, "v": 1')
     with pytest.raises(ValueError, match='duplicate'):
-        invite_client.parse_invite('ml-stack://enroll?data=' + encode(raw.encode()), now=1000)
+        invite_client.parse_invite('poolhouse://enroll?data=' + encode(raw.encode()), now=1000)
 
 
 @pytest.mark.parametrize('address', ['8.8.8.8', '127.0.0.1', '0.0.0.0', '224.0.0.1'])  # noqa: S104
@@ -118,7 +118,7 @@ def test_wrong_certificate_is_refused_before_any_http(invitation_server):
     store, member, hits = invitation_server
     data = json.loads(decode(store.mint(member.group)['invite'].split('data=')[1]))
     data['fingerprint'] = hashlib.sha256(b'wrong-certificate').hexdigest()
-    invite = 'ml-stack://enroll?data=' + encode(json.dumps(data).encode())
+    invite = 'poolhouse://enroll?data=' + encode(json.dumps(data).encode())
     with pytest.raises(ValueError, match='certificate'):
         invite_client.redeem(invite, 'test-device')
     assert hits == []

@@ -15,13 +15,13 @@ pytestmark = pytest.mark.slow
 def mount_editor(page):
     page.get_by_role('tab', name='Appearance & advanced', exact=True).click()
     assert page.locator('theme-editor').count() == 1
-    page.get_by_role('button', name='Poolside Light', exact=True).wait_for()
+    page.get_by_role('button', name='Poolhouse Light', exact=True).wait_for()
 
 
 def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#settings')
     mount_editor(page)
-    page.get_by_role('button', name='Poolside Light', exact=True).click()
+    page.get_by_role('button', name='Poolhouse Light', exact=True).click()
     page.wait_for_function("() => document.querySelector('theme-editor select').value === 'light'")
     page.locator('theme-editor summary').click()
     page.get_by_label('Pink accent', exact=True).fill('#aa3377')
@@ -31,7 +31,7 @@ def test_theme_selector_preview_save_reload_reset_and_delete(joined, open_page):
     assert page.evaluate("document.documentElement.dataset.theme") == 'light'
     assert page.evaluate("document.documentElement.dataset.density") == 'compact'
     assert page.evaluate("document.documentElement.style.getPropertyValue('--ui-font-size')") == '17px'
-    assert page.evaluate("document.documentElement.style.getPropertyValue('--poolside-pink')") == '#aa3377'
+    assert page.evaluate("document.documentElement.style.getPropertyValue('--poolhouse-pink')") == '#aa3377'
     _, current, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert current['settings']['appearance']['active_theme'] == 'light'
     page.get_by_role('button', name='Save theme', exact=True).click()

@@ -36,7 +36,7 @@ final class Enrollment {
         String challenge = issued.getString("challenge");
         if (!challenge.matches("[a-f0-9]{64}") || issued.getLong("expires") <= now
                 || issued.getLong("expires") > invite.expires) throw new SecurityException("Invalid enrollment challenge.");
-        String transcript = "ml-stack-invite/v1\n" + invite.id + "\n" + challenge
+        String transcript = "poolhouse-invite/v1\n" + invite.id + "\n" + challenge
                 + "\nandroid\n" + invite.fingerprint + "\nandroid\n" + name + "\n";
         identity.put("challenge", challenge).put("proof", hmac(invite.secret, transcript.getBytes(StandardCharsets.UTF_8)));
         JSONObject answer = response(client, invite, "/join/invite/redeem", identity);
@@ -46,7 +46,7 @@ final class Enrollment {
         if (grantBytes.length > 16384 || !Base64.getUrlEncoder().withoutPadding().encodeToString(grantBytes).equals(encoded)) {
             throw new SecurityException("Invalid enrollment grant.");
         }
-        byte[] prefix = ("ml-stack-invite-grant/v1\n" + challenge + "\n").getBytes(StandardCharsets.UTF_8);
+        byte[] prefix = ("poolhouse-invite-grant/v1\n" + challenge + "\n").getBytes(StandardCharsets.UTF_8);
         byte[] message = Arrays.copyOf(prefix, prefix.length + grantBytes.length);
         System.arraycopy(grantBytes, 0, message, prefix.length, grantBytes.length);
         String proof = answer.getString("proof");
@@ -83,6 +83,6 @@ final class Enrollment {
                 .put("id", grant.getString("device_id")).put("secret", Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]))
                 .put("expires", now + 1);
         String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(check.toString().getBytes(StandardCharsets.UTF_8));
-        Invite.parse("ml-stack://enroll?data=" + encoded, now);
+        Invite.parse("poolhouse://enroll?data=" + encoded, now);
     }
 }

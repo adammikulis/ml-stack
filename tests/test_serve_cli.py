@@ -1,7 +1,7 @@
-"""``ml-stack-serve``: what it prints, what it exits with, and what it refuses to do.
+"""``poolhouse-serve``: what it prints, what it exits with, and what it refuses to do.
 
 The adoption paths run against `FakeLlamaServer` on a real socket, so the refusals here
-are the library's own, reached the way a person's `ml-stack-serve status` reaches a live
+are the library's own, reached the way a person's `poolhouse-serve status` reaches a live
 one. No model is loaded anywhere in this file.
 """
 
@@ -24,14 +24,14 @@ from conftest import (
     write_gguf,
 )
 
-from ml_stack import hub
-from ml_stack.client import is_healthy
-from ml_stack.client.counters import Speculative
-from ml_stack.serve import cli, holding, lifecycle_cli, ops
-from ml_stack.serve.backend import ServerSpec
-from ml_stack.serve.ports import free_port
-from ml_stack.testing import FakeLlamaServer, FakePreflight, Served
-from ml_stack.testing.registry import record_server
+from poolhouse import hub
+from poolhouse.client import is_healthy
+from poolhouse.client.counters import Speculative
+from poolhouse.serve import cli, holding, lifecycle_cli, ops
+from poolhouse.serve.backend import ServerSpec
+from poolhouse.serve.ports import free_port
+from poolhouse.testing import FakeLlamaServer, FakePreflight, Served
+from poolhouse.testing.registry import record_server
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 
@@ -120,7 +120,7 @@ class TestStatus:
         assert json.loads(capsys.readouterr().out)["servers"][0]["log"] == str(log)
 
     def test_nothing_serving_names_the_last_log_on_that_port(self, state, capsys):
-        from ml_stack.serve.backend import server_log
+        from poolhouse.serve.backend import server_log
 
         port = free_port()
         log = server_log("llama-server", port)
@@ -171,7 +171,7 @@ class TestStatus:
         record(state, instance.port, pid=4242, owner_pid=4242)
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
-        assert "started by 'ml-stack-serve up'" in capsys.readouterr().out
+        assert "started by 'poolhouse-serve up'" in capsys.readouterr().out
 
     def test_the_process_holding_the_lease_is_named(self, serving, state, capsys):
         instance = serving()
@@ -317,13 +317,13 @@ class TestDownOrphans:
 class TestTellingTheFleet:
     """A server nobody announced is a server no other machine can use.
 
-    `ml-stack-serve up` leased and recorded the port in its own state file and stopped there, so a
+    `poolhouse-serve up` leased and recorded the port in its own state file and stopped there, so a
     peer asking who is serving a model saw nothing and loaded its own copy — while a working
     serving sat idle on this machine.
     """
 
     def beacon(self, root):
-        from ml_stack.fleet.serving import Serving
+        from poolhouse.fleet.serving import Serving
 
         return Serving(root / "serving.json")
 
@@ -340,7 +340,7 @@ class TestTellingTheFleet:
         assert served[0].models == [MODEL]
 
     def test_with_no_root_it_announces_under_the_state_root(self, serving, state, tmp_path, monkeypatch):
-        from ml_stack import home
+        from poolhouse import home
 
         root = home.state("traind")
         root.mkdir(parents=True)
@@ -381,8 +381,8 @@ def test_a_draft_is_passed_through_and_auto_asks_the_one_chooser(monkeypatch, tm
     the decision is said out loud; anything else is taken as written."""
     import huggingface_hub
 
-    import ml_stack.hub as hub
-    from ml_stack.serve.ops import drafted
+    import poolhouse.hub as hub
+    from poolhouse.serve.ops import drafted
 
     hub._DRAFT_NOTES.clear()
     shelves = {"maker/thing-GGUF": [("weights.gguf", 4_000_000_000),
@@ -415,9 +415,9 @@ def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, t
     """`up --draft auto` on a mainline binary serves no head whose README names a fork, and
     prints the chooser's reason with the README's own sentence under it. Mutation: pass
     `borrows=True` in `cmd_up` -- the head is served and the load fails at the far end."""
-    import ml_stack.hub as hub
-    from ml_stack.serve import cli, ops
-    from ml_stack.testing.fakehub import FakeHub
+    import poolhouse.hub as hub
+    from poolhouse.serve import cli, ops
+    from poolhouse.testing.fakehub import FakeHub
 
     hub._DRAFT_NOTES.clear()
     shelves = {"maker/flash-GGUF": [("flash-Q4.gguf", 4_000_000_000),
@@ -428,8 +428,8 @@ def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, t
     request.addfinalizer(served.close)
     served.point(monkeypatch)
     preflight = FakePreflight()
-    monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
-    monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
+    monkeypatch.setattr("poolhouse.serve.preflight.Preflight", preflight)
+    monkeypatch.setattr("poolhouse.hub.room", lambda: 0)
     monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
     binary = tmp_path / "current" / "llama-server"
     binary.parent.mkdir()
@@ -450,7 +450,7 @@ def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, t
 def test_auto_finds_the_draft_head_lying_beside_a_local_model(tmp_path):
     """A cached repository puts the mtp- head in the model's own directory, so a local path
     resolves by looking rather than by asking the Hub about a file already on the disk."""
-    from ml_stack.serve.ops import drafted
+    from poolhouse.serve.ops import drafted
 
     where = tmp_path / "snapshots" / "abc123"
     where.mkdir(parents=True)
@@ -472,7 +472,7 @@ def test_a_head_is_found_across_revisions_of_the_same_repository(tmp_path):
     fetched today land in different ones, so "beside the weights" finds nothing -- which is
     what happened: `--draft auto` reported no head for a model that ships three, and would
     have run a whole experiment unaccelerated without saying so."""
-    from ml_stack.serve.ops import drafted
+    from poolhouse.serve.ops import drafted
 
     snaps = tmp_path / "models--maker--thing-GGUF" / "snapshots"
     old = snaps / "aaaaaaaa" / "UD-IQ4_XS"
@@ -494,8 +494,8 @@ def test_a_head_is_found_across_revisions_of_the_same_repository(tmp_path):
 def test_a_head_named_for_its_method_is_found_and_says_which_kind(tmp_path):
     """`mtp-` and `eagle3-` are both draft heads; a rule knowing only one reported no draft
     for gpt-oss, which ships two EAGLE3 heads and no mtp- file."""
-    from ml_stack.hub import spec_for
-    from ml_stack.serve.ops import drafted
+    from poolhouse.hub import spec_for
+    from poolhouse.serve.ops import drafted
 
     where = tmp_path / "m"
     where.mkdir()
@@ -514,7 +514,7 @@ def test_a_head_named_for_its_method_is_found_and_says_which_kind(tmp_path):
 def test_build_subcommand_is_wired_to_cmd_build(monkeypatch):
     """The parser's job here is just getting every flag to `build.cmd_build` unmangled --
     what it does with them is `test_serve_build.py`'s job."""
-    from ml_stack.serve import build
+    from poolhouse.serve import build
 
     seen: dict[str, object] = {}
 
@@ -539,8 +539,8 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     `--help` without `--draft-max`. Nothing is started; the refusal names the nearest."""
     import subprocess as sp
 
-    from ml_stack.serve import backend
-    from ml_stack.serve.backend import flags_of
+    from poolhouse.serve import backend
+    from poolhouse.serve.backend import flags_of
 
     monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
     monkeypatch.setattr(backend, "_HELP", {})
@@ -584,7 +584,7 @@ class TestPreflightOnly:
     without ever leasing a server."""
 
     def test_a_passing_preflight_exits_zero_and_never_leases(self, tmp_path, monkeypatch, capsys):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
@@ -607,8 +607,8 @@ class TestPreflightOnly:
         assert "ok    architecture" in out
 
     def test_a_failing_preflight_exits_one(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr("ml_stack.serve.preflight.source_dir", lambda: tmp_path / "no-src")
-        import ml_stack.setup as setup_module
+        monkeypatch.setattr("poolhouse.serve.preflight.source_dir", lambda: tmp_path / "no-src")
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # not llama
@@ -630,14 +630,14 @@ class TestResolveModel:
     preflight saying 'shards missing' for a model already in the Hub cache."""
 
     def test_a_path_or_hf_reference_is_not_a_file_this_machine_holds(self):
-        import ml_stack.hub as hub_module
+        import poolhouse.hub as hub_module
 
         assert hub_module.located("hf:maker/thing-GGUF/thing.gguf") is None
         assert hub_module.located("some/dir/thing.gguf") is None
 
     def test_a_bare_name_found_in_the_hub_cache_resolves_to_its_real_path(
             self, tmp_path, monkeypatch):
-        import ml_stack.hub as hub_module
+        import poolhouse.hub as hub_module
 
         cache = tmp_path / "hub"
         snapshot = cache / "models--maker--thing-GGUF" / "snapshots" / "abc123"
@@ -649,15 +649,15 @@ class TestResolveModel:
         assert str(hub_module.located(MODEL)) == str(gguf.resolve())
 
     def test_a_bare_name_found_nowhere_is_none(self, tmp_path, monkeypatch):
-        import ml_stack.hub as hub_module
+        import poolhouse.hub as hub_module
 
         monkeypatch.setattr(hub_module, "default_roots", lambda root: [tmp_path / "empty"])
         assert hub_module.located(MODEL) is None
 
     def test_up_preflight_only_resolves_a_bare_name_and_reports_it(
             self, tmp_path, monkeypatch, capsys):
-        import ml_stack.hub as hub_module
-        import ml_stack.setup as setup_module
+        import poolhouse.hub as hub_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
         cache = tmp_path / "hub"
@@ -699,7 +699,7 @@ class TestBuildFlag:
         every construction is recorded rather than one captured value overwritten -- only
         the *first* is `cmd_up`'s own.
         """
-        from ml_stack.serve import backend as backend_module
+        from poolhouse.serve import backend as backend_module
 
         monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
         calls: list[dict] = []
@@ -742,8 +742,8 @@ class TestModelsFetch:
     def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys):
         import struct
 
-        import ml_stack.hub as hub
-        from ml_stack.testing.fakehub import fake_hub
+        import poolhouse.hub as hub
+        from poolhouse.testing.fakehub import fake_hub
 
         body = b"GGUF" + struct.pack("<IQQ", 3, 0, 0) + b"\0" * 40
         with fake_hub({"maker/thing-GGUF": {"thing-Q4_K_M.gguf": body}}) as server:
@@ -756,16 +756,16 @@ def test_preflight_only_resolves_a_draft_named_by_file(monkeypatch, tmp_path, ca
     """`up --preflight-only` with `--draft hf:owner/repo/MTP/head.gguf` refused the reference
     where a real start would have fetched it and served by path. Mutation: drop the
     resolved_draft call before Preflight."""
-    from ml_stack.serve import cli
+    from poolhouse.serve import cli
 
     head = tmp_path / "mtp-head-Q8_0.gguf"
     head.write_bytes(b"GGUF")
     model = tmp_path / "m.gguf"
     model.write_bytes(b"GGUF")
-    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: head)
+    monkeypatch.setattr("poolhouse.hub.fetch", lambda ref: head)
     preflight = FakePreflight()
-    monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
-    monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
+    monkeypatch.setattr("poolhouse.serve.preflight.Preflight", preflight)
+    monkeypatch.setattr("poolhouse.hub.room", lambda: 0)
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
@@ -781,7 +781,7 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     The link is returned, and its size still reads through to the blob."""
     from pathlib import Path
 
-    import ml_stack.hub as hub_module
+    import poolhouse.hub as hub_module
 
     cache = tmp_path / "hub"
     blobs = cache / "models--maker--big-GGUF" / "blobs"
@@ -866,7 +866,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     aside = tmp_path / "aside"
     aside.mkdir()
     (aside / "alone-Q8_0.gguf").write_bytes(b"z" * (4 * 2**20))
-    monkeypatch.setattr("ml_stack.hub.default_roots", lambda root: [tmp_path / "hub"])
+    monkeypatch.setattr("poolhouse.hub.default_roots", lambda root: [tmp_path / "hub"])
     fakes = [fake_process(["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
                            "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30, pid=11),
              fake_process(["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
@@ -902,7 +902,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
     """A server answering health checks that this machine never recorded is named foreign,
     with its pid -- never judged for adopting or starting over it (the backend now never
     kills one it did not start; `ports.reclaim_port`)."""
-    from ml_stack.serve import cli, ops
+    from poolhouse.serve import cli, ops
 
     instance = serving(model="/models/foreign-model.gguf", recorded=False)
     instance.refuse["/props"] = 404
@@ -912,7 +912,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
     assert cli.main(["status", "--port", str(instance.port)]) == 0
     out = capsys.readouterr().out
     assert instance.base_url in out
-    assert "unmanaged -- pid 9911, not started by ml-stack; reported and left alone" in out
+    assert "unmanaged -- pid 9911, not started by poolhouse; reported and left alone" in out
     assert "not reported" not in out, "a foreign server is not judged for adopting"
 
     assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0
@@ -923,7 +923,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
 
 
 def test_status_every_json_carries_the_foreign_list(monkeypatch, capsys):
-    from ml_stack.serve import cli, ops
+    from poolhouse.serve import cli, ops
 
     fakes = [fake_process(["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
                            "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30, pid=11),
@@ -955,7 +955,7 @@ def test_machine_memory_splits_the_servers_from_everything_else(monkeypatch):
 def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
     """`--kv q8_0` reaches both cache types of the spec; nothing asked leaves the server's
     own default."""
-    import ml_stack.hub as hub_module
+    import poolhouse.hub as hub_module
 
     seen = {}
 
@@ -991,7 +991,7 @@ def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypat
     import contextlib
     import types
 
-    import ml_stack.hub as hub_module
+    import poolhouse.hub as hub_module
 
     seen = {}
 

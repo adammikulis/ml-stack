@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from ml_stack.interventions import Call, Confirm, Context, Proceed
-from ml_stack.taint import (
+from poolhouse.interventions import Call, Confirm, Context, Proceed
+from poolhouse.taint import (
     Arg,
     Capability,
     ExtractionError,
@@ -17,7 +17,7 @@ from ml_stack.taint import (
     check_schema,
     extract,
     ledger_of as taint_of,
-    ml_stack_tools,
+    poolhouse_tools,
     quarantined,
     validate,
 )
@@ -120,7 +120,7 @@ def test_a_quarantined_tool_hands_the_privileged_model_only_validated_values():
     result = tool(url="http://x")
     assert tool.__name__ == "read_page" and result == {"model": "quince-2b.gguf", "kind": "chat"}
 
-    sinks = ml_stack_tools().with_(
+    sinks = poolhouse_tools().with_(
         read_page=Sink(Capability.READ),
         deploy=Sink(Capability.FLEET, {"model": Arg(validated="listing")}))
     rail = TaintRail(sinks, validated_tools={"read_page": "listing"})
@@ -135,7 +135,7 @@ def test_a_quarantined_tool_hands_the_privileged_model_only_validated_values():
 
 
 def test_a_model_that_returns_text_that_fits_the_pattern_but_was_not_validated_is_not_vouched():
-    rail = TaintRail(ml_stack_tools().with_(
+    rail = TaintRail(poolhouse_tools().with_(
         deploy=Sink(Capability.FLEET, {"model": Arg(validated="listing")})))
     context = Context(task="deploy it", tools=[])
     rail.after_tool_call(Call("web_fetch"), PAGE, context)

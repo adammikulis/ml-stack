@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.gym.adapters import make_environment
-from ml_stack.gym.worlds import configure_world, schema
+from poolhouse.gym.adapters import make_environment
+from poolhouse.gym.worlds import configure_world, schema
 
 
 def test_world_descriptors_expose_native_modes_without_universal_physics():
@@ -64,7 +64,7 @@ def test_native_sumo_generated_seed_and_manual_files(tmp_path, monkeypatch):
     other, distinct = configure_world('traffic', options, seed=5)
     assert config == same
     with monkeypatch.context() as temporary:
-        temporary.setenv('ML_STACK_CACHE', str(tmp_path / 'fresh-cache'))
+        temporary.setenv('POOLHOUSE_CACHE', str(tmp_path / 'fresh-cache'))
         _, fresh = configure_world('traffic', options, seed=4)
         assert {name: value['sha256'] for name, value in first['files'].items()} == {
             name: value['sha256'] for name, value in fresh['files'].items()}
@@ -83,7 +83,7 @@ def test_native_sumo_generated_seed_and_manual_files(tmp_path, monkeypatch):
             assert env.sumo.vehicle.getIDList()
         finally:
             env.close()
-    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(tmp_path))
+    monkeypatch.setenv('POOLHOUSE_GYM_FILES_ROOT', str(tmp_path))
     shutil.copyfile(config['net_file'], tmp_path / 'manual.net.xml')
     shutil.copyfile(config['route_file'], tmp_path / 'manual.rou.xml')
     manual, manifest = configure_world('traffic-driving', {'num_seconds': 30, 'world': {
@@ -105,7 +105,7 @@ def test_native_sumo_generated_seed_and_manual_files(tmp_path, monkeypatch):
 @pytest.mark.slow
 def test_warehouse_task_resets_preserve_native_robots_and_clock():
     pytest.importorskip('rware')
-    from ml_stack.gym.world_warehouse import make_warehouse_world
+    from poolhouse.gym.world_warehouse import make_warehouse_world
 
     env = make_warehouse_world({'task_horizon': 2, 'max_steps': 2, 'world': {'seed': 11}})
     try:
@@ -134,7 +134,7 @@ def test_traffic_task_resets_preserve_native_connection_and_replenish_demand(com
     pytest.importorskip('sumo_rl')
     if combined:
         pytest.importorskip('metadrive')
-    from ml_stack.gym.world_traffic import make_traffic_world
+    from poolhouse.gym.world_traffic import make_traffic_world
 
     env = make_traffic_world({'task_horizon': 2, 'num_seconds': 5,
                               'world': {'seed': 4, 'demand_seconds': 60}}, combined=combined)

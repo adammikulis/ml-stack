@@ -9,7 +9,7 @@ from gates import atomic_writes
 
 
 def _count(tmp_path: Path, source: str) -> list[str]:
-    where = tmp_path / "src" / "ml_stack" / "one.py"
+    where = tmp_path / "src" / "poolhouse" / "one.py"
     where.parent.mkdir(parents=True)
     where.write_text(source, encoding="utf-8")
     return [f.detail for f in atomic_writes.find(tmp_path)]
@@ -39,7 +39,7 @@ def test_a_callback_on_self_is_left_alone(tmp_path) -> None:
 
 
 def test_the_file_that_owns_the_job_is_exempt(tmp_path) -> None:
-    where = tmp_path / "src" / "ml_stack" / "files.py"
+    where = tmp_path / "src" / "poolhouse" / "files.py"
     where.parent.mkdir(parents=True)
     where.write_text("def promote(a, b):\n    a.replace(b)\n", encoding="utf-8")
     assert not atomic_writes.find(tmp_path)

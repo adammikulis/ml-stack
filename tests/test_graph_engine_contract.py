@@ -1,4 +1,4 @@
-"""What `ml_stack.graph` relies on the storage engine to do, measured against the installed one.
+"""What `poolhouse.graph` relies on the storage engine to do, measured against the installed one.
 
 Each test is a property of ladybug that a module here is built around; when an upgrade turns
 one red, the module that relies on it is what changes. Anything that can take the interpreter
@@ -135,7 +135,7 @@ def _build_seed(into: Path) -> None:
 def seeded_store() -> Path:
     """The seeded store, written once for every worker and run with these sources (see
     ``artifact_cache``); each test copies it before changing anything."""
-    sources = [Path(__file__), REPO / "src" / "ml_stack" / "graph"]
+    sources = [Path(__file__), REPO / "src" / "poolhouse" / "graph"]
     return cached("seeded-store", expand(*sources), _build_seed) / "seed.lbug"
 
 

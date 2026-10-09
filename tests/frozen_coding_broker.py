@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-from ml_stack import codex, harnessing
+from poolhouse import codex, harnessing
 
 
 @contextmanager

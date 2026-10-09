@@ -1,0 +1,215 @@
+<style>
+models-view #models{max-width:none;padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1))}
+models-view .models-heading{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:24px}
+models-view .models-heading h1{font-size:1.714rem;letter-spacing:-.03em;margin:0}
+models-view #add-model{background:var(--poolhouse-orange,#ff8a3d);color:var(--poolhouse-orange-ink,var(--poolhouse-navy,#1b1f3a));font-weight:750;border:0;padding:13px 20px;border-radius:12px;white-space:nowrap}
+models-view .models-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:28px}
+models-view .models-stat{display:flex;align-items:center;gap:16px;padding:18px 20px;border:1px solid var(--line);border-radius:16px;background:var(--bg-raised,#fff)}
+models-view .models-stat strong{font-size:26px;line-height:1.1}
+models-view .models-stat span{font-size:13px;color:var(--muted)}
+models-view .stat-icon{font-size:22px;width:42px;height:42px;display:grid;place-items:center;border-radius:12px;color:var(--poolhouse-navy)}
+models-view .models-stat:nth-child(1) .stat-icon{background:var(--poolhouse-orange,#ff8a3d);color:var(--poolhouse-orange-ink,var(--poolhouse-navy,#1b1f3a))}
+models-view .models-stat:nth-child(2) .stat-icon{background:var(--poolhouse-cyan,#2de2e6);color:var(--poolhouse-cyan-ink,var(--poolhouse-navy,#1b1f3a))}
+models-view .models-stat:nth-child(3) .stat-icon{background:var(--poolhouse-yellow,#ffd166);color:var(--poolhouse-yellow-ink,var(--poolhouse-navy,#1b1f3a))}
+models-view #models-here{padding:0;border:0;background:transparent}
+models-view #model-discovery{margin-top:28px;padding:24px;border-radius:20px;background:var(--bg-raised);border:1px solid var(--line)}
+models-view #model-discovery>summary{font-weight:750;font-size:17px;cursor:pointer}
+models-view #model-discovery[open]>summary{margin-bottom:22px}
+models-view #models-getting,models-view #models-unfinished{background:var(--bg-raised);border:1px solid var(--line);border-radius:16px;padding:20px;margin:20px 0}
+models-view .models-utilities{margin-top:24px;display:flex;gap:24px;flex-wrap:wrap;color:var(--muted);font-size:13px}
+models-view #models-room{margin-top:16px}
+models-view #models-note:empty{display:none}
+models-view .model-loading{padding:28px;border-radius:16px;background:var(--bg-raised);border:1px solid var(--line);color:var(--muted)}
+@media(max-width:700px){models-view #models{padding:20px}models-view .models-overview{grid-template-columns:1fr}models-view .models-heading{align-items:start}models-view #add-model{padding:10px}}
+</style>
+<template>
+  <main id="models" hidden>
+    <header class="models-heading"><div><h1>Models</h1></div><button type="button" id="add-model">+ Add a model</button></header>
+    <div class="models-overview"><div class="models-stat"><div class="stat-icon" aria-hidden="true">▦</div><div><strong id="models-count">—</strong><br><span>Installed models</span></div></div><div class="models-stat"><div class="stat-icon" aria-hidden="true">↗</div><div><strong id="models-running">—</strong><br><span>Ready for conversations</span></div></div><div class="models-stat"><div class="stat-icon" aria-hidden="true">◉</div><div><strong id="models-free">—</strong><br><span>Free storage on this device</span></div></div></div>
+    <div id="models-note" role="status"></div>
+    <section id="models-getting" hidden><h2>Downloads</h2><div id="download-rows"></div></section>
+    <section id="models-here"><models-library></models-library></section>
+    <details id="model-discovery"><summary>Add from your Pool or Hugging Face</summary><model-browser></model-browser></details>
+    <section id="models-unfinished" hidden></section>
+    <div class="models-utilities"><a href="#fit">Explore capacity &amp; performance →</a><a href="#settings">Manage model runtimes in Settings →</a></div>
+    <details data-advanced id="models-room"><summary>Device memory controls</summary><wired-memory></wired-memory></details>
+  </main>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const { el, api } = M;
+  class ModelsView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#models");
+      this.note = this.querySelector("#models-note");
+      this.browser = this.querySelector("model-browser");
+      this.browser.owner = this;
+      this.querySelector('#add-model').onclick = () => {
+        const discovery = this.querySelector('#model-discovery');
+        discovery.open = true; discovery.scrollIntoView({behavior:'smooth', block:'start'});
+        this.browser.hunt.focus();
+      };
+      this.progress = new Map();
+      this.starting = new Set();
+      this.stopping = new Set();
+      this.downloading = new Set();
+      this.onSelection = (event) => {
+        this.selectedModel = event.detail;
+        this.querySelector("models-library").selectModel?.(event.detail);
+        this.browser.selectModel?.(event.detail);
+      };
+      window.addEventListener("fleet-select-model", this.onSelection);
+      M.onRoute((route) => {
+        this.box.hidden = route !== "models";
+        clearTimeout(this.timer);
+        if (!this.box.hidden) this.draw();
+      });
+    }
+    disconnectedCallback() { clearTimeout(this.timer); window.removeEventListener("fleet-select-model", this.onSelection); }
+    async draw() {
+      if (this.loading) return;
+      this.loading = true;
+      try {
+        const [m, run] = await Promise.all([api("/ui/models"), api("/ui/serving")]);
+        if (M.refused(m) || M.refused(run) || this.box.hidden) return;
+        this.querySelector("#models-free").textContent = `${m.free_gb ?? '—'} GiB`;
+        this.querySelector('#models-count').textContent = String((m.library || []).length);
+        this.querySelector('#models-running').textContent = String((run.running || []).length);
+        this.browser.setInventory(m, run);
+        this.querySelector("models-library").update(m.library || [], run,
+          (path, name) => this.serve(path, name), (port) => this.halt(port));
+        this.paintDownloads(m.getting || []);
+        const section = this.querySelector("#models-unfinished");
+        const key = JSON.stringify(m.unfinished || []);
+        if (key !== this.unfinishedKey) {
+          this.unfinishedKey = key;
+          section.hidden = !(m.unfinished || []).length;
+          section.replaceChildren(el("h2", {}, "Paused downloads"),
+            el("p", { class: "hint" }, "Choose the same model to resume, or discard its partial download."),
+            ...(m.unfinished || []).map((x) => el("div", { class: "model-row" },
+              el("div", { class: "model-info" }, el("b", {}, x.name.replace(/\.part$/, "")),
+                el("span", { class: "why" }, `${M.fileSize(x.size)} downloaded`)),
+              el("button", { class: "ghost small", onclick: async () => {
+                const got = await api("/ui/models", { method: "DELETE", body: JSON.stringify({ name: x.name }) });
+                if (got.error) this.note.replaceChildren(el("div", { class: "err" }, got.error));
+                else this.draw();
+              } }, "Discard"))));
+        }
+      } catch (error) {
+        this.note.replaceChildren(el("div", { class: "err" }, `Could not refresh models: ${error.message}`));
+      } finally {
+        this.loading = false;
+        clearTimeout(this.timer);
+        if (!this.box.hidden) this.timer = setTimeout(() => this.draw(), 2000);
+      }
+    }
+    paintDownloads(rows) {
+      const section = this.querySelector("#models-getting");
+      const container = this.querySelector("#download-rows");
+      const active = rows.filter((g) => g.state !== "done");
+      section.hidden = !active.length;
+      const keep = new Set();
+      for (const g of active) {
+        const key = g.id || g.name;
+        keep.add(key);
+        let progress = this.progress.get(key);
+        if (!progress) {
+          progress = M.ui("ml-progress");
+          this.progress.set(key, progress);
+          container.append(progress);
+        }
+        Object.assign(progress, { label: g.name, format: "bytes", done: g.done, total: g.total || 0,
+          state: g.state === "failed" ? "failed" : "running", message: M.downloadMessage(g) });
+      }
+      for (const [key, progress] of this.progress) if (!keep.has(key)) {
+        progress.remove(); this.progress.delete(key);
+      }
+    }
+    async serve(name, label = name) {
+      if (this.starting.has(name)) return;
+      this.starting.add(name);
+      this.browser.setLoading(name, true);
+      this.note.replaceChildren(el("div", { class: "hint" },
+        el("span", { class: "spin" }), ` Starting ${name}…`));
+      try {
+        const r = await api("/ui/serving", { method: "POST", body: JSON.stringify(name.includes("/") || name.includes("\\") ? { path: name } : { name }) });
+        const identity = (r.models || []).find(model => [name, name.split(/[\\/]/).pop(), label].includes(model));
+        this.note.replaceChildren(r.error
+          ? el("div", { class: "err" }, r.error)
+          : el("div", { class: "ok" }, `${label} is ready. `, el("button", {class:"ghost small", onclick:()=>this.openChat(identity || name.split(/[\\/]/).pop())}, "Open chat")));
+        if (!r.error) {
+          this.draw();
+          const selected = this.selectedModel;
+          if (selected?.from === "chat" && [selected.path, selected.name, selected.id].includes(name)) {
+            this.selectedModel = null;
+            this.openChat(identity || name.split(/[\\/]/).pop());
+          }
+        }
+      } catch (error) {
+        this.note.replaceChildren(el("div", { class: "err" }, `Could not start ${name}: ${error.message}`));
+      } finally {
+        this.starting.delete(name);
+        this.browser.setLoading(name, false);
+      }
+    }
+
+    openChat(model) {
+      window.dispatchEvent(new CustomEvent('fleet-chat-ready', {detail:{model}}));
+      M.go('chat');
+    }
+
+    async halt(port) {
+      if (this.stopping.has(port)) return;
+      this.stopping.add(port);
+      try {
+        const stopped = await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
+        if (!stopped.ok) throw new Error(stopped.error || "Could not stop the model server.");
+        this.note.replaceChildren(); this.draw();
+      } catch (error) { this.note.replaceChildren(el("div", {class:"err"}, error.message)); }
+      finally { this.stopping.delete(port); }
+    }
+
+    async get(name, source, recommendMtp = false) {
+      if (this.downloading.has(name)) return;
+      this.downloading.add(name);
+      this.note.replaceChildren(el("p", {}, "Checking optional components…"));
+      try {
+        const found = await api("/ui/models/addons?name=" + encodeURIComponent(name) + "&source=" + encodeURIComponent(source || ""));
+        if (found.error) throw new Error(found.error);
+        const selected = {mtp: false, vision: false};
+        const choices = el("div", {class: "group"}, el("b", {}, name));
+        for (const component of found.components || []) {
+          const title = component.kind === "mtp" ? "Multi-token prediction" : "Vision";
+          if (component.status !== "available") {
+            choices.append(el("p", {class: "hint"}, title + ": " + (component.error || component.status)));
+            continue;
+          }
+          const check = el("input", {type: "checkbox"});
+          check.checked = component.kind === "mtp" && !!recommendMtp;
+          selected[component.kind] = check.checked;
+          check.onchange = () => { selected[component.kind] = check.checked; };
+          choices.append(el("label", {class: "opt"}, check, title + " ? " + M.fileSize(component.download_bytes) +
+            (component.packaging === "integrated" ? " replacement model" : " additional download")));
+        }
+        choices.append(el("button", {onclick: async (event) => {
+          if (event.currentTarget.disabled) return;
+          event.currentTarget.disabled = true;
+          this.note.replaceChildren(el("p", {}, "Getting " + name + "…"));
+          try {
+            const result = await api("/ui/models", {method: "POST", body: JSON.stringify({name, source, ...selected})});
+            if (result.error) throw new Error(result.error);
+            this.note.replaceChildren(); this.draw();
+          } catch (error) { this.note.replaceChildren(el("p", {class: "err"}, error.message)); }
+        }}, "Start download"), el("button", {class: "ghost", onclick: () => this.note.replaceChildren()}, "Cancel"));
+        this.note.replaceChildren(choices);
+      } catch (error) { this.note.replaceChildren(el("p", {class: "err"}, error.message)); }
+      finally { this.downloading.delete(name); }
+    }
+
+  }
+  customElements.define("models-view", ModelsView);
+})();
+</script>

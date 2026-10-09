@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from ml_stack.fleet.onboard import manifest as mf
+from poolhouse.fleet.onboard import manifest as mf
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +19,7 @@ def signer():
 
 
 def entries(tmp_path, signer, **more):
-    f = tmp_path / "ml_stack-0.2-py3-none-any.whl"
+    f = tmp_path / "poolhouse-0.2-py3-none-any.whl"
     f.write_bytes(b"w" * 200_000)
     return [signer.entry(f, kind="wheel", chunk_size=65536, **more)]
 
@@ -28,7 +28,7 @@ def test_a_manifest_signed_by_the_pinned_key_verifies_and_lists_chunks(tmp_path,
     raw = signer.sign(entries(tmp_path, signer), serial=7)
     m = mf.verify(raw, signer.public)
     assert m.serial == 7 and m.key_id == signer.key_id
-    e = m.entry("ml_stack-0.2-py3-none-any.whl")
+    e = m.entry("poolhouse-0.2-py3-none-any.whl")
     assert e.size == 200_000 and len(e.chunks) == 4 and e.sharing == "open"
 
 

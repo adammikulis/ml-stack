@@ -10,20 +10,20 @@ from ._perfile import finder
 from ._util import calls, exempt, parse
 
 NAME = "server-starts"
-OWNER = "ml_stack.serve.broker"
+OWNER = "poolhouse.serve.broker"
 INCREMENTAL = True
 HARD = True
-ROOTS = ("src/ml_stack",)
-GRANTORS = ("src/ml_stack/serve/grant.py", "src/ml_stack/serve/broker.py")
+ROOTS = ("src/poolhouse",)
+GRANTORS = ("src/poolhouse/serve/grant.py", "src/poolhouse/serve/broker.py")
 """Where `broker_grant` is defined and where it is opened."""
-LEASERS = ("src/ml_stack/serve/backend.py", "src/ml_stack/serve/manager.py")
+LEASERS = ("src/poolhouse/serve/backend.py", "src/poolhouse/serve/manager.py")
 """Where the `Lease` a backend launches on is defined and made."""
 SPAWNERS = (
-    "src/ml_stack/serve/backend.py",
-    "src/ml_stack/serve/build_platform.py",
-    "src/ml_stack/serve/build_source.py",
-    "src/ml_stack/serve/llamacpp_compile.py",
-    "src/ml_stack/setup.py",
+    "src/poolhouse/serve/backend.py",
+    "src/poolhouse/serve/build_platform.py",
+    "src/poolhouse/serve/build_source.py",
+    "src/poolhouse/serve/llamacpp_compile.py",
+    "src/poolhouse/setup.py",
 )
 """The modules that may both start a process and name llama-server, each for its own reason."""
 SPAWN = {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call",
@@ -32,7 +32,7 @@ SPAWN = {"subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.ch
 
 def describe() -> str:
     return ("A model server started, or the grant to start one opened, outside the broker; "
-            "`ml-stack-serve up` asks the broker for a lease.")
+            "`poolhouse-serve up` asks the broker for a lease.")
 
 
 def scan(path: Path, where: str) -> list[Finding]:

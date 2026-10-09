@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import routes
-from ml_stack.fleet.discovery import DiscoveryError
+from poolhouse.fleet import routes
+from poolhouse.fleet.discovery import DiscoveryError
 
 
 class Enrollment(routes.ClusterRoutes):

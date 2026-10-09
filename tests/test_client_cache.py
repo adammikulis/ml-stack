@@ -4,9 +4,9 @@ import json
 
 from conftest import json_reply
 
-from ml_stack.client import Client
-from ml_stack.client.cache import extraction_key
-from ml_stack.extraction import Checking, Kept, Prompting
+from poolhouse.client import Client
+from poolhouse.client.cache import extraction_key
+from poolhouse.extraction import Checking, Kept, Prompting
 
 SCHEMA = {
     "type": "object",

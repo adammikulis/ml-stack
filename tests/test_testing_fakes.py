@@ -1,7 +1,7 @@
 """The shared fakes carry the real signatures, and the diff that keeps them there.
 
 A fake with ``**kwargs`` accepts what the real thing refuses; the suite went green on a
-keyword that took an 87G load down. Every fake in `ml_stack.testing.fakes` is diffed here
+keyword that took an 87G load down. Every fake in `poolhouse.testing.fakes` is diffed here
 against what it stands in for, and the diff itself is tested on fakes built to drift.
 """
 
@@ -13,11 +13,11 @@ import sys
 
 import pytest
 
-from ml_stack.client import Client, Reply, Request
-from ml_stack.extraction import Checking
-from ml_stack.serve import ServerFailed, ServerInfo, ServerSpec
-from ml_stack.serve.preflight import Report
-from ml_stack.testing import (
+from poolhouse.client import Client, Reply, Request
+from poolhouse.extraction import Checking
+from poolhouse.serve import ServerFailed, ServerInfo, ServerSpec
+from poolhouse.serve.preflight import Report
+from poolhouse.testing import (
     DRAFTING,
     MIRRORED,
     FakeClient,
@@ -52,7 +52,7 @@ NO_SIGNATURE = {"FakeReport", "Served", "Yielding", "FakeLlamaServer", "fake_bin
 
 def test_every_fake_in_the_module_is_in_the_table():
     """A fake added to the module and not to `MIRRORED` is a fake nothing checks."""
-    from ml_stack.testing import fakes
+    from poolhouse.testing import fakes
 
     listed = {label.split(".")[0] for label, _, _ in MIRRORED}
     public = {name for name in fakes.__all__
@@ -295,10 +295,10 @@ def test_a_fake_preflight_records_what_it_was_asked_and_refuses_by_name():
 # ---------------------------------------------------------------- the llama-server
 
 def test_the_clients_read_the_fake_the_way_they_read_a_real_one():
-    """Every reader in `ml_stack.client` against one fake, over a real socket."""
-    from ml_stack.client import Client, is_healthy, reported_models
-    from ml_stack.client.counters import read_speculative
-    from ml_stack.client.health import serving_params
+    """Every reader in `poolhouse.client` against one fake, over a real socket."""
+    from poolhouse.client import Client, is_healthy, reported_models
+    from poolhouse.client.counters import read_speculative
+    from poolhouse.client.health import serving_params
 
     held = Served(model="/models/quince-2b-Q4_K_M.gguf", context=8192, slots=2,
                   draft="mtp.gguf", spec_type="mtp", counted=DRAFTING, answer="a reply")
@@ -321,7 +321,7 @@ def test_the_clients_read_the_fake_the_way_they_read_a_real_one():
 
 
 def test_a_server_started_without_metrics_answers_501_there():
-    from ml_stack.client.counters import read_speculative
+    from poolhouse.client.counters import read_speculative
 
     with fake_llama_server(Served(metrics=False, counted=DRAFTING)) as server:
         assert read_speculative(server.base_url) is None
@@ -329,7 +329,7 @@ def test_a_server_started_without_metrics_answers_501_there():
 
 
 def test_a_server_with_no_draft_head_reports_no_speculative_counters():
-    from ml_stack.client.counters import read_speculative
+    from poolhouse.client.counters import read_speculative
 
     with fake_llama_server() as server:
         assert read_speculative(server.base_url) is None, "nothing drafted, nothing counted"
@@ -337,7 +337,7 @@ def test_a_server_with_no_draft_head_reports_no_speculative_counters():
 
 
 def test_it_records_what_was_asked_of_it_and_saves_and_restores_slots():
-    from ml_stack.http import request_json
+    from poolhouse.http import request_json
 
     with fake_llama_server(Served(slots=2)) as server:
         request_json(f"{server.base_url}/slots/1?action=save", payload={"filename": "s.bin"})
@@ -350,8 +350,8 @@ def test_it_records_what_was_asked_of_it_and_saves_and_restores_slots():
 
 
 def test_a_route_can_be_made_to_fail_without_the_rest_going_with_it():
-    from ml_stack.client import is_healthy
-    from ml_stack.http import ServerError, request_json
+    from poolhouse.client import is_healthy
+    from poolhouse.http import ServerError, request_json
 
     with fake_llama_server() as server:
         server.refuse["/props"] = 404
@@ -362,7 +362,7 @@ def test_a_route_can_be_made_to_fail_without_the_rest_going_with_it():
 
 
 def test_a_streamed_completion_arrives_in_the_pieces_it_was_given():
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     seen: list[tuple[str, str]] = []
     with fake_llama_server(Served(pieces=("one ", "two ", "three"))) as server:
@@ -374,7 +374,7 @@ def test_a_streamed_completion_arrives_in_the_pieces_it_was_given():
 
 
 def test_the_answer_can_be_worked_out_from_the_request():
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     held = Served(answer=lambda body: str(len(body.get("messages") or [])))
     with fake_llama_server(held) as server:
@@ -390,9 +390,9 @@ def test_the_binary_really_launches_and_answers_on_the_port_it_was_given(tmp_pat
     """Started by `LlamaServerBackend`, past the flag check and the health poll."""
     import json as encoding
 
-    from ml_stack.client import reported_models
-    from ml_stack.serve import LlamaServerBackend, ServerSpec, backend as backend_module, free_port
-    from ml_stack.serve.process import every_server
+    from poolhouse.client import reported_models
+    from poolhouse.serve import LlamaServerBackend, ServerSpec, backend as backend_module, free_port
+    from poolhouse.serve.process import every_server
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
@@ -415,7 +415,7 @@ def test_the_binary_really_launches_and_answers_on_the_port_it_was_given(tmp_pat
         assert scanned and scanned[0]["spec_type"] == "mtp", (
             "a process scan sees it as a llama-server with a draft head")
     finally:
-        from ml_stack.serve.process import kill_process_tree
+        from poolhouse.serve.process import kill_process_tree
 
         kill_process_tree(info.pid)
         monkeypatch.undo()
@@ -426,7 +426,7 @@ def test_the_launcher_execs_python_app_on_a_framework_build(tmp_path, monkeypatc
     launcher execs Python.app's interpreter itself."""
     import sysconfig
 
-    from ml_stack.testing import fakes
+    from poolhouse.testing import fakes
 
     app = tmp_path / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
     app.parent.mkdir(parents=True)

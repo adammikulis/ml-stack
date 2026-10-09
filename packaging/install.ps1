@@ -1,30 +1,30 @@
-# Network installer for ml-stack, in four modes. Re-running any of them upgrades in place.
+# Network installer for poolhouse, in four modes. Re-running any of them upgrades in place.
 #
 #   irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 #
 # `iex` runs the script with no arguments, so a mode is chosen with the environment -- one
 # line, and no scriptblock incantation to get a switch past the pipe:
 #
-#   $env:ML_STACK_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
-#   $env:ML_STACK_MODE="dev";      irm ... | iex
-#   $env:ML_STACK_MODE="system";   irm ... | iex      (in a PowerShell opened as administrator)
+#   $env:POOLHOUSE_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+#   $env:POOLHOUSE_MODE="dev";      irm ... | iex
+#   $env:POOLHOUSE_MODE="system";   irm ... | iex      (in a PowerShell opened as administrator)
 #
 # Downloaded to a file it takes switches as well: .\install.ps1 -Headless
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
-#   -Headless   a venv under %LOCALAPPDATA%\ml-stack, console scripts on PATH, no window
+#   -Headless   a venv under %LOCALAPPDATA%\poolhouse, console scripts on PATH, no window
 #   -Dev        a git checkout with an immutable install, following 0.3dev
 #   -System     -Headless, per machine: a Scheduled Task at startup, as the user who ran it
 #   -Uninstall  takes it off, and leaves the model cache alone
 #
-# Every step past the install is an ml-stack command, not PowerShell: ml-stack-serve build,
-# ml-stack-setup, ml-stack-models fetch, ml-stack-cluster join, ml-stack-doctor.
+# Every step past the install is a poolhouse command, not PowerShell: poolhouse-serve build,
+# poolhouse-setup, poolhouse-models fetch, poolhouse-cluster join, poolhouse-doctor.
 #
-# Unattended: ML_STACK_MODE, ML_STACK_NAME, ML_STACK_PASSPHRASE, ML_STACK_CLUSTER,
-# ML_STACK_MODELS, ML_STACK_ADOPT_CACHE, ML_STACK_REF, ML_STACK_OFFLINE_ZIP,
-# ML_STACK_OFFLINE_MODELS. Nothing is prompted for when no console is attached.
+# Unattended: POOLHOUSE_MODE, POOLHOUSE_NAME, POOLHOUSE_PASSPHRASE, POOLHOUSE_CLUSTER,
+# POOLHOUSE_MODELS, POOLHOUSE_ADOPT_CACHE, POOLHOUSE_REF, POOLHOUSE_OFFLINE_ZIP,
+# POOLHOUSE_OFFLINE_MODELS. Nothing is prompted for when no console is attached.
 #
-# ML_STACK_OFFLINE_WHEELS=C:\dir names the wheels the extras are installed from offline; a
+# POOLHOUSE_OFFLINE_WHEELS=C:\dir names the wheels the extras are installed from offline; a
 # `wheels` directory beside the zip is used without being named, and
 # `python packaging\build.py --wheelhouse` fills one.
 param(
@@ -38,21 +38,21 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-$repo    = if ($env:ML_STACK_REPO) { $env:ML_STACK_REPO } else { "adammikulis/ml-stack" }
+$repo    = if ($env:POOLHOUSE_REPO) { $env:POOLHOUSE_REPO } else { "adammikulis/ml-stack" }
 $api     = "https://api.github.com/repos/$repo/releases/latest"
 $gitUrl  = "https://github.com/$repo"
 $python  = "3.13"
 $extras  = "store,hub,web,plot,graph,coordinator,agents"
 $arch    = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x86_64" }
-$key     = "ml-stack-windows-$arch"
-$offZip  = $env:ML_STACK_OFFLINE_ZIP
-$offMod  = $env:ML_STACK_OFFLINE_MODELS
-$offWhl  = $env:ML_STACK_OFFLINE_WHEELS
-if (-not $Models) { $Models = $env:ML_STACK_MODELS }
-if (-not $Ref)    { $Ref    = $env:ML_STACK_REF }
+$key     = "poolhouse-windows-$arch"
+$offZip  = $env:POOLHOUSE_OFFLINE_ZIP
+$offMod  = $env:POOLHOUSE_OFFLINE_MODELS
+$offWhl  = $env:POOLHOUSE_OFFLINE_WHEELS
+if (-not $Models) { $Models = $env:POOLHOUSE_MODELS }
+if (-not $Ref)    { $Ref    = $env:POOLHOUSE_REF }
 
 $mode = "app"
-if ($env:ML_STACK_MODE) { $mode = $env:ML_STACK_MODE }
+if ($env:POOLHOUSE_MODE) { $mode = $env:POOLHOUSE_MODE }
 if ($Headless) { $mode = "headless" }
 if ($Dev)      { $mode = "dev" }
 if ($System)   { $mode = "system" }
@@ -77,7 +77,7 @@ function Find-Python {
     $direct = Get-Command "python$python" -ErrorAction SilentlyContinue
     if ($direct) { return $direct.Source }
     throw @"
-ml-stack runs on Python $python. Install it with:
+poolhouse runs on Python $python. Install it with:
     winget install --id Python.Python.3.13 -e
   then open a new terminal and run this again.
 "@
@@ -86,11 +86,11 @@ ml-stack runs on Python $python. Install it with:
 # -- the two firewall rules ---------------------------------------------------
 # Windows Defender Firewall blocks the daemon (TCP 8770) and its beacons (UDP 8771)
 # inbound by default, so without these two rules the machine is invisible to the rest of
-# the fleet. Names and ports match ml_stack.fleet.discovery. One approval prompt.
+# the fleet. Names and ports match poolhouse.fleet.discovery. One approval prompt.
 function Open-Firewall {
     $rules = @(
-        @{ Name = "ml-stack traind";    Protocol = "TCP"; Port = 8770 },
-        @{ Name = "ml-stack discovery"; Protocol = "UDP"; Port = 8771 }
+        @{ Name = "poolhouse traind";    Protocol = "TCP"; Port = 8770 },
+        @{ Name = "poolhouse discovery"; Protocol = "UDP"; Port = 8771 }
     )
     $missing = @($rules | Where-Object {
         -not (Get-NetFirewallRule -DisplayName $_.Name -ErrorAction SilentlyContinue) })
@@ -111,7 +111,7 @@ function Open-Firewall {
 # -- the app (default) --------------------------------------------------------
 function Install-App {
     Step "the app"
-    $tmp = Join-Path $env:TEMP ("ml-stack-" + [guid]::NewGuid())
+    $tmp = Join-Path $env:TEMP ("poolhouse-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
         $zip = Join-Path $tmp "pkg.zip"
@@ -120,9 +120,9 @@ function Install-App {
             Copy-Item $offZip $zip
         }
         else {
-            Write-Host "Looking for the newest ml-stack for Windows $arch..."
+            Write-Host "Looking for the newest poolhouse for Windows $arch..."
             $release = Invoke-RestMethod -Uri $api `
-                -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "ml-stack" }
+                -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "poolhouse" }
             $asset = $release.assets | Where-Object { $_.name -like "*$key*" } | Select-Object -First 1
             if (-not $asset) { throw "release $($release.tag_name) has no download for $key" }
             Write-Host "Downloading $($release.tag_name)..."
@@ -137,15 +137,15 @@ function Install-App {
         }
         Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp "out") -Force
 
-        $dest = if ($env:ML_STACK_DEST) { $env:ML_STACK_DEST }
-                else { Join-Path $env:LOCALAPPDATA "Programs\ml-stack" }
+        $dest = if ($env:POOLHOUSE_DEST) { $env:POOLHOUSE_DEST }
+                else { Join-Path $env:LOCALAPPDATA "Programs\poolhouse" }
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
         # The window is a Windows installer; the daemon beside it is copied as it is.
         $setup = Get-ChildItem -Path (Join-Path $tmp "out") -Filter "*-setup.exe" -Recurse |
                  Select-Object -First 1
         if ($setup) {
             Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
-            Get-ChildItem -Path (Join-Path $tmp "out") -Filter "ml-stack-headless*" -Recurse |
+            Get-ChildItem -Path (Join-Path $tmp "out") -Filter "poolhouse-headless*" -Recurse |
                 ForEach-Object { Copy-Item $_.FullName -Destination $dest -Force }
         }
         else { Copy-Item -Path (Join-Path $tmp "out\*") -Destination $dest -Recurse -Force }
@@ -153,7 +153,7 @@ function Install-App {
         Open-Firewall
         Write-Host ""
         Write-Host "Installed to $dest"
-        Write-Host "Open ml-stack to name this device and choose Dev or Prod."
+        Write-Host "Open poolhouse to name this device and choose Dev or Prod."
         Write-Host "Setup downloads continue in the background while you finish onboarding."
     }
     finally {
@@ -171,9 +171,9 @@ function Add-ToPath($dir) {
 
 # -- headless: a venv and the console scripts ---------------------------------
 function Venv-Root {
-    if ($env:ML_STACK_PREFIX) { return (Join-Path $env:ML_STACK_PREFIX "venv") }
-    if ($mode -eq "system") { return "C:\ProgramData\ml-stack\venv" }
-    return (Join-Path $env:LOCALAPPDATA "ml-stack\venv")
+    if ($env:POOLHOUSE_PREFIX) { return (Join-Path $env:POOLHOUSE_PREFIX "venv") }
+    if ($mode -eq "system") { return "C:\ProgramData\poolhouse\venv" }
+    return (Join-Path $env:LOCALAPPDATA "poolhouse\venv")
 }
 
 function New-Venv($venv) {
@@ -202,7 +202,7 @@ function Local-Uri($path) {
     return "file://$slashed"
 }
 
-# The extras come from wheels on the disk. Without them, ml-stack and nothing else.
+# The extras come from wheels on the disk. Without them, poolhouse and nothing else.
 function Install-Offline($pip) {
     $abs = (Resolve-Path $offZip).Path
     $house = Find-Wheelhouse $abs
@@ -210,10 +210,10 @@ function Install-Offline($pip) {
         Write-Host "extras from the wheels in $house"
         try {
             & $pip install --quiet --no-index --find-links $house `
-                "ml-stack[$extras] @ $(Local-Uri $abs)"
+                "poolhouse[$extras] @ $(Local-Uri $abs)"
             if ($LASTEXITCODE -eq 0) { return }
         } catch { }
-        Write-Host "  $house does not hold every wheel ml-stack[$extras] needs"
+        Write-Host "  $house does not hold every wheel poolhouse[$extras] needs"
     }
     & $pip install --quiet $abs
     if ($LASTEXITCODE -ne 0) { throw "could not install $offZip" }
@@ -232,13 +232,13 @@ function Install-Headless {
         if (-not $want) {
             try {
                 $want = (Invoke-RestMethod -Uri $api `
-                    -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "ml-stack" }).tag_name
+                    -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "poolhouse" }).tag_name
             } catch { $want = "main" }
         }
         if (-not $want) { $want = "main" }
-        Write-Host "installing ml-stack[$extras] at $want"
-        & $pip install --quiet --upgrade "ml-stack[$extras] @ git+$gitUrl@$want"
-        if ($LASTEXITCODE -ne 0) { throw "pip could not install ml-stack" }
+        Write-Host "installing poolhouse[$extras] at $want"
+        & $pip install --quiet --upgrade "poolhouse[$extras] @ git+$gitUrl@$want"
+        if ($LASTEXITCODE -ne 0) { throw "pip could not install poolhouse" }
         # The ref decides how it keeps itself current: a tag follows releases, main follows main.
         if ($want -in @("main", "master")) { $script:track = $want }
     }
@@ -249,12 +249,12 @@ function Install-Headless {
 # -- dev: a checkout that follows development ----------------------------------------
 function Install-Dev {
     Step "developer"
-    $script:track = if ($env:ML_STACK_TRACK) { $env:ML_STACK_TRACK } else { "0.3dev" }
+    $script:track = if ($env:POOLHOUSE_TRACK) { $env:POOLHOUSE_TRACK } else { "0.3dev" }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "this needs git" }
-    $src = if ($env:ML_STACK_SRC) { $env:ML_STACK_SRC } else { Join-Path $env:LOCALAPPDATA "ml-stack\src" }
+    $src = if ($env:POOLHOUSE_SRC) { $env:POOLHOUSE_SRC } else { Join-Path $env:LOCALAPPDATA "poolhouse\src" }
     if (Test-Path (Join-Path $src ".git")) {
         $branch = & git -C $src branch --show-current
-        if ($branch -ne $script:track) { throw "$src must be on $script:track; choose a separate ML_STACK_SRC" }
+        if ($branch -ne $script:track) { throw "$src must be on $script:track; choose a separate POOLHOUSE_SRC" }
         Write-Host "updating $src"
         & git -C $src pull --ff-only
         if ($LASTEXITCODE -ne 0) { throw "could not fast-forward $src" }
@@ -270,7 +270,7 @@ function Install-Dev {
     Push-Location $src
     try { & (Join-Path $script:bin "pip.exe") install --quiet ".[$extras]"; if ($LASTEXITCODE -ne 0) { throw "could not install $src" } }
     finally { Pop-Location }
-    & (Join-Path $script:bin "python.exe") -c 'import sys; from pathlib import Path; from ml_stack.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' $src
+    & (Join-Path $script:bin "python.exe") -c 'import sys; from pathlib import Path; from poolhouse.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' $src
     if ($LASTEXITCODE -ne 0) { throw "could not install the committed runtime from $src" }
     Add-ToPath $script:bin
     Open-Firewall
@@ -284,7 +284,7 @@ function Install-System {
         throw @"
 -System installs for the whole machine, so it needs an administrator. Open PowerShell as
 administrator and run:
-    `$env:ML_STACK_MODE="system"; irm $gitUrl/raw/main/packaging/install.ps1 | iex
+    `$env:POOLHOUSE_MODE="system"; irm $gitUrl/raw/main/packaging/install.ps1 | iex
 "@
     }
     $who = "$env:USERDOMAIN\$env:USERNAME"
@@ -292,10 +292,10 @@ administrator and run:
     Write-Host "the task will run at startup as $who ($home_dir)"
     # The models already on this disk. Running as the installing user means the service
     # opens that cache where it is -- nothing moved, linked or downloaded twice.
-    $cacheArgs = if ($AdoptCache -or $env:ML_STACK_ADOPT_CACHE -eq "yes") { "--adopt" } else { "--same-user" }
-    & (Join-Path $script:bin "python.exe") -m ml_stack.fleet.autostart cache `
+    $cacheArgs = if ($AdoptCache -or $env:POOLHOUSE_ADOPT_CACHE -eq "yes") { "--adopt" } else { "--same-user" }
+    & (Join-Path $script:bin "python.exe") -m poolhouse.fleet.autostart cache `
         --user-cache (Join-Path $home_dir ".cache\huggingface") $cacheArgs
-    & (Join-Path $script:bin "python.exe") -m ml_stack.fleet.autostart system `
+    & (Join-Path $script:bin "python.exe") -m poolhouse.fleet.autostart system `
         --user $who --home $home_dir
     if ($LASTEXITCODE -ne 0) { throw "could not register the startup task" }
 }
@@ -304,17 +304,17 @@ administrator and run:
 function Build-Llama {
     Step "llama.cpp"
     if ($offZip) { Write-Host "offline: skipping the llama.cpp build"; return }
-    $serve = Join-Path $script:bin "ml-stack-serve.exe"
-    if (-not (Test-Path $serve)) { Write-Host "skipped: no ml-stack-serve"; return }
+    $serve = Join-Path $script:bin "poolhouse-serve.exe"
+    if (-not (Test-Path $serve)) { Write-Host "skipped: no poolhouse-serve"; return }
     # Most Windows installs have no compiler, so a release build is the default here.
-    $from = if ($env:ML_STACK_BUILD -eq "source") { "source" } else { "release" }
+    $from = if ($env:POOLHOUSE_BUILD -eq "source") { "source" } else { "release" }
     & $serve build --from $from
-    if ($LASTEXITCODE -ne 0) { Write-Host "  the build did not finish; 'ml-stack-serve build' retries" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "  the build did not finish; 'poolhouse-serve build' retries" }
 }
 
 function Show-Sizing {
     Step "what this machine can do"
-    $setup = Join-Path $script:bin "ml-stack-setup.exe"
+    $setup = Join-Path $script:bin "poolhouse-setup.exe"
     if (Test-Path $setup) { & $setup } else { Write-Host "skipped" }
 }
 
@@ -325,27 +325,27 @@ function Fetch-Models {
     if ($want -eq "none") { Write-Host "none asked for"; return }
     if ($offMod) { Write-Host "offline: using the models in $offMod; nothing is downloaded"; return }
     $py = Join-Path $script:bin "python.exe"
-    $room = & $py -c "from ml_stack.hub import machine_room; print(machine_room())" 2>$null
+    $room = & $py -c "from poolhouse.hub import machine_room; print(machine_room())" 2>$null
     if (-not $room) { $room = 0 }
-    $pick = & $py -m ml_stack.fleet.autostart choose --room $room --want $want 2>$null
+    $pick = & $py -m poolhouse.fleet.autostart choose --room $room --want $want 2>$null
     if (-not $pick) { Write-Host "no measured model fits this machine; none fetched"; return }
     Write-Host "fetching $pick into the one cache on this machine"
-    # ml-stack-models fetch checks every download's sha256 and refuses a mismatch.
-    & (Join-Path $script:bin "ml-stack-models.exe") fetch @($pick -split "\s+")
+    # poolhouse-models fetch checks every download's sha256 and refuses a mismatch.
+    & (Join-Path $script:bin "poolhouse-models.exe") fetch @($pick -split "\s+")
 }
 
 function Join-Fleet {
     Step "joining the fleet"
-    $fleet = Join-Path $script:bin "ml-stack-cluster.exe"
-    if (-not (Test-Path $fleet)) { Write-Host "skipped: no ml-stack-cluster"; return }
+    $fleet = Join-Path $script:bin "poolhouse-cluster.exe"
+    if (-not (Test-Path $fleet)) { Write-Host "skipped: no poolhouse-cluster"; return }
     $argv = @("join", "--persist")
-    if ($env:ML_STACK_NAME)    { $argv += @("--name", $env:ML_STACK_NAME) }
-    if ($env:ML_STACK_CLUSTER) { $argv += @("--group", $env:ML_STACK_CLUSTER) }
+    if ($env:POOLHOUSE_NAME)    { $argv += @("--name", $env:POOLHOUSE_NAME) }
+    if ($env:POOLHOUSE_CLUSTER) { $argv += @("--group", $env:POOLHOUSE_CLUSTER) }
     if ($script:track)         { $argv += @("--track", $script:track) }
-    if ($env:ML_STACK_PASSPHRASE) { $argv += @("--passphrase", $env:ML_STACK_PASSPHRASE) }
+    if ($env:POOLHOUSE_PASSPHRASE) { $argv += @("--passphrase", $env:POOLHOUSE_PASSPHRASE) }
     elseif (-not (Interactive)) {
-        Write-Host "no passphrase, and no console to ask at. Set ML_STACK_PASSPHRASE and re-run,"
-        Write-Host "or run:  ml-stack-cluster join --persist"
+        Write-Host "no passphrase, and no console to ask at. Set POOLHOUSE_PASSPHRASE and re-run,"
+        Write-Host "or run:  poolhouse-cluster join --persist"
         return
     }
     & $fleet @argv
@@ -355,16 +355,16 @@ function Show-WhatCameWithIt {
     Step "what came with it"
     $py = Join-Path $script:bin "python.exe"
     if (-not (Test-Path $py)) { Write-Host "skipped"; return }
-    & $py -m ml_stack.installed
+    & $py -m poolhouse.installed
     if ($LASTEXITCODE -ne 0 -and $offZip) {
         Write-Host "    on a machine with no network these come from wheels on its disk:"
-        Write-Host "    put them in one directory and name it with ML_STACK_OFFLINE_WHEELS=C:\dir"
+        Write-Host "    put them in one directory and name it with POOLHOUSE_OFFLINE_WHEELS=C:\dir"
     }
 }
 
 function Check-Over {
     Step "checking it over"
-    $doctor = Join-Path $script:bin "ml-stack-doctor.exe"
+    $doctor = Join-Path $script:bin "poolhouse-doctor.exe"
     if (Test-Path $doctor) { & $doctor } else { Write-Host "skipped" }
 }
 
@@ -372,20 +372,20 @@ function Last-Screen {
     Step "done"
     $py = Join-Path $script:bin "python.exe"
     if (-not (Test-Path $py)) { Write-Host "skipped"; return }
-    $name = $(if ($env:ML_STACK_NAME) { $env:ML_STACK_NAME } else { $env:COMPUTERNAME })
-    & $py -m ml_stack.fleet.autostart done --name $name --track "$($script:track)"
+    $name = $(if ($env:POOLHOUSE_NAME) { $env:POOLHOUSE_NAME } else { $env:COMPUTERNAME })
+    & $py -m poolhouse.fleet.autostart done --name $name --track "$($script:track)"
 }
 
-function Remove-MlStack {
-    Step "removing ml-stack"
+function Remove-Poolhouse {
+    Step "removing poolhouse"
     $venv = Venv-Root
     $py = Join-Path $venv "Scripts\python.exe"
     if (Test-Path $py) {
-        # uninstall.plan ticks everything ml-stack made for itself and leaves unticked what
+        # uninstall.plan ticks everything poolhouse made for itself and leaves unticked what
         # the person made -- their models and their datasets. Only the ticked ones go.
         $code = @(
-            "from ml_stack.fleet import uninstall",
-            "from ml_stack.home import state",
+            "from poolhouse.fleet import uninstall",
+            "from poolhouse.home import state",
             "root = state('traind')",
             "items = uninstall.plan(root)",
             "went = uninstall.remove(root, [i.key for i in items if i.default])",
@@ -401,7 +401,7 @@ function Remove-MlStack {
 }
 
 # -- go -----------------------------------------------------------------------
-if ($Uninstall) { Remove-MlStack; return }
+if ($Uninstall) { Remove-Poolhouse; return }
 
 switch ($mode) {
     "app"      { Install-App }

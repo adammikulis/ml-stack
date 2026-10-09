@@ -10,18 +10,18 @@ import stat
 
 import pytest
 
-from ml_stack import keystore
-from ml_stack.fleet import recovery
-from ml_stack.fleet.discovery import (
+from poolhouse import keystore
+from poolhouse.fleet import recovery
+from poolhouse.fleet.discovery import (
     Advertiser,
     Beacon,
     discover,
     load_cluster_key,
     memberships,
 )
-from ml_stack.fleet.join import leave_machine, main
-from ml_stack.fleet.onboard.joining import matches
-from ml_stack.keystore import Keystore, Wires
+from poolhouse.fleet.join import leave_machine, main
+from poolhouse.fleet.onboard.joining import matches
+from poolhouse.keystore import Keystore, Wires
 from tests.cluster_support import join_cluster
 from tests.keystore_support import counting  # noqa: F401
 
@@ -72,14 +72,14 @@ def test_the_passphrase_command_prints_for_a_person(tmp_path, ks, monkeypatch, c
     key = tmp_path / "cluster.key"
     _join(key)
     monkeypatch.delenv("CLAUDECODE", raising=False)
-    monkeypatch.delenv("ML_STACK_NONINTERACTIVE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_NONINTERACTIVE", raising=False)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
     assert main(["--cluster-key", str(key), "passphrase"]) == 0
     assert capsys.readouterr().out.strip() == WORDS
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_NONINTERACTIVE"])
 def test_the_passphrase_command_refuses_an_agent(tmp_path, ks, monkeypatch, capsys, marker):
     key = tmp_path / "cluster.key"
     _join(key)
@@ -95,7 +95,7 @@ def test_export_then_import_joins_a_fresh_machine_with_the_same_key(tmp_path, ks
     first.parent.mkdir(), second.parent.mkdir()
     _join(first)
     monkeypatch.delenv("CLAUDECODE", raising=False)
-    monkeypatch.delenv("ML_STACK_NONINTERACTIVE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_NONINTERACTIVE", raising=False)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
     file = tmp_path / "lab.recovery"
@@ -133,7 +133,7 @@ def test_leave_clears_the_stored_passphrase(tmp_path, ks):
 
 
 def test_join_machine_stores_the_passphrase(tmp_path, ks, monkeypatch):
-    from ml_stack.fleet import join as joining
+    from poolhouse.fleet import join as joining
 
     key = tmp_path / "cluster.key"
     monkeypatch.setattr(joining, "already_running", lambda port: {"name": "quince", "machine": "m1"})

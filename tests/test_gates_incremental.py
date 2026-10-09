@@ -47,7 +47,7 @@ def copy_of_the_tree(where: Path) -> Path:
 
 
 def source_files(root: Path) -> list[Path]:
-    return sorted((root / "src" / "ml_stack").rglob("*.py"))
+    return sorted((root / "src" / "poolhouse").rglob("*.py"))
 
 
 def rows(found) -> list[tuple]:
@@ -88,7 +88,7 @@ class Session:
 
     def __init__(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "cache"))
-        monkeypatch.delenv("ML_STACK_GATES_FULL", raising=False)
+        monkeypatch.delenv("POOLHOUSE_GATES_FULL", raising=False)
         self.root = copy_of_the_tree(tmp_path / "tree")
         self.monkeypatch, self.nowhere = monkeypatch, tmp_path / "nowhere"
         monkeypatch.setattr(_perfile, "REPO", self.root.resolve())
@@ -138,16 +138,16 @@ def test_every_checker_agrees_with_a_whole_run_through_edits(tmp_path, monkeypat
     assert len(after_leaf["print-calls"]) == len(first["print-calls"]) + 1
     assert len(after_leaf["broad-excepts"]) == len(first["broad-excepts"]) + 1
 
-    core = tree.root / "src" / "ml_stack" / "files.py"
+    core = tree.root / "src" / "poolhouse" / "files.py"
     where = tree.append(core, PROBE)
     after_core, touched = tree.agree("a widely imported file edited")
     assert touched == {where}
     assert len(after_core["duplicate-bodies"]) == len(first["duplicate-bodies"]) + 2
 
-    twin = tree.root / "src" / "ml_stack" / "zz_twin.py"
+    twin = tree.root / "src" / "poolhouse" / "zz_twin.py"
     twin.write_text(core.read_text(encoding="utf-8"), encoding="utf-8")
     after_twin, touched = tree.agree("a file written twice")
-    assert touched == {"src/ml_stack/zz_twin.py"}
+    assert touched == {"src/poolhouse/zz_twin.py"}
     assert len(after_twin["duplicate-bodies"]) > len(after_core["duplicate-bodies"])
 
     where = tree.append(sorted((tree.root / "tests").glob("test_*.py"))[0],
@@ -169,7 +169,7 @@ def test_the_repository_itself_agrees_with_a_whole_run(tmp_path, monkeypatch):
     if pyright_errors.skip():
         pytest.skip(pyright_errors.skip())
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "cache"))
-    monkeypatch.delenv("ML_STACK_GATES_FULL", raising=False)
+    monkeypatch.delenv("POOLHOUSE_GATES_FULL", raising=False)
     names = {c.NAME for c in gates.checkers()}
     cold = answers(REPO, names)
     warm = answers(REPO, names)

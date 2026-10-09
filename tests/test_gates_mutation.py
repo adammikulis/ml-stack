@@ -27,7 +27,7 @@ def alive(pid):
 
 def _mutants(source: str, qualname: str = "alive") -> list[_mutation.Mutant]:
     node = dict(_mutation.functions(ast.parse(source)))[qualname]
-    return _mutation.mutants(source, Target("src/ml_stack/sample.py", qualname, node.lineno))
+    return _mutation.mutants(source, Target("src/poolhouse/sample.py", qualname, node.lineno))
 
 
 def test_every_mutation_is_a_change_that_still_parses() -> None:
@@ -84,40 +84,40 @@ def test_the_sample_is_the_same_for_the_same_seed() -> None:
 
 
 def test_the_tests_that_name_the_module_are_the_ones_that_run() -> None:
-    target = Target("src/ml_stack/serve/process.py", "pid_exists", 15)
+    target = Target("src/poolhouse/serve/process.py", "pid_exists", 15)
     assert _mutation.covering_tests(REPO, target, 2)[0] == "tests/test_serve.py"
 
 
 def test_a_module_nothing_names_runs_nothing() -> None:
-    target = Target("src/ml_stack/nowhere/absent.py", "qqzzxx", 1)
+    target = Target("src/poolhouse/nowhere/absent.py", "qqzzxx", 1)
     assert _mutation.covering_tests(REPO, target, 2) == []
 
 
 def _ledger(tmp_path: Path, rows: str) -> Path:
     (tmp_path / "scripts" / "gates").mkdir(parents=True)
     (tmp_path / mutation_survivors.LEDGER).write_text(rows, encoding="utf-8")
-    where = tmp_path / "src" / "ml_stack"
+    where = tmp_path / "src" / "poolhouse"
     where.mkdir(parents=True)
     (where / "sample.py").write_text(SAMPLE, encoding="utf-8")
     return tmp_path
 
 
 def test_a_recorded_survivor_is_counted_where_the_function_is(tmp_path) -> None:
-    root = _ledger(tmp_path, "survivor\tsrc/ml_stack/sample.py::alive\tempty-body:0\tt.py\n")
+    root = _ledger(tmp_path, "survivor\tsrc/poolhouse/sample.py::alive\tempty-body:0\tt.py\n")
     found = mutation_survivors.find(root)
     assert len(found) == 1
-    assert found[0].path == "src/ml_stack/sample.py" and found[0].line == 2
+    assert found[0].path == "src/poolhouse/sample.py" and found[0].line == 2
     assert "empty-body:0" in found[0].detail
 
 
 def test_a_survivor_whose_function_is_gone_is_not_counted(tmp_path) -> None:
-    root = _ledger(tmp_path, "survivor\tsrc/ml_stack/sample.py::dead\tempty-body:0\tt.py\n")
+    root = _ledger(tmp_path, "survivor\tsrc/poolhouse/sample.py::dead\tempty-body:0\tt.py\n")
     assert mutation_survivors.find(root) == []
 
 
 def test_a_mutation_recorded_as_equivalent_is_not_a_survivor(tmp_path) -> None:
     root = _ledger(tmp_path,
-                   "equivalent\tsrc/ml_stack/sample.py::alive\tempty-body:0\tnothing reads it\n")
+                   "equivalent\tsrc/poolhouse/sample.py::alive\tempty-body:0\tnothing reads it\n")
     assert mutation_survivors.find(root) == []
 
 
@@ -151,7 +151,7 @@ def test_a_campaign_row_is_not_a_survivor(tmp_path) -> None:
 
 
 def test_recording_a_campaign_keeps_the_rows_already_there(tmp_path) -> None:
-    root = _ledger(tmp_path, "survivor\tsrc/ml_stack/sample.py::alive\tempty-body:0\tt.py\n")
+    root = _ledger(tmp_path, "survivor\tsrc/poolhouse/sample.py::alive\tempty-body:0\tt.py\n")
     mutation_survivors.record(root, mutation_survivors.Campaign("2026-09-18", "abc1234",
                                                                 "1 function", "2 mutants"))
     assert len(mutation_survivors.find(root)) == 1
@@ -175,7 +175,7 @@ def test_the_count_says_out_loud_that_it_only_covers_what_was_sampled(tmp_path) 
 
 def _measurable(tmp_path: Path, test_body: str) -> Path:
     """A tree with two modules and one test file, for the module-naming question."""
-    where = tmp_path / "src" / "ml_stack" / "toy"
+    where = tmp_path / "src" / "poolhouse" / "toy"
     where.mkdir(parents=True)
     for name in ("seen.py", "unseen.py"):
         (where / name).write_text(SAMPLE, encoding="utf-8")
@@ -185,21 +185,21 @@ def _measurable(tmp_path: Path, test_body: str) -> Path:
 
 
 def test_a_module_no_test_file_names_is_reported_as_unmeasured(tmp_path) -> None:
-    root = _measurable(tmp_path, "from ml_stack.toy.seen import alive\n")
-    assert mutation_survivors.unmeasured(root) == ["src/ml_stack/toy/unseen.py"]
+    root = _measurable(tmp_path, "from poolhouse.toy.seen import alive\n")
+    assert mutation_survivors.unmeasured(root) == ["src/poolhouse/toy/unseen.py"]
 
 
 def test_a_module_imported_only_off_its_package_is_unmeasured_too(tmp_path) -> None:
-    """The trap: `from ml_stack.toy import seen` never writes the dotted module, so a
+    """The trap: `from poolhouse.toy import seen` never writes the dotted module, so a
     campaign runs nothing for it however well it is tested."""
-    root = _measurable(tmp_path, "from ml_stack.toy import seen, unseen\n")
-    assert mutation_survivors.unmeasured(root) == ["src/ml_stack/toy/seen.py",
-                                                   "src/ml_stack/toy/unseen.py"]
+    root = _measurable(tmp_path, "from poolhouse.toy import seen, unseen\n")
+    assert mutation_survivors.unmeasured(root) == ["src/poolhouse/toy/seen.py",
+                                                   "src/poolhouse/toy/unseen.py"]
 
 
 def test_the_modules_this_repository_cannot_measure_are_countable() -> None:
     blind = mutation_survivors.unmeasured(REPO)
-    assert "src/ml_stack/sources/rows.py" not in blind
+    assert "src/poolhouse/sources/rows.py" not in blind
     assert all((REPO / path).is_file() for path in blind)
 
 
@@ -246,9 +246,9 @@ def test_a_verify_with_nothing_to_re_run_says_so_rather_than_printing_nothing(ca
 
 
 def _mini(root: Path, test_body: str) -> None:
-    (root / "src" / "ml_stack" / "toy").mkdir(parents=True)
-    (root / "src" / "ml_stack" / "__init__.py").write_text('', encoding="utf-8")
-    (root / "src" / "ml_stack" / "toy" / "count.py").write_text(
+    (root / "src" / "poolhouse" / "toy").mkdir(parents=True)
+    (root / "src" / "poolhouse" / "__init__.py").write_text('', encoding="utf-8")
+    (root / "src" / "poolhouse" / "toy" / "count.py").write_text(
         "def over(n):\n    if n > 3:\n        return 'many'\n    return 'few'\n", encoding="utf-8")
     (root / "tests").mkdir()
     (root / "tests" / "conftest.py").write_text(
@@ -260,7 +260,7 @@ def _mini(root: Path, test_body: str) -> None:
 
 @pytest.mark.slow
 def test_a_test_that_asserts_nothing_lets_the_mutation_through(tmp_path) -> None:
-    _mini(tmp_path, "from ml_stack.toy.count import over\n\n\ndef test_over():\n    over(9)\n")
+    _mini(tmp_path, "from poolhouse.toy.count import over\n\n\ndef test_over():\n    over(9)\n")
     done = subprocess.run([sys.executable, str(REPO / "scripts" / "mutate"),
                            "--root", str(tmp_path), "--functions", "1", "--mutations", "9"],
                           capture_output=True, text=True, check=False)
@@ -274,7 +274,7 @@ def test_a_test_that_asserts_nothing_lets_the_mutation_through(tmp_path) -> None
 
 @pytest.mark.slow
 def test_a_test_that_reads_the_answer_catches_them_all(tmp_path) -> None:
-    _mini(tmp_path, "from ml_stack.toy.count import over\n\n\ndef test_over():\n"
+    _mini(tmp_path, "from poolhouse.toy.count import over\n\n\ndef test_over():\n"
                     "    assert over(9) == 'many'\n    assert over(1) == 'few'\n")
     done = subprocess.run([sys.executable, str(REPO / "scripts" / "mutate"),
                            "--root", str(tmp_path), "--functions", "1", "--mutations", "9"],
@@ -291,8 +291,8 @@ def test_a_test_that_reads_the_answer_catches_them_all(tmp_path) -> None:
 @pytest.mark.slow
 def test_the_tree_it_read_is_the_same_afterwards(tmp_path) -> None:
     """A run writes into a copy; src is byte for byte what it was."""
-    _mini(tmp_path, "from ml_stack.toy.count import over\n\n\ndef test_over():\n    over(9)\n")
-    source = tmp_path / "src" / "ml_stack" / "toy" / "count.py"
+    _mini(tmp_path, "from poolhouse.toy.count import over\n\n\ndef test_over():\n    over(9)\n")
+    source = tmp_path / "src" / "poolhouse" / "toy" / "count.py"
     was = source.read_bytes()
     subprocess.run([sys.executable, str(REPO / "scripts" / "mutate"),
                     "--root", str(tmp_path), "--functions", "1", "--mutations", "2"],

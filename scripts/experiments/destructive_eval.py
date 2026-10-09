@@ -2,7 +2,7 @@
 """Recall, false asks and latency of the destructive-action classifier.
 
     scripts/experiments/destructive_eval.py                 deterministic layer on the corpus
-                                                            (ml_stack.decide.guards.destructive) and
+                                                            (poolhouse.decide.guards.destructive) and
                                                             the held-out set
     scripts/experiments/destructive_eval.py --model URL     also layer 1 + 2 with the decision
                                                             model served at URL (a quiet machine,
@@ -21,10 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from ml_stack.decide import router
-from ml_stack.guard.destructive import classify, combine
-from ml_stack.guard.destructive_eval import evaluate, table
-from ml_stack.guard.destructive_model import ModelLayer
+from poolhouse.decide import router
+from poolhouse.guard.destructive import classify, combine
+from poolhouse.guard.destructive_eval import evaluate, table
+from poolhouse.guard.destructive_model import ModelLayer
 
 RECALL_BAR = 0.99
 SAFE_ASK_BAR = 0.05

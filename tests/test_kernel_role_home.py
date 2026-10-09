@@ -11,7 +11,7 @@ import pytest
 import test_kernel_assets as loader
 import test_kernel_role_smoke as smoke
 
-from ml_stack.files import write_json
+from poolhouse.files import write_json
 
 
 def _holder_file(name):
@@ -23,7 +23,7 @@ def _holder_file(name):
 
 
 def test_role_home_atomic_state_and_immutable_fences(tmp_path):
-    bank = json.loads(_holder_file("ML_STACK_TEST_HOLDER_ROLE_BANK").read_text())
+    bank = json.loads(_holder_file("POOLHOUSE_TEST_HOLDER_ROLE_BANK").read_text())
     node = "tests/test_kernel_role_home.py::test_role_home_atomic_state_and_immutable_fences"
     assert set(bank["cases"]) == {node}
     entry = bank["cases"][node]
@@ -40,7 +40,7 @@ def test_role_home_atomic_state_and_immutable_fences(tmp_path):
         with pytest.raises(PermissionError):
             (home / name).write_bytes(b"unlisted")
     with pytest.raises(PermissionError):
-        (prefix / "lib/python3.13/site-packages/ml_stack/serve/broker.py").read_bytes()
+        (prefix / "lib/python3.13/site-packages/poolhouse/serve/broker.py").read_bytes()
     for operation in (lambda: asset.write_bytes(b"changed"), lambda: asset.chmod(0o600),
                       asset.unlink, lambda: asset.rename(home / "broker-handoff.json"),
                       lambda: (tmp_path / "alias").hardlink_to(asset),
@@ -81,25 +81,25 @@ def test_role_home_atomic_state_and_immutable_fences(tmp_path):
 
 
 def test_fixed_normal_role_imports_and_runtime_verification():
-    bank = json.loads(_holder_file("ML_STACK_TEST_HOLDER_ROLE_BANK").read_text())
+    bank = json.loads(_holder_file("POOLHOUSE_TEST_HOLDER_ROLE_BANK").read_text())
     node = "tests/test_kernel_role_home.py::test_fixed_normal_role_imports_and_runtime_verification"
     assert set(bank["cases"]) == {node}
     entry = bank["cases"][node]
     descriptor = entry["prepared"]["runtime"]
     home, prefix = Path(entry["home"]), Path(descriptor["prefix"])
     assert prefix.parents[3] == home and entry["variant"] == "normal"
-    report = json.loads(Path(os.environ["ML_STACK_TEST_ROLE_IMPORT_REPORT"]).read_text())
+    report = json.loads(Path(os.environ["POOLHOUSE_TEST_ROLE_IMPORT_REPORT"]).read_text())
     assert report["status"] == "passed" and report["exit"] == 0 and report["case"] == node
     value = report["identity"]
     assert value["prefix"] == str(prefix) and value["version"] == "0.1.0" and value["stamp"] == "a" * 40
-    assert Path(value["package"]) == prefix / "lib/python3.13/site-packages/ml_stack/__init__.py"
+    assert Path(value["package"]) == prefix / "lib/python3.13/site-packages/poolhouse/__init__.py"
     assert Path(value["holder"]).is_relative_to(prefix) and Path(value["psutil"]).is_relative_to(prefix)
     assert set(bank["original_variant_files"]) == {"normal", "slow", "stale"}
     for original in bank["original_variant_files"].values():
         with pytest.raises(PermissionError):
             Path(original).read_bytes()
     with pytest.raises(PermissionError):
-        (prefix / "lib/python3.13/site-packages/ml_stack/serve/broker.py").read_bytes()
+        (prefix / "lib/python3.13/site-packages/poolhouse/serve/broker.py").read_bytes()
 
 
 def test_smoke_initial_capture_failure_never_releases_gate(monkeypatch):
@@ -144,7 +144,7 @@ def test_smoke_unknown_membership_never_signals_or_claims_cleanup(monkeypatch):
 
 
 def test_owned_smoke_reaps_exited_leader_and_known_stdout_child():
-    report = json.loads(_holder_file("ML_STACK_TEST_ROLE_CONTROL_REPORT").read_text())
+    report = json.loads(_holder_file("POOLHOUSE_TEST_ROLE_CONTROL_REPORT").read_text())
     assert report["status"] == "passed" and report["expected_output_timeout"] is True
     assert report["cleanup"] == "captured group checked and leader reaped"
     assert report["exit"] == 0 and report["gate_released"] is True

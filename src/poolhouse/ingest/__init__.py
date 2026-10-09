@@ -1,0 +1,256 @@
+"""Documents into a graph: every source read section by section into one store.
+
+`poolhouse.sources` turns a PDF, a mailbox, a Slack export or a table into units an
+extractor can take. This is the other half: each unit through `Client.extract` against
+``contracts/extraction-document.schema.json``, the extractions folded into one graph per
+source (`poolhouse.entities.fold`, so a relation the model spelled two ways is one edge),
+and nodes, edges and the raw extractions written into a `GraphStore`. Every node and edge
+carries where it was read from -- source, chapter, section, page -- because a claim in a
+knowledge graph with no page behind it is a claim nobody can check.
+
+Three things here are not obvious and all three were paid for elsewhere in this repo:
+
+*A run is hours, so it is resumable and it detaches.* A progress file beside the store
+records every unit that finished; `--resume` skips those, `--detach` re-runs the command in
+its own session with a log under ``~/.poolhouse/ingest/logs`` (a child of a shell dies with
+the shell, and a ranking sweep was killed that way thirty minutes in), and
+``poolhouse-ingest status`` says how many sections of how many sources are done and at what
+rate.
+
+*What it cost is on record, per section.* Each extraction keeps a `poolhouse.telemetry.Call`
+and the run keeps their `Spent`, so "the ten sources took nine hours" can be broken down
+into which source, which section, and how much of it was prompt.
+
+*Whether it does a good job is measured, not asserted.* ``--gold FILE`` runs a set of
+passages with known triples through the same extraction and scores recall and precision,
+matching subjects and objects through their aliases and `entities.close` and predicates
+through theirs, and lists what was missed. ``--fail-under`` makes that a gate.
+
+*A half-read source is readable.* Each unit's extraction lands in
+``<store>.<slug>.reads.json`` as it finishes, and the source so far is folded into the
+store as the run goes -- see `FOLD_EVERY` -- so a run that will take days can be asked
+questions today. `Sources` is how an application reads one::
+
+    view = Sources("./sources.ladybug")
+    for one in view.sources():
+        print(one.slug, one.units, "of", one.wanted, "partial" if one.partial else "")
+    graph = view.graph("velthorne-open-texts")     # folded from the reads, no store needed
+    with view.store() as store:                    # read-only, beside the running writer
+        store.nodes(kind="concept")
+
+*A graph somebody else already extracted is free.* ``poolhouse-ingest import DIR --out
+STORE`` takes a nodes/edges CSV pair another extractor wrote, maps its predicates onto the
+verbs this library sets and writes the rest as they stand, marked ``extension``, and folds
+the result in as one source -- so it sits beside the read ones and every command works over
+it. ``--dry-run`` says what it would write, predicate by predicate.
+
+``poolhouse-ingest fold --out STORE`` does the same fold from the reads into the store on
+demand, ``show`` prints what one source holds, ``sources`` prints what they hold together
+-- the concepts more than one of them names and the relations joining their vocabularies,
+see `Sources.shared` -- and ``stop`` ends a detached run after folding what it has read.
+
+*A store is asked questions the way any graph is.* ``poolhouse-ingest ask --out STORE
+"question"`` puts the store's graph through `poolhouse.graph.conversation.converse` with the model
+served in the settings it scored best with, and ``ask --gold FILE`` scores a set of questions against the
+entries each answer should have selected, using the bench's own scorer.
+
+Nothing here is about any one source: it reads a document, it asks a model, it writes a
+graph.
+
+The modules: `reads` (a unit's `Read`, and the files beside the store), `extract` (one
+section through the model), `vocabulary` (the verbs and kinds a store is read with, core
+and extension), `fold` (extractions into a graph, and into the store), `progress` (how far
+a run has got), `sources` (what has been read), `migrate` (a store written before the
+rename, brought up to date), `judge` (the run record and the judge a fold hands close
+spellings to), `gold` (the extraction scored), `ask` (the store asked questions),
+`serving` (the model a run reads with), `run` (the read run), `embed` (the store given a
+vector index) and `cli` (the command).
+Everything a caller needs is re-exported here.
+"""
+
+from poolhouse.ingest.ask import (
+    _ids_for as _ids_for,
+    ask as ask,
+    asked_f1 as asked_f1,
+    asked_lines as asked_lines,
+    graph_of as graph_of,
+    read_asked as read_asked,
+    score_asked as score_asked,
+    spent_line as spent_line,
+)
+from poolhouse.ingest.cli import (
+    KIND as KIND,
+    STOP_WAIT as STOP_WAIT,
+    _ask_run as _ask_run,
+    _gold_run as _gold_run,
+    _out_of as _out_of,
+    _parsed as _parsed,
+    _recorded_alive as _recorded_alive,
+    detach as detach,
+    home_dir as home_dir,
+    main as main,
+    parser as parser,
+    retry as retry,
+    stop as stop,
+    wait as wait,
+)
+from poolhouse.ingest.embed import (
+    MOST_CHARS as MOST_CHARS,
+    embed_store as embed_store,
+    texts_for as texts_for,
+)
+from poolhouse.ingest.extract import (
+    CORE_KINDS as CORE_KINDS,
+    IMAGES_PER_SECTION as IMAGES_PER_SECTION,
+    INSTRUCTIONS as INSTRUCTIONS,
+    PER_SECTION as PER_SECTION,
+    VERBS as VERBS,
+    WITH_IMAGES as WITH_IMAGES,
+    _Recording as _Recording,
+    closed as closed,
+    core_kinds as core_kinds,
+    core_verbs as core_verbs,
+    extract_unit as extract_unit,
+    instructions as instructions,
+    prompt_for as prompt_for,
+    schema as schema,
+)
+from poolhouse.ingest.fold import (
+    CORE as CORE,
+    _apply as _apply,
+    _drop_source as _drop_source,
+    _missing_from as _missing_from,
+    _texts_of as _texts_of,
+    _unit_docs as _unit_docs,
+    build as build,
+    fold as fold,
+    fold_into as fold_into,
+    fold_source as fold_source,
+    marked as marked,
+    unsourced as unsourced,
+    write as write,
+)
+from poolhouse.ingest.gold import (
+    INVERSES as INVERSES,
+    Scored as Scored,
+    _matches as _matches,
+    _names as _names,
+    _passage_unit as _passage_unit,
+    _same as _same,
+    fenced as fenced,
+    gold_lines as gold_lines,
+    gold_score as gold_score,
+    read_gold as read_gold,
+    sayable as sayable,
+)
+from poolhouse.ingest.imports import (
+    CONFIDENCE as CONFIDENCE,
+    KINDS as KINDS,
+    RELATIONS as RELATIONS,
+    VAGUE as VAGUE,
+    Imported as Imported,
+    _pair as _pair,
+    _titled as _titled,
+    _where_of as _where_of,
+    bring as bring,
+    imported as imported,
+    lines as import_lines,
+    named as named,
+    vague as vague,
+    verb_for as verb_for,
+)
+from poolhouse.ingest.judge import (
+    _judge as _judge,
+    located as located,
+    origin as origin,
+    quote as quote,
+    run_record as run_record,
+    sources_for as sources_for,
+    write_run as write_run,
+)
+from poolhouse.ingest.migrate import (
+    NEW_PREFIX as NEW_PREFIX,
+    OLD_PREFIX as OLD_PREFIX,
+    _rewrite as _rewrite,
+    _rewrite_progress as _rewrite_progress,
+    _rewrite_reads as _rewrite_reads,
+    migrate as migrate,
+    pending as pending,
+)
+from poolhouse.ingest.progress import (
+    GIVE_UP as GIVE_UP,
+    Progress as Progress,
+    _folded_at as _folded_at,
+)
+from poolhouse.ingest.reads import (
+    Damaged as Damaged,
+    Read as Read,
+    _keep_reads as _keep_reads,
+    _read_json as _read_json,
+    _slug as _slug,
+    _Unit as _Unit,
+    _write_json as _write_json,
+    forget_reads as forget_reads,
+    reads_beside as reads_beside,
+    reads_path as reads_path,
+    tokens_of as tokens_of,
+    unit_of as unit_of,
+    units_of as units_of,
+)
+from poolhouse.ingest.run import (
+    FOLD_EVERY as FOLD_EVERY,
+    FOLD_SECONDS as FOLD_SECONDS,
+    Stopped as Stopped,
+    _call_of as _call_of,
+    _fold_interval as _fold_interval,
+    _read_run as _read_run,
+    _rows as _rows,
+    _stopping as _stopping,
+    _time_to_fold as _time_to_fold,
+    read_unit as read_unit,
+    reader_for as reader_for,
+)
+from poolhouse.ingest.serving import (
+    EXTRACT_SAMPLING as EXTRACT_SAMPLING,
+    _alive as _alive,
+    _run as _run,
+    _sampling as _sampling,
+    _serving as _serving,
+    _serving_said as _serving_said,
+)
+from poolhouse.ingest.sources import (
+    Source as Source,
+    Sources as Sources,
+    _decisions_in as _decisions_in,
+    _label as _label,
+    _run_said as _run_said,
+    run_attrs as run_attrs,
+    show as show,
+    sources as sources,
+)
+from poolhouse.ingest.spans import (
+    locate as locate,
+    sentence_span as sentence_span,
+    spans_for as spans_for,
+)
+from poolhouse.ingest.stats import (
+    RunStats as RunStats,
+    _for_long as _for_long,
+    _source_in_store as _source_in_store,
+    run_stats as run_stats,
+    status as status,
+)
+from poolhouse.ingest.vocabulary import (
+    Vocabulary as Vocabulary,
+)
+
+__all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS", "INSTRUCTIONS",
+           "KINDS", "MOST_CHARS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS", "Imported",
+           "Progress", "RunStats", "Scored", "Source", "Sources", "Stopped", "Vocabulary", "ask",
+           "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs", "detach",
+           "embed_store", "extract_unit", "fenced", "fold", "fold_into", "fold_source",
+           "gold_score", "graph_of", "home_dir", "import_lines", "imported", "instructions",
+           "locate", "main", "marked", "migrate", "quote", "read_asked", "read_gold",
+           "reader_for", "run_attrs", "run_stats", "sayable", "schema", "score_asked",
+           "sentence_span", "show", "sources", "spans_for", "status", "texts_for", "unit_of",
+           "units_of", "unsourced", "vague", "verb_for", "write"]

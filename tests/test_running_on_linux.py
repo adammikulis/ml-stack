@@ -79,7 +79,7 @@ def test_the_runner_passes_pytest_arguments_through():
     text = RUNNER.read_text(encoding="utf-8")
     assert 'PYTEST_ARGS=("$@")' in text
     assert '[ -n "$SINGLE" ] && WANT=1' in text, "--single has to reach the scheduler as one process"
-    assert 'ML_STACK_LINUX_SINGLE="$SINGLE"' in text
+    assert 'POOLHOUSE_LINUX_SINGLE="$SINGLE"' in text
 
 
 def test_every_matrix_entry_runs_the_slow_tests_on_ubuntu():

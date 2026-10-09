@@ -1,5 +1,5 @@
 """A record for a long command, shared by anything that detaches: record, alive, wait,
-stop, status -- against a real sleeping child, in ``tmp_path``, never ``~/.ml-stack``."""
+stop, status -- against a real sleeping child, in ``tmp_path``, never ``~/.poolhouse``."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-from ml_stack import jobs
-from ml_stack.lock import Busy
+from poolhouse import jobs
+from poolhouse.lock import Busy
 
 
 def _until(ready, what, seconds=30.0):
@@ -189,10 +189,10 @@ def test_detach_without_a_kind_writes_no_record(tmp_path, monkeypatch):
             seen["command"], seen["kw"] = list(command), kw
 
     monkeypatch.setattr(subprocess, "Popen", Child)
-    ran = jobs.detach("ml_stack.hub", ["fetch", "hf:pellard/larch/larch.gguf"],
+    ran = jobs.detach("poolhouse.hub", ["fetch", "hf:pellard/larch/larch.gguf"],
                       log=tmp_path / "logs" / "fetch.log")
 
-    assert ran.pid == 4242 and seen["command"][1:3] == ["-m", "ml_stack.hub"]
+    assert ran.pid == 4242 and seen["command"][1:3] == ["-m", "poolhouse.hub"]
     assert seen["kw"]["stdin"] is subprocess.DEVNULL
     assert seen["kw"]["stderr"] is subprocess.STDOUT
     assert seen["kw"]["env"]["PYTHONUNBUFFERED"] == "1"

@@ -10,8 +10,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from ml_stack.activity.source_snapshot import validate_storage
-from ml_stack.sandbox.seatbelt import quote
+from poolhouse.activity.source_snapshot import validate_storage
+from poolhouse.sandbox.seatbelt import quote
 
 MAX_CONTENT = 2 * 1024 * 1024 * 1024
 MAX_NODES = 16384

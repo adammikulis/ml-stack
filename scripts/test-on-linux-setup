@@ -23,7 +23,7 @@ tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -
 git config --global --add safe.directory /work
 mkdir -p /wheel
 python -m pip wheel --quiet --no-deps --wheel-dir /wheel /work
-WHEEL=(/wheel/ml_stack-*.whl)
+WHEEL=(/wheel/poolhouse-*.whl)
 [ "${#WHEEL[@]}" -eq 1 ]
 [ -f "${WHEEL[0]}" ]
 WHEEL="${WHEEL[0]}"
@@ -49,8 +49,8 @@ if [ ! -f "$STAMP" ]; then
   "$ENV_DIR/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
   "$ENV_DIR/bin/pip" install -q "$WHEEL$EXTRAS"
   "$ENV_DIR/bin/python" -m spacy download en_core_web_sm
-  # The shared environment retains dependencies; the private environment owns ml-stack.
-  "$ENV_DIR/bin/pip" uninstall -y -q ml-stack
+  # The shared environment retains dependencies; the private environment owns poolhouse.
+  "$ENV_DIR/bin/pip" uninstall -y -q poolhouse
   touch "$STAMP"
 fi
 flock -u 9

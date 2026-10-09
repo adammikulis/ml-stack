@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+pw = pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
 
 #: Every test here launches headless Chromium and drives a real page.
 pytestmark = pytest.mark.slow
@@ -30,7 +30,7 @@ ROOM = 96 * GIB
 
 def sample_fits():
     """Two invented measurements: a small dense model and one with a fat cache."""
-    from ml_stack.serve.fit import Fit
+    from poolhouse.serve.fit import Fit
 
     return [
         Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, compute=GIB, room=ROOM,
@@ -43,7 +43,7 @@ def sample_fits():
 @pytest.fixture(autouse=True)
 def no_release_lookup(monkeypatch):
     """The settings view asks the daemon for the newest release; a test does not ask GitHub."""
-    from ml_stack.fleet import updates
+    from poolhouse.fleet import updates
 
     def offline(*args, **kwargs):
         raise updates.UpdateError("no network in tests")
@@ -67,9 +67,9 @@ def daemon(tmp_path, monkeypatch):
     """A daemon with a model store, a chat store and somewhere to keep things."""
     import urllib.error
 
-    from ml_stack.fleet import catalogue as catalogue_mod
-    from ml_stack.fleet.conversations import Conversations
-    from ml_stack.fleet.models import Models
+    from poolhouse.fleet import catalogue as catalogue_mod
+    from poolhouse.fleet.conversations import Conversations
+    from poolhouse.fleet.models import Models
 
     served = Serving(tmp_path)
     served.ui.root = tmp_path / "traind"
@@ -209,8 +209,8 @@ class TestFirstRun:
         assert not errors
 
     def test_dev_can_pair_manually_and_return_to_automatic(self, daemon, open_page, monkeypatch):
-        from ml_stack.fleet import automatic_clusters
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet import automatic_clusters
+        from poolhouse.fleet.discovery import memberships
 
         monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
         page, errors = open_page(daemon)
@@ -229,8 +229,8 @@ class TestFirstRun:
         assert not errors
 
     def test_fresh_automatically_joined_device_can_choose_prod(self, daemon, open_page, monkeypatch):
-        from ml_stack.fleet import automatic_clusters
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet import automatic_clusters
+        from poolhouse.fleet.discovery import memberships
 
         monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
         automatic_clusters.ensure(daemon.keyfile, mode="dev")
@@ -246,8 +246,8 @@ class TestFirstRun:
         assert not errors
 
     def test_dev_can_return_to_auto_after_leaving_all_clusters(self, daemon, open_page, monkeypatch):
-        from ml_stack.fleet import automatic_clusters
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet import automatic_clusters
+        from poolhouse.fleet.discovery import memberships
 
         monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
         page, errors = open_page(daemon)
@@ -270,8 +270,8 @@ class TestFirstRun:
             self, daemon, open_page, monkeypatch):
         import threading
 
-        from ml_stack.fleet import automatic_clusters, llama
-        from ml_stack.fleet.environment import Environment
+        from poolhouse.fleet import automatic_clusters, llama
+        from poolhouse.fleet.environment import Environment
 
         entered, release = threading.Event(), threading.Event()
         def install(root, **options):
@@ -385,7 +385,7 @@ class TestTheClusterView:
         page.locator("#cluster-sweep").get_by_label("Question limit", exact=True).fill("40")
         page.locator("#cluster-sweep").get_by_label("Run name", exact=False).fill("nightly")
         assert page.locator("#sample").input_value() == "40"
-        assert "ml-stack-bench" not in page.locator("#cluster-sweep").inner_text()
+        assert "poolhouse-bench" not in page.locator("#cluster-sweep").inner_text()
         assert not errors
 
 
@@ -506,7 +506,7 @@ class TestTheFitView:
 
     def test_the_table_says_what_the_command_says(self, joined, open_page):
         """Every number on the screen is `serve.fit`'s own, so the two cannot disagree."""
-        from ml_stack.serve.fit import Fit
+        from poolhouse.serve.fit import Fit
 
         page, errors = open_page(joined, cookie=joined.cookie)
         open_capacity(page)
@@ -617,10 +617,10 @@ class TestTheFitView:
         assert not errors
 
     def test_the_fit_page_on_its_own_carries_no_other_screen(self, open_page):
-        """`ml-stack-serve fit --ui` puts up the same component with no daemon behind it."""
+        """`poolhouse-serve fit --ui` puts up the same component with no daemon behind it."""
         import threading
 
-        from ml_stack.fleet.ui import serve_page
+        from poolhouse.fleet.ui import serve_page
 
         httpd = serve_page(name="atrium")
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -643,9 +643,9 @@ class TestClosingTheWindow:
                                                                      open_page):
         daemon.call("/ui/setup/done", method="POST")
         page, errors = open_page(daemon)
-        page.wait_for_function("() => typeof window.mlStackAskOnClose === 'function'")
+        page.wait_for_function("() => typeof window.poolhouseAskOnClose === 'function'")
 
-        page.evaluate("window.mlStackAskOnClose()")
+        page.evaluate("window.poolhouseAskOnClose()")
         page.wait_for_selector("#close-sheet[open] #close-why")
 
         assert "part of your pool" not in page.locator("#close-why").inner_text()
@@ -655,9 +655,9 @@ class TestClosingTheWindow:
     def test_a_machine_in_a_cluster_is_told_what_the_others_lose(self, joined,
                                                                  open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_function("() => typeof window.mlStackAskOnClose === 'function'")
+        page.wait_for_function("() => typeof window.poolhouseAskOnClose === 'function'")
 
-        page.evaluate("window.mlStackAskOnClose()")
+        page.evaluate("window.poolhouseAskOnClose()")
         page.wait_for_selector("#close-sheet[open] #close-why")
 
         assert "part of your pool" in page.locator("#close-why").inner_text()

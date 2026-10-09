@@ -2,7 +2,7 @@
 
 Decision models pick among options you name and return calibrated probabilities. They do not write text. Early uses reported for this class of model: model routing, tool selection, evaluations, guardrails, memory, context management and policy classification; hybrid agents where an LLM takes the hardest decisions and a decider the rote ones (less cost and latency); decider models combined with fixed workflow languages. Sources: [Introducing Strands Decider](https://strandsagents.com/blog/introducing-strands-decider/).
 
-This plan has two halves: the platform in ml-stack, and pcb-engine as the first real consumer. The default decider is the Strands 2B (`StrandsAgents/strands-decider-2B-hobson-v19`, Qwen3.5-2B base) because it is small; revisit only against measured results. Fine-tuned deciders are never committed: datasets and weights stay in caches, the repository keeps recipes and metrics.
+This plan has two halves: the platform in Poolhouse, and pcb-engine as the first real consumer. The default decider is the Strands 2B (`StrandsAgents/strands-decider-2B-hobson-v19`, Qwen3.5-2B base) because it is small; revisit only against measured results. Fine-tuned deciders are never committed: datasets and weights stay in caches, the repository keeps recipes and metrics.
 
 ## Principles
 

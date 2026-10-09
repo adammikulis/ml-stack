@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ml_stack.activity.gate import tree_hash
+from poolhouse.activity.gate import tree_hash
 
 KEEP = 400
 """Stored passes kept; the oldest go first."""

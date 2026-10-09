@@ -6,7 +6,7 @@ A graph here is a mapping with `nodes` and `edges` and nothing else agreed in ad
 what a project calls its kinds and its relations is the project's business.
 
 ```python
-from ml_stack.graph import GraphStore, replace, converse, render, hybrid
+from poolhouse.graph import GraphStore, replace, converse, render, hybrid
 
 replace("graph.ladybug", graph)              # safely: see below
 with GraphStore("graph.ladybug") as store:
@@ -47,7 +47,7 @@ that makes such a result safe to ask for: N tokens per tool result instead of th
 characters, with `look_at`, `look_around` and `list_kind` packing **whole entries with their
 quotes**, most-mentioned first, rather than every entry with its words clipped — because the
 quote is the evidence. Both are off by default (`reach=None`): a small model decodes
-cheaply and holds an expensive cache, and a fatter result is a worse trade for it. `ml-stack-bench --also reach` measures the fat
+cheaply and holds an expensive cache, and a fatter result is a worse trade for it. `poolhouse-bench --also reach` measures the fat
 asking against the default on one load, and `--reach N` sets the size on every way.
 
 **`look_up`'s first hits are put in the order the vectors mean.** Fusion decides which
@@ -65,7 +65,7 @@ ever mentioned. `graph.smooth` spreads every vector over the graph: rounds of `D
 D^-1/2` through the same message passing a GCN layer uses, each result scaled to unit length,
 so an entry with nothing written about it ends up pointing where its neighbours point and an
 entry with plenty is nudged towards the company it keeps. `remember(..., smooth_hops=N)`
-writes the smoothed vectors as it embeds, and `ml-stack-store embed PATH --smooth N` spreads
+writes the smoothed vectors as it embeds, and `poolhouse-store embed PATH --smooth N` spreads
 the ones a store already holds without asking a model anything.
 
 
@@ -93,7 +93,7 @@ ids the prose names kept first, `cut N of M lit` in `steps`), and an entry the p
 that no tool ever returned is dropped (`dropped N unread from show`). `tight=False` is the
 loose asking kept as a **control** — the words the ranking runs and the answer cache
 fingerprinted, the same schema objects, byte for byte as they were — and
-`ml-stack-bench --also loose` measures it against the default on the same load.
+`poolhouse-bench --also loose` measures it against the default on the same load.
 
 **Three more askings, each off until it is measured: `batch`, `kinds`, `summary`.**
 Over a hundred questions of the invented community, Qwen3.8-Flash-Next `UD-Q4_K_XL` asked
@@ -116,7 +116,7 @@ this group about?" has no name in it to look up — and adds `summarise`: counts
 ten most-mentioned entries of each kind with a line of their own words and their ids in
 brackets, and the busiest relations, computed from the graph with no model call at all.
 `routing_prompts(summary=True)` is what to route against when it is offered.
-`ml-stack-bench --also batch --also kinds --also summary` measures all three against the
+`poolhouse-bench --also batch --also kinds --also summary` measures all three against the
 default on one load.
 
 **Two more, pulling the other way: `single` and `few`.** `Asking(single=True)` is
@@ -144,20 +144,20 @@ a 2B that loses the thread of a long result wants `single` and more rounds; a mo
 tool choice degrades with the offer wants `few` and more rounds still — and which is which
 is a number in a store, not a taste. The same goes for sampling: a model is measured at the
 temperature, top-p and top-k that suit *it*, not at one setting shared by all. So the choice
-lives in the model's **profile** (`ml_stack/data/profiles.json`,
-`ml_stack.serve.profile`, and [the shape a model measured best in](serving.md)):
-`ml-stack-bench report --profile`
+lives in the model's **profile** (`poolhouse/data/profiles.json`,
+`poolhouse.serve.profile`, and [the shape a model measured best in](serving.md)):
+`poolhouse-bench report --profile`
 writes, per model and workload, the asking and the sampling of the fastest row whose F1 the questions
 could not tell apart from the best — F1 alone would trade real seconds for a hundredth of a
 point it cannot see — with the label of the row that set it. `converse(question, graph, client,
-asking=Asking.for_model(MODEL))` then asks that way, and `ml-stack-serve profile MODEL`
+asking=Asking.for_model(MODEL))` then asks that way, and `poolhouse-serve profile MODEL`
 reads it out: `ask with tight + few + rounds 20 at temperature 1.0 / top-p 0.95 /
 top-k 20`.
 
 **Where people say they are becomes a point on the map.** A node that carries a place in its
 attributes -- and a `place` node, which carries one in its name -- goes through
-`ml_stack.geo`, and comes back with `lat` and `lon` on it, which is what the page's map
-draws. `ml-stack-graph geocode --graph FILE --cache FILE.json` is the command, and the cache
+`poolhouse.geo`, and comes back with `lat` and `lon` on it, which is what the page's map
+draws. `poolhouse-graph geocode --graph FILE --cache FILE.json` is the command, and the cache
 means a place is asked about once however many times a run is repeated. `--near K` joins each
 placed entry to its `K` closest with a `near` edge weighted `1 / (1 + kilometres)`, so
 "who else is out there" is a question the graph itself answers, and the layout draws the
@@ -166,7 +166,7 @@ people in one city together.
 **The page is components, and a page is the list of them.** `graph.page.render` assembles
 the page out of one file per component under `graph/web/components/` -- a custom element
 apiece, each holding its own style, markup and script, sharing one model -- so a caller can
-leave a component out (`parts=`) or add one of its own file; `ml_stack.ui.assemble` is the
+leave a component out (`parts=`) or add one of its own file; `poolhouse.ui.assemble` is the
 assembler, for any page built this way. The ask pane, the review queue, the change-request
 form, the refresh button and the note drafter each have a route behind them, and
 there is one mixin per route: `graph.serve.AskRoutes` streams answers from
@@ -192,34 +192,34 @@ that would take most of a store, and leaves a verified snapshot when it would ta
 **A store checks itself.** Every `put_doc` reads its document back by key and raises
 `StoreMismatch` when what comes back is not what went in; a node is read back by id the same
 way, an edge from its own `RETURN`, and `replace` counts what it wrote before committing.
-`ml-stack-store check PATH` reads every document, node and edge by key *and* by scan and prints one line per disagreement (exit 1 on any);
+`poolhouse-store check PATH` reads every document, node and edge by key *and* by scan and prints one line per disagreement (exit 1 on any);
 `--fix` rewrites a document the scan lost and checks again rather than announcing a repair,
-and `ml-stack-store docs PATH` lists the documents with their sizes.
+and `poolhouse-store docs PATH` lists the documents with their sizes.
 
 **How much memory a store takes is yours to set.** Left alone the engine claims a share of
 the machine's, which is what one store on one machine wants and four at once do not:
-`GraphStore(path, buffer_pool_size=N)`, or `$MLSTACK_STORE_MEMORY=N` for every store a
+`GraphStore(path, buffer_pool_size=N)`, or `$POOLHOUSE_STORE_MEMORY=N` for every store a
 process opens, caps it at N bytes.
 
 **Two processes cannot corrupt one.** The database's own lock stops the second writer with an
-IO error; what `ml_stack.graph.access` adds is knowing whose lock it is, waiting for a turn,
+IO error; what `poolhouse.graph.access` adds is knowing whose lock it is, waiting for a turn,
 and letting go of a read handle when a writer wants in.
 
-**The files around a graph are the same in every project.** `ml_stack.files.write_json`
+**The files around a graph are the same in every project.** `poolhouse.files.write_json`
 writes beside the file and renames over it, so whatever is reading the graph while a
 pipeline rewrites it sees the old one or the new one and never half of either;
 `prune_orphans` deletes the per-record files (an extraction per message) whose record the
-log has since dropped. `ml_stack.geo.geocode_all` turns the places people write — "Raleigh",
+log has since dropped. `poolhouse.geo.geocode_all` turns the places people write — "Raleigh",
 "MD", "sf" — into points through Nominatim, cached to a JSON file, one request a second,
 picking the answer that is actually *called* what was asked rather than the county Nominatim
-ranks first; pass your own `user_agent`, as its usage policy asks. `ml_stack.redact.names_in`
+ranks first; pass your own `user_agent`, as its usage policy asks. `poolhouse.redact.names_in`
 reads every name a graph and its message log hold, for a `Redactor` to keep out of anything
 printed.
 
 **A vocabulary the model coined drifts, and folds back.** A model asked to read prose into
 (subject, relation, object) invents the relation as it goes, so one relationship arrives as
 `works_at`, `worksat` and `worked_at` and the graph is split three ways.
-`ml_stack.entities.fold.fold_edges` keeps whichever spelling the graph already uses more and
+`poolhouse.entities.fold.fold_edges` keeps whichever spelling the graph already uses more and
 folds the rest into it -- `entities.close` decides what counts as the same word -- but only
 while one of them is rare: past `ESTABLISHED` weight both are names people keep choosing, and
 neither folds without a written entry saying which is right. Every fold is logged *and*
@@ -239,7 +239,7 @@ kept, so a run that gave up is asked again rather than remembered as settled.
 ## A hierarchy read out of prose or a picture
 
 ```python
-from ml_stack.graph.tree import FAMILY, ORG, read, to_graph
+from poolhouse.graph.tree import FAMILY, ORG, read, to_graph
 
 rows = read(client, ORG, images=[chart], reader=document_model)   # or text=...
 graph = to_graph(rows, ORG)                                       # entries and links
@@ -259,9 +259,9 @@ attached, and answers confidently about nothing.
 ## Which tool a question wants
 
 ```python
-from ml_stack.graph.looking import tools_for
-from ml_stack.graph.prompts import TOOL_PROMPTS
-from ml_stack.graph.route import narrow, rank
+from poolhouse.graph.looking import tools_for
+from poolhouse.graph.prompts import TOOL_PROMPTS
+from poolhouse.graph.route import narrow, rank
 
 routed = rank(question, TOOL_PROMPTS, base_url=embedder, model=name)
 tools = narrow(tools_for(graph), routed)      # [] when the question wants no graph
@@ -300,9 +300,9 @@ list rather than selecting from it. The question is the last thing the model rea
 ## Answering the same question twice
 
 ```python
-from ml_stack.graph.answers import Answer
-from ml_stack.graph.conversation import converse
-from ml_stack.graph.cache import asked, digest, forget
+from poolhouse.graph.answers import Answer
+from poolhouse.graph.conversation import converse
+from poolhouse.graph.cache import asked, digest, forget
 
 out, again = asked(store, question, lambda: converse(question, graph, client),
                    kind=Answer, graph=graph, model=name, system=SYSTEM, tools=tools)
@@ -330,7 +330,7 @@ keys beginning `_`, which `GraphStore.docs` skips.
 
 ```python
 from functools import partial
-from ml_stack.graph.thread import WINDOW, latest_summary, recall, recent, summarise, write_summary
+from poolhouse.graph.thread import WINDOW, latest_summary, recall, recent, summarise, write_summary
 
 turns = recent(store, thread, turns=WINDOW)                       # the last ten, always
 summary = latest_summary(store, thread)                           # one paragraph, rarely changed
@@ -368,7 +368,7 @@ recalled turns, the ten-turn window and the question; because the summary sits a
 everything that changes per question, it is inside the cached prefix and re-read for free
 until it changes. `tests/test_graph_thread.py` holds, with a scripted model, that a fact
 stated at turn one is in front of the model at turn two hundred twice, once in the summary
-and once recalled, and that the prefix is identical across turns 193–200. Measure the `cached` share per turn with `ml-stack-bench
+and once recalled, and that the prefix is identical across turns 193–200. Measure the `cached` share per turn with `poolhouse-bench
 concurrent` after changing `EVERY`; a summary that changes too often shows up there.
 
 `store` above is the conversation store, `thread.conversation_store(corpus)`, which
@@ -381,13 +381,13 @@ thread; only an entry makes the tools find it next time, in any thread.
 
 ## Searching the web
 
-The graph's tools see the graph and nothing else. `ml_stack.web` adds the web in the same
+The graph's tools see the graph and nothing else. `poolhouse.web` adds the web in the same
 `(schema, callable)` shape, so a model can be handed both:
 
 ```python
-from ml_stack.graph.conversation import converse
-from ml_stack.graph.looking import tools_for
-from ml_stack.web import PROMPTS, tools as web_tools
+from poolhouse.graph.conversation import converse
+from poolhouse.graph.looking import tools_for
+from poolhouse.web import PROMPTS, tools as web_tools
 
 converse(question, graph, client, tools=tools_for(graph) + web_tools())
 # and, for routing: rank(question, {**TOOL_PROMPTS, **PROMPTS}, ...)
@@ -404,9 +404,9 @@ gives.
 that is not http(s) and any host that resolves to a loopback, private or link-local
 address — `file:`, `localhost`, `127/8`, `10/8`, `192.168/16` and their kin — before a
 byte is fetched or a browser navigates. The browser uses its own profile
-(`MLSTACK_WEB_PROFILE`, default `~/.ml-stack/web`), never the scraper's signed-in one.
+(`POOLHOUSE_WEB_PROFILE`, default `~/.poolhouse/web`), never the scraper's signed-in one.
 
-`MLSTACK_SEARCH` picks the engine. `ddgs` (the default; `pip install 'ml-stack[web]'`) is
+`POOLHOUSE_SEARCH` picks the engine. `ddgs` (the default; `pip install 'poolhouse[web]'`) is
 keyless, fronts several engines, and is rate-limited by them: a refusal comes back to the
 model as `{"none": "search unavailable: ..."}` rather than an empty list, so it moves on
 instead of asking again. `searxng` is the robust option when the questions are many: a

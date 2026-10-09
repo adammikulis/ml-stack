@@ -6,14 +6,14 @@ import json
 
 import pytest
 
-from ml_stack import authority, features, features_cli
-from ml_stack.fleet.settings import Settings
+from poolhouse import authority, features, features_cli
+from poolhouse.fleet.settings import Settings
 
 
 @pytest.fixture
 def machine(monkeypatch, tmp_path):
     """A state root of its own, so the settings file is this test's."""
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv(features.ACTOR_ENV, raising=False)
     return tmp_path / "state" / "traind" / "settings.json"
 

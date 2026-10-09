@@ -1,1 +1,1 @@
-"""The ml-stack test suite."""
+"""The poolhouse test suite."""

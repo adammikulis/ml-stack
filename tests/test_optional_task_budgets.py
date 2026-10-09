@@ -2,7 +2,7 @@
 
 import pytest
 
-from ml_stack.workspace import localagent as la, localloop, localtools
+from poolhouse.workspace import localagent as la, localloop, localtools
 
 
 def test_task_caps_default_unlimited_and_legacy_profiles_migrate():
@@ -33,7 +33,7 @@ def test_unlimited_guard_survives_time_and_calls_but_honors_cancel(monkeypatch):
         guarded.chat([])
 
 def test_context_sizes_parse_k_and_profiles_carry_their_caps():
-    from ml_stack.workspace import localprofile as lp
+    from poolhouse.workspace import localprofile as lp
     assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144
     assert lp.parse_ctx("32768") == 32768 and lp.parse_ctx("") == lp.CODING.ctx == lp.CHAT.ctx == 0
     for bad in ("big", "1", "-5k", "256 k"):
@@ -45,7 +45,7 @@ def test_context_sizes_parse_k_and_profiles_carry_their_caps():
 
 
 def test_saved_explicit_old_default_values_remain_finite(tmp_path):
-    from ml_stack.workspace.service import Workspace
+    from poolhouse.workspace.service import Workspace
     ws = Workspace(tmp_path)
     agent = la.Agent("worker", "model", max_output_tokens=8192,
                      extra={"explicit_output_limit": True, "explicit_task_limits": True,
@@ -68,7 +68,7 @@ def test_guarded_none_transport_interrupts_before_response_headers(cause):
 
     from test_http_cancel import pending_headers
 
-    from ml_stack.client import Client, Transport, families
+    from poolhouse.client import Client, Transport, families
     stopped = threading.Event()
     with pending_headers() as (url, received, closed):
         client = Client(url.removesuffix("/v1/chat/completions"), family=families.GENERIC,
@@ -95,7 +95,7 @@ def test_guarded_none_transport_interrupts_before_response_headers(cause):
 def test_optional_wall_limits_preserve_recovery_bounds_and_counter_schema(tmp_path):
     import json
 
-    from ml_stack.workspace import task_caps, task_schema
+    from poolhouse.workspace import task_caps, task_schema
     spec = {"title": "Inspect queue", "acceptance": ["Report queue state"]}
     for wall in (None, 200000):
         assert task_schema.task_spec({**spec, "limits": {"max_wall_s": wall}})["limits"]["max_wall_s"] == wall

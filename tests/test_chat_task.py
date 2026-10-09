@@ -1,4 +1,4 @@
-"""``ml-stack-chat "task"``: the old do behaviour as a role. A task asks what it leaves open,
+"""``poolhouse-chat "task"``: the old do behaviour as a role. A task asks what it leaves open,
 shows its plan once, asks go, runs the calls the plan names without asking again, asks about
 anything else, ends on done and prints what it cost."""
 
@@ -8,8 +8,8 @@ import io
 import json
 from pathlib import Path
 
-from ml_stack import chat, do
-from ml_stack.guard.untrusted import unfenced
+from poolhouse import chat, do
+from poolhouse.guard.untrusted import unfenced
 from tests.test_do import Scripted, call, tools_over
 
 PLAN_RUN = 'bench_run ["run", "quince-2b.gguf", "--sample", "10"]'
@@ -285,8 +285,8 @@ def test_model_and_url_are_one_or_the_other():
 def test_a_model_already_up_on_the_port_is_used_as_it_stands(monkeypatch, tmp_path, capsys):
     here = tmp_path / "quince-2b.gguf"
     here.write_bytes(b"gguf")
-    monkeypatch.setattr("ml_stack.hub.located", lambda *a, **k: here)
-    monkeypatch.setattr("ml_stack.serve.leases.already_up",
+    monkeypatch.setattr("poolhouse.hub.located", lambda *a, **k: here)
+    monkeypatch.setattr("poolhouse.serve.leases.already_up",
                         lambda model, port, **_: {"base_url": "http://127.0.0.1:8080", "slots": 2,
                                                   "model": str(here), "pid": 1})
     built = {}
@@ -295,7 +295,7 @@ def test_a_model_already_up_on_the_port_is_used_as_it_stands(monkeypatch, tmp_pa
         def __init__(self, url, **kw):
             built["url"] = url
 
-    monkeypatch.setattr("ml_stack.client.Client", FakeClient)
+    monkeypatch.setattr("poolhouse.client.Client", FakeClient)
     args = chat.COMMAND.parser().parse_args(["look", "--model", "quince-2b.gguf"])
     client = do.client_for(args)
     assert isinstance(client, FakeClient) and built["url"] == "http://127.0.0.1:8080"

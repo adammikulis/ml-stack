@@ -11,14 +11,14 @@ from pathlib import Path
 import pytest
 from git_template import copy_checkout
 
-from ml_stack import harnesshook, harnesspolicy, worktreerules
+from poolhouse import harnesshook, harnesspolicy, worktreerules
 
 HOOKS = Path(__file__).resolve().parent.parent / "scripts" / "hooks"
 BASH, EDIT = HOOKS / "claude-bash-guard", HOOKS / "claude-edit-guard"
 START, COMMIT = HOOKS / "claude-subagent-start", HOOKS / "primary-only"
 BLOCKED, ALLOWED = 2, 0
 CLEAN = {k: v for k, v in os.environ.items()
-         if k not in ("MLSTACK_GUARD", "CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")}
+         if k not in ("POOLHOUSE_GUARD", "CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE")}
 
 
 def git(where: Path, *args: str) -> None:
@@ -86,7 +86,7 @@ def test_a_write_in_any_other_tree_or_outside_the_repository_is_allowed(repo, tm
 
 def test_the_edit_guard_can_be_switched_off(repo):
     primary, work, _ = repo
-    assert edit(primary / "a.py", work, MLSTACK_GUARD="off") == ALLOWED
+    assert edit(primary / "a.py", work, POOLHOUSE_GUARD="off") == ALLOWED
 
 
 @pytest.mark.parametrize("command", [
@@ -174,7 +174,7 @@ def test_the_directory_a_compound_command_runs_in_is_followed(repo):
 
 def test_the_bash_guard_can_be_switched_off(repo):
     primary, _, _ = repo
-    assert bash("git commit -m x", primary, MLSTACK_GUARD="off") == ALLOWED
+    assert bash("git commit -m x", primary, POOLHOUSE_GUARD="off") == ALLOWED
 
 
 @pytest.mark.parametrize("command", [
@@ -229,7 +229,7 @@ def test_an_agent_can_commit_in_the_primary_development_checkout(repo):
     assert refused.returncode == 0
     assert commit(primary).returncode == 0
     assert commit(work, CLAUDECODE="1").returncode == 0
-    assert commit(primary, CLAUDECODE="1", MLSTACK_GUARD="off").returncode == 0
+    assert commit(primary, CLAUDECODE="1", POOLHOUSE_GUARD="off").returncode == 0
 
 
 def test_an_agent_cannot_commit_on_the_development_branch_in_another_tree(repo):
@@ -307,8 +307,8 @@ def test_hook_repository_environment_does_not_change_checkout_identity(repo, mon
     monkeypatch.setenv(variable, value)
     assert worktreerules.checkouts(primary) == (primary, primary)
     assert worktreerules.checkouts(work) == (work, primary)
-    assert worktreerules.commit_refusal(work, {"ML_STACK_AGENT": "test"}) == ""
-    assert worktreerules.commit_refusal(primary, {"ML_STACK_AGENT": "test"}) == ""
+    assert worktreerules.commit_refusal(work, {"POOLHOUSE_AGENT": "test"}) == ""
+    assert worktreerules.commit_refusal(primary, {"POOLHOUSE_AGENT": "test"}) == ""
 
 
 def test_read_only_stash_commands_are_allowed_in_the_primary_checkout(repo):

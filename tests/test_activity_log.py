@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import keystore
-from ml_stack.activity import schema, writer
-from ml_stack.activity.log import ActivityLog, Limits, Unreadable
-from ml_stack.activity.schema import Entry
+from poolhouse import keystore
+from poolhouse.activity import schema, writer
+from poolhouse.activity.log import ActivityLog, Limits, Unreadable
+from poolhouse.activity.schema import Entry
 from tests.activity_support import CANARY, entries, person, ring
 from tests.keystore_support import counting
 
@@ -172,7 +172,7 @@ def test_a_head_anchor_kept_elsewhere_catches_a_log_rolled_back_with_its_head(tm
 
 
 def test_the_verify_command_says_where_the_chain_breaks(person, capsys):
-    from ml_stack.activity import cli
+    from poolhouse.activity import cli
     for i in range(4):
         writer.record("net.download", subject=f"h{i}")
     path = writer.log().path
@@ -244,8 +244,8 @@ def test_an_active_file_older_than_the_age_limit_is_rotated(tmp_path):
 WRITER = """
 import sys, time
 from pathlib import Path
-from ml_stack.activity import schema
-from ml_stack.activity.log import ActivityLog, Limits
+from poolhouse.activity import schema
+from poolhouse.activity.log import ActivityLog, Limits
 key = bytes(range(32))
 log = ActivityLog(Path(sys.argv[1]), key=lambda: key, limits=Limits(max_bytes=3000, keep=50))
 for i in range(25):
@@ -320,7 +320,7 @@ def test_off_by_a_person_is_logged_first_and_then_nothing_is(person, monkeypatch
     assert got == [("net.download", "before"), ("activity.off", "")]
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"])
 def test_an_agent_cannot_switch_the_log_off_and_the_try_is_logged(person, monkeypatch, marker):
     monkeypatch.setenv(marker, "1")
     monkeypatch.setenv(writer.ENV_OFF, "off")

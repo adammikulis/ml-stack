@@ -7,7 +7,7 @@
     scripts/cold-start-check --source /path/to/checkout --keep
 
 Each combination is a Python version and a set of extras. Every step runs in the clone with a
-throwaway HOME and ML_STACK_HOME, so nothing under ~/.ml-stack or the real site-packages is
+throwaway HOME and POOLHOUSE_HOME, so nothing under ~/.poolhouse or the real site-packages is
 touched, with the agent markers removed so a hook or guard sees a person's terminal, and with a
 PATH of the venv, git, cargo and the system directories only: a ruff or pyright that happens to
 be installed in the machine's own pyenv does not make a bare install look ready.
@@ -72,7 +72,7 @@ def interpreter(version: str) -> str | None:
 
 def scrubbed(tmp: Path, venv: Path) -> dict[str, str]:
     """The environment of a person at a terminal with an empty home: no agent markers, nothing of ours inherited."""
-    env = {k: v for k, v in os.environ.items() if k not in SCRUB and not k.startswith(("ML_STACK_", "MLSTACK_", "DEV_TEST_"))}
+    env = {k: v for k, v in os.environ.items() if k not in SCRUB and not k.startswith(("POOLHOUSE_", "POOLHOUSE_", "DEV_TEST_"))}
     home = tmp / "home"
     home.mkdir(exist_ok=True)
     env.pop("PYENV_ROOT", None)
@@ -80,7 +80,7 @@ def scrubbed(tmp: Path, venv: Path) -> dict[str, str]:
     path = os.pathsep.join([str(venv / "bin"), *sorted(tools), "/usr/bin", "/bin"])
     for name, folder in (("RUSTUP_HOME", ".rustup"), ("CARGO_HOME", ".cargo")):  # the toolchain, which a new home would not have
         env.setdefault(name, str(Path.home() / folder))
-    env.update(HOME=str(home), ML_STACK_HOME=str(home / ".ml-stack"), PATH=path)
+    env.update(HOME=str(home), POOLHOUSE_HOME=str(home / ".poolhouse"), PATH=path)
     return env
 
 
@@ -115,7 +115,7 @@ def rust_step(repo: Path, env: dict[str, str], timeout: float) -> subprocess.Com
     if shutil.which("cargo") is None:
         return subprocess.CompletedProcess([], 0, "no cargo on PATH: skipped", "")
     env = {**env, "CARGO_TARGET_DIR": str(repo.parent / "cargo-target")}
-    return run(["cargo", "check", "--locked", "-p", "ml-stack-app"], repo / "app", env, timeout)
+    return run(["cargo", "check", "--locked", "-p", "poolhouse-app"], repo / "app", env, timeout)
 
 
 SPECIAL = {"hooks": hooks_step, "rust": rust_step}
@@ -157,14 +157,14 @@ def build(version: str, extras: str, pins: bool, source: Path, tmp: Path, find_l
 
 
 def combination(version: str, extras: str, pins: bool, steps: list[str], args: argparse.Namespace) -> list[Outcome]:
-    with tempfile.TemporaryDirectory(prefix="ml-stack-cold-") as raw:
+    with tempfile.TemporaryDirectory(prefix="poolhouse-cold-") as raw:
         tmp = Path(raw)
         made = build(version, extras, pins, Path(args.source), tmp, args.find_links)
         if isinstance(made, str):
             return [Outcome("install", "BROKEN" if "failed" in made else "skipped", 0.0, made)]
         outcomes = [one_step(step, *made, tmp, args.timeout) for step in steps]
         if args.keep:
-            kept = Path(tempfile.mkdtemp(prefix="ml-stack-cold-kept-"))
+            kept = Path(tempfile.mkdtemp(prefix="poolhouse-cold-kept-"))
             shutil.copytree(tmp, kept, dirs_exist_ok=True, symlinks=True)
             print(f"  kept {kept}")
         return outcomes

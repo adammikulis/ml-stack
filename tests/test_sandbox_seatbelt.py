@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import sandbox
-from ml_stack.sandbox import Limits, Net, SandboxViolation, run
+from poolhouse import sandbox
+from poolhouse.sandbox import Limits, Net, SandboxViolation, run
 from tests.sandbox_kit import CONNECT, policy
 
 pytest_plugins = ["tests.sandbox_kit"]
@@ -126,11 +126,11 @@ def test_a_symlinked_or_climbing_allow_list_entry_is_refused(tmp_path, seatbelt)
 
 
 def test_the_environment_is_exactly_what_the_policy_lists(tmp_path, seatbelt, monkeypatch):
-    monkeypatch.setenv("ML_STACK_TEST_TOKEN", "leaked-value")
+    monkeypatch.setenv("POOLHOUSE_TEST_TOKEN", "leaked-value")
     result = run(["/usr/bin/env"], policy(env={"LISTED": "yes"}))
     lines = sorted(result.stdout.split())
     assert "LISTED=yes" in lines and "PATH=/usr/bin:/bin" in lines
-    assert not any("ML_STACK_TEST_TOKEN" in line or "leaked-value" in line for line in lines)
+    assert not any("POOLHOUSE_TEST_TOKEN" in line or "leaked-value" in line for line in lines)
     assert all(line.split("=")[0] in {"LISTED", "PATH", "PWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING"}
                for line in lines)
 
@@ -211,10 +211,10 @@ def test_a_command_that_is_not_refused_has_no_denials(tmp_path, seatbelt):
 
 
 def test_the_deprecation_is_logged_once_per_process(tmp_path, seatbelt, caplog):
-    from ml_stack.sandbox import seatbelt as module
+    from poolhouse.sandbox import seatbelt as module
 
     module._WARNED.clear()
-    caplog.set_level("WARNING", logger="ml_stack.sandbox")
+    caplog.set_level("WARNING", logger="poolhouse.sandbox")
     for _ in range(3):
         run(["/bin/echo", "x"], policy(), diagnose="never")
     said = [r for r in caplog.records if "deprecated" in r.getMessage()]
@@ -222,7 +222,7 @@ def test_the_deprecation_is_logged_once_per_process(tmp_path, seatbelt, caplog):
 
 
 def test_a_missing_binary_makes_the_backend_unavailable(monkeypatch, seatbelt):
-    from ml_stack.sandbox import seatbelt as module
+    from poolhouse.sandbox import seatbelt as module
 
     monkeypatch.setattr(module, "BINARY", "/nonexistent/sandbox-exec")
     state = module.Seatbelt().available()

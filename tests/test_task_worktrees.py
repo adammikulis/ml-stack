@@ -3,10 +3,10 @@
 import pytest
 from workspace_kit import Kit
 
-from ml_stack.net import git
-from ml_stack.workspace import localagent, task_worktrees
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.net import git
+from poolhouse.workspace import localagent, task_worktrees
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.taskboard import TaskBoard
 
 
 def test_clean_task_baseline_claims_and_parent_authority(tmp_path):
@@ -33,7 +33,7 @@ def test_clean_task_baseline_claims_and_parent_authority(tmp_path):
     assert prepared['project'] == str(target)
     assert not target.exists()
     assert prepared['state'] == 'reserved'
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
     with GraphStore(kit.ws.base / 'coordination.db') as graph:
         task_worktrees.activate(graph, worker, task)
     assert (target / 'code.py').read_text() == 'ORIGINAL = True\n'
@@ -44,7 +44,7 @@ def test_clean_task_baseline_claims_and_parent_authority(tmp_path):
 
 
 def test_task_target_inside_a_checkout_is_refused_before_creation(tmp_path):
-    from ml_stack import worktreerules
+    from poolhouse import worktreerules
     primary = tmp_path / 'repo'
     primary.mkdir()
     git.run(['init', str(primary)])
@@ -53,7 +53,7 @@ def test_task_target_inside_a_checkout_is_refused_before_creation(tmp_path):
 
 
 def test_shell_guard_refuses_nested_creation_in_primary_and_worktree(tmp_path):
-    from ml_stack import worktreerules
+    from poolhouse import worktreerules
     primary = tmp_path / 'repo'
     (primary / 'scripts' / 'hooks').mkdir(parents=True)
     (primary / 'scripts' / 'hooks' / 'primary-only').write_text('')
@@ -69,7 +69,7 @@ def test_shell_guard_refuses_nested_creation_in_primary_and_worktree(tmp_path):
 
 
 def test_primary_baseline_is_read_only_and_execution_materializes_beside_it(tmp_path):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
     primary = tmp_path / 'repo'
     primary.mkdir()
     git.run(['init', str(primary)])
@@ -95,7 +95,7 @@ def test_primary_baseline_is_read_only_and_execution_materializes_beside_it(tmp_
 
 
 def test_crash_created_checkout_is_validated_and_promoted_without_losing_changes(tmp_path):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
     primary = tmp_path / 'repo'
     primary.mkdir()
     git.run(['init', str(primary)])

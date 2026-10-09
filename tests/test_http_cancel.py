@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler
 import httpx
 import pytest
 
-from ml_stack.client.sdk import FleetTransport
-from ml_stack.http import Server
+from poolhouse.client.sdk import FleetTransport
+from poolhouse.http import Server
 
 
 @contextmanager
@@ -106,9 +106,9 @@ def test_unlimited_sdk_can_cancel_during_tls_handshake():
 
 
 def test_cancelling_queued_request_removes_its_resource_ticket(tmp_path, monkeypatch):
-    from ml_stack import gate
-    from ml_stack.http import ServerError, request_json
-    from ml_stack.http_cancel import Cancellation, scope
+    from poolhouse import gate
+    from poolhouse.http import ServerError, request_json
+    from poolhouse.http_cancel import Cancellation, scope
 
     path = tmp_path / 'admission'
     path.mkdir()
@@ -162,7 +162,7 @@ def test_cancel_during_hostname_resolution_releases_sdk_opening_thread(monkeypat
         asyncio.run(run())
         assert time.monotonic() - began < 1
         assert not exited.is_set()
-        assert len([t for t in threading.enumerate() if t.name.startswith('ml-stack-dns-')]) <= 2
+        assert len([t for t in threading.enumerate() if t.name.startswith('poolhouse-dns-')]) <= 2
     finally:
         release.set()
         assert exited.wait(1)

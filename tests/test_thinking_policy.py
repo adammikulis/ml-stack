@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.client import thinking
+from poolhouse.client import thinking
 
 
 @pytest.fixture(autouse=True)

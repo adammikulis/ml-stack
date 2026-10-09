@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.job_records import process_started
-from ml_stack.fleet.jobs import DaemonError, Job, JobRunner
+from poolhouse.fleet.job_records import process_started
+from poolhouse.fleet.jobs import DaemonError, Job, JobRunner
 
 
 def wait_for(check, timeout=10):
@@ -102,7 +102,7 @@ def test_uncertain_or_reused_process_records_are_never_replayed_or_signalled(tmp
         document.pop('version')
         path.write_text(json.dumps(document))
     runner.shutdown()
-    monkeypatch.setattr('ml_stack.fleet.jobs.stop_pid', lambda pid: pytest.fail('signalled unrelated process'))
+    monkeypatch.setattr('poolhouse.fleet.jobs.stop_pid', lambda pid: pytest.fail('signalled unrelated process'))
     restored = JobRunner(tmp_path / 'runner')
     try:
         assert restored.jobs[job.id].state == 'interrupted'
@@ -152,7 +152,7 @@ def test_recovery_after_daemon_process_exit_keeps_child_and_its_recorded_outcome
     argv, env = command(marker, release)
     owner = """import json, os, sys, time
 from pathlib import Path
-from ml_stack.fleet.jobs import JobRunner
+from poolhouse.fleet.jobs import JobRunner
 root, cwd, argv, env = json.loads(sys.argv[1])
 runner = JobRunner(Path(root))
 job = runner.submit('owned child', argv, cwd, env)
@@ -286,15 +286,15 @@ def test_uncertain_launch_reserves_capacity_across_restarts(tmp_path):
 
 @pytest.mark.redteam
 def test_inaccessible_process_identity_holds_capacity_without_signalling(tmp_path, monkeypatch):
-    from ml_stack.fleet import job_records
+    from poolhouse.fleet import job_records
     runner = JobRunner(tmp_path / 'runner', gate=lambda: (False, 'Held'))
     job = Job('unverifiable', 'Unverifiable process', [sys.executable, '-c', 'pass'], str(tmp_path),
               state='running', pid=os.getpid(), process_started=process_started(os.getpid()))
     runner.record(job)
     runner.shutdown()
     monkeypatch.setattr(job_records, 'ownership', lambda job: None)
-    monkeypatch.setattr('ml_stack.fleet.jobs.ownership', lambda job: None)
-    monkeypatch.setattr('ml_stack.fleet.jobs.stop_pid', lambda pid: pytest.fail('signalled inaccessible process'))
+    monkeypatch.setattr('poolhouse.fleet.jobs.ownership', lambda job: None)
+    monkeypatch.setattr('poolhouse.fleet.jobs.stop_pid', lambda pid: pytest.fail('signalled inaccessible process'))
     restored = JobRunner(tmp_path / 'runner')
     try:
         assert restored.jobs[job.id].state == 'interrupted'
@@ -319,7 +319,7 @@ def test_frozen_and_closed_runners_refuse_new_submissions(tmp_path):
 def test_record_write_finishes_before_generation_lock_release(tmp_path, monkeypatch):
     import threading
 
-    from ml_stack.fleet import job_records
+    from poolhouse.fleet import job_records
 
     runner = JobRunner(tmp_path / 'runner', gate=lambda: (False, 'Held'))
     job = runner.submit('history', [sys.executable, '-c', 'pass'], str(tmp_path))

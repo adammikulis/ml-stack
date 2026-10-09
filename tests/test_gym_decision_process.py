@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from ml_stack.gym import decision_process
-from ml_stack.platform import start_process
+from poolhouse.gym import decision_process
+from poolhouse.platform import start_process
 
 pytestmark = pytest.mark.redteam
 
@@ -126,7 +126,7 @@ def test_decision_spawn_keeps_hostile_checkpoint_as_one_json_argument(monkeypatc
     try:
         assert wait_event(process)["status"] == "ready"
         argv = json.loads(record.read_text())
-        assert argv == ["-m", "ml_stack.gym.decision_process", json.dumps(checkpoint), "cpu"]
+        assert argv == ["-m", "poolhouse.gym.decision_process", json.dumps(checkpoint), "cpu"]
         assert not marker.exists()
     finally:
         process.close()

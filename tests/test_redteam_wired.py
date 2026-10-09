@@ -17,21 +17,21 @@ import pytest
 from test_room_routes import room  # noqa: F401
 from test_wired import SRC, Recorder, hooks
 
-from ml_stack.sentinel.human import HumanRequired
-from ml_stack.serve import wired_apply as apply
+from poolhouse.sentinel.human import HumanRequired
+from poolhouse.serve import wired_apply as apply
 
 SAFE_SCRIPT = re.compile(r"[A-Za-z0-9 /:.=_;'%\\\-<>?\",!()&|\s]*")
 
 
 @pytest.fixture(autouse=True)
 def state_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     for name in apply.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
 
 
 def test_no_model_tool_chat_tool_or_slash_command_touches_the_wiring_limit():
-    from ml_stack import chat, do, mcp
+    from poolhouse import chat, do, mcp
 
     words = ("wired", "sysctl", "iogpu", "wiring")
     for tool in mcp.TOOLS:
@@ -44,7 +44,7 @@ def test_no_model_tool_chat_tool_or_slash_command_touches_the_wiring_limit():
 
 
 def test_only_the_command_and_the_ui_route_import_the_privileged_change():
-    root = Path(SRC) / "ml_stack"
+    root = Path(SRC) / "poolhouse"
     users = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.py")
                    if re.search(r"import .*wired_apply|wired_apply import",
                                 p.read_text(encoding="utf-8")))
@@ -54,9 +54,9 @@ def test_only_the_command_and_the_ui_route_import_the_privileged_change():
 @pytest.mark.parametrize("argv", [["--reset"], ["--apply", "65536"], ["--persist", "65536"],
                                   ["--unpersist"]])
 def test_a_command_run_by_an_agent_is_refused_before_anything_is_written(tmp_path, argv):
-    env = {**os.environ, "PYTHONPATH": SRC, "ML_STACK_HOME": str(tmp_path / "home"),
-           "ML_STACK_NO_REAL_KEYSTORE": "1", "CLAUDECODE": "1"}
-    code = ("import sys; from ml_stack.serve import cli; "
+    env = {**os.environ, "PYTHONPATH": SRC, "POOLHOUSE_HOME": str(tmp_path / "home"),
+           "POOLHOUSE_NO_REAL_KEYSTORE": "1", "CLAUDECODE": "1"}
+    code = ("import sys; from poolhouse.serve import cli; "
             f"sys.exit(cli.COMMANDS.run(['memory', *{argv!r}]))")
     got = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, timeout=60)
@@ -67,10 +67,10 @@ def test_a_command_run_by_an_agent_is_refused_before_anything_is_written(tmp_pat
 @pytest.mark.parametrize("name", ["x; touch PWNED", "$(touch PWNED)", "`touch PWNED`",
                                   "../../etc/passwd", "a\ntouch PWNED"])
 def test_a_model_name_is_a_lookup_and_never_a_command(tmp_path, name):
-    env = {**os.environ, "PYTHONPATH": SRC, "ML_STACK_HOME": str(tmp_path / "home"),
-           "ML_STACK_NO_REAL_KEYSTORE": "1", "CLAUDECODE": ""}
+    env = {**os.environ, "PYTHONPATH": SRC, "POOLHOUSE_HOME": str(tmp_path / "home"),
+           "POOLHOUSE_NO_REAL_KEYSTORE": "1", "CLAUDECODE": ""}
     got = subprocess.run([sys.executable, "-c",
-                          "import sys; from ml_stack.serve import cli; "
+                          "import sys; from poolhouse.serve import cli; "
                           f"sys.exit(cli.COMMANDS.run(['memory', '--for', {name!r}, '--apply']))"],
                          env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                          timeout=60, cwd=tmp_path)
@@ -96,7 +96,7 @@ def test_a_hostile_number_never_reaches_the_runner(bad, tmp_path):
 
 def test_an_agent_marker_stops_every_entry_point(tmp_path):
     ran = Recorder()
-    h = hooks(ran, tmp_path / "d.plist", env={"ML_STACK_AGENT": "1"}, terminal=(True, True))
+    h = hooks(ran, tmp_path / "d.plist", env={"POOLHOUSE_AGENT": "1"}, terminal=(True, True))
     for call in (lambda: apply.set_limit(65536, via="osascript", hooks=h),
                  lambda: apply.set_limit(65536, keep=True, via="sudo", hooks=h),
                  lambda: apply.set_limit(None, keep=False, via="osascript", hooks=h),

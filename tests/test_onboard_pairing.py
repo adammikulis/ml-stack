@@ -9,9 +9,9 @@ from http.server import BaseHTTPRequestHandler
 import pytest
 from onboard_support import Clock, Recorder, grant_for, identity, requests
 
-from ml_stack.fleet import tls
-from ml_stack.fleet.framing import Limited, LimitedServer
-from ml_stack.fleet.onboard.pairing import (
+from poolhouse.fleet import tls
+from poolhouse.fleet.framing import Limited, LimitedServer
+from poolhouse.fleet.onboard.pairing import (
     API,
     Hooks,
     PairError,
@@ -19,7 +19,7 @@ from ml_stack.fleet.onboard.pairing import (
     PairingServer,
     unverified_context,
 )
-from ml_stack.fleet.onboard.requests import State
+from poolhouse.fleet.onboard.requests import State
 
 
 @pytest.fixture(autouse=True)
@@ -96,7 +96,7 @@ def test_the_server_reveals_nothing_checkable_before_the_asker_proves_the_code(w
     c = client(world)
     request_id = ask(c)
     world.rq.accept(request_id, mine=True)
-    from ml_stack.fleet.onboard import pake
+    from poolhouse.fleet.onboard import pake
     guess = pake.start_initiator("000000", context=b"x", mine=world.joiner.fingerprint,
                                   theirs=world.acceptor.fingerprint)
     status, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": guess.message})
@@ -108,7 +108,7 @@ def test_the_server_reveals_nothing_checkable_before_the_asker_proves_the_code(w
 def test_a_request_nobody_accepted_cannot_start_an_exchange(world):
     c = client(world)
     request_id = ask(c)
-    from ml_stack.fleet.onboard import pake
+    from poolhouse.fleet.onboard import pake
     guess = pake.start_initiator("123456", context=b"x", mine="a", theirs="b")
     status, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": guess.message})
     assert status == 409 and set(body) == {"error"}
@@ -121,8 +121,8 @@ def test_a_confirmation_cannot_be_replayed(world):
     c = client(world)
     request_id = ask(c)
     code = world.rq.accept(request_id, mine=True).code
-    from ml_stack.fleet.onboard import pake
-    from ml_stack.fleet.onboard.pairing import context_for
+    from poolhouse.fleet.onboard import pake
+    from poolhouse.fleet.onboard.pairing import context_for
     session = pake.start_initiator(code, context=context_for(request_id, c.nonce),
                                     mine=world.joiner.fingerprint,
                                     theirs=world.acceptor.fingerprint)
@@ -299,8 +299,8 @@ def test_the_asker_refuses_a_grant_from_a_machine_that_did_not_prove_the_code(tm
 
 def _open_exchange(c, world, request_id, code, *, context=None):
     """The asker's side of one exchange, by hand: returns the session after the server's reply."""
-    from ml_stack.fleet.onboard import pake
-    from ml_stack.fleet.onboard.pairing import context_for
+    from poolhouse.fleet.onboard import pake
+    from poolhouse.fleet.onboard.pairing import context_for
     session = pake.start_initiator(code, context=context or context_for(request_id, c.nonce),
                                     mine=world.joiner.fingerprint,
                                     theirs=world.acceptor.fingerprint)

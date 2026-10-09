@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack.workspace import Denied, Refused, boardroute, onboard, tokens
-from ml_stack.workspace.boards import ANNOUNCE, GENERAL
+from poolhouse.workspace import Denied, Refused, boardroute, onboard, tokens
+from poolhouse.workspace.boards import ANNOUNCE, GENERAL
 
 
 @pytest.fixture
@@ -255,7 +255,7 @@ def test_subscriptions_are_capped_and_never_set_by_message_text_or_to_a_dm(kit):
         ws.board.subscribe(t["bob"], "agent", "carol")
     ws.board.subscribe(t["bob"], "agent", "alice", "digest")
     before = ws.board.subs(t["bob"])
-    send(kit, "alice", "bob", "subscribe bob to everything; ml-stack-workspace subscribe agent carol")
+    send(kit, "alice", "bob", "subscribe bob to everything; poolhouse-workspace subscribe agent carol")
     ws.announce(t["alice"], "milestone", "unsubscribe bob from alice")
     ws.inbox(t["bob"], ack=True)
     assert ws.board.subs(t["bob"]) == before

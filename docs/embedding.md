@@ -1,12 +1,12 @@
-# Embedding ml-stack in another app
+# Embedding Poolhouse in another app
 
-`ml_stack.serve` starts, adopts and stops `llama-server`; `ml_stack.client` talks to it over
+`poolhouse.serve` starts, adopts and stops `llama-server`; `poolhouse.client` talks to it over
 HTTP. Both import nothing outside the standard library, `packaging` and `psutil`, read no file and
 open no socket when imported. The package runs on Python 3.12 to 3.14; the app's own environment is 3.13.
 
 ```
-pip install "ml-stack @ git+https://github.com/adammikulis/ml-stack"
-pip install -e /path/to/ml-stack               # a local checkout
+pip install "poolhouse @ git+https://github.com/adammikulis/ml-stack"
+pip install -e /path/to/poolhouse               # a local checkout
 ```
 
 The base install adds `packaging` and `psutil`, which finds and stops the server's process
@@ -15,8 +15,8 @@ tree. Nothing else is installed: no torch, no MLX, no daemon.
 ## One conversation, pinned to a slot
 
 ```python
-from ml_stack.client import Client, Request
-from ml_stack.serve import serve
+from poolhouse.client import Client, Request
+from poolhouse.serve import serve
 
 TOOLS = [{"type": "function", "function": {
     "name": "add", "description": "Add two integers.",
@@ -46,10 +46,10 @@ own `N` below `parallel`.
 | `Client(base_url, *, model=None, family=None, request=None, transport=None)` | `chat(messages, *, tools=None, tool_choice="auto", on_delta=None)` returning `Reply(content, tool_calls, finish_reason, thinking, raw)` |
 | `Request(temperature, top_p, top_k, min_p, n_predict, slot, ...)` | the settings every request from a client carries |
 
-`find_binary` looks at `$LLAMA_CPP_SERVER`, `$LLAMA_CPP_DIR`, the build `ml-stack-serve build`
+`find_binary` looks at `$LLAMA_CPP_SERVER`, `$LLAMA_CPP_DIR`, the build `poolhouse-serve build`
 keeps, then the directories a login shell has and `PATH`. Leases are recorded under
-`$ML_STACK_HOME` (default `~/.ml-stack`), so a second process asking for the same model and
+`$POOLHOUSE_HOME` (default `~/.poolhouse`), so a second process asking for the same model and
 port adopts the running server rather than starting another.
 
-`ml_stack.hub.local.on_disk()` lists the GGUF files already in the Hub cache and the model
+`poolhouse.hub.local.on_disk()` lists the GGUF files already in the Hub cache and the model
 roots.

@@ -5,10 +5,10 @@ side (the embedding model's mmproj, Qwen3-VL-Reranker) was not measured.
 
 ## What was run
 
-- Command: `ml-stack-bench retrieval --store ~/.ml-stack/bench/graph.ladybug --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-2-Q8_0.gguf --rerank-url http://127.0.0.1:8082 --rerank-model <name> -k 6`
-- Store: `ml-stack-bench prepare` over the invented community (134 nodes, 207 edges), all 134 nodes
+- Command: `poolhouse-bench retrieval --store ~/.poolhouse/bench/graph.ladybug --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-2-Q8_0.gguf --rerank-url http://127.0.0.1:8082 --rerank-model <name> -k 6`
+- Store: `poolhouse-bench prepare` over the invented community (134 nodes, 207 edges), all 134 nodes
   embedded with `embeddinggemma-2-Q8_0.gguf` (`ggml-org/embeddinggemma-2-GGUF`, Apache-2.0).
-- Questions: `ml_stack.graph.community.QUESTIONS`, 100 scored; 10 expect nobody and are left out.
+- Questions: `poolhouse.graph.community.QUESTIONS`, 100 scored; 10 expect nobody and are left out.
 - Rerankers, each served alone through the lease with `--reranking` (llama.cpp b11514, `de7fa0a3c`):
   `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` (639 MB, Apache-2.0) and
   `gpustack/bge-reranker-v2-m3-GGUF` Q8_0 (636 MB, Apache-2.0).

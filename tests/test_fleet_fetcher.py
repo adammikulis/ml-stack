@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.fleet.files import Fetcher
-from ml_stack.fleet.jobs import DaemonError
+from poolhouse.fleet.files import Fetcher
+from poolhouse.fleet.jobs import DaemonError
 
 
 @pytest.mark.parametrize("relpath", ["../../etc/passwd", "/etc/passwd", "a/../../b", "..%2f..%2fx"])

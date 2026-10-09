@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from ml_stack.devbranch import development_branch  # noqa: E402
+from poolhouse.devbranch import development_branch  # noqa: E402
 
 TYPES = ("feat", "fix", "perf", "refactor", "docs", "test", "chore", "merge", "other")
 KNOWN = set(TYPES) - {"other"}
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None, repo: Path = ROOT) -> int:
     args = parse_args(argv)
     args.branch = args.branch or development_branch(repo)
     if importlib.util.find_spec("matplotlib") is None:
-        print("matplotlib is missing: install it with pip install 'ml-stack[plot]'", file=sys.stderr)
+        print("matplotlib is missing: install it with pip install 'poolhouse[plot]'", file=sys.stderr)
         return 1
     try:
         commits = read_commits(repo, args.branch, args.since)

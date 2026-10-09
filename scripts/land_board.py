@@ -28,10 +28,10 @@ import land_entries
 import land_git as lg
 import land_recover as recover
 
-from ml_stack.devbranch import development_branch
-from ml_stack.workspace import landing
-from ml_stack.workspace.claims import Conflict
-from ml_stack.workspace.identity import Denied
+from poolhouse.devbranch import development_branch
+from poolhouse.workspace import landing
+from poolhouse.workspace.claims import Conflict
+from poolhouse.workspace.identity import Denied
 
 HERE = Path(__file__).resolve().parent
 MAX_BATCH = 8
@@ -394,7 +394,7 @@ class Runner:
 
 def serve(root: Path, target: str, flags: dict) -> int:
     """Run passes as the identity in this environment until interrupted, or one pass with ``once``."""
-    from ml_stack.workspace import Workspace, tokens
+    from poolhouse.workspace import Workspace, tokens
 
     ws = Workspace()
     token = tokens.resolve(ws.base)

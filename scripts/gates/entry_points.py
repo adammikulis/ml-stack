@@ -10,13 +10,13 @@ from ._perfile import finder
 from ._util import parse
 
 NAME = "entry-points"
-OWNER = "ml_stack.cli"
+OWNER = "poolhouse.cli"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 
 
 def describe() -> str:
-    return "Another main(); a command reaches the library through ml_stack.cli."
+    return "Another main(); a command reaches the library through poolhouse.cli."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

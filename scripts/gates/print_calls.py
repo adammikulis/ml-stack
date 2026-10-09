@@ -10,17 +10,17 @@ from ._perfile import finder
 from ._util import calls, dotted, exempt, parse
 
 NAME = "print-calls"
-OWNER = "ml_stack.log"
+OWNER = "poolhouse.log"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/log.py",)
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/log.py",)
 
 COMMANDS: set[str] = set()
 """Command modules still printing straight to the console."""
 
 
 def describe() -> str:
-    return "A print() in library code; `ml_stack.log` says it, so a caller can redirect it."
+    return "A print() in library code; `poolhouse.log` says it, so a caller can redirect it."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

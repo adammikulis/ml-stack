@@ -1,2 +1,2 @@
 pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-rootProject.name = 'ml-stack-android'
+rootProject.name = 'poolhouse-android'

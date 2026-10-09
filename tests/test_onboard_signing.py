@@ -9,10 +9,10 @@ import keyring
 import pytest
 from onboard_support import FileKeyring, Recorder
 
-from ml_stack import keystore as keystore_module
-from ml_stack.fleet.onboard import manifest as mf, signing
-from ml_stack.fleet.onboard.human import HumanRequired, mint
-from ml_stack.fleet.onboard.signing import KeyStoreError, SigningKeys
+from poolhouse import keystore as keystore_module
+from poolhouse.fleet.onboard import manifest as mf, signing
+from poolhouse.fleet.onboard.human import HumanRequired, mint
+from poolhouse.fleet.onboard.signing import KeyStoreError, SigningKeys
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def needs_cryptography():
 @pytest.fixture
 def keystore(tmp_path, monkeypatch):
     """The OS keystore, stood in for by a real keyring backend over a file."""
-    monkeypatch.setenv("ML_STACK_TEST_KEYRING", str(tmp_path / "keystore.json"))
+    monkeypatch.setenv("POOLHOUSE_TEST_KEYRING", str(tmp_path / "keystore.json"))
     before = keyring.get_keyring()
     keyring.set_keyring(FileKeyring())
     yield tmp_path / "keystore.json"

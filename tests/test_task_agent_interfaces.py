@@ -6,10 +6,10 @@ import pytest
 from taskboard_kit import accepted, board, proposed
 from workspace_kit import cli as run_cli
 
-from ml_stack import mcp
-from ml_stack.memory import vault
-from ml_stack.workspace import task_outcomes, tools
-from ml_stack.workspace.identity import TOKEN_ENV, Denied
+from poolhouse import mcp
+from poolhouse.memory import vault
+from poolhouse.workspace import task_outcomes, tools
+from poolhouse.workspace.identity import TOKEN_ENV, Denied
 
 __all__ = ['board']
 

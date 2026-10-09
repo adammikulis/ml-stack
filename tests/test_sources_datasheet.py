@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.sources import datasheet
+from poolhouse.sources import datasheet
 
 COLS = (50, 90, 50, 250)
 ROW_H = 22
@@ -19,8 +19,8 @@ ROW_H = 22
 def pymupdf(monkeypatch):
     """The pin tables and page pictures are MuPDF-only: the engine is asked for by name, and the
     test is skipped where the AGPL extra is not installed (the default install does not carry it)."""
-    module = pytest.importorskip("pymupdf", reason="MuPDF (AGPL, opt-in): pip install 'ml-stack[pdf-agpl]'")
-    monkeypatch.setenv("ML_STACK_PDF_ENGINE", "pymupdf")
+    module = pytest.importorskip("pymupdf", reason="MuPDF (AGPL, opt-in): pip install 'poolhouse[pdf-agpl]'")
+    monkeypatch.setenv("POOLHOUSE_PDF_ENGINE", "pymupdf")
     return module
 
 

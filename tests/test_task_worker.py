@@ -5,8 +5,8 @@ from dataclasses import replace
 import pytest
 from taskboard_kit import board
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_runtime, task_scheduler, task_worker
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import task_runtime, task_scheduler, task_worker
 
 __all__ = ['board']
 

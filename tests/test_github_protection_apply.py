@@ -23,9 +23,9 @@ APPLY = ["--repo", REPO, "--apply", "--identity-ready"]
 
 @pytest.fixture
 def ap(tmp_path, monkeypatch):
-    for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"):
+    for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     loader = importlib.machinery.SourceFileLoader("github_protection_apply", str(SCRIPT))
     module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     monkeypatch.setitem(sys.modules, loader.name, module)

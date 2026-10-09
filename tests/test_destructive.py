@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from ml_stack.guard import destructive, shellscan
-from ml_stack.guard.destructive import Verdict, classify, combine
-from ml_stack.guard.destructive_eval import evaluate
-from ml_stack.interventions import Call
+from poolhouse.guard import destructive, shellscan
+from poolhouse.guard.destructive import Verdict, classify, combine
+from poolhouse.guard.destructive_eval import evaluate
+from poolhouse.interventions import Call
 
 
 @pytest.fixture

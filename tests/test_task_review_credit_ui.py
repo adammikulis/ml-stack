@@ -6,11 +6,11 @@ import pytest
 from taskboard_kit import accepted, board as _board_fixture, proposed
 from test_fleet_ui import Serving
 
-from ml_stack.fleet import extension_routes
-from ml_stack.memory import vault
-from ml_stack.reputation.sealed import SealedGraph
-from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import task_credit, task_routes, tokens, work_reputation
+from poolhouse.fleet import extension_routes
+from poolhouse.memory import vault
+from poolhouse.reputation.sealed import SealedGraph
+from poolhouse.reputation.work import WorkLedger
+from poolhouse.workspace import task_credit, task_routes, tokens, work_reputation
 
 board = _board_fixture
 pytestmark = pytest.mark.redteam

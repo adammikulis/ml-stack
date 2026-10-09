@@ -14,8 +14,8 @@ import land_check as lc
 import land_git as lg
 import land_plan
 
-from ml_stack import trees
-from ml_stack.activity.gate import tree_hash
+from poolhouse import trees
+from poolhouse.activity.gate import tree_hash
 
 UNION_FILES = {"HANDOFF.md"}
 OWNER_KEYS = ("Agent-Label", "Agent", "Label")

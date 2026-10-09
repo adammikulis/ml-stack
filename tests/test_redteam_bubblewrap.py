@@ -9,7 +9,7 @@ from itertools import pairwise
 
 import pytest
 
-from ml_stack.sandbox import bubblewrap
+from poolhouse.sandbox import bubblewrap
 
 pytestmark = pytest.mark.redteam
 

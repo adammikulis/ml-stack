@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! A native window on the ml-stack interface, and the daemon that serves it.
+//! A native window on the poolhouse interface, and the daemon that serves it.
 
 mod daemon;
 mod identity;
@@ -18,14 +18,14 @@ use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 
-const TITLE: &str = "Poolside";
+const TITLE: &str = "Poolhouse";
 const WIDTH: f64 = 1360.0;
 const HEIGHT: f64 = 900.0;
 const MIN_WIDTH: f64 = 760.0;
 const MIN_HEIGHT: f64 = 640.0;
 const BACKGROUND: Color = Color(13, 19, 27, 255);
 const PORT: u16 = 8770;
-const ROOT: &str = ".ml-stack/traind";
+const ROOT: &str = ".poolhouse/traind";
 
 /// What the window holds: where the settings are, and the daemon it started.
 struct Shell {
@@ -85,7 +85,7 @@ fn on_closing(app: AppHandle, state: State<'_, Shell>) -> bool {
     if saved == settings::BACKGROUND {
         let _ = window.hide();
     } else {
-        let _ = window.eval("window.mlStackAskOnClose && window.mlStackAskOnClose()");
+        let _ = window.eval("window.poolhouseAskOnClose && window.poolhouseAskOnClose()");
     }
     false
 }
@@ -117,9 +117,9 @@ fn asked(home: &std::path::Path) -> (u16, PathBuf) {
     (port, root)
 }
 
-/// Where `ML_STACK_WINDOW_POSITION` ("X,Y") says to put the window, if it says.
+/// Where `POOLHOUSE_WINDOW_POSITION` ("X,Y") says to put the window, if it says.
 fn told_where() -> Option<PhysicalPosition<i32>> {
-    let told = std::env::var("ML_STACK_WINDOW_POSITION").ok()?;
+    let told = std::env::var("POOLHOUSE_WINDOW_POSITION").ok()?;
     let (x, y) = told.split_once(',')?;
     Some(PhysicalPosition::new(
         x.trim().parse().ok()?,

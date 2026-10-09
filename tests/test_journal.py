@@ -4,9 +4,9 @@ import copy
 
 import pytest
 
-from ml_stack.fleet.onboard.manifest import Signer
-from ml_stack.workspace import journal_merge as rules
-from ml_stack.workspace.journal import Journals
+from poolhouse.fleet.onboard.manifest import Signer
+from poolhouse.workspace import journal_merge as rules
+from poolhouse.workspace.journal import Journals
 
 
 class Clock:
@@ -74,7 +74,7 @@ def test_a_forged_head_signature_marks_the_origin_damaged_and_stores_nothing(tmp
     head = rows[-1]
     head['body']['sig'] = rules.base64.b64encode(outsider.sign_bytes(
         rules.head_message('', a.origin, 1, rows[0]['hash']))).decode()
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
     head['hash'] = _digest(head['prev'], head)
     with pytest.raises(rules.Damaged, match='bad signature'):
         b.ingest(a.origin, rows, authoritative=True)
@@ -132,7 +132,7 @@ def test_replaying_an_older_journal_changes_nothing_and_a_fork_is_refused(tmp_pa
     assert b.rows(a.origin) == before
     forked = copy.deepcopy(old)
     forked[1]['body']['text'] = 'rewritten'
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
     forked[1]['hash'] = _digest(forked[1]['prev'], forked[1])
     with pytest.raises(rules.Damaged, match='differs'):
         b.ingest(a.origin, forked)
@@ -179,7 +179,7 @@ def test_a_row_far_ahead_of_the_local_clock_is_held_back_and_does_not_move_the_l
 
 def forge(journals, genuine, extra):
     """Rows a relay builds after ``genuine``: the chain hashes are unkeyed, so anyone can."""
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
     out, prev = [], genuine[-1]
     for seq, (kind, body) in enumerate(extra, start=len(genuine) + 1):
         made = {'v': 1, 'origin': prev['origin'], 'hlc': [prev['hlc'][0], 0, prev['origin']], 'kind': kind,
@@ -247,7 +247,7 @@ def test_a_forged_copy_marks_an_origin_damaged_only_when_its_owner_presented_it(
     a.seal()
     rows = copy.deepcopy(a.rows(a.origin))
     rows[-1]['body']['sig'] = rules.base64.b64encode(b'\x00' * 64).decode()
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
     rows[-1]['hash'] = _digest(rows[-1]['prev'], rows[-1])
     with pytest.raises(rules.Damaged):
         b.ingest(a.origin, rows, authoritative=False)
@@ -279,7 +279,7 @@ def test_an_origin_bound_by_a_relay_is_rebound_to_the_key_its_owner_presents(tmp
 
 
 def test_a_device_holds_no_more_journals_than_the_origin_cap(tmp_path, monkeypatch):
-    from ml_stack.workspace import journal
+    from poolhouse.workspace import journal
     monkeypatch.setattr(journal, 'MAX_ORIGINS', 2)
     victim, _ = device(tmp_path, 'victim')
     post(victim, 'own')

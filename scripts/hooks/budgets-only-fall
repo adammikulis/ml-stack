@@ -9,7 +9,7 @@ the tree holds. A hard gate carries no number, so dropping one of those is the f
 
 Claude Code sets CLAUDECODE for every command it runs and a terminal sets nothing, so an
 agent is refused outright; a person raises a number on purpose with
-ML_STACK_BUDGET_RISE=yes git commit ...
+POOLHOUSE_BUDGET_RISE=yes git commit ...
 """
 
 from __future__ import annotations
@@ -123,9 +123,9 @@ def main(argv: list[str] | None = None) -> int:
               "Only the repository owner, at his own terminal, can. Say in your report "
               "that the budget is over and what is in it.", file=sys.stderr)
         return 1
-    if os.environ.get("ML_STACK_BUDGET_RISE") == "yes":
+    if os.environ.get("POOLHOUSE_BUDGET_RISE") == "yes":
         return 0
-    print("\nTo raise it on purpose:  ML_STACK_BUDGET_RISE=yes git commit ...",
+    print("\nTo raise it on purpose:  POOLHOUSE_BUDGET_RISE=yes git commit ...",
           file=sys.stderr)
     return 1
 

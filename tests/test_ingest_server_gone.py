@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import hub, ingest, jobs
+from poolhouse import hub, ingest, jobs
 from tests.test_ingest import a_reading
 
 
@@ -48,12 +48,12 @@ def test_the_run_stops_when_its_server_is_gone(tmp_path, server, monkeypatch, ca
 
 
 def test_detach_records_the_run_as_this_machines_ingest_job(tmp_path, monkeypatch, capsys):
-    """`detach` writes the pid, the argv and the log through `ml_stack.jobs`, and the same
-    record is what `stop`, `wait` and `ml-stack-jobs status` read."""
+    """`detach` writes the pid, the argv and the log through `poolhouse.jobs`, and the same
+    record is what `stop`, `wait` and `poolhouse-jobs status` read."""
     import subprocess
     import sys
 
-    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_INGEST_HOME", str(tmp_path))
     started = {}
     popen = subprocess.Popen
 
@@ -66,7 +66,7 @@ def test_detach_records_the_run_as_this_machines_ingest_job(tmp_path, monkeypatc
     argv = ["source.pdf", "--out", str(tmp_path / "s"), "--detach"]
     try:
         assert ingest.main(argv) == 0
-        assert started["command"][1:3] == ["-m", "ml_stack.ingest"], "the module, not a shell"
+        assert started["command"][1:3] == ["-m", "poolhouse.ingest"], "the module, not a shell"
         assert "--detach" not in started["command"]
         record = jobs.recorded("ingest", home=tmp_path / "jobs")
         assert record["pid"] == started["child"].pid
@@ -83,7 +83,7 @@ def test_a_second_detach_is_refused_while_the_recorded_run_is_still_ending(tmp_p
     import subprocess
     import sys
 
-    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_INGEST_HOME", str(tmp_path))
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
@@ -137,7 +137,7 @@ def test_a_judged_tidy_refuses_beside_a_live_run(tmp_path, monkeypatch, capsys):
     import subprocess
     import sys
 
-    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_INGEST_HOME", str(tmp_path))
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
@@ -164,8 +164,8 @@ def _leased(monkeypatch):
         finally:
             released.append(True)
 
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: None)
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
     return released
 
@@ -189,14 +189,14 @@ def _gold(tmp_path):
 
 def _ask(tmp_path, monkeypatch):
     (tmp_path / "s").mkdir()
-    monkeypatch.setattr("ml_stack.ingest.cli.graph_of",
+    monkeypatch.setattr("poolhouse.ingest.cli.graph_of",
                         lambda out, cite=False: {"nodes": [{"id": "concept:glimmer-node"}],
                                                  "edges": []})
     return ["ask", "--out", str(tmp_path / "s"), "--model", "x", "what flows?"]
 
 
 def _tidy(tmp_path, monkeypatch):
-    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_INGEST_HOME", str(tmp_path))
     monkeypatch.setattr(ingest, "_judge", lambda *a, **k: None)
     return ["tidy", "--out", str(tmp_path / "s"), "--model", "x"]
 
@@ -210,13 +210,13 @@ def test_a_sigterm_mid_run_releases_the_lease_on_every_path(tmp_path, monkeypatc
     released = _leased(monkeypatch)
     if path == "gold":
         argv = _gold(tmp_path)
-        monkeypatch.setattr("ml_stack.ingest.cli.gold_score", _terminated)
+        monkeypatch.setattr("poolhouse.ingest.cli.gold_score", _terminated)
     elif path == "ask":
         argv = _ask(tmp_path, monkeypatch)
         monkeypatch.setattr(ingest, "ask", _terminated)
     else:
         argv = _tidy(tmp_path, monkeypatch)
-        monkeypatch.setattr("ml_stack.ingest.cli.hygiene", _terminated)
+        monkeypatch.setattr("poolhouse.ingest.cli.hygiene", _terminated)
     assert ingest.main(argv) == 1
     assert released == [True], "the lease was not released"
     assert "stopped" in capsys.readouterr().out

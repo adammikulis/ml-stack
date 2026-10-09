@@ -14,8 +14,8 @@ from typing import ClassVar
 import pytest
 from conftest import a_row
 
-from ml_stack.bench import runs, save, table
-from ml_stack.client import Request, Transport
+from poolhouse.bench import runs, save, table
+from poolhouse.client import Request, Transport
 
 G = 2**30
 
@@ -23,7 +23,7 @@ G = 2**30
 # -- what --on takes, and what a client is built from -----------------------------------
 
 def test_an_ollama_url_names_the_program_and_the_model():
-    from ml_stack.bench.backends import parse_on
+    from poolhouse.bench.backends import parse_on
 
     name, url, how = parse_on("flash-ollama=ollama://127.0.0.1:11434/thornfell:125b-mlx")
     assert name == "flash-ollama"
@@ -32,7 +32,7 @@ def test_an_ollama_url_names_the_program_and_the_model():
 
 
 def test_an_openai_url_names_the_program_and_the_model():
-    from ml_stack.bench.backends import parse_on
+    from poolhouse.bench.backends import parse_on
 
     name, _url, how = parse_on("hosted=openai://10.0.0.7:8000/pellard-9b")
     assert name == "hosted"
@@ -40,14 +40,14 @@ def test_an_openai_url_names_the_program_and_the_model():
 
 
 def test_a_plain_http_url_is_llama_cpp_and_names_nothing():
-    from ml_stack.bench.backends import parse_on
+    from poolhouse.bench.backends import parse_on
 
     name, url, how = parse_on("e4b=http://127.0.0.1:8083")
     assert (name, url, how) == ("e4b", "http://127.0.0.1:8083", {})
 
 
 def test_a_spec_without_name_or_url_is_refused():
-    from ml_stack.bench.backends import parse_on
+    from poolhouse.bench.backends import parse_on
 
     with pytest.raises(ValueError):
         parse_on("just-a-name")
@@ -59,7 +59,7 @@ def test_the_client_is_told_the_program_and_the_model_a_url_names():
     """``ollama://host:port/tag`` reaches the client as the plain address, the api in its
     transport and the tag as its model; the request and the rest of the transport ride
     along untouched."""
-    from ml_stack.bench.backends import client_for
+    from poolhouse.bench.backends import client_for
 
     built = client_for("ollama://127.0.0.1:11434/thornfell:125b-mlx",
                        request=Request(context=32768, temperature=0.0),
@@ -78,7 +78,7 @@ def test_the_client_is_told_the_program_and_the_model_a_url_names():
 # -- what served the run ----------------------------------------------------------------
 
 def test_served_by_is_read_off_a_client_that_can_say():
-    from ml_stack.bench.backends import served_by
+    from poolhouse.bench.backends import served_by
 
     class Ollama:
         base_url = "http://127.0.0.1:11434"
@@ -97,7 +97,7 @@ def test_served_by_is_read_off_a_client_that_can_say():
 def test_served_by_for_llama_cpp_comes_from_props_and_the_gguf_name(monkeypatch, tmp_path):
     """A client with no ``served_by`` is a llama-server: the program, its build, the
     format and the quantisation are read off ``/props`` and the file it names."""
-    from ml_stack.bench import backends
+    from poolhouse.bench import backends
 
     weights = tmp_path / "Thornfell-Next-UD-Q4_K_XL-00001-of-00002.gguf"
     weights.write_bytes(b"x" * 1000)
@@ -124,7 +124,7 @@ def test_served_by_for_llama_cpp_comes_from_props_and_the_gguf_name(monkeypatch,
 
 
 def test_a_server_that_will_not_say_what_serves_it_is_none(monkeypatch):
-    from ml_stack.bench import backends
+    from poolhouse.bench import backends
 
     def down(url, **kw):
         raise ConnectionError("nothing on that port")
@@ -149,13 +149,13 @@ def test_a_server_that_will_not_say_what_serves_it_is_none(monkeypatch):
     (None, "", ""),
 ])
 def test_the_configuration_line_names_program_runtime_and_quant(record, build, expect):
-    from ml_stack.bench.backends import describe
+    from poolhouse.bench.backends import describe
 
     assert describe(record, build=build) == expect
 
 
 def test_the_short_form_is_one_word_for_a_table_column():
-    from ml_stack.bench.backends import short
+    from poolhouse.bench.backends import short
 
     assert short({"program": "ollama", "runtime": "mlx", "format": "safetensors",
                   "quant": "nvfp4"}) == "ollama·mlx·nvfp4"
@@ -168,7 +168,7 @@ def test_the_short_form_is_one_word_for_a_table_column():
 def test_the_build_reads_what_served_a_run_before_the_binary_it_started():
     """An Ollama run has no llama-server binary, and read from the binary alone it was
     the default build. The record says what served it, and that is what is read."""
-    from ml_stack.bench.record import of
+    from poolhouse.bench.record import of
 
     def build(server):
         return of({"server": server}).build
@@ -212,7 +212,7 @@ class _Reply:
 
 
 def test_llama_cpp_timings_are_read_whole_and_a_missing_draft_is_zero():
-    from ml_stack.bench.backends import timings_of
+    from poolhouse.bench.backends import timings_of
 
     got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
                                          "prompt_n": 90, "cache_n": 10, "predicted_n": 40}}))
@@ -226,7 +226,7 @@ def test_llama_cpp_timings_are_read_whole_and_a_missing_draft_is_zero():
 def test_the_time_drafting_and_the_time_checking_are_read_apart():
     """A build that times the two halves of generation reports both, plus how many passes
     the model made. ``predicted_ms`` still covers them both."""
-    from ml_stack.bench.backends import timings_of
+    from poolhouse.bench.backends import timings_of
 
     got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
                                          "prompt_n": 90, "cache_n": 10, "predicted_n": 40,
@@ -239,7 +239,7 @@ def test_the_time_drafting_and_the_time_checking_are_read_apart():
 
 
 def test_a_build_that_does_not_split_generation_reports_zero_for_both_halves():
-    from ml_stack.bench.backends import timings_of
+    from poolhouse.bench.backends import timings_of
 
     got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
                                          "prompt_n": 90, "predicted_n": 40}}))
@@ -249,7 +249,7 @@ def test_a_build_that_does_not_split_generation_reports_zero_for_both_halves():
 
 
 def test_a_reply_with_no_timings_at_all_is_none_everywhere():
-    from ml_stack.bench.backends import timings_of
+    from poolhouse.bench.backends import timings_of
 
     got = timings_of(_Reply({"usage": {"prompt_tokens": 100, "completion_tokens": 20}}))
     assert all(v is None for v in got.values()), got
@@ -258,7 +258,7 @@ def test_a_reply_with_no_timings_at_all_is_none_everywhere():
 def test_a_timings_key_written_null_is_not_measured_and_one_left_out_is_zero():
     """The client turns an Ollama reply into llama.cpp's ``timings`` with ``cache_n`` and
     ``draft_n`` written null: that is a program that cannot say, not a server with no head."""
-    from ml_stack.bench.backends import timings_of
+    from poolhouse.bench.backends import timings_of
 
     got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
                                          "load_ms": 5000.0, "prompt_n": 90, "predicted_n": 40,
@@ -272,7 +272,7 @@ def test_a_timings_key_written_null_is_not_measured_and_one_left_out_is_zero():
 def test_an_ollama_reply_reports_prefill_and_decode_and_nothing_it_cannot():
     """Ollama says what it read and wrote and how long each took, in nanoseconds; it has no
     prompt cache figure and no draft head, and those are None rather than 0."""
-    from ml_stack.bench.backends import timings_of
+    from poolhouse.bench.backends import timings_of
 
     got = timings_of(_Reply({"model": "thornfell:125b-mlx", "prompt_eval_count": 90,
                              "prompt_eval_duration": 120_000_000, "eval_count": 40,
@@ -286,7 +286,7 @@ def test_an_ollama_reply_reports_prefill_and_decode_and_nothing_it_cannot():
 
 
 def test_counting_carries_none_through_for_what_a_backend_did_not_report():
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     class Model:
         def chat(self, messages, **kw):
@@ -305,7 +305,7 @@ def test_counting_carries_none_through_for_what_a_backend_did_not_report():
 def test_counting_adds_up_what_is_reported_and_leaves_none_for_the_rest():
     """Two calls, one with a prompt-cache figure and one without: the total is over the
     calls that said, and a field no call reported stays None."""
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     replies = iter([
         _Reply({"timings": {"prompt_ms": 100.0, "predicted_ms": 500.0, "prompt_n": 80,
@@ -329,7 +329,7 @@ def test_counting_adds_up_what_is_reported_and_leaves_none_for_the_rest():
 
 
 def test_a_row_from_a_backend_that_reports_nothing_says_so(tmp_path):
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     class Model:
         def chat(self, messages, **kw):
@@ -355,7 +355,7 @@ def test_a_row_from_a_backend_that_reports_nothing_says_so(tmp_path):
 
 
 def test_prefix_kept_skips_a_call_that_reported_nothing():
-    from ml_stack.bench import prefix_kept
+    from poolhouse.bench import prefix_kept
 
     assert prefix_kept([(None, None), (None, None)]) == (0, 0)
     assert prefix_kept([(20, 80), (None, 50), (100, 5), (110, 3)]) == (1, 1), \
@@ -380,7 +380,7 @@ def test_the_table_prints_a_dash_for_each_figure_nobody_measured(tmp_path, capsy
 
 
 def test_drafting_tells_no_head_from_not_reported():
-    from ml_stack.bench import drafting
+    from poolhouse.bench import drafting
 
     assert drafting([{"draft_tokens": None, "draft_taken": None}]) == "-", "not reported"
     assert drafting([{"draft_tokens": 0, "draft_taken": 0}]) == "none", "a server with no head"
@@ -389,7 +389,7 @@ def test_drafting_tells_no_head_from_not_reported():
 
 
 def test_compare_says_not_measured_rather_than_a_percentage(tmp_path):
-    from ml_stack.bench import compare
+    from poolhouse.bench import compare
 
     store = tmp_path / "runs.ladybug"
     a = a_row("who?", expected=["person:iris"], shown=["person:iris"], label="llama")
@@ -447,8 +447,8 @@ def test_the_sampler_sums_the_tree_and_sees_a_runner_that_arrives_late(monkeypat
     """Ollama's listener holds nothing; the runner it spawns after the first request holds
     the weights. The pids are re-read every tick, so the child is counted from the tick
     it appears, and the peak is the sum over the tree."""
-    import ml_stack.bench as measuring
-    import ml_stack.serve.process as process_mod
+    import poolhouse.bench as measuring
+    import poolhouse.serve.process as process_mod
 
     runner = _Proc(5001, 60 * G)
     listener = _Proc(5000, 1 * G, children=[])
@@ -480,8 +480,8 @@ def test_the_sampler_sums_the_tree_and_sees_a_runner_that_arrives_late(monkeypat
 
 
 def test_the_sampler_falls_back_to_the_llama_server_on_the_port(monkeypatch):
-    import ml_stack.bench as measuring
-    import ml_stack.serve.process as process_mod
+    import poolhouse.bench as measuring
+    import poolhouse.serve.process as process_mod
 
     server = _Proc(7000, 50 * G, cmdline=["llama-server", "--port", "8099"])
     monkeypatch.setitem(sys.modules, "psutil", _Tree([server]))
@@ -500,8 +500,8 @@ def test_the_sampler_falls_back_to_the_llama_server_on_the_port(monkeypatch):
 
 
 def test_the_footprint_takes_the_weights_and_the_program_from_what_served_it(monkeypatch):
-    import ml_stack.bench as measuring
-    from ml_stack.bench import backends
+    import poolhouse.bench as measuring
+    from poolhouse.bench import backends
 
     runner = _Proc(5001, 64 * G)
     listener = _Proc(5000, 1 * G, children=[runner])
@@ -554,12 +554,12 @@ def test_a_sweep_serves_without_the_head_and_labels_the_runs_so(tmp_path, monkey
 
     from test_graph_bench import _serving
 
-    import ml_stack.bench as bench
-    from ml_stack.serve.profile import record
+    import poolhouse.bench as bench
+    from poolhouse.serve.profile import record
 
     measured = record("tiny.gguf", slot_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for",
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for",
                         lambda m, **_: replace(measured, served=str(m)))
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--no-draft", "--serve-label", "flash",
@@ -581,7 +581,7 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
     """``--on flash-ollama=ollama://host:port/model``: the client is built with the api
     and the model the URL names at the sweep's context, the busy check goes to the plain
     http port, and the run's record says what served it."""
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     built = {}
 
@@ -609,9 +609,9 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
                            "eval_duration": 400_000_000}, content="a compiler person")
 
     asked = []
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: asked.append(url) or 0)
-    monkeypatch.setattr("ml_stack.client.Client", Ollama)
+    monkeypatch.setattr("poolhouse.client.Client", Ollama)
     kept = tmp_path / "runs.ladybug"
     graph = tmp_path / "g.json"
     from test_graph_bench import TINY
@@ -666,7 +666,7 @@ def _drafting(**over):
 
 
 def test_a_server_that_obeys_a_requested_draft_depth_is_read_as_obeying():
-    from ml_stack.bench.backends import DRAFT_OBEYED, draft_depth_support
+    from poolhouse.bench.backends import DRAFT_OBEYED, draft_depth_support
 
     made = _drafting(honours=True)
     assert draft_depth_support(made()) == DRAFT_OBEYED
@@ -676,12 +676,12 @@ def test_a_server_that_obeys_a_requested_draft_depth_is_read_as_obeying():
 
 def test_a_server_that_drafts_regardless_is_read_as_ignoring():
     """The field a server does not know is dropped in silence, not refused."""
-    from ml_stack.bench.backends import DRAFT_IGNORED, draft_depth_support
+    from poolhouse.bench.backends import DRAFT_IGNORED, draft_depth_support
 
     assert draft_depth_support(_drafting(honours=False)()) == DRAFT_IGNORED
 
 
 def test_a_server_with_no_draft_head_is_read_as_not_drafting():
-    from ml_stack.bench.backends import DRAFT_NONE, draft_depth_support
+    from poolhouse.bench.backends import DRAFT_NONE, draft_depth_support
 
     assert draft_depth_support(_drafting(drafts=0)()) == DRAFT_NONE

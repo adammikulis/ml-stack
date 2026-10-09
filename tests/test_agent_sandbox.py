@@ -25,8 +25,8 @@ import agent_sandbox_stage as stage  # noqa: E402
 def layout(tmp_path):
     home = tmp_path / "home"
     return profile.Layout(
-        home=home, state=home / ".ml-stack", primary=tmp_path / "ml-stack",
-        worktrees=(tmp_path / "ml-stack-feature",), scratch=(tmp_path / "scratch",), platform="darwin")
+        home=home, state=home / ".poolhouse", primary=tmp_path / "poolhouse",
+        worktrees=(tmp_path / "poolhouse-feature",), scratch=(tmp_path / "scratch",), platform="darwin")
 
 
 def test_claude_settings_close_the_escape_hatches(layout):
@@ -38,7 +38,7 @@ def test_claude_settings_close_the_escape_hatches(layout):
 
 def test_only_the_gated_runtime_deploy_commands_run_outside_the_sandbox(layout):
     sandbox = profile.claude_settings(layout)["sandbox"]
-    assert sandbox["excludedCommands"] == ["ml-stack runtime ensure", "ml-stack runtime rollback", "ml-stack runtime restart-host"]
+    assert sandbox["excludedCommands"] == ["poolhouse runtime ensure", "poolhouse runtime rollback", "poolhouse runtime restart-host"]
     assert str(layout.state / "runtimes") in sandbox["filesystem"]["denyWrite"]
 
 
@@ -88,7 +88,7 @@ def test_network_allows_only_the_listed_hosts(layout):
 
 def test_scrubbed_environment_names_messaging_and_search_path_variables(layout):
     deny = profile.claude_settings(layout)["sandbox"]["credentials"]["envVars"]["deny"]
-    for name in ("CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "ML_STACK_HOME",
+    for name in ("CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "POOLHOUSE_HOME",
                  "PYTHONPATH", "GIT_CONFIG_GLOBAL", "SSH_AUTH_SOCK"):
         assert name in deny
 

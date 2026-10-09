@@ -45,7 +45,7 @@ jobs:
       - name: SBOM
         run: |
           python -m venv "$RUNNER_TEMP/sbom-env"
-          wheel=$(find dist -name 'ml_stack-*.whl' -print -quit)
+          wheel=$(find dist -name 'poolhouse-*.whl' -print -quit)
           "$RUNNER_TEMP/sbom-env/bin/pip" install "${wheel}[store,hub,web,plot,graph,serve]" packaging
           "$RUNNER_TEMP/sbom-env/bin/python" scripts/sbom.py --out sbom.cdx.json
           "$RUNNER_TEMP/sbom-env/bin/python" scripts/sbom.py --check sbom.cdx.json
@@ -61,11 +61,11 @@ jobs:
       matrix:
         include:
           - os: macos-15
-            asset: ml-stack-macos-arm64
+            asset: poolhouse-macos-arm64
           - os: ubuntu-latest
-            asset: ml-stack-linux-x86_64
+            asset: poolhouse-linux-x86_64
           - os: windows-latest
-            asset: ml-stack-windows-x86_64
+            asset: poolhouse-windows-x86_64
     runs-on: ${{ matrix.os }}
     # The Linux job spent 17 minutes in apt on a slow mirror and another 4 fetching the browser's
     # system packages; 25 minutes cancelled it before the first test.
@@ -99,7 +99,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           python packaging/build.py --node
           if ($LASTEXITCODE -ne 0) { throw "the node did not build" }
-          if (-not (Get-ChildItem dist\node\poolside-node-*.exe)) { throw "no poolside-node.exe in dist/node" }
+          if (-not (Get-ChildItem dist\node\poolhouse-node-*.exe)) { throw "no poolhouse-node.exe in dist/node" }
           python -m pip install pytest pytest-xdist numpy psutil keyring cryptography pyyaml
           $env:PYTHONPATH = "src"
           python -m pytest tests/test_node_windows.py -q -n 0 -p no:cacheprovider
@@ -114,7 +114,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
+          BIN=$(find dist/bundle -maxdepth 3 -name 'poolhouse-headless*' -type f | head -1)
           echo "starting $BIN"
           "$BIN" --port 8899 --no-browser &
           for _ in $(seq 1 40); do
@@ -137,7 +137,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
+          BIN=$(find dist/bundle -maxdepth 3 -name 'poolhouse-headless*' -type f | head -1)
           echo "starting $BIN"
           if "$BIN" --port 8899 --no-browser > "$RUNNER_TEMP/launch.txt" 2>&1; then
             cat "$RUNNER_TEMP/launch.txt"; echo "the launcher started a daemon without WSL"; exit 1
@@ -153,19 +153,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # The screens, not just the assets. ml_stack.serve is reached through a lazy
+      # The screens, not just the assets. poolhouse.serve is reached through a lazy
       # import, so nothing static points at it and only a running bundle says whether
       # PyInstaller carried it.
       - name: the screens answer
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
+          U='X-Poolhouse-UI: 1'; J='Content-Type: application/json'
           B=http://127.0.0.1:8899
           # A page is signed in only by a one-use ticket from the daemon's own launch secret
-          # (what `ml-stack peers open` presents), never by headers a client writes.
-          SECRET=$(python -c "import json,pathlib; print(json.loads((pathlib.Path.home()/'.ml-stack'/'traind'/'launch'/'secret.json').read_text())['secret'])")
-          TICKET=$(curl -sf -H "$J" -H "$U" -H "X-ML-Stack-Launch: $SECRET" -X POST -d '{}' \
+          # (what `poolhouse peers open` presents), never by headers a client writes.
+          SECRET=$(python -c "import json,pathlib; print(json.loads((pathlib.Path.home()/'.poolhouse'/'traind'/'launch'/'secret.json').read_text())['secret'])")
+          TICKET=$(curl -sf -H "$J" -H "$U" -H "X-Poolhouse-Launch: $SECRET" -X POST -d '{}' \
             $B/ui/launch/ticket | python -c "import json,sys; print(json.load(sys.stdin)['ticket'])")
           C=$(curl -s -D- -o /dev/null -H "$J" -H "$U" -X POST \
             -d "{\"ticket\":\"$TICKET\"}" \
@@ -179,13 +179,13 @@ jobs:
           done
           curl -sf -o /tmp/serving -H "$U" -H "Cookie: $C" $B/ui/serving
           grep -q '"can_serve": true' /tmp/serving \
-            || { echo "the bundle cannot run a model: ml_stack.serve is missing"; exit 1; }
+            || { echo "the bundle cannot run a model: poolhouse.serve is missing"; exit 1; }
 
       # Python rather than zip(1): Windows runners have no zip in bash.
       # The name carries the tag, or the commit for a build off a branch, so two
       # downloads in one folder are two files and it is clear which is which. It
       # stays a suffix: install.sh, install.ps1 and the updater all look for
-      # "ml-stack-<os>-<arch>" inside the name, including the copies already out there.
+      # "poolhouse-<os>-<arch>" inside the name, including the copies already out there.
       - name: package it
         shell: bash
         env:

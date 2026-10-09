@@ -19,7 +19,7 @@ def test_the_real_keystore_backends_refuse_inside_a_test():
         for method in ("get_password", "set_password", "delete_password"):
             assert getattr(getattr(backend, method), "__name__", "") == "refuse_the_real_keystore", (backend, method)   # before any call
         with pytest.raises(RuntimeError, match="real OS keystore"):
-            backend.set_password(object(), "ml-stack-test", "nobody", "x")
+            backend.set_password(object(), "poolhouse-test", "nobody", "x")
 
 
 def test_a_fake_installed_through_keyrings_own_interface_still_works():
@@ -30,8 +30,8 @@ def test_a_fake_installed_through_keyrings_own_interface_still_works():
     before = keyring.get_keyring()
     keyring.set_keyring(MemoryRing())
     try:
-        keyring.set_password("ml-stack-test", "nobody", "x")
-        assert keyring.get_password("ml-stack-test", "nobody") == "x"
+        keyring.set_password("poolhouse-test", "nobody", "x")
+        assert keyring.get_password("poolhouse-test", "nobody") == "x"
     finally:
         keyring.set_keyring(before)
 
@@ -48,13 +48,13 @@ def usable_here(cls: type) -> bool:
 def test_a_process_a_test_starts_sees_the_real_keystore_as_absent():
     """The in-process guard cannot reach a child; the environment variable the suite sets does:
     a child whose active backend is the machine's own keystore finds none, and touches nothing."""
-    from ml_stack import keystore
+    from poolhouse import keystore
 
     real = [c for c in real_keystore_classes() if usable_here(c)]
     if not real:
         pytest.skip("no real keystore backend can run on this host")
     cls = real[0]
-    code = ("from ml_stack import keystore; import sys\n"
+    code = ("from poolhouse import keystore; import sys\n"
             "sys.exit(0 if not keystore.default().available() else 3)")
     src = str(Path(__file__).resolve().parents[1] / "src")
     env = {**os.environ, "PYTHONPATH": src, "PYTHON_KEYRING_BACKEND": f"{cls.__module__}.{cls.__name__}"}

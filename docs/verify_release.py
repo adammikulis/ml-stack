@@ -51,7 +51,7 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-TMP = Path(tempfile.mkdtemp(prefix="ml-stack-verify-"))
+TMP = Path(tempfile.mkdtemp(prefix="poolhouse-verify-"))
 REPO = Path(__file__).resolve().parent.parent
 WORDS = "correct horse battery staple"
 
@@ -59,8 +59,8 @@ WORDS = "correct horse battery staple"
 # -- setup ---------------------------------------------------------------
 @check("Setup", "cluster keys are random even when their join passphrases match")
 def _():
-    from ml_stack.fleet.discovery import mint_cluster
-    from ml_stack.fleet.onboard.joining import join_secret
+    from poolhouse.fleet.discovery import mint_cluster
+    from poolhouse.fleet.onboard.joining import join_secret
     secret = join_secret(WORDS, "verify-setup")
     a = mint_cluster("verify-setup", TMP / "random-a.key", join=secret)
     b = mint_cluster("verify-setup", TMP / "random-b.key", join=secret)
@@ -71,8 +71,8 @@ def _():
 
 @check("Setup", "two groups on one network cannot see each other")
 def _():
-    from ml_stack.fleet import Advertiser, Beacon, discover
-    from ml_stack.fleet.discovery import mint_cluster
+    from poolhouse.fleet import Advertiser, Beacon, discover
+    from poolhouse.fleet.discovery import mint_cluster
     port = free_port()
     ours = mint_cluster("ours", TMP / "a.key").key
     theirs = mint_cluster("theirs", TMP / "b.key").key
@@ -86,7 +86,7 @@ def _():
 
 @check("Setup", "a passphrase shorter than the minimum is refused")
 def _():
-    from ml_stack.fleet.discovery import MIN_JOIN_LENGTH, DiscoveryError, check_length
+    from poolhouse.fleet.discovery import MIN_JOIN_LENGTH, DiscoveryError, check_length
     try:
         check_length("x" * (MIN_JOIN_LENGTH - 1))
     except DiscoveryError as exc:
@@ -96,8 +96,8 @@ def _():
 
 @check("Setup", "the group is remembered, so a passphrase can be checked later")
 def _():
-    from ml_stack.fleet.discovery import cluster_group, mint_cluster
-    from ml_stack.fleet.onboard.joining import join_secret, matches
+    from poolhouse.fleet.discovery import cluster_group, mint_cluster
+    from poolhouse.fleet.onboard.joining import join_secret, matches
     key = TMP / "grp.key"
     mint_cluster("garage", key, join=join_secret(WORDS, "garage"))
     assert cluster_group(key) == "garage"
@@ -109,7 +109,7 @@ def _():
 # -- the daemon ----------------------------------------------------------
 class Box:
     def __init__(self, name="box", slots=1, labels=(), extra=None, host="127.0.0.1"):
-        from ml_stack.fleet import (
+        from poolhouse.fleet import (
             Daemon,
             JobRunner,
             Peer,
@@ -117,8 +117,8 @@ class Box:
             load_or_create_token,
             make_handler,
         )
-        from ml_stack.fleet.settings import Settings
-        from ml_stack.fleet.ui import UI
+        from poolhouse.fleet.settings import Settings
+        from poolhouse.fleet.ui import UI
         root = TMP / name
         self.files = root / "files"
         self.files.mkdir(parents=True)
@@ -144,7 +144,7 @@ def _():
     box = Box("pull")
     try:
         job = box.peer.submit([sys.executable, "-c",
-            "import os,pathlib;d=pathlib.Path(os.environ['ML_STACK_OUT']);"
+            "import os,pathlib;d=pathlib.Path(os.environ['POOLHOUSE_OUT']);"
             "d.mkdir(parents=True,exist_ok=True);(d/'r.txt').write_text('done')"])
         box.peer.wait(job["id"], poll_s=0.1, timeout_s=30)
         got = box.peer.pull(f"jobs/{job['id']}/out/r.txt", TMP / "pulled.txt")
@@ -202,7 +202,7 @@ def _():
 # -- placement -----------------------------------------------------------
 @check("Placement", "vendors are distinguished: cuda, rocm and any-GPU differ")
 def _():
-    from ml_stack.fleet import Requires
+    from poolhouse.fleet import Requires
     amd = {"backends": ["torch"], "vendor": "amd", "rocm": True, "cuda": False,
            "accelerator": True, "labels": []}
     why = Requires(backend="cuda").why_not("amd", amd, 1, 1)
@@ -214,7 +214,7 @@ def _():
 
 @check("Placement", "an unmeasured machine is tried, not skipped")
 def _():
-    from ml_stack.fleet import Candidate, choose
+    from poolhouse.fleet import Candidate, choose
     fast = Candidate(peer=None, name="fast", report={}, slots=1, free=1, rate=1000.0)
     new = Candidate(peer=None, name="new", report={}, slots=1, free=1, rate=None)
     assert choose([fast, new]).name == "new"
@@ -223,7 +223,7 @@ def _():
 
 @check("Placement", "work is refused with every machine's reason")
 def _():
-    from ml_stack.fleet import Rates, Requires, Unit, run
+    from poolhouse.fleet import Rates, Requires, Unit, run
     gpu, pi = Box("gpu-lbl", labels=("train",)), Box("pi-lbl", labels=("prep",))
     try:
         unit = Unit(id="needs-cuda", argv=["true"], requires=Requires(backend="cuda"))
@@ -237,7 +237,7 @@ def _():
 
 @check("Placement", "labels keep prep work off the training machines")
 def _():
-    from ml_stack.fleet import Rates, Requires, Unit, run
+    from poolhouse.fleet import Rates, Requires, Unit, run
     gpu, pi = Box("g2", labels=("train",)), Box("p2", slots=2, labels=("prep",))
     try:
         units = [Unit(id=f"u{i}", argv=[sys.executable, "-c", "pass"],
@@ -254,7 +254,7 @@ def _():
 @check("Scheduling", "working hours block new work, including past midnight")
 def _():
     from datetime import datetime
-    from ml_stack.fleet.availability import Availability
+    from poolhouse.fleet.availability import Availability
     day = Availability.from_specs(busy=["mon-fri 09:00-17:00"])
     assert not day.open_at(datetime.fromisoformat("2026-08-24 10:00"))
     assert day.open_at(datetime.fromisoformat("2026-08-24 18:00"))
@@ -266,7 +266,7 @@ def _():
 
 @check("Scheduling", "pausing stops running work and requeues it")
 def _():
-    from ml_stack.fleet.availability import Availability
+    from poolhouse.fleet.availability import Availability
     box = Box("pause")
     sched = Availability()
     box.runner.gate = lambda: sched.may_start()
@@ -286,7 +286,7 @@ def _():
 
 @check("Scheduling", "a pause survives a restart")
 def _():
-    from ml_stack.fleet.availability import Availability
+    from poolhouse.fleet.availability import Availability
     a = Availability(); a.pause(reason="gaming"); a.save(TMP / "av.json")
     back = Availability.load(TMP / "av.json")
     assert back.paused and "gaming" in back.may_start()[1]
@@ -297,7 +297,7 @@ def _():
 @check("Training", "a language model trains and the loss falls")
 def _():
     import math
-    from ml_stack.train.run import run as train_run
+    from poolhouse.train.run import run as train_run
     data = TMP / "corpus"; data.mkdir()
     (data / "c.jsonl").write_text("\n".join(json.dumps(
         {"text": f"The quick brown fox jumps over the lazy dog {i}."}) for i in range(300)))
@@ -310,7 +310,7 @@ def _():
 @check("Training", "a classifier generalises to rows it never saw")
 def _():
     import math
-    from ml_stack.train.run import run as train_run
+    from poolhouse.train.run import run as train_run
     data = TMP / "reviews"; data.mkdir()
     rows = [{"text": f"This was {'great' if i % 2 else 'awful'}, truly.",
              "label": "good" if i % 2 else "bad"} for i in range(300)]
@@ -323,7 +323,7 @@ def _():
 
 @check("Training", "a dry run leaves no checkpoint behind")
 def _():
-    from ml_stack.train.run import run as train_run
+    from poolhouse.train.run import run as train_run
     out = TMP / "dry"
     got = train_run("classify-text", {"size": "small"}, TMP / "reviews", out, dry=True)
     assert got["dry_run"] and not [p for p in out.iterdir() if p.is_dir()]
@@ -332,7 +332,7 @@ def _():
 
 @check("Training", "resuming continues rather than restarting")
 def _():
-    from ml_stack.train.run import run as train_run
+    from poolhouse.train.run import run as train_run
     train_run("text-lm", {"size": "small", "steps": 60, "context": 64},
               TMP / "corpus", TMP / "resume")
     again = train_run("text-lm", {"size": "small", "steps": 120, "context": 64},
@@ -343,8 +343,8 @@ def _():
 
 @check("Training", "the two array backends compute the same thing")
 def _():
-    from ml_stack.backend import available, get_backend
-    from ml_stack.train.parity import CASES, check_all
+    from poolhouse.backend import available, get_backend
+    from poolhouse.train.parity import CASES, check_all
     if sorted(available()) != ["mlx", "torch"]:
         return f"only {available()} here, so there is nothing to compare"
     results = check_all(get_backend("torch"), get_backend("mlx"))
@@ -355,7 +355,7 @@ def _():
 
 @check("Training", "an undeclared setting is refused, not ignored")
 def _():
-    from ml_stack.train.recipes import validate
+    from poolhouse.train.recipes import validate
     try:
         validate("text-lm", {"lr_schedule": "cosine"})
     except ValueError as exc:
@@ -380,13 +380,13 @@ def _():
 
 @check("Interface", "setup is refused from another machine")
 def _():
-    from ml_stack.fleet.discovery import primary_ip
+    from poolhouse.fleet.discovery import primary_ip
     box = Box("guard", host="0.0.0.0")
     try:
         req = urllib.request.Request(
             f"http://{primary_ip()}:{box.port}/ui/setup/join",
             data=json.dumps({"passphrase": WORDS}).encode(), method="POST")
-        req.add_header("X-ML-Stack-UI", "1")
+        req.add_header("X-Poolhouse-UI", "1")
         req.add_header("Content-Type", "application/json")
         try:
             urllib.request.urlopen(req, timeout=5)
@@ -407,7 +407,7 @@ def _():
             req = urllib.request.Request(
                 f"http://127.0.0.1:{box.port}/ui/session",
                 data=json.dumps(body).encode(), method="POST")
-            req.add_header("X-ML-Stack-UI", "1")
+            req.add_header("X-Poolhouse-UI", "1")
             req.add_header("Content-Type", "application/json")
             try:
                 with urllib.request.urlopen(req, timeout=10) as r:
@@ -417,7 +417,7 @@ def _():
         urllib.request.urlopen(urllib.request.Request(
             f"http://127.0.0.1:{box.port}/ui/setup/join",
             data=json.dumps({"passphrase": WORDS}).encode(), method="POST",
-            headers={"X-ML-Stack-UI": "1", "Content-Type": "application/json"}), timeout=20)
+            headers={"X-Poolhouse-UI": "1", "Content-Type": "application/json"}), timeout=20)
         assert post({"passphrase": "wrong words here"}) == 401
         assert post({"passphrase": WORDS}) == 200
         return "typo then correct -> signed in"
@@ -427,7 +427,7 @@ def _():
 
 @check("Interface", "settings are suggested from the machine's own hardware")
 def _():
-    from ml_stack.fleet.settings import suggest
+    from poolhouse.fleet.settings import suggest
     gpu = suggest({"accelerator": True, "gpu": "RTX 4090", "cpus": 16})
     cpu = suggest({"accelerator": False, "cpus": 12})
     assert gpu["labels"].value == ["train"] and "RTX 4090" in gpu["labels"].why
@@ -437,7 +437,7 @@ def _():
 
 @check("Interface", "closing asks once, then remembers")
 def _():
-    from ml_stack.fleet.settings import Settings
+    from poolhouse.fleet.settings import Settings
     path = TMP / "close.json"
 
     Settings(on_close="").save(path)
@@ -445,9 +445,9 @@ def _():
     Settings(on_close="background").save(path)
     assert Settings.load(path).on_close == "background"
 
-    page = (REPO / "src/ml_stack/fleet/web/components/close-sheet.html").read_text()
+    page = (REPO / "src/poolhouse/fleet/web/components/close-sheet.html").read_text()
     window = (REPO / "app/src-tauri/src/settings.rs").read_text()
-    assert "mlStackAskOnClose" in page and 'close_choice' in page
+    assert "poolhouseAskOnClose" in page and 'close_choice' in page
     assert '"on_close"' in window and '"settings.json"' in window
     return "unticked -> ask again; ticked -> remembered"
 
@@ -455,7 +455,7 @@ def _():
 # -- telemetry -----------------------------------------------------------
 @check("Telemetry", "this machine reports its own temperature and clocks")
 def _():
-    from ml_stack.train.accelerator import report
+    from poolhouse.train.accelerator import report
     got = report()
     have = [k for k in ("temp_c", "clock_mhz", "power_w", "gpu_util_pct") if k in got]
     if not have:
@@ -465,7 +465,7 @@ def _():
 
 @check("Telemetry", "a machine says how much memory is in use and how busy it is")
 def _():
-    from ml_stack.fleet.device import stdlib_device_report
+    from poolhouse.fleet.device import stdlib_device_report
 
     got = stdlib_device_report()
     assert got.get("ram_gb"), "no memory total"
@@ -479,7 +479,7 @@ def _():
 
 @check("Telemetry", "a machine with no framework still reports what it is")
 def _():
-    from ml_stack.fleet.device import stdlib_device_report
+    from poolhouse.fleet.device import stdlib_device_report
     got = stdlib_device_report()
     assert got["cpus"] >= 1 and got["arch"]
     assert "cuda" not in got and "gpu" not in got
@@ -497,11 +497,11 @@ def _():
         capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-200:]
     names = zipfile.ZipFile(sorted(out.glob("*.whl"))[-1]).namelist()
-    from ml_stack.fleet.page import COMPONENTS
+    from poolhouse.fleet.page import COMPONENTS
     for asset in ("shell.html", "style.css"):
-        assert f"ml_stack/fleet/web/{asset}" in names, asset
+        assert f"poolhouse/fleet/web/{asset}" in names, asset
     for name in COMPONENTS:
-        assert f"ml_stack/fleet/web/components/{name}.html" in names, name
+        assert f"poolhouse/fleet/web/components/{name}.html" in names, name
     return f"shell.html, style.css and {len(COMPONENTS)} components"
 
 
@@ -525,9 +525,9 @@ def _():
     import threading
     from http.server import ThreadingHTTPServer
 
-    from ml_stack.fleet import Daemon, JobRunner, Models, make_handler
-    from ml_stack.fleet.daemon import load_or_create_token
-    from ml_stack.fleet.discovery import mint_cluster
+    from poolhouse.fleet import Daemon, JobRunner, Models, make_handler
+    from poolhouse.fleet.daemon import load_or_create_token
+    from poolhouse.fleet.discovery import mint_cluster
 
     key = mint_cluster("verify-models", TMP / "models.key").key
     where = TMP / "haver"
@@ -566,7 +566,7 @@ def _():
     import json as js
     import threading
 
-    from ml_stack.fleet import Models
+    from poolhouse.fleet import Models
 
     store = TMP / "parts"
     store.mkdir(parents=True, exist_ok=True)
@@ -605,7 +605,7 @@ def _():
     import os
     import time as clock
 
-    from ml_stack.fleet import Models
+    from poolhouse.fleet import Models
 
     store = TMP / "stopped"
     store.mkdir(parents=True, exist_ok=True)
@@ -634,7 +634,7 @@ def _():
     import threading
     import time as clock
 
-    from ml_stack.fleet.models import CHUNK, Downloads, Models
+    from poolhouse.fleet.models import CHUNK, Downloads, Models
 
     payload = os.urandom(3 * CHUNK)
 
@@ -684,7 +684,7 @@ def _():
 @check("Models", "the model list is what Hugging Face says is popular now", network=True)
 def _():
     """A list written into the code is out of date the day it ships."""
-    from ml_stack.fleet.catalogue import SUGGESTED, popular
+    from poolhouse.fleet.catalogue import SUGGESTED, popular
 
     got = popular(free_gb=1024.0, ram_gb=1024.0, limit=12)
     assert len(got) >= 5, f"only {len(got)} came back"
@@ -707,13 +707,13 @@ def _():
     import urllib.error
     import urllib.request
 
-    from ml_stack.fleet.catalogue import SUGGESTED
-    from ml_stack.fleet.weights import resolve
+    from poolhouse.fleet.catalogue import SUGGESTED
+    from poolhouse.fleet.weights import resolve
 
     checked = []
     for pick in SUGGESTED:
         req = urllib.request.Request(resolve(pick.ref), method="HEAD",
-                                     headers={"User-Agent": "ml-stack"})
+                                     headers={"User-Agent": "poolhouse"})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 size = int(r.headers.get("Content-Length") or 0)
@@ -736,10 +736,10 @@ def _():
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    from ml_stack.fleet import Daemon, JobRunner, Serving, make_handler
-    from ml_stack.fleet.chat import find, reply_text, stream, targets
-    from ml_stack.fleet.daemon import load_or_create_token
-    from ml_stack.fleet.discovery import derive_token, mint_cluster
+    from poolhouse.fleet import Daemon, JobRunner, Serving, make_handler
+    from poolhouse.fleet.chat import find, reply_text, stream, targets
+    from poolhouse.fleet.daemon import load_or_create_token
+    from poolhouse.fleet.discovery import derive_token, mint_cluster
 
     class Model(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -805,12 +805,12 @@ def _():
     import threading
     from http.server import ThreadingHTTPServer
 
-    from ml_stack import speech as package
-    from ml_stack.fleet import Daemon, JobRunner, make_handler
-    from ml_stack.fleet.daemon import load_or_create_token
-    from ml_stack.fleet.remote import Peer
-    from ml_stack.media import wav
-    from ml_stack.speech import ProviderHealth, Registry, Segment, Transcript
+    from poolhouse import speech as package
+    from poolhouse.fleet import Daemon, JobRunner, make_handler
+    from poolhouse.fleet.daemon import load_or_create_token
+    from poolhouse.fleet.remote import Peer
+    from poolhouse.media import wav
+    from poolhouse.speech import ProviderHealth, Registry, Segment, Transcript
 
     class Ears:
         name = "fake"
@@ -857,7 +857,7 @@ def _():
 
 @check("Chat", "a conversation is still there after a restart")
 def _():
-    from ml_stack.fleet import Conversations
+    from poolhouse.fleet import Conversations
 
     where = TMP / "chats"
     first = Conversations(where)
@@ -878,7 +878,7 @@ def _():
     import threading as th
     import time as clock
 
-    from ml_stack.fleet import updates
+    from poolhouse.fleet import updates
 
     tried = th.Event()
     real = updates.apply_if_newer
@@ -902,9 +902,9 @@ def _():
 # -- removing it ---------------------------------------------------------
 @check("Removing", "an uninstall leaves your models and your own files alone")
 def _():
-    from ml_stack.fleet.uninstall import plan, remove
+    from poolhouse.fleet.uninstall import plan, remove
 
-    home = TMP / "leaving" / ".ml-stack"
+    home = TMP / "leaving" / ".poolhouse"
     root = home / "traind"
     for name in ("chats", "files", "models", "env"):
         (root / name).mkdir(parents=True, exist_ok=True)
@@ -932,7 +932,7 @@ def _():
 def _():
     import pytest
     pytest.importorskip("ladybug")
-    from ml_stack.graph import GraphStore
+    from poolhouse.graph import GraphStore
     path = TMP / "graph" / "g"
     graph = {"nodes": [{"id": "p:a", "kind": "person", "label": "Ada", "mentions": 2,
                         "attrs": {"role": "analyst"}, "messages": ["m1"]},
@@ -956,7 +956,7 @@ def _():
 def _():
     import pytest
     pytest.importorskip("ladybug")
-    from ml_stack.graph import GraphStore, WouldLoseTooMuch, count_store, replace
+    from poolhouse.graph import GraphStore, WouldLoseTooMuch, count_store, replace
     path = TMP / "guard" / "g"
     with GraphStore(path) as store:
         store.write({"nodes": [{"id": f"n{i}", "kind": "t", "label": str(i), "mentions": 1,
@@ -975,8 +975,8 @@ def _():
 def _():
     import pytest
     pytest.importorskip("ladybug")
-    from ml_stack.graph import GraphStore, count_store, roll_back, snapshot
-    from ml_stack.graph.snapshots import snapshots
+    from poolhouse.graph import GraphStore, count_store, roll_back, snapshot
+    from poolhouse.graph.snapshots import snapshots
     path = TMP / "snap" / "g"
     with GraphStore(path) as store:
         store.write({"nodes": [{"id": f"n{i}", "kind": "t", "label": str(i), "mentions": 1,
@@ -993,7 +993,7 @@ def _():
 
 @check("Graphs", "finding things fuses characters, words and meaning")
 def _():
-    from ml_stack.graph.search import hybrid, lexical, rrf
+    from poolhouse.graph.search import hybrid, lexical, rrf
     graph = {"nodes": [{"id": "t:r", "kind": "topic", "label": "robotics", "mentions": 2,
                         "attrs": {}, "messages": []},
                        {"id": "p:b", "kind": "person", "label": "Bea", "mentions": 1,
@@ -1016,7 +1016,7 @@ def _():
 
 @check("Graphs", "an entry nobody wrote about takes its meaning from its neighbours")
 def _():
-    from ml_stack.graph import smooth
+    from poolhouse.graph import smooth
     graph = {"nodes": [{"id": "p:a"}, {"id": "p:b"}, {"id": "p:c"}],
              "edges": [{"source": "p:c", "target": "p:a", "rel": "works_with"},
                        {"source": "p:c", "target": "p:b", "rel": "works_with"}]}
@@ -1028,7 +1028,7 @@ def _():
 
 @check("Graphs", "a place becomes a point, asked about once, and the closest are joined")
 def _():
-    from ml_stack.graph import geocode, points
+    from poolhouse.graph import geocode, points
     where = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84), "Kyoto": (35.01, 135.77)}
     asked = []
 
@@ -1058,7 +1058,7 @@ def _():
 
 @check("Graphs", "a hierarchy that runs in a ring is reported and never broken")
 def _():
-    from ml_stack.graph import cycles
+    from poolhouse.graph import cycles
     chain = [{"source": "u:a", "rel": "part_of", "target": "u:b"},
              {"source": "u:b", "rel": "part_of", "target": "u:c"}]
     assert cycles(chain) == []
@@ -1072,7 +1072,7 @@ def _():
 @check("Graphs", "the model reads a graph with tools, and invented ids are refused")
 def _():
     from dataclasses import dataclass
-    from ml_stack.graph.conversation import converse
+    from poolhouse.graph.conversation import converse
     graph = {"nodes": [{"id": "p:a", "kind": "person", "label": "Ada", "mentions": 1,
                         "attrs": {}, "messages": []}], "edges": [], "messages": {}}
 
@@ -1102,7 +1102,7 @@ def _():
 def _():
     import pytest
     pytest.importorskip("ladybug")
-    from ml_stack.ingest import gold
+    from poolhouse.ingest import gold
     root = Path(__file__).resolve().parent.parent
     passages = gold.read_gold(root / "tests" / "fixtures" / "extraction-gold.json")
     shape = json.loads((root / "contracts" / "extraction-document.schema.json").read_text())
@@ -1121,7 +1121,7 @@ def _():
 # -- measuring models ------------------------------------------------------
 @check("Measuring", "the settings a model scored best with is on file per workload, not remembered")
 def _():
-    from ml_stack.serve import profile_for
+    from poolhouse.serve import profile_for
     named = "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"
     found = profile_for(named)
     assert found is not None, "no shipped profile for the flagship"
@@ -1137,7 +1137,7 @@ def _():
 
 @check("Measuring", "an evening of measurement is a file checked before the first model loads")
 def _():
-    from ml_stack.bench import queue
+    from poolhouse.bench import queue
     steps = queue.read(Path(__file__).resolve().parent / "examples" / "flash-next-restart.queue")
     assert steps and all(s.argv for s in steps), "the shipped queue parsed to nothing"
     try:
@@ -1152,9 +1152,9 @@ def _():
 # -- placing a fleet -------------------------------------------------------
 @check("Fleet", "a plan slots the wanted conversations and names what fits nowhere")
 def _():
-    from ml_stack.fleet.plan import Room, place
-    from ml_stack.serve.fit import Fit
-    from ml_stack.serve.profile import Profile
+    from poolhouse.fleet.plan import Room, place
+    from poolhouse.serve.fit import Fit
+    from poolhouse.serve.profile import Profile
     gb, kb = 2**30, 2**10
     big = Profile(model="big-120b-UD-Q4_K_XL.gguf", right=0.85, questions=100,
                   seconds_per_question=26.0)
@@ -1177,7 +1177,7 @@ def _():
 # -- agents and the web ----------------------------------------------------
 @check("Agents", "the same functions are MCP tools an agent can call")
 def _():
-    from ml_stack.mcp import TOOLS
+    from poolhouse.mcp import TOOLS
     names = {t.name for t in TOOLS}
     need = {"serve_up", "serve_down", "serve_status", "models_find", "models_files",
             "models_fetch", "bench_run", "bench_status", "fleet_peers", "world_make",
@@ -1189,7 +1189,7 @@ def _():
 
 @check("Web", "the web tools refuse the machine they run on")
 def _():
-    from ml_stack.web import Refused, check
+    from poolhouse.web import Refused, check
     for url in ("file:///etc/passwd", "http://localhost/x", "http://127.0.0.1:8080/v1/chat",
                 "http://10.1.2.3/x", "http://192.168.2.44:8770/", "http://[::1]:8080/"):
         try:
@@ -1203,7 +1203,7 @@ def _():
 # -- reading a site ------------------------------------------------------
 @check("Reading a site", "a virtualised list is read all the way, not one screenful")
 def _():
-    from ml_stack.scrape import SLACK, preset, read_all
+    from poolhouse.scrape import SLACK, preset, read_all
     rows = [{"key": f"17879371{i:02d}.000000", "author": "x", "text": f"row {i}"}
             for i in range(9)]
 

@@ -1,4 +1,4 @@
-"""``ml-stack-draft``: the arms it measures, what it prints, and what it refuses.
+"""``poolhouse-draft``: the arms it measures, what it prints, and what it refuses.
 
 Nothing here serves a model. The work each arm does is a stand-in that returns rows of the
 shape a real run keeps, so the arithmetic, the table and the recommendation are exercised
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack import draft
-from ml_stack.draft import Arm, Measured, arms_for, recommendation, table
+from poolhouse import draft
+from poolhouse.draft import Arm, Measured, arms_for, recommendation, table
 
 #: How many rows one arm's totals are split over, so a sum is what is being tested.
 EACH = 4
@@ -92,7 +92,7 @@ class TestTheArms:
         assert every[0].over["draft_n_max"] == 4
 
     def test_an_arm_lays_over_a_run_without_touching_the_rest_of_it(self):
-        from ml_stack.serve.serving import Config, Serving
+        from poolhouse.serve.serving import Config, Serving
 
         config = Config(serving=Serving(model="m.gguf", slot_context=32768, cache_type="q8_0"))
         arm = Arm("head@n8", {"draft": "h.gguf", "spec_type": "draft-mtp",
@@ -148,7 +148,7 @@ class TestWhatToServe:
              Measured("head@n8", rows(20.0, 1000, drafted=(800, 600)))],
             model="/models/marrowgate-Q4.gguf", head="/models/mtp-marrowgate.gguf")
         assert "serve head@n8" in said[0]
-        assert said[1].strip() == ("ml-stack-serve up marrowgate-Q4.gguf --draft "
+        assert said[1].strip() == ("poolhouse-serve up marrowgate-Q4.gguf --draft "
                                    "mtp-marrowgate.gguf --spec-n-max 8")
 
     def test_a_head_that_is_slower_than_none_is_not_recommended(self):
@@ -157,7 +157,7 @@ class TestWhatToServe:
              Measured("head@n8", rows(40.0, 1000, drafted=(800, 100)))],
             model="/models/marrowgate-Q4.gguf", head="/models/mtp-marrowgate.gguf")
         assert said[0].startswith("serve no head")
-        assert said[1].strip() == "ml-stack-serve up marrowgate-Q4.gguf"
+        assert said[1].strip() == "poolhouse-serve up marrowgate-Q4.gguf"
 
     def test_the_heads_cache_type_reaches_the_line(self):
         said = recommendation(
@@ -172,7 +172,7 @@ class TestWhatToServe:
             [Measured("none", rows(40.0, 1000)),
              Measured("head@n32", rows(20.0, 1000, drafted=(800, 600)))],
             model="mlx:quarry-lab/marrowgate-MLX-4bit", head="quarry-lab/marrowgate-DFlash2")
-        assert said[1].strip() == ("ml-stack-serve up mlx:quarry-lab/marrowgate-MLX-4bit "
+        assert said[1].strip() == ("poolhouse-serve up mlx:quarry-lab/marrowgate-MLX-4bit "
                                    "--draft quarry-lab/marrowgate-DFlash2 --spec-n-max 32")
 
     def test_without_a_baseline_it_recommends_nothing(self):
@@ -195,7 +195,7 @@ class TestTheCommand:
 
     def test_a_build_that_is_not_here_stops_before_a_head_is_chosen(self, tmp_path,
                                                                     monkeypatch, capsys):
-        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path))
         monkeypatch.setattr(draft, "located", lambda m: None)
         monkeypatch.setattr(draft, "choose_head", lambda *a, **k: pytest.fail("chose a head"))
         assert draft.main(["marrowgate-Q4.gguf", "--build", "gone"]) == 1
@@ -204,7 +204,7 @@ class TestTheCommand:
         assert "--name gone" in said.out + said.err
 
     def test_a_busy_machine_refuses_before_anything_is_served(self, monkeypatch, capsys):
-        from ml_stack.bench.quiet import Quiet
+        from poolhouse.bench.quiet import Quiet
 
         served = []
         monkeypatch.setattr(draft, "located", lambda m: None)
@@ -222,7 +222,7 @@ class TestTheCommand:
         assert "not quiet" in said and "something else holds the card" in said
 
     def test_anyway_measures_and_marks_every_row(self, monkeypatch, capsys):
-        from ml_stack.bench.quiet import Quiet
+        from poolhouse.bench.quiet import Quiet
 
         asked = []
 
@@ -244,7 +244,7 @@ class TestTheCommand:
         assert " NO" in capsys.readouterr().out
 
     def test_for_ingest_without_a_document_says_what_to_do(self, monkeypatch, capsys):
-        from ml_stack.bench.quiet import Quiet
+        from poolhouse.bench.quiet import Quiet
 
         monkeypatch.setattr(draft, "located", lambda m: None)
         monkeypatch.setattr(draft, "build_for", lambda model, asked: "")

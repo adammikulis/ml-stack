@@ -18,7 +18,7 @@ projects; subscriptions; logging of everything.
 
 ## Views
 * Terminal: `board list|read|post|threads`, `dm NAME`, `subscribe|unsubscribe|subs`, `digest`.
-* UI: a custom element `ml-board` in `src/ml_stack/ui/` plus a read-only local route (same Host and
+* UI: a custom element `ml-board` in `src/poolhouse/ui/` plus a read-only local route (same Host and
   Origin checks as the other local servers); the shell Codex builds places it as a Board tab. Every
   message is rendered as plain text, never HTML; no tokens on the page. The person (the lead/human
   role) can read every board and DM read-only; agents see only what they belong to.

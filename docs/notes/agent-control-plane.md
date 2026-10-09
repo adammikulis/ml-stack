@@ -1,6 +1,6 @@
-# Driving agents entirely from the ml-stack UI (planned, not built)
+# Driving agents entirely from the Poolhouse UI (planned, not built)
 
-Owner goal, 2026-10-03: a person should be able to drive agents entirely through the ml-stack UI,
+Owner goal, 2026-10-03: a person should be able to drive agents entirely through the Poolhouse UI,
 without opening an editor.
 
 ## Pieces that exist or are in flight
@@ -11,7 +11,7 @@ leases, the test worker queue, the sentinel and memory.
 
 ## Missing
 1. **Agent runner:** start, supervise, resume and stop agents, each in its own worktree with its
-   workspace identity and role wired in. Adapters: our `ml-stack-chat`; Claude through its Agent
+   workspace identity and role wired in. Adapters: our `poolhouse-chat`; Claude through its Agent
    SDK; Codex through its app-server protocol.
 2. **Live transcript** per agent: tool calls and results as they happen, with a stop button.
 3. **Review view:** per-agent diffs, branch and worktree status, gate results from a ledger, and a
@@ -36,11 +36,11 @@ stopped from the UI even if its process is wedged.
 ## First runner milestone: start a local model from the UI and have it contribute (owner priority)
 From the UI: pick a downloaded model (fit meter, a recommended default: the best MoE ranked for
 agents, thinking off, a warning on quants known to be slow on Metal), a role (read-only, approve-first,
-plan-and-go), a project and a task or "pick up work from the board", then Start. ml-stack leases the model
+plan-and-go), a project and a task or "pick up work from the board", then Start. Poolhouse leases the model
 through the Broker, creates a fresh worktree and branch, connects the agent to the workspace with its
-own identity, and launches it there with the board brief. The adapter reuses `ml-stack-claude MODEL`
+own identity, and launches it there with the board brief. The adapter reuses `poolhouse-claude MODEL`
 (Claude Code on a locally served model, in the settings it scored best with) so the local model has
-real coding tools; `ml-stack-chat` has none and only operates ml-stack. Its approval prompts route to
+real coding tools; `poolhouse-chat` has none and only operates poolhouse. Its approval prompts route to
 the Requests inbox; its transcript streams into an Agents panel with a stop button; its work stays in
 its worktree and branch, tests go through the shared queue, and merging needs the gates and the person.
 Expectations: small local models did not finish a board end to end in the live runs, so scope the first

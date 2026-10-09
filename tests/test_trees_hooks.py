@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_trees import commit, git, make_repo, tree
 
-from ml_stack import trees
+from poolhouse import trees
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -22,14 +22,14 @@ def main(tmp_path):
 
 def as_agent(name: str) -> dict:
     """The environment a hook runs a workspace command in."""
-    return {**os.environ, "ML_STACK_WORKSPACE_AGENT": name}
+    return {**os.environ, "POOLHOUSE_WORKSPACE_AGENT": name}
 
 
 @pytest.fixture
 def board(tmp_path, monkeypatch):
-    """A stand-in `ml-stack-workspace` on PATH that records every call, and the hook module."""
+    """A stand-in `poolhouse-workspace` on PATH that records every call, and the hook module."""
     calls = tmp_path / "calls.txt"
-    stub = tmp_path / "bin" / "ml-stack-workspace"
+    stub = tmp_path / "bin" / "poolhouse-workspace"
     stub.parent.mkdir()
     stub.write_text(f'#!/bin/sh\necho "$@" >> {calls}\n')
     stub.chmod(0o755)
@@ -80,7 +80,7 @@ def test_the_post_commit_check_only_looks_at_the_tree_committed_in(main, board):
 def test_delivery_to_a_slow_board_does_not_hold_up_the_hook(main, board, monkeypatch):
     tree_watch, calls = board
     monkeypatch.setattr(tree_watch, "DETACH", True)
-    stub = calls.parent / "bin" / "ml-stack-workspace"
+    stub = calls.parent / "bin" / "poolhouse-workspace"
     stub.write_text(f'#!/bin/sh\nsleep 2\necho "$@" >> {calls}\n')
     trees.set_lead(main, "lead")
     path = tree(main, "big", owner="worker-x", now=time.time())

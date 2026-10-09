@@ -24,8 +24,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import ml_stack.serve.binary as binary_module
-from ml_stack.serve import (
+import poolhouse.serve.binary as binary_module
+from poolhouse.serve import (
     build,
     build_persist,
     build_platform,
@@ -104,14 +104,14 @@ class FakeToolchain:
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    """Every managed path lives under tmp_path, never a real ~/.ml-stack."""
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+    """Every managed path lives under tmp_path, never a real ~/.poolhouse."""
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "poolhouse"))
     monkeypatch.setattr(build_persist, "PERSIST_PLIST",
                         tmp_path / "Library" / "LaunchAgents" / f"{build_persist.PERSIST_LABEL}.plist")
     monkeypatch.setattr(build_report, "find_binary", lambda *a, **k: None)
     monkeypatch.setattr(build_release, "arches_at", lambda ref, **k: set())
     # No patches, unless a test points this at a directory holding some.
-    monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(tmp_path / "no-patches"))
+    monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(tmp_path / "no-patches"))
     yield
 
 
@@ -309,7 +309,7 @@ class TestFindBinaryPrefersTheManagedBuild:
     def test_it_wins_over_path_but_not_over_the_env_var_or_an_explicit_path(
             self, tmp_path, monkeypatch):
 
-        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
         managed = binary_module.managed_current()
         managed.mkdir(parents=True)
         (managed / "llama-server").write_text("#!/bin/sh\nexit 0\n")
@@ -341,7 +341,7 @@ class TestFindBinaryPrefersTheManagedBuild:
     def test_a_named_build_wins_over_current_but_not_over_explicit_or_the_env_var(
             self, tmp_path, monkeypatch):
 
-        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
         current = binary_module.managed_current()
         current.mkdir(parents=True)
         (current / "llama-server").write_text("#!/bin/sh\nexit 0\n")
@@ -354,7 +354,7 @@ class TestFindBinaryPrefersTheManagedBuild:
 
         monkeypatch.delenv("LLAMA_CPP_SERVER", raising=False)
         monkeypatch.delenv("LLAMA_CPP_DIR", raising=False)
-        monkeypatch.delenv("MLSTACK_LLAMA_BUILD", raising=False)
+        monkeypatch.delenv("POOLHOUSE_LLAMA_BUILD", raising=False)
         monkeypatch.setenv("PATH", "")
 
         # No build named: current, as always.
@@ -364,8 +364,8 @@ class TestFindBinaryPrefersTheManagedBuild:
         assert (binary_module.find_binary("llama-server", build="unsloth")
                 == unsloth / "llama-server")
 
-        # $MLSTACK_LLAMA_BUILD does the same for a caller with no build= to pass.
-        monkeypatch.setenv("MLSTACK_LLAMA_BUILD", "unsloth")
+        # $POOLHOUSE_LLAMA_BUILD does the same for a caller with no build= to pass.
+        monkeypatch.setenv("POOLHOUSE_LLAMA_BUILD", "unsloth")
         assert binary_module.find_binary("llama-server") == unsloth / "llama-server"
 
         # An explicit path, or $LLAMA_CPP_SERVER, still wins over a named build.
@@ -388,11 +388,11 @@ class TestFindBinaryPrefersTheManagedBuild:
         with pytest.raises(binary_module.BinaryNotFound) as refused:
             binary_module.find_binary("llama-server", build="missing")
         assert "'missing'" in str(refused.value)
-        assert "ml-stack-serve build --repo OWNER/REPO" in str(refused.value)
+        assert "poolhouse-serve build --repo OWNER/REPO" in str(refused.value)
         assert "--name missing" in str(refused.value)
 
-        monkeypatch.setenv("MLSTACK_LLAMA_BUILD", "missing")
-        with pytest.raises(binary_module.BinaryNotFound, match="MLSTACK_LLAMA_BUILD"):
+        monkeypatch.setenv("POOLHOUSE_LLAMA_BUILD", "missing")
+        with pytest.raises(binary_module.BinaryNotFound, match="POOLHOUSE_LLAMA_BUILD"):
             binary_module.find_binary("llama-server")
 
 
@@ -501,15 +501,15 @@ class TestPersist:
         monkeypatch.setattr(subprocess, "run",
                             lambda *a, **k: calls.append((a, k)) or _ok())
         monkeypatch.setattr(shutil, "which",
-                            lambda name: "/usr/local/bin/ml-stack-serve"
-                            if name == "ml-stack-serve" else None)
+                            lambda name: "/usr/local/bin/poolhouse-serve"
+                            if name == "poolhouse-serve" else None)
 
         assert build.cmd_build(_args(persist=True)) == 0
         assert build_persist.PERSIST_PLIST.is_file()
 
         import plistlib
         plist = plistlib.loads(build_persist.PERSIST_PLIST.read_bytes())
-        assert plist["ProgramArguments"] == ["/usr/local/bin/ml-stack-serve", "build"]
+        assert plist["ProgramArguments"] == ["/usr/local/bin/poolhouse-serve", "build"]
         assert plist["StartInterval"] == build_persist.WEEK_SECONDS
         assert plist["Label"] == build_persist.PERSIST_LABEL
 
@@ -528,8 +528,8 @@ class TestPersist:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         monkeypatch.setattr(shutil, "which",
-                            lambda name: "C:\\ml-stack\\ml-stack-serve.exe"
-                            if name == "ml-stack-serve" else None)
+                            lambda name: "C:\\poolhouse\\poolhouse-serve.exe"
+                            if name == "poolhouse-serve" else None)
 
         assert build.cmd_build(_args(persist=True)) == 0
         assert len(calls) == 1
@@ -539,7 +539,7 @@ class TestPersist:
         assert argv[argv.index("/SC") + 1] == "WEEKLY"
         assert argv[argv.index("/TN") + 1] == build_persist.PERSIST_TASK
         tr = argv[argv.index("/TR") + 1]
-        assert "ml-stack-serve" in tr and "build" in tr
+        assert "poolhouse-serve" in tr and "build" in tr
 
     def test_a_refused_launchctl_job_fails_rather_than_pretending_to_be_installed(
             self, monkeypatch):
@@ -627,7 +627,7 @@ class TestNamedBuild:
     def test_a_named_build_missing_an_architecture_the_baseline_has_is_linked_anyway(
             self, monkeypatch, capsys):
         """The whole point of --name: a fork is not required to be a superset of master's
-        own build, unlike the default build a bare 'ml-stack-serve build' would replace."""
+        own build, unlike the default build a bare 'poolhouse-serve build' would replace."""
         baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build_platform.server_name())
@@ -676,7 +676,7 @@ class TestNamedBuild:
             downloaded.append(asset["name"])
             return archive
 
-        import ml_stack.fleet.updates as gh_updates
+        import poolhouse.fleet.updates as gh_updates
         monkeypatch.setattr(gh_updates, "download", fake_download)
 
         code = build.cmd_build(_args(repo="unslothai/llama.cpp", name="unsloth",
@@ -760,7 +760,7 @@ def _serve_a_release(monkeypatch, tmp_path, tag: str, arches: set[str],
         downloaded.append(asset["name"])
         return archive
 
-    import ml_stack.fleet.updates as gh_updates
+    import poolhouse.fleet.updates as gh_updates
     monkeypatch.setattr(gh_updates, "download", fake_download)
     return downloaded
 
@@ -778,7 +778,7 @@ def _current_build(tag: str, arches: set[str], defined: set[str]) -> Path:
 
 
 def test_the_names_llama_cpp_defines_are_read_whatever_family_they_belong_to(tmp_path):
-    import ml_stack.setup as setup_module
+    import poolhouse.setup as setup_module
 
     _fake_libllama(tmp_path / "libllama.dylib", {"t5", "bert", "gemma3n_e", "gemma4", "phi4", "chatml"})
     assert setup_module._arches(tmp_path, known={"t5", "bert", "gemma3n_e", "gemma4", "mamba"}) == {
@@ -808,7 +808,7 @@ class TestReleaseInstall:
         on_path.mkdir(parents=True)
         _fake_server_script(on_path / build_platform.server_name())
         _fake_libllama(on_path / "libllama.dylib", {"gemma4", "phi4", "olmo9"})
-        for name in ("LLAMA_CPP_SERVER", "LLAMA_CPP_DIR", "MLSTACK_LLAMA_BUILD"):
+        for name in ("LLAMA_CPP_SERVER", "LLAMA_CPP_DIR", "POOLHOUSE_LLAMA_BUILD"):
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("PATH", f"{on_path}{os.pathsep}/usr/bin{os.pathsep}/bin")
         monkeypatch.setattr(binary_module, "_LOGIN_SHELL_DIRS", ())
@@ -872,7 +872,7 @@ class TestPatches:
             "@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n")
 
     def test_the_shipped_patch_set_is_found_and_stamped(self, monkeypatch):
-        monkeypatch.delenv("MLSTACK_LLAMA_PATCHES")
+        monkeypatch.delenv("POOLHOUSE_LLAMA_PATCHES")
         names = [f.name for f in build.patch_files()]
         assert "0001-speculative-per-request.patch" in names
         assert build.patch_stamp().startswith("p")
@@ -883,13 +883,13 @@ class TestPatches:
 
     def test_a_patch_is_applied_to_the_checkout(self, tmp_path, monkeypatch):
         source = self._repo(tmp_path)
-        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
         assert build_source._apply_patches(source) == ["0001-x.patch"]
         assert "TWO" in (source / "a.txt").read_text()
 
     def test_applying_twice_is_not_an_error(self, tmp_path, monkeypatch):
         source = self._repo(tmp_path)
-        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
         build_source._apply_patches(source)
         assert build_source._apply_patches(source) == ["0001-x.patch"]
         assert (source / "a.txt").read_text().count("TWO") == 1
@@ -898,12 +898,12 @@ class TestPatches:
         """A checkout the previous build patched is reset before this one is applied; two
         patch sets stacking is what makes a rebuild produce something neither describes."""
         source = self._repo(tmp_path)
-        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
         build_source._apply_patches(source)
         assert "TWO" in (source / "a.txt").read_text()
 
         other = self.BODY.replace("+TWO", "+DEUX")
-        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, other)))
+        monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(self._patch(tmp_path, other)))
         build_source._apply_patches(source)
         text = (source / "a.txt").read_text()
         assert "DEUX" in text and "TWO" not in text
@@ -911,12 +911,12 @@ class TestPatches:
     def test_a_patch_that_does_not_apply_fails_the_build(self, tmp_path, monkeypatch):
         source = self._repo(tmp_path)
         body = self.BODY.replace(" one\n-two", " ONE\n-two")
-        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, body)))
+        monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(self._patch(tmp_path, body)))
         with pytest.raises(build.BuildFailed, match="does not apply"):
             build_source._apply_patches(source)
 
     def test_the_stamp_names_the_build_directory(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        monkeypatch.setenv("POOLHOUSE_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
         chain = FakeToolchain()
         monkeypatch.setattr(subprocess, "run", chain.run)
         monkeypatch.setattr(build_source, "_apply_patches", lambda source: ["0001-x.patch"])

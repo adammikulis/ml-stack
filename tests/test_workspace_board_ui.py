@@ -9,8 +9,8 @@ import time
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.ui import assets_dir
-from ml_stack.workspace import boardroute, tokens
+from poolhouse.ui import assets_dir
+from poolhouse.workspace import boardroute, tokens
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def served(kit):
 
 @pytest.fixture(scope="module")
 def browser():
-    sync = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    sync = pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
     with sync.sync_playwright() as p:
         try:
             b = p.chromium.launch(headless=True)

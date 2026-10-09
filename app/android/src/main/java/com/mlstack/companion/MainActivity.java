@@ -191,7 +191,7 @@ public final class MainActivity extends Activity {
                 JSONObject verified = enrolled;
                 runOnUiThread(() -> {
                     if (!visible || epoch != generation) return;
-                    authenticate("Save your ml-stack connection", () -> {
+                    authenticate("Save your poolhouse connection", () -> {
                         vault.save(verified);
                         grant = verified;
                         dashboard();
@@ -204,8 +204,8 @@ public final class MainActivity extends Activity {
     }
 
     private void locked() {
-        page("ml-stack", "Your connection is locked.");
-        button("Unlock", () -> authenticate("Unlock ml-stack", () -> {
+        page("poolhouse", "Your connection is locked.");
+        button("Unlock", () -> authenticate("Unlock poolhouse", () -> {
             JSONObject opened = vault.open();
             Enrollment.validate(opened, System.currentTimeMillis() / 1000);
             grant = opened;
@@ -259,7 +259,7 @@ public final class MainActivity extends Activity {
     }
 
     private void dashboard() {
-        page("ml-stack", "Connected to your computer. Status and chat are available on this phone.");
+        page("poolhouse", "Connected to your computer. Status and chat are available on this phone.");
         button("Lock", () -> { generation++; grant = null; if (connection != null) connection.close(); locked(); });
         TextView status = text("Loading device status...", 16);
         Spinner models = new Spinner(this);

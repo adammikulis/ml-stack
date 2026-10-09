@@ -2,8 +2,8 @@
 
 import pytest
 
-from ml_stack.fleet import discovery, peers
-from ml_stack.fleet.onboard import joining
+from poolhouse.fleet import discovery, peers
+from poolhouse.fleet.onboard import joining
 
 
 @pytest.fixture(autouse=True)

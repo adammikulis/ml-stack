@@ -1,0 +1,39 @@
+"""Holding the machine's GPU for a native model workload, through the Broker."""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Iterator
+from typing import Any
+
+from poolhouse.serve import broker_wire
+from poolhouse.serve.broker import BrokerError
+
+CLAIM = "gpu-training"
+
+
+@contextlib.contextmanager
+def hold(purpose: str, *, wait_s: float = 0.0, wire: Any = broker_wire) -> Iterator[None]:
+    """Claim ``gpu-training`` at the Broker for the block, where it shows in
+    ``poolhouse-serve status``.
+
+    Raises `BrokerError` when a model server is held by another process or another run
+    already holds the claim for longer than ``wait_s``.
+    """
+    try:
+        busy = [s for s in wire.status(start=False)["servers"] if s["holders"] or s["loading"]]
+    except (BrokerError, OSError):
+        busy = []
+    if busy and wait_s <= 0:
+        who = "; ".join(f"{s['model']} on port {s['port']} held by "
+                        f"{[h['label'] or h['pid'] for h in s['holders']]}" for s in busy)
+        raise BrokerError(f"the GPU is in use: {who}. Release it, or wait until it is free")
+    got = wire.claim(CLAIM, {"purpose": purpose}, timeout=wait_s)
+    if not got["granted"]:
+        raise BrokerError(f"another training run (pid {got['pid']}: "
+                          f"{got['info'].get('purpose', '')}) holds the GPU")
+    try:
+        yield
+    finally:
+        with contextlib.suppress(BrokerError, OSError):
+            wire.unclaim(CLAIM)

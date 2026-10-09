@@ -1,20 +1,20 @@
-# Chatting with ml-stack
+# Chatting with Poolhouse
 
-`ml-stack-chat` is a conversation with a served model that operates ml-stack: what is serving,
+`poolhouse-chat` is a conversation with a served model that operates Poolhouse: what is serving,
 the models on this machine and on the Hub, downloads, benchmarks, jobs, and read-only views of
 the security review. It is the one agent command: with no task it is a conversation (one history,
-no end), with a task in words (`ml-stack-chat "run benchmarks with quince-2b"`) it plans, asks
+no end), with a task in words (`poolhouse-chat "run benchmarks with quince-2b"`) it plans, asks
 go and ends on `done`. Which calls run unasked is the role (`docs/agent-roles.md`).
 
 ```
-ml-stack-chat                         # the best downloaded mixture-of-experts model ranked for an agent
-ml-stack-chat --model PATH_OR_HF_REF  # lease this one, in the settings it scored best with
-ml-stack-chat --url http://127.0.0.1:8080
-ml-stack-chat --resume                # the newest saved chat; --resume ID for another
+poolhouse-chat                         # the best downloaded mixture-of-experts model ranked for an agent
+poolhouse-chat --model PATH_OR_HF_REF  # lease this one, in the settings it scored best with
+poolhouse-chat --url http://127.0.0.1:8080
+poolhouse-chat --resume                # the newest saved chat; --resume ID for another
 ```
 
 With no `--model` or `--url` the model is the first of what is already downloaded that
-`ml-stack-models`' ranking (`serve.suggest.recommend`, goal `agent`) puts forward and whose name
+`poolhouse-models`' ranking (`serve.suggest.recommend`, goal `agent`) puts forward and whose name
 reads as a mixture-of-experts (`Flash-Next`, `-A3B`, `moe`); a dense model is used only when no
 such one is downloaded, and the chat says so. With nothing suitable downloaded it prints what to
 pull and exits. The server is leased through the broker like any other served model's. Nothing leaves the
@@ -35,7 +35,7 @@ machine and no paid API is called.
 
 Anything else is said to the model. The answer streams; each tool call is one line
 (`-> name(args)`) and its result the next, cut at 300 characters. The history is saved to
-`~/.ml-stack/chat/ID.json` after every message (no system prompt in it; a resume builds a fresh
+`~/.poolhouse/chat/ID.json` after every message (no system prompt in it; a resume builds a fresh
 one and keeps only user, assistant and tool messages, dropping a trailing call that has no
 result). When it fills 80% of the context it is compacted as in `docs/compaction.md`
 (`--no-compact` turns that off, `--context-size` sets the window it measures against).
@@ -47,12 +47,12 @@ Reads run without asking: `serve_status`, `models_find`, `models_files`, `models
 `doctor`, `jobs_status`, `jobs_wait`, and `review_view` (status, held items, events, hosts,
 downloads, scanners of the security review, as JSON).
 
-Each of these asks you, naming the arguments (and any path outside ml-stack's state
+Each of these asks you, naming the arguments (and any path outside Poolhouse's state
 directory): `serve_up`, `serve_down`, `serve_escalate`, `models_fetch`, `bench_run`,
 `bench_standard`, `bench_speed`, `bench_compare`, `bench_animate`. The question offers
 `1) allow this time`, `2) always allow` and `3) never allow`; Enter, no answer, EOF or
 anything else is a no. Always and never become saved rules (`docs/agent-roles.md`), only on your
-own typed answer, and always is not offered for a downloaded model, a path outside ml-stack's
+own typed answer, and always is not offered for a downloaded model, a path outside Poolhouse's
 state, a wildcard value or a run that has read outside text. There is no `--yes`; an allow this
 time does not cover the next call; an answer to the model's own question (`ask_user`) is not an
 answer to a call.
@@ -66,11 +66,11 @@ command itself before the model answers:
 
 | asked | the command |
 | --- | --- |
-| release or purge something in quarantine | `ml-stack-security review` |
-| approve a host | `ml-stack-security approve-host HOST` |
-| mint a grant | `ml-stack-security review` |
-| change the security mode or policy | `ml-stack-security mode`, `ml-stack-security scan-policy` |
-| plant or remove baselines and decoys | `ml-stack-security baseline` |
+| release or purge something in quarantine | `poolhouse-security review` |
+| approve a host | `poolhouse-security approve-host HOST` |
+| mint a grant | `poolhouse-security review` |
+| change the security mode or policy | `poolhouse-security mode`, `poolhouse-security scan-policy` |
+| plant or remove baselines and decoys | `poolhouse-security baseline` |
 
 Everything a tool returns is untrusted text (model names, logs, model cards, reasons): it is
 fenced as `<untrusted>` data, stripped of chat markup, cleared of credentials and flagged when
@@ -125,8 +125,8 @@ A smoke sweep is running; bench_status will say when it ends.
 
 you> release the quarantine on 20261003-1a2b
 
-Only a person can release or purge something held in quarantine. This agent cannot, and no argument changes that. Run this in your own terminal: ml-stack-security review
-I can't release a quarantine. Only you can, in your own terminal: ml-stack-security review
+Only a person can release or purge something held in quarantine. This agent cannot, and no argument changes that. Run this in your own terminal: poolhouse-security review
+I can't release a quarantine. Only you can, in your own terminal: poolhouse-security review
 ```
 
 ## Limits
@@ -138,7 +138,7 @@ I can't release a quarantine. Only you can, in your own terminal: ml-stack-secur
   interrupt one except through `serve_down`; a job it started detached keeps running after the chat is closed.
 - The prompts can come twice for one action (the confirm rail, then the taint rail).
 - Whether a request is destructive is decided by the tool list, not by a decision model; a
-  second-layer classifier from `ml_stack.decide` (adding a confirmation, never removing one) is not
+  second-layer classifier from `poolhouse.decide` (adding a confirmation, never removing one) is not
   wired in.
 - No file edits, shell or workspace access, and no way to cancel a call already confirmed.
 - The history is compacted by the same summariser as in `docs/compaction.md`; a summary is the model's
@@ -147,11 +147,11 @@ I can't release a quarantine. Only you can, in your own terminal: ml-stack-secur
 ## Fleet plain chat
 
 The browser Chat view runs a plain turn through the OpenAI Agents Python SDK against
-an explicitly selected local or fleet model. Install `ml-stack[agents]`; the full app
+an explicitly selected local or fleet model. Install `poolhouse[agents]`; the full app
 includes this extra. The SDK uses Chat Completions at the selected server, including
 its model alias. Fleet requests retain signed, sealed authentication and pinned TLS;
 no OpenAI cloud endpoint, environment API key or tracing exporter is selected.
 
 Answers stream into the existing chat composer. Disconnecting closes the model stream
-and cancels the SDK turn. Saved messages stay in ml-stack's encrypted conversation
+and cancels the SDK turn. Saved messages stay in Poolhouse's encrypted conversation
 graph; no separate SDK session database is created.

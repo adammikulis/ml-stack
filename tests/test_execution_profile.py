@@ -2,8 +2,8 @@
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import execution_profile, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import execution_profile, tokens
+from poolhouse.workspace.identity import Denied
 
 
 @pytest.fixture
@@ -113,8 +113,8 @@ def test_expired_child_cannot_record_observations(kit, monkeypatch):
 
 
 def test_observations_share_one_graph_without_replacing_agent_or_work_records(kit):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.workspace.coordination import workspace_id
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.workspace.coordination import workspace_id
 
     alice = kit.agent('alice')
     stable = workspace_id(kit.ws)

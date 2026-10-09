@@ -1,0 +1,470 @@
+<template>
+  <main class="chatmain" id="chat" hidden>
+    <button class="conversation-mobile-nav ghost" id="conversation-mobile-nav" aria-expanded="false" aria-controls="conversation-sidebar">Channels and model chats ▾</button>
+    <aside class="chats" id="conversation-sidebar" aria-label="Conversations">
+      <div class="conversation-space"><span class="conversation-space-mark" aria-hidden="true">✦</span><div><strong>Poolhouse</strong></div></div>
+      <label class="conversation-project-label" for="conversation-project">Workspace</label><select id="conversation-project"><option value="">Loading projects…</option></select>
+      <button id="chat-new" class="conversation-new">＋ New conversation</button>
+      <label class="conversation-search" for="chat-search"><input type="search" id="chat-search" placeholder="Search model chats…" aria-label="Search conversations"></label>
+      <section class="conversation-group"><h2>Team channels</h2><div id="conversation-channels" role="status">Connecting to workspace…</div></section>
+      <section class="conversation-group"><h2>Direct messages</h2><div id="conversation-direct"></div></section>
+      <section class="conversation-group"><h2>Model chats</h2><div id="chat-list"></div></section>
+      <section class="conversation-group"><h2>Running models</h2><div id="conversation-models"></div><a class="conversation-library" href="#models">Browse model library →</a></section>
+      <details class="conversation-coordination" data-advanced><summary>Workspace connection</summary><coordinator-control></coordinator-control><details id="conversation-local-agents"><summary>Device agents</summary><div id="conversation-agents"></div></details></details>
+    </aside>
+    <div id="conversation-team" hidden></div>
+    <div class="talk" id="conversation-model">
+      <header class="chat-toolbar"><div class="conversation-title"><span class="conversation-avatar" aria-hidden="true">✦</span><div><h1 id="chat-title">New conversation</h1><span class="chat-status" id="chat-status">Model chat</span></div></div>
+        <div class="conversation-actions"><label class="sr" for="chat-mode">Conversation mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding agent</option></select><button class="ghost" id="conversation-details" aria-expanded="false" aria-controls="chat-options">Options</button></div></header>
+      <div class="pickrow" id="chat-pickrow" hidden>
+        <span>Model</span><button class="ghost chat-model-current" id="chat-model-button" aria-haspopup="dialog">Choose a model</button>
+        <select id="model" aria-label="Selected model" hidden></select>
+      </div>
+      <div class="hint" id="chat-none" hidden>
+        <strong>Bring a model into the conversation.</strong> Choose an installed model to serve on your pool.<button type="button" class="conversation-choose">Choose a model</button>
+      </div>
+      <div class="chat-coding-fields" data-coding hidden>
+        <label for="chat-project">Project directory</label><input id="chat-project" placeholder="/path/to/project">
+        <div class="chat-coding-pair"><div><label for="chat-harness">Coding agent</label><select id="chat-harness"></select></div>
+          <div><label for="chat-role">Tool permissions</label><select id="chat-role"></select></div></div>
+        <p class="hint">The selected agent works in this directory using your model and the permissions above.</p>
+      </div>
+      <details class="aside" id="chat-options" data-advanced hidden>
+        <summary>Advanced options</summary>
+        <label for="chat-output-tokens">Maximum output tokens</label>
+        <input id="chat-output-tokens" type="number" min="1" step="1" placeholder="No user cap">
+        <p class="hint">Applies to Chat and Pi coding. Independent of reasoning effort. Leave blank for no user cap.</p>
+        <div data-chat>
+        <label for="chat-temperature">Temperature</label>
+        <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
+        <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
+        </div><div data-coding hidden><label for="chat-context">Context override (tokens)</label>
+          <input id="chat-context" type="number" min="0" max="1048576" step="1024" value="0" placeholder="Auto for this device">
+          <p class="hint">Leave at 0 to fit the context to the selected model and this device's memory. Memory admission runs before the model starts.</p>
+          <label for="chat-draft">Draft model / MTP head</label><input id="chat-draft" value="auto" placeholder="auto, none, or /path/to/head.gguf">
+          <p class="hint">Auto uses a matching head when available. Use none to disable, or an explicit installed head path.</p></div>
+      </details>
+      <div class="messages" id="chat-messages" aria-label="Chat messages" role="log"></div>
+      <div id="chat-note" role="status"></div>
+      <details id="chat-activity" class="aside" hidden><summary>Tool activity and session details</summary><pre id="chat-activity-output"></pre></details>
+      <ml-composer class="askrow" id="chat-askrow" recipient="Message your model" hidden>
+        <textarea id="ask" rows="3" placeholder="Message your model…" aria-label="Message"></textarea>
+        <button id="chat-send" data-composer-send>Send</button><button class="ghost" id="chat-cancel" data-composer-cancel hidden>Stop</button>
+      </ml-composer>
+      <div class="chat-hint">Saved on this machine</div>
+    </div>
+  </main>
+  <dialog id="chat-model-dialog" aria-labelledby="chat-model-heading">
+    <h2 id="chat-model-heading">Choose a model</h2>
+    <label for="chat-model-search">Search models</label><input type="search" id="chat-model-search" placeholder="Name, family, or quantization…">
+    <div id="chat-model-list"></div><button class="ghost" id="chat-model-close">Close</button>
+  </dialog>
+  <dialog id="chat-manage" aria-labelledby="chat-manage-title">
+    <form id="chat-manage-form">
+      <h2 id="chat-manage-title">Rename conversation</h2>
+      <label for="chat-name">Conversation name</label>
+      <input id="chat-name" maxlength="60" required>
+      <p id="chat-manage-description" class="hint" hidden></p>
+      <div class="err" id="chat-manage-error" role="status"></div>
+      <div class="chat-dialog-actions"><button type="button" class="ghost" id="chat-manage-cancel">Cancel</button>
+        <button type="submit" id="chat-manage-confirm">Save name</button></div>
+    </form>
+  </dialog>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+
+  class ChatView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#chat");
+      this.sidebar = this.querySelector("#chat-list");
+      this.picker = this.querySelector("#model");
+      this.pickrow = this.querySelector("#chat-pickrow");
+      this.none = this.querySelector("#chat-none");
+      this.options = this.querySelector("#chat-options");
+      this.temperature = this.querySelector("#chat-temperature");
+      this.list = this.querySelector("#chat-messages");
+      this.note = this.querySelector("#chat-note");
+      this.askrow = this.querySelector("#chat-askrow");
+      this.input = this.querySelector("#ask");
+      this.send = this.querySelector("#chat-send");
+      this.stop = this.querySelector("#chat-cancel");
+      this.askrow.addEventListener("composer-cancel", () => this.coding.stop());
+      this.newChat = this.querySelector("#chat-new");
+      this.search = this.querySelector("#chat-search");
+      this.heading = this.querySelector("#chat-title");
+      this.dialog = this.querySelector("#chat-manage");
+      this.dialogForm = this.querySelector("#chat-manage-form");
+      this.nameInput = this.querySelector("#chat-name");
+      this.dialogConfirm = this.querySelector("#chat-manage-confirm");
+      this.dialogForm.onsubmit = (event) => { event.preventDefault(); this.manage(); };
+      this.querySelector("#chat-manage-cancel").onclick = () => this.dialog.close();
+      this.open = null;
+      this.messages = [];
+      this.savedSettings = {};
+      this.defaultSettings = {};
+      this.searchEpoch = 0;
+      this.loadEpoch = 0;
+      this.askrow.addEventListener("composer-send", () => this.ask());
+      this.picker.onchange = () => { this.updateReadiness(); this.modelPicker.render(); this.saveSettings(); };
+      this.temperature.onchange = () => this.saveSettings();
+      this.outputTokens = this.querySelector("#chat-output-tokens");
+      this.outputTokens.onchange = () => this.saveSettings();
+      this.coding = new window.ChatCoding(this);
+      this.modelPicker = new window.ChatModelPicker(this);
+      this.newChat.onclick = () => {
+        M.go("chat");
+        if (this.request) return;
+        this.open = null;
+        localStorage.removeItem("poolhouse.chat.selected");
+        this.heading.textContent = "New conversation";
+        this.loadEpoch++;
+        this.input.value = "";
+        this.messages = [];
+        this.savedSettings = { ...this.defaultSettings };
+        this.temperature.value = "";
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
+        this.coding.restore(this.savedSettings);
+        this.welcome();
+        this.note.replaceChildren();
+        this.paintList();
+        this.input.focus();
+      };
+      this.search.oninput = () => {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => this.paintList(), 180);
+      };
+      this.workspace = new window.ConversationsWorkspace(this);
+      M.onRoute((route) => {
+        const on = route === "chat" || route === "board";
+        this.box.hidden = !on;
+        this.workspace.route(route);
+        if (on && !this.request) this.draw();
+      });
+      window.addEventListener("fleet-chat-ready", event => { this.pendingModel = event.detail.model; });
+      this.welcome();
+    }
+
+    welcome() {
+      this.list.replaceChildren(el("div", { class: "chat-welcome" },
+        el("strong", {}, "Start a conversation"),
+        el("p", {}, "Choose a model above or a team channel in the sidebar."),
+        el("div", { class: "chat-starters" }, ...[
+          ["Explain a model", "Help me understand this model’s strengths, limitations, and how to evaluate it."],
+          ["Plan an experiment", "Help me design a reproducible training experiment. Ask me about the model, data, and success criteria."],
+          ["Review an implementation", "Help me review an implementation. Ask me about the project, requirements, and tests."],
+        ].map(([title, prompt]) => el("button", { class: "ghost", type: "button", onclick: () => {
+          this.input.value = prompt; this.input.focus();
+        } }, title)))));
+    }
+
+    renderBody(node, text) {
+      M.renderMarkdown(node, text);
+    }
+
+    say(role, text, reasoning = "") {
+      const body = el("div", { class: "message-body" });
+      this.renderBody(body, text);
+      const copy = el("button", { class: "ghost copy-message", "aria-label": `Copy ${role} message`,
+        onclick: async () => {
+          try { await navigator.clipboard.writeText(body.dataset.text || text); copy.textContent = "Copied"; }
+          catch { copy.textContent = "Copy unavailable"; }
+        } }, "Copy");
+      const node = el("div", { class: `msg ${role}` },
+        el("span", { class: "speaker" }, role === "user" ? "You" : "Assistant"), body, copy);
+      body.dataset.text = text;
+      if (role === "assistant") {
+        const thoughts = el("details", { class: "model-reasoning" }, el("summary", {}, "Model reasoning"),
+          el("pre", { class: "reasoning-text" }, reasoning));
+        thoughts.hidden = !reasoning;
+        node.prepend(thoughts);
+        node.append(el("span", { class: "reply-activity", role: "status" }));
+      }
+      this.list.append(node);
+      this.list.scrollTop = this.list.scrollHeight;
+      return body;
+    }
+
+    async draw() {
+      this.coding.mode.disabled = true;
+      try {
+        const defaults = await api("/ui/conversations/defaults");
+        if (M.refused(defaults)) return;
+        if (!defaults.ok) throw new Error(defaults.error || "Could not read conversation settings.");
+        this.defaultSettings = defaults.settings || {};
+        if (!Object.keys(this.savedSettings).length) this.savedSettings = { ...this.defaultSettings };
+        const where = await api("/ui/chat");
+        if (M.refused(where)) return;
+        if (!where.ok) throw new Error(where.error || "Could not read the serving models.");
+        this.runtimeReady = where.runtime_ready !== false;
+        this.runtimeError = where.runtime_error || "The agent runtime is not installed.";
+        const available = where.models || [];
+        this.chatModels = available;
+        const selected = this.picker.value;
+        this.picker.replaceChildren(...available.map((m) =>
+          el("option", { value: m.model }, m.local ? m.model : `${m.model} — on ${m.peer}`)));
+        if (available.some((m) => m.model === selected)) this.picker.value = selected;
+        this.pickrow.hidden = false;
+        this.askrow.hidden = !available.length;
+        this.none.hidden = !!available.length;
+        this.options.hidden = false;
+        await this.modelPicker.catalogue();
+        this.workspace.models(available);
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
+        await this.coding.restore(this.savedSettings, this.picker.value);
+        this.updateReadiness();
+        await this.paintList();
+        const selectedChat = this.open || localStorage.getItem("poolhouse.chat.selected");
+        if (selectedChat) await this.load(selectedChat);
+        if (this.pendingModel && available.some(model => model.model === this.pendingModel)) {
+          this.picker.value = this.pendingModel; this.pendingModel = null;
+          this.modelPicker.render(); this.updateReadiness(); this.saveSettings();
+        }
+      } catch (error) { this.showError(error.message); }
+      finally { this.coding.mode.disabled = !!this.request; }
+    }
+
+    settings() {
+      return { ...this.savedSettings, ...this.coding.settings(), temperature: this.temperature.value === "" ? null : Number(this.temperature.value), max_output_tokens: this.outputTokens.value === "" ? null : Number(this.outputTokens.value) };
+    }
+
+    saveSettings() {
+      if (!this.outputTokens.checkValidity()) { this.showError("Maximum output tokens must be a positive integer."); return; }
+      if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
+      this.savedSettings = this.settings();
+      if (!this.open) return;
+      const id = this.open, payload = { model: this.picker.value, settings: this.savedSettings };
+      this.savePending = (this.savePending || Promise.resolve()).then(async () => {
+        const saved = await api(`/ui/conversations/${id}`, { method: "POST", body: JSON.stringify(payload) });
+        if (M.refused(saved)) return;
+        if (!saved.ok) throw new Error(saved.error || "Could not save conversation settings.");
+      }).catch((error) => { if (this.open === id) this.showError(error.message); });
+      return this.savePending;
+    }
+
+    updateReadiness() {
+      this.askrow.setAttribute("recipient", `Message ${this.picker.value || "your model"}`);
+      this.send.disabled = (!this.coding.active && this.runtimeReady === false) || !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
+      if (!this.coding.active) M.agentRuntimeAlert(this);
+      this.coding.readiness();
+    }
+
+    showError(message) {
+      this.note.replaceChildren(el("div", { class: "err" }, message));
+    }
+
+    async paintList() {
+      const epoch = ++this.searchEpoch;
+      try {
+        const saved = await api(`/ui/conversations?q=${encodeURIComponent(this.search.value.trim())}`);
+        if (epoch !== this.searchEpoch || M.refused(saved)) return;
+        if (!saved.ok) throw new Error(saved.error || "Could not read conversations.");
+        const found = saved.conversations || [];
+        const rows = found.slice(0, M.LIST_MAX);
+        this.sidebar.replaceChildren(...rows.map((c) =>
+          el("div", { class: `chatrow${c.id === this.open ? " on" : ""}`, "data-conversation": c.id },
+            el("a", { href: "#chat", onclick: (e) => {
+              e.preventDefault(); if (!this.request) { this.open = c.id; if (M.route !== "chat") M.go("chat"); else this.load(c.id); }
+            } }, c.title || "New chat"),
+            el("details", { class: "chat-row-menu" },
+              el("summary", { "aria-label": `Options for ${c.title || "New chat"}` }, "•••"),
+              el("div", {},
+                el("button", { class: "ghost small", onclick: () => this.openManage(c, "rename") }, "Rename"),
+                el("button", { class: "ghost small", onclick: () => this.openManage(c, "delete") }, "Delete"))))));
+        if (!rows.length) this.sidebar.append(el("p", { class: "hint" },
+          this.search.value.trim() ? "No conversations match your search." : "Your conversations will appear here."));
+        if (found.length > rows.length) this.sidebar.append(el("p", { class: "hint" },
+          `Showing the ${rows.length} most recent of ${found.length}; search to find the others.`));
+      } catch (error) { this.showError(error.message); }
+    }
+
+    openManage(conversation, action) {
+      if (this.request) return;
+      this.sidebar.querySelectorAll("details[open]").forEach((menu) => { menu.open = false; });
+      this.managing = { conversation, action };
+      const deleting = action === "delete";
+      this.querySelector("#chat-manage-title").textContent = deleting ? "Delete conversation?" : "Rename conversation";
+      this.nameInput.value = conversation.title || "New chat";
+      this.nameInput.hidden = this.nameInput.previousElementSibling.hidden = deleting;
+      this.nameInput.required = !deleting;
+      const description = this.querySelector("#chat-manage-description");
+      description.hidden = !deleting;
+      description.textContent = `“${conversation.title || "New chat"}” and its messages will be removed.`;
+      this.querySelector("#chat-manage-error").textContent = "";
+      this.dialogConfirm.textContent = deleting ? "Delete conversation" : "Save name";
+      this.dialogConfirm.classList.toggle("danger", deleting);
+      this.dialog.showModal();
+      if (!deleting) { this.nameInput.focus(); this.nameInput.select(); }
+    }
+
+    async manage() {
+      const { conversation, action } = this.managing;
+      const deleting = action === "delete";
+      this.dialogConfirm.disabled = true;
+      try {
+        if (!deleting && !this.nameInput.value.trim()) throw new Error("Enter a conversation name.");
+        const changed = await api(`/ui/conversations/${conversation.id}`, {
+          method: deleting ? "DELETE" : "POST",
+          ...(!deleting ? { body: JSON.stringify({ title: this.nameInput.value.trim() }) } : {}) });
+        if (M.refused(changed)) return;
+        if (!changed.ok) throw new Error(changed.error || "Could not update the conversation.");
+        if (this.open === conversation.id) {
+          if (deleting) {
+            this.open = null; this.messages = []; this.heading.textContent = "New conversation";
+            localStorage.removeItem("poolhouse.chat.selected");
+            this.welcome();
+          } else this.heading.textContent = changed.title || this.nameInput.value.trim();
+        }
+        this.dialog.close();
+        await this.paintList();
+      } catch (error) { this.querySelector("#chat-manage-error").textContent = error.message; }
+      finally { this.dialogConfirm.disabled = false; }
+    }
+
+    async load(id) {
+      if (this.request) return;
+      const epoch = ++this.loadEpoch;
+      try {
+        await this.savePending;
+        if (epoch !== this.loadEpoch) return;
+        const one = await api(`/ui/conversations/${id}`);
+        if (epoch !== this.loadEpoch || M.refused(one)) return;
+        if (one.status === 404) {
+          this.open = null; this.messages = []; this.heading.textContent = "New conversation";
+          localStorage.removeItem("poolhouse.chat.selected");
+          this.welcome();
+          this.note.textContent = "This conversation was removed.";
+          return;
+        }
+        if (!one.ok) throw new Error(one.error || "Could not open the conversation.");
+        this.open = id;
+        this.sidebar.querySelectorAll(".chatrow").forEach((row) => {
+          row.classList.toggle("on", row.dataset.conversation === id);
+        });
+        localStorage.setItem("poolhouse.chat.selected", id);
+        this.heading.textContent = one.title || "New chat";
+        this.messages = one.messages || [];
+        this.savedSettings = one.settings || { ...this.defaultSettings };
+        this.temperature.value = this.savedSettings.temperature ?? "";
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? "";
+        await this.coding.restore(this.savedSettings, one.model);
+        this.list.replaceChildren();
+        for (const m of this.messages) this.say(m.role, m.content, m.reasoning || "");
+        if (!this.messages.length) this.welcome();
+        if (one.model) {
+          if (![...this.picker.options].some((option) => option.value === one.model)) {
+            this.picker.append(el("option", { value: one.model, disabled: "" }, `${one.model} — not running`));
+          }
+          this.picker.value = one.model;
+        }
+        this.note.replaceChildren();
+        this.updateReadiness();
+        this.modelPicker.render();
+        this.coding.reattach();
+      } catch (error) { this.showError(error.message); }
+    }
+
+    async ask() {
+      const text = this.input.value.trim();
+      if (!this.outputTokens.checkValidity()) { this.showError("Maximum output tokens must be a positive integer."); return; }
+      if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
+      this.updateReadiness();
+      if (this.send.disabled) return;
+      if (!text || !this.picker.value || this.picker.selectedOptions[0]?.disabled || this.request) return;
+      this.request = new AbortController();
+      this.list.setAttribute("aria-busy", "true");
+      this.note.replaceChildren();
+      this.send.hidden = true;
+      this.stop.hidden = false;
+      this.newChat.disabled = this.picker.disabled = true;
+      this.temperature.disabled = this.outputTokens.disabled = true;
+      this.coding.busy(true);
+      this.coding.accepted = false;
+      let reply, userBody, accepted = false;
+      try {
+        await this.savePending;
+        if (!this.open) {
+          const made = await api("/ui/conversations", { method: "POST", signal: this.request.signal,
+            body: JSON.stringify({ model: this.picker.value, settings: this.settings() }) });
+          if (M.refused(made)) return;
+          if (!made.ok) throw new Error(made.error || "Could not start the conversation.");
+          this.open = made.id;
+          localStorage.setItem("poolhouse.chat.selected", made.id);
+        }
+        if (this.input.value.trim() === text) this.input.value = "";
+        if (this.heading.textContent === "New conversation") this.heading.textContent = text.replace(/\s+/g, " ").slice(0, 60);
+        this.list.querySelector(".chat-welcome")?.remove();
+        userBody = this.say("user", text);
+        reply = this.say("assistant", "");
+        if (this.coding.active) {
+          await this.coding.run(text, reply);
+          accepted = this.coding.accepted;
+          return;
+        }
+        const messages = [...this.messages, { role: "user", content: text }];
+        const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
+          body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages,
+            max_output_tokens: this.settings().max_output_tokens,
+            ...(this.temperature.value !== "" ? { temperature: Number(this.temperature.value) } : {}) }) });
+        if (!r.ok) {
+          const why = await r.json().catch(() => ({}));
+          if (r.status === 401) M.signIn();
+          throw new Error(why.error || "The model could not answer. Try sending again.");
+        }
+        accepted = true;
+        this.messages = messages;
+        await this.stream(r, reply);
+      } catch (error) {
+        accepted ||= this.coding.accepted;
+        if (error.name === "AbortError") this.note.textContent = "Generation stopped.";
+        else this.showError(error.message || "The connection to the model ended.");
+        if (reply && !reply.dataset.text) reply.closest(".msg").remove();
+        if (!accepted) userBody?.closest(".msg").remove();
+        if (error.name !== "AbortError" && !reply?.dataset.text && !this.input.value) this.input.value = text;
+      } finally {
+        if (reply?.dataset.text) {
+          this.renderBody(reply, reply.dataset.text);
+          this.messages.push({ role: "assistant", content: reply.dataset.text, reasoning: reply.closest(".msg").querySelector(".reasoning-text")?.textContent || "" });
+        }
+        this.request = null;
+        this.list.removeAttribute("aria-busy");
+        this.send.hidden = false;
+        this.stop.hidden = true;
+        this.newChat.disabled = this.picker.disabled = false;
+        this.temperature.disabled = this.outputTokens.disabled = false;
+        this.coding.busy(false);
+        this.updateReadiness();
+        this.paintList();
+      }
+    }
+
+    async stream(r, reply) {
+      const node = reply.closest(".msg");
+      const activity = node.querySelector(".reply-activity");
+      try {
+        const result = await M.readChatStream(r, (delta) => {
+          if (delta.activity) activity.textContent = delta.activity;
+          if (delta.reasoning) {
+            const thoughts = node.querySelector(".model-reasoning");
+            thoughts.hidden = false;
+            thoughts.querySelector(".reasoning-text").append(document.createTextNode(delta.reasoning));
+          }
+          if (delta.content) {
+            reply.dataset.text += delta.content;
+            reply.textContent = reply.dataset.text;
+            reply.classList.remove("markdown");
+          }
+          this.list.scrollTop = this.list.scrollHeight;
+        });
+        if (!result.content) throw new Error("The model returned no answer. Try again or choose another model.");
+      } finally { activity.textContent = ""; }
+    }
+  }
+  customElements.define("chat-view", ChatView);
+})();
+</script>

@@ -14,7 +14,7 @@ FILES = ("pyproject.toml", MAP, "docs/redteam/coverage.json",
          "app/src-tauri/capabilities/main.json", "scripts/test-on-linux",
          "scripts/redteam_coverage.py", "scripts/gates/_util.py", "scripts/gates/_store.py",
          "scripts/gates/_redteam_memo.py")
-"""Files outside src/ml_stack that the check reads or runs."""
+"""Files outside src/poolhouse that the check reads or runs."""
 
 
 def mapped_tests(root: Path) -> list[str]:
@@ -28,9 +28,9 @@ def mapped_tests(root: Path) -> list[str]:
 
 
 def environment(root: Path) -> str:
-    """The interpreter, the ML_STACK variables, and what is installed beside the interpreter."""
+    """The interpreter, the POOLHOUSE variables, and what is installed beside the interpreter."""
     seen = [sys.version, sys.executable]
-    seen += sorted(f"{k}={v}" for k, v in os.environ.items() if k.startswith("ML_STACK"))
+    seen += sorted(f"{k}={v}" for k, v in os.environ.items() if k.startswith("POOLHOUSE"))
     for entry in (e for e in sys.path if e and root.resolve() not in Path(e).resolve().parents
                   and Path(e).resolve() != root.resolve()):
         try:
@@ -42,7 +42,7 @@ def environment(root: Path) -> str:
 
 def inputs(root: Path) -> str:
     """A hash of every file the check reads, of the interpreter and of the environment."""
-    paths = [*sorted(p for p in (root / "src" / "ml_stack").rglob("*")
+    paths = [*sorted(p for p in (root / "src" / "poolhouse").rglob("*")
                      if p.is_file() and "__pycache__" not in p.parts),
              *(root / name for name in (*FILES, *mapped_tests(root)))]
     lines = [environment(root)]

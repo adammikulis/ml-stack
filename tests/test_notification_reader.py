@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harnesshook
-from ml_stack.workspace import notification_reader as reader
-from ml_stack.workspace.identity import Denied
+from poolhouse import harnesshook
+from poolhouse.workspace import notification_reader as reader
+from poolhouse.workspace.identity import Denied
 
 
 def record(session):
@@ -160,7 +160,7 @@ def test_explicit_parent_hook_preserves_launcher_root(monkeypatch):
 def test_checkout_authority_mismatch_is_refused(saved):
     import json
     root, _, _, _ = saved
-    (root / '.ml-stack-project.json').write_text(json.dumps(
+    (root / '.poolhouse-project.json').write_text(json.dumps(
         {'kind': 'project-checkout', 'project_id': 'b' * 32, 'authority': {}}))
     with pytest.raises(Denied, match='authority disagree'):
         reader.binding('codex', root, 'root-one')

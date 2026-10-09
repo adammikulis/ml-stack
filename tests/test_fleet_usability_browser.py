@@ -64,7 +64,7 @@ def test_training_environment_catalogue_drafts_and_pending_submission(usability_
     expect(page.get_by_role('button', name='Start training', exact=True)).to_be_enabled()
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-    page.screenshot(path='/private/tmp/ml-stack-training-audit-mobile.png', full_page=True)
+    page.screenshot(path='/private/tmp/poolhouse-training-audit-mobile.png', full_page=True)
     assert not errors
 
 
@@ -101,7 +101,7 @@ def test_settings_failure_is_visible_and_only_selected_libraries_install(usabili
     expect(page.locator('#settings-libs .err')).to_contain_text('Could not download the selected library')
     assert posts == [{'install': ['gym-drone'], 'remove': []}]
     expect(page.get_by_role('button', name='Apply library changes', exact=True)).to_be_enabled()
-    page.screenshot(path='/private/tmp/ml-stack-settings-audit.png', full_page=True)
+    page.screenshot(path='/private/tmp/poolhouse-settings-audit.png', full_page=True)
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     assert not errors
@@ -159,23 +159,23 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     for theme in ('light', 'dark'):
         page.evaluate('(theme)=>window.fleetModel.setPreferences({...window.fleetModel.preferences,resolved_theme:{base:theme}})', theme)
         expect(page.locator('html')).to_have_attribute('data-theme', theme)
-        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#ff5fa2'
-        page.screenshot(path=f'/private/tmp/poolside-rebuild-shell-{theme}.png', full_page=True)
+        assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolhouse-pink').trim()") == '#ff5fa2'
+        page.screenshot(path=f'/private/tmp/poolhouse-rebuild-shell-{theme}.png', full_page=True)
     page.evaluate("""()=>window.fleetModel.setPreferences({...window.fleetModel.preferences,
       resolved_theme:{base:'dark', colors:{background:'#112233', pink:'#aa77cc',yellow:'#111111'},font_size:18,density:'compact'}})""")
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#112233'
-    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#aa77cc'
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolhouse-pink').trim()") == '#aa77cc'
     assert page.evaluate("getComputedStyle(document.body).fontSize") == '18px'
     expect(page.locator('html')).to_have_attribute('data-density', 'compact')
-    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-yellow-ink').trim()") == '#ffffff'
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolhouse-yellow-ink').trim()") == '#ffffff'
     page.evaluate("()=>window.fleetModel.setPreferences({...window.fleetModel.preferences,resolved_theme:{base:'light'}})")
     assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--ml-bg').trim()") == '#f4f5f7'
-    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-pink').trim()") == '#ff5fa2'
-    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolside-yellow-ink').trim()") == '#1b1f3a'
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolhouse-pink').trim()") == '#ff5fa2'
+    assert page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--poolhouse-yellow-ink').trim()") == '#1b1f3a'
     page.set_viewport_size({'width': 390, 'height': 844})
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     expect(primary.locator('a')).to_have_count(4)
-    page.screenshot(path='/private/tmp/poolside-rebuild-shell-narrow.png', full_page=True)
+    page.screenshot(path='/private/tmp/poolhouse-rebuild-shell-narrow.png', full_page=True)
     assert not errors
 
 
@@ -244,5 +244,5 @@ def test_named_workspace_tools_stay_with_main_navigation_at_all_sizes(usability_
         training.click()
         expect(page.locator('training-view > section.workspace')).to_be_visible()
         expect(page.get_by_role('button', name='Sign out', exact=True)).to_be_in_viewport()
-        page.screenshot(path=f'/private/tmp/poolside-nav-controls-{width}-{height}.png')
+        page.screenshot(path=f'/private/tmp/poolhouse-nav-controls-{width}-{height}.png')
     assert not errors

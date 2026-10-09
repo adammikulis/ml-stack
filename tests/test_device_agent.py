@@ -4,9 +4,9 @@ from dataclasses import replace
 import pytest
 from workspace_kit import Kit
 
-from ml_stack.workspace import device_agent, localagent, tokens
-from ml_stack.workspace.device_accounts import account_for
-from ml_stack.workspace.identity import AGENT, Denied
+from poolhouse.workspace import device_agent, localagent, tokens
+from poolhouse.workspace.device_accounts import account_for
+from poolhouse.workspace.identity import AGENT, Denied
 
 
 def test_owner_enrollment_survives_worker_revocation_and_model_change(tmp_path, monkeypatch):
@@ -40,7 +40,7 @@ def test_agent_cannot_enroll_or_self_assign_device_credit(tmp_path, monkeypatch)
 def test_person_start_binds_model_independent_default(tmp_path, monkeypatch):
     from test_workspace_local_agent import PICK, sleeper
 
-    from ml_stack.workspace import localstart
+    from poolhouse.workspace import localstart
     kit = Kit(tmp_path / "ws")
     monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
     got = localstart.start(kit.ws, localstart.Ask(ctx=65536), pick=PICK, spawn=sleeper,
@@ -60,7 +60,7 @@ def test_person_start_binds_model_independent_default(tmp_path, monkeypatch):
 def test_saved_delegated_coding_seat_survives_model_restart(tmp_path, monkeypatch):
     from test_workspace_local_agent import PICK, sleeper
 
-    from ml_stack.workspace import localprofile, localstart
+    from poolhouse.workspace import localprofile, localstart
     kit = Kit(tmp_path / "ws")
     parent = kit.agent("parent")
     child = kit.ws.delegate(parent, "worker")

@@ -18,11 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import sandbox
-from ml_stack.client import Client, wait_for_health
-from ml_stack.sandbox import policies
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-from ml_stack.serve.process import every_server, pid_exists
+from poolhouse import sandbox
+from poolhouse.client import Client, wait_for_health
+from poolhouse.sandbox import policies
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from poolhouse.serve.process import every_server, pid_exists
 from tests.test_serve_real_llama import LIMIT, llama_server
 
 pytest_plugins = ["tests.sandbox_kit"]
@@ -32,7 +32,7 @@ pytestmark = pytest.mark.slow
 
 def chat_gguf(account: Path) -> Path | None:
     """The smallest GGUF under the Hugging Face cache that is a model on its own."""
-    named = os.environ.get("ML_STACK_TEST_GGUF")
+    named = os.environ.get("POOLHOUSE_TEST_GGUF")
     if named:
         return Path(named)
     root = account / ".cache" / "huggingface" / "hub"

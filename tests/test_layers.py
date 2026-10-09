@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-ROOT = REPO / "src" / "ml_stack"
+ROOT = REPO / "src" / "poolhouse"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("activity", "agent_dependency", "agent_hooks", "asking", "authority", "backend", "briefing", "checks", "command", "command_capture", "contracts", "credentials", "data",
@@ -67,7 +67,7 @@ def _package_of_module(name: str) -> str | None:
 
 
 def _imports() -> dict[tuple[str, str], set[str]]:
-    """Every ``ml_stack`` import in the tree, keyed by (importer, imported) package."""
+    """Every ``poolhouse`` import in the tree, keyed by (importer, imported) package."""
     found: dict[tuple[str, str], set[str]] = {}
     for path in sorted(ROOT.rglob("*.py")):
         if path == ROOT / "__init__.py":
@@ -81,10 +81,10 @@ def _imports() -> dict[tuple[str, str], set[str]]:
             elif isinstance(node, ast.ImportFrom) and not node.level:
                 module = node.module or ""
                 named = [module]
-                if module == "ml_stack":
-                    named += [f"ml_stack.{alias.name}" for alias in node.names]
+                if module == "poolhouse":
+                    named += [f"poolhouse.{alias.name}" for alias in node.names]
             for name in named:
-                if name != "ml_stack" and not name.startswith("ml_stack."):
+                if name != "poolhouse" and not name.startswith("poolhouse."):
                     continue
                 target = _package_of_module(name)
                 if target and target != source:
@@ -123,13 +123,13 @@ def test_known_holds_nothing_already_fixed() -> None:
 
 
 def _loaded(module: str, then: str = "pass") -> set[str]:
-    """The ``ml_stack`` modules a fresh interpreter loads importing ``module`` and running
+    """The ``poolhouse`` modules a fresh interpreter loads importing ``module`` and running
     ``then``."""
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [str(REPO / "src")] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     code = (f"import sys, {module}; {then}; "
-            "print('\\n'.join(m for m in sys.modules if m.startswith('ml_stack')))")
+            "print('\\n'.join(m for m in sys.modules if m.startswith('poolhouse')))")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                           env=env, timeout=120)
     assert done.returncode == 0, done.stderr
@@ -137,16 +137,16 @@ def _loaded(module: str, then: str = "pass") -> set[str]:
 
 
 def test_a_client_does_not_load_the_fleet() -> None:
-    unwanted = {"ml_stack.fleet.daemon", "ml_stack.fleet.discovery"}
-    for module in ("ml_stack.client", "ml_stack.hub", "ml_stack.serve.cli"):
+    unwanted = {"poolhouse.fleet.daemon", "poolhouse.fleet.discovery"}
+    for module in ("poolhouse.client", "poolhouse.hub", "poolhouse.serve.cli"):
         pulled = _loaded(module) & unwanted
         assert not pulled, f"{module} loads {sorted(pulled)}"
 
 
 def test_the_beacon_s_memory_number_does_not_load_the_graph(tmp_path: Path) -> None:
     pulled = _loaded(
-        "ml_stack.fleet.measuring",
-        "ml_stack.fleet.measuring.BenchHost(None, home="
+        "poolhouse.fleet.measuring",
+        "poolhouse.fleet.measuring.BenchHost(None, home="
         f"{str(tmp_path)!r}).report()")
-    graph = sorted(m for m in pulled if m.startswith("ml_stack.graph"))
+    graph = sorted(m for m in pulled if m.startswith("poolhouse.graph"))
     assert not graph, f"the beacon's room number loads {graph}"

@@ -7,9 +7,9 @@ import pytest
 from decide_fakes import embedder
 from safetensors.numpy import save_file
 
-from ml_stack.decide.cases import Case
-from ml_stack.decide.embed import EmbedDecider, Head, Training, fit_head
-from ml_stack.decide.types import DecideError, options_of
+from poolhouse.decide.cases import Case
+from poolhouse.decide.embed import EmbedDecider, Head, Training, fit_head
+from poolhouse.decide.types import DecideError, options_of
 
 TEAMS = {"billing": "payment invoice refund charge", "technical": "error crash bug timeout",
          "sales": "price quote upgrade discount"}
@@ -87,7 +87,7 @@ def test_a_file_that_is_not_a_head_or_has_the_wrong_shapes_is_refused(tmp_path):
         Head.load(odd)
     wrong = tmp_path / "wrong.safetensors"
     save_file({"w": np.zeros(3, dtype="float32")}, str(wrong), metadata={
-        "format": "ml-stack-embed-head/1", "kind": "pairwise", "dim": "4", "options": "[]"})
+        "format": "poolhouse-embed-head/1", "kind": "pairwise", "dim": "4", "options": "[]"})
     with pytest.raises(DecideError, match="do not match"):
         Head.load(wrong)
 

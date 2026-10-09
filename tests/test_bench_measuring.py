@@ -1,4 +1,4 @@
-"""What `ml-stack-bench status` says while a measurement is running.
+"""What `poolhouse-bench status` says while a measurement is running.
 
 The record is written when the measuring lock is taken and retired when it is released,
 so a run started in the foreground is as visible as a detached one, and it says how it is
@@ -17,10 +17,10 @@ from tests.test_graph_bench import TINY, _Scripted
 
 def _measurable(tmp_path, monkeypatch):
     """A bench home, a tiny graph and one question: the arguments of a `run` that measures."""
-    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    import ml_stack.bench as bench
+    pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
+    import poolhouse.bench as bench
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
     graph = tmp_path / "g.json"
@@ -38,8 +38,8 @@ def test_a_run_in_the_foreground_is_measuring_and_says_how_it_asks(tmp_path, mon
     """The gap this closes: a run started without `--detach` held the lock and the GPU
     while `status` said nothing was measuring, so the only way to learn its temperature
     was to read the source."""
-    import ml_stack.bench as bench
-    from ml_stack.bench.progress import status
+    import poolhouse.bench as bench
+    from poolhouse.bench.progress import status
 
     line = _measurable(tmp_path, monkeypatch)
     seen: list[str] = []
@@ -55,15 +55,15 @@ def test_a_run_in_the_foreground_is_measuring_and_says_how_it_asks(tmp_path, mon
 
     said = seen[0]
     assert f"(pid {os.getpid()})" in said and "measuring for " in said
-    assert "ml-stack-bench run in-the-foreground" in said
+    assert "poolhouse-bench run in-the-foreground" in said
     assert "asking: temperature 0.0 (greedy), n_predict 16384" in said
     assert "log: none -- it prints to the terminal it was started in" in said
     assert "nothing is measuring" in status(results=False)
 
 
 def test_a_run_asked_for_a_temperature_says_that_one(tmp_path, monkeypatch, capsys):
-    import ml_stack.bench as bench
-    from ml_stack.bench.progress import status
+    import poolhouse.bench as bench
+    from poolhouse.bench.progress import status
 
     line = _measurable(tmp_path, monkeypatch)
     seen: list[str] = []
@@ -80,9 +80,9 @@ def test_a_run_asked_for_a_temperature_says_that_one(tmp_path, monkeypatch, caps
 
 
 def test_a_record_whose_process_has_gone_is_not_measuring(tmp_path, monkeypatch):
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    from ml_stack.bench.progress import status
-    from ml_stack.bench.underway import measuring, measuring_file, remember
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
+    from poolhouse.bench.progress import status
+    from poolhouse.bench.underway import measuring, measuring_file, remember
 
     remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
     assert measuring() is not None
@@ -97,9 +97,9 @@ def test_a_record_whose_process_has_gone_is_not_measuring(tmp_path, monkeypatch)
 def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsys):
     """SIGTERM becomes a `SystemExit`, so the lock's block runs its exit and the record it
     wrote is retired with it."""
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    from ml_stack.bench import run as running
-    from ml_stack.bench.underway import measuring, measuring_file
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
+    from poolhouse.bench import run as running
+    from poolhouse.bench.underway import measuring, measuring_file
 
     def killed(rest):
         assert measuring() is not None
@@ -115,8 +115,8 @@ def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsy
 
 
 def test_the_record_says_the_serving_a_sweep_will_use():
-    from ml_stack.bench.progress import _how_said
-    from ml_stack.bench.underway import asking_said
+    from poolhouse.bench.progress import _how_said
+    from poolhouse.bench.underway import asking_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
                        "--n-max", "4", "--serve-kv", "f16", "--reasoning-budget", "2048",
@@ -132,8 +132,8 @@ def test_the_record_says_the_serving_a_sweep_will_use():
 def test_the_record_says_every_arm_a_drafts_run_will_serve():
     """`drafts` names its heads under --draft and a depth per arm, and the baseline arm is
     the empty head."""
-    from ml_stack.bench.progress import _how_said
-    from ml_stack.bench.underway import asking_said
+    from poolhouse.bench.progress import _how_said
+    from poolhouse.bench.underway import asking_said
 
     how = asking_said(["drafts", "flash.gguf", "--draft", "", "--draft", "heads/mtp-a.gguf",
                        "--n-max", "2", "--n-max", "8", "--reasoning-budget", "0"])
@@ -143,8 +143,8 @@ def test_the_record_says_every_arm_a_drafts_run_will_serve():
 
 
 def test_a_sweep_told_to_drop_the_head_says_it_has_none():
-    from ml_stack.bench.progress import _how_said
-    from ml_stack.bench.underway import asking_said
+    from poolhouse.bench.progress import _how_said
+    from poolhouse.bench.underway import asking_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
                        "--no-draft"])
@@ -155,8 +155,8 @@ def test_a_sweep_told_to_drop_the_head_says_it_has_none():
 def test_a_detached_run_keeps_the_log_its_parent_opened_for_it(tmp_path, monkeypatch):
     """The child writes its own record when it takes the lock; the log belongs to the
     parent that opened it."""
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    from ml_stack.bench.underway import remember
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
+    from poolhouse.bench.underway import remember
 
     remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid(),
              log=str(tmp_path / "sweep.log"), started="2026-09-05T10:00:00")
@@ -167,14 +167,14 @@ def test_a_detached_run_keeps_the_log_its_parent_opened_for_it(tmp_path, monkeyp
 
 def test_a_record_that_kept_no_sampling_says_the_asking_was_unrecorded():
     """An older record, or one written before the sampler was read, has no `sampling`."""
-    from ml_stack.bench.progress import _how_said, _sampling_said
+    from poolhouse.bench.progress import _how_said, _sampling_said
 
     assert _sampling_said({}) == "unrecorded"
     assert _how_said({"sampling": {}, "cache_type": "q8_0"})[0] == "  asking: unrecorded"
 
 
 def test_the_sampling_reads_temperature_first_and_names_a_zero_greedy():
-    from ml_stack.bench.progress import _sampling_said
+    from poolhouse.bench.progress import _sampling_said
 
     said = _sampling_said({"top_p": 0.9, "temperature": 0.0, "seed": 7})
     assert said == "temperature 0.0 (greedy), top_p 0.9, seed 7"

@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import device_auth
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.remote import Peer
-from ml_stack.http import Server, ServerError
-from ml_stack.workspace import coordinator_client
-from ml_stack.workspace.identity import Denied
+from poolhouse.fleet import device_auth
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.remote import Peer
+from poolhouse.http import Server, ServerError
+from poolhouse.workspace import coordinator_client
+from poolhouse.workspace.identity import Denied
 
 pytest_plugins = ("test_device_agent_bootstrap",)
 
@@ -66,7 +66,7 @@ def test_daemon_project_dispatch_refuses_invalid_device_requests(enrolled, tmp_p
             assert calls == []
             return
         if credential == "missing":
-            from ml_stack.http import request_bytes
+            from poolhouse.http import request_bytes
             headers = {"Authorization": "Bearer " + secret} if credential == "unsealed" else {}
             with pytest.raises(ServerError) as refused:
                 request_bytes(origin + route, method="POST", data=b"{}", headers=headers)

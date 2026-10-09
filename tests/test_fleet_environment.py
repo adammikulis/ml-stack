@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from ml_stack.fleet.environment import CATALOG, METADRIVE_SOURCE, Environment, catalog_for
+from poolhouse.fleet.environment import CATALOG, METADRIVE_SOURCE, Environment, catalog_for
 
 
 class TestCatalog:
@@ -32,10 +32,10 @@ class TestCatalog:
             assert lib.title and lib.blurb and lib.packages
             assert lib.size_mb > 0, lib.name
 
-    def test_the_essentials_include_ml_stack_itself(self):
+    def test_the_essentials_include_poolhouse_itself(self):
         """A machine can hold torch and still not run a job without these."""
         core = next(lib for lib in CATALOG if lib.name == "core")
-        assert any(p.startswith("ml-stack[") for p in core.packages), core.packages
+        assert any(p.startswith("poolhouse[") for p in core.packages), core.packages
 
 
 class TestEnvironment:
@@ -50,13 +50,13 @@ class TestEnvironment:
         assert env.python.parent.parent == env.path
         assert env.path.parent == tmp_path
 
-    def test_it_finds_the_wheels_for_ml_stacks_own_packages(self, tmp_path):
+    def test_it_finds_the_wheels_for_poolhouses_own_packages(self, tmp_path):
         """They are not on any index, so without them the environment can hold torch
-        and still not import ml_stack."""
+        and still not import poolhouse."""
         found = Environment(tmp_path).wheels()
         if found is None:
             pytest.skip("no wheels built; run packaging/build.py")
-        assert any(found.glob("ml_stack-*.whl"))
+        assert any(found.glob("poolhouse-*.whl"))
 
     def test_an_unknown_library_is_reported_not_ignored(self, tmp_path):
         env = Environment(tmp_path)
@@ -112,11 +112,11 @@ class TestBuildingItForReal:
         assert env.exists
         have = env.installed()
         assert "numpy" in have and "safetensors" in have
-        assert "ml-stack" in have, "a job could not import ml_stack.train"
+        assert "poolhouse" in have, "a job could not import poolhouse.train"
 
         import subprocess
         out = subprocess.run([str(env.python), "-c",
-                              "import ml_stack.train, numpy; print('ok')"],
+                              "import poolhouse.train, numpy; print('ok')"],
                              capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr[-300:]
 
@@ -126,7 +126,7 @@ class TestFetchingPython:
     def _release(self, monkeypatch, tmp_path, assets):
         import json
 
-        from ml_stack.fleet import environment as mod
+        from poolhouse.fleet import environment as mod
         from tests.net_site import Site
 
         env = Environment(tmp_path)
@@ -151,7 +151,7 @@ class TestFetchingPython:
 
 
 def test_requirement_names_support_direct_urls():
-    from ml_stack.fleet.environment import _base
+    from poolhouse.fleet.environment import _base
     assert _base('MetaDrive-Simulator @ git+https://example.invalid/project.git@abc') == 'metadrive-simulator'
     assert _base('stable_baselines3>=2.0') == 'stable-baselines3'
 
@@ -160,7 +160,7 @@ def test_extra_readiness_requires_selected_dependencies(monkeypatch):
     from email.message import Message
     from types import SimpleNamespace
 
-    from ml_stack.fleet import environment
+    from poolhouse.fleet import environment
     metadata = Message()
     metadata['Provides-Extra'] = 'gym-driving'
     dist = SimpleNamespace(metadata=metadata, requires=[
@@ -168,7 +168,7 @@ def test_extra_readiness_requires_selected_dependencies(monkeypatch):
         'rware; extra == "gym-warehouse"'])
     monkeypatch.setattr(environment.metadata, 'distribution', lambda name: dist)
     library = next(lib for lib in CATALOG if lib.name == 'gym-driving')
-    have = {'ml-stack': '0.3', 'packaging': '25.0', 'gymnasium': '1.2'}
+    have = {'poolhouse': '0.3', 'packaging': '25.0', 'gymnasium': '1.2'}
     assert not environment._library_installed(library, have)
     have['metadrive-simulator'] = '0.4'
     base, revision = METADRIVE_SOURCE.split('git+')[1].rsplit('@', 1)
@@ -181,7 +181,7 @@ def test_extra_readiness_requires_selected_dependencies(monkeypatch):
 def test_pinned_git_readiness_requires_exact_installed_commit():
     from packaging.requirements import Requirement
 
-    from ml_stack.fleet.environment import _direct_matches
+    from poolhouse.fleet.environment import _direct_matches
     requirement = Requirement('native @ git+https://example.invalid/simulator.git@abc')
     urls = {'native': {'url': 'https://example.invalid/simulator.git',
                        'vcs_info': {'vcs': 'git', 'requested_revision': 'abc', 'commit_id': 'def'}}}
@@ -199,7 +199,7 @@ def test_managed_metadata_controls_extra_readiness(tmp_path, monkeypatch):
     env.python.write_text('managed')
     base, revision = METADRIVE_SOURCE.split('git+')[1].rsplit('@', 1)
     payload = {'installed': [
-        {'metadata': {'name': 'ml-stack', 'version': '0.3', 'provides_extra': ['gym-driving'],
+        {'metadata': {'name': 'poolhouse', 'version': '0.3', 'provides_extra': ['gym-driving'],
                       'requires_dist': []}},
         {'metadata': {'name': 'metadrive-simulator', 'version': '0.4'},
          'direct_url': {'url': base,
@@ -227,7 +227,7 @@ def test_managed_driving_install_supplies_source_outside_package_metadata(tmp_pa
     monkeypatch.setattr(env, 'pip', pip)
     result = env.install([name])
     assert result[name]['ok']
-    assert calls == [['install', '--upgrade', f'ml-stack[{name}]', METADRIVE_SOURCE]]
+    assert calls == [['install', '--upgrade', f'poolhouse[{name}]', METADRIVE_SOURCE]]
 
 
 def test_every_published_extra_uses_index_dependencies():
@@ -250,7 +250,7 @@ def test_built_wheel_metadata_has_no_direct_dependencies():
     wheels = Environment('.').wheels()
     if wheels is None:
         pytest.skip('build wheels with packaging/build.py')
-    for wheel in wheels.glob('ml_stack-*.whl'):
+    for wheel in wheels.glob('poolhouse-*.whl'):
         with ZipFile(wheel) as archive:
             metadata_file = next(name for name in archive.namelist() if name.endswith('.dist-info/METADATA'))
             metadata = archive.read(metadata_file).decode()
@@ -261,7 +261,7 @@ def test_built_wheel_metadata_has_no_direct_dependencies():
 def test_unavailable_pyenv_shim_is_not_an_environment_builder(tmp_path, monkeypatch):
     import subprocess
 
-    from ml_stack.fleet import environment
+    from poolhouse.fleet import environment
     version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
     monkeypatch.setattr(environment.shutil, 'which', lambda _name: '/tmp/shims/python')
     monkeypatch.setattr(environment.subprocess, 'run', lambda *args, **kwargs:
@@ -273,7 +273,7 @@ def test_python_builder_uses_verified_executable_not_shim(tmp_path, monkeypatch)
     import json
     import subprocess
 
-    from ml_stack.fleet import environment
+    from poolhouse.fleet import environment
     version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
     monkeypatch.setattr(environment.shutil, 'which', lambda _name: '/tmp/shims/python')
     monkeypatch.setattr(environment.subprocess, 'run', lambda *args, **kwargs:
@@ -286,7 +286,7 @@ def test_installed_pyenv_python_is_reused_when_current_shim_cannot_run(tmp_path,
     import json
     import subprocess
 
-    from ml_stack.fleet import environment
+    from poolhouse.fleet import environment
 
     version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
     monkeypatch.setattr(environment.shutil, 'which', lambda name:
@@ -308,10 +308,10 @@ def test_installed_pyenv_python_is_reused_when_current_shim_cannot_run(tmp_path,
 def test_frozen_runtime_requires_exact_bundled_commit_before_work(tmp_path, monkeypatch, actual):
     import subprocess
 
-    from ml_stack.fleet import environment
+    from poolhouse.fleet import environment
 
     managed = Environment(tmp_path)
-    wheel = tmp_path / "ml_stack-0.2.1-py3-none-any.whl"
+    wheel = tmp_path / "poolhouse-0.2.1-py3-none-any.whl"
     wheel.touch()
     monkeypatch.setattr(environment.sys, "frozen", True, raising=False)
     monkeypatch.setattr(managed, "wheels", lambda: tmp_path)
@@ -334,11 +334,11 @@ def test_frozen_runtime_requires_exact_bundled_commit_before_work(tmp_path, monk
 
 @pytest.mark.skipif(os.name == 'nt', reason='POSIX executable path syntax')
 def test_runtime_revision_probe_rejects_stale_literal_hostile_interpreter(tmp_path, monkeypatch):
-    from ml_stack.fleet import environment
+    from poolhouse.fleet import environment
 
     python = tmp_path / "python;touch injected"
     python.symlink_to(sys.executable)
-    wheel = tmp_path / "ml_stack-0.2.1-py3-none-any.whl"
+    wheel = tmp_path / "poolhouse-0.2.1-py3-none-any.whl"
     wheel.touch()
     managed = Environment(tmp_path)
     monkeypatch.chdir(tmp_path)

@@ -18,15 +18,15 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.device import device_report
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.pool import Candidate, Requires, candidates, choose, eligible, soonest
-from ml_stack.fleet.rates import Rates
-from ml_stack.fleet.remote import Peer
-from ml_stack.fleet.work import Unit, run
-from ml_stack.http import Server
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.device import device_report
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.pool import Candidate, Requires, candidates, choose, eligible, soonest
+from poolhouse.fleet.rates import Rates
+from poolhouse.fleet.remote import Peer
+from poolhouse.fleet.work import Unit, run
+from poolhouse.http import Server
 from tests.cluster_support import any_command
 
 

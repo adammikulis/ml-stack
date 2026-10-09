@@ -14,10 +14,10 @@ from test_fixture_plan import FixturePlan, invocation_selectors
 from test_kernel_browser import prepare as prepare_assets
 from test_kernel_browser_endpoints import EndpointBank
 
-from ml_stack.activity.source_snapshot import SourceSnapshot, private_namespace, protected_roots
-from ml_stack.fleet.discovery import primary_ip
-from ml_stack.sandbox.policy import Policy
-from ml_stack.sandbox.seatbelt import quote
+from poolhouse.activity.source_snapshot import SourceSnapshot, private_namespace, protected_roots
+from poolhouse.fleet.discovery import primary_ip
+from poolhouse.sandbox.policy import Policy
+from poolhouse.sandbox.seatbelt import quote
 
 CURRENT = contextvars.ContextVar('test_fixture_resources', default=None)
 
@@ -33,7 +33,7 @@ def bind(run):
 
 def source_plan(command: list[str], environment: dict[str, str]) -> FixturePlan:
     root = Path(__file__).resolve().parent.parent
-    storage = private_namespace(environment, 'ml-stack-fixture-plan-')
+    storage = private_namespace(environment, 'poolhouse-fixture-plan-')
     snapshot = None
     try:
         snapshot = SourceSnapshot(root, storage)

@@ -1,4 +1,4 @@
-"""Stand-ins for the models behind ml_stack.decide: a chat server that reports log-probabilities
+"""Stand-ins for the models behind poolhouse.decide: a chat server that reports log-probabilities
 and an embedder that hashes words."""
 
 from __future__ import annotations

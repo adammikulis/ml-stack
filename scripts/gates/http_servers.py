@@ -10,16 +10,16 @@ from ._perfile import finder
 from ._util import dotted, exempt, parse
 
 NAME = "http-servers"
-OWNER = "ml_stack.graph.serve"
+OWNER = "poolhouse.graph.serve"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/graph/serve.py", "src/ml_stack/testing/fakes.py",
-        "src/ml_stack/testing/fakehub.py")
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/graph/serve.py", "src/poolhouse/testing/fakes.py",
+        "src/poolhouse/testing/fakehub.py")
 
 
 def describe() -> str:
-    return ("A second HTTP handler; ml_stack.graph.serve takes a route mixin and\n"
-            "    ml_stack.testing.fakes the stand-in servers.")
+    return ("A second HTTP handler; poolhouse.graph.serve takes a route mixin and\n"
+            "    poolhouse.testing.fakes the stand-in servers.")
 
 
 def scan(path: Path, where: str) -> list[Finding]:

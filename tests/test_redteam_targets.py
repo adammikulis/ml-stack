@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
-from ml_stack.redteam.targets import ToolSpy, chat_endpoint, from_callable, mcp_tool_agent
-from ml_stack.testing.fakes import Served, fake_llama_server
+from poolhouse.redteam.targets import ToolSpy, chat_endpoint, from_callable, mcp_tool_agent
+from poolhouse.testing.fakes import Served, fake_llama_server
 
 
 def ask(responder, text: str):

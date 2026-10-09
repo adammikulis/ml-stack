@@ -20,7 +20,7 @@ import affected
 import testreuse_facts as facts
 
 NEVER_MARKS = frozenset({"live_api", "live_net", "redteam", "gpu", "model"})
-NEVER_WORDS = re.compile(r"\b(?:Lease|llama[-_]server|ml-stack-serve)\b")
+NEVER_WORDS = re.compile(r"\b(?:Lease|llama[-_]server|poolhouse-serve)\b")
 SPAWNS = re.compile(r"\b(?:subprocess|Popen|os\.system|os\.exec\w*|os\.spawn\w*|os\.fork\w*|multiprocessing|pexpect|"
                     r"pty|create_subprocess_\w+|ProcessPoolExecutor|runpytest_subprocess|playwright|"
                     r"concurrent\.futures\.process)\b")
@@ -39,13 +39,13 @@ DROPPED_OPTIONS = frozenset({"-n", "--numprocesses", "--junitxml"})
 RUNNER_FILES = ("scripts/testreuse_plugin.py", "scripts/testreuse_key.py", "scripts/testreuse_store.py",
                 "scripts/testreuse_run.py", "scripts/testslots_pytest.py", "scripts/testslots_rpc.py")
 ENV_NAME = re.compile(r"""["']([A-Z][A-Z0-9_]{3,})["']""")
-ENV_FIXED = ("PATH", "CI", "TZ", "LANG", "LC_ALL", "CLAUDECODE", "ML_STACK_NONINTERACTIVE",
-             "ML_STACK_LIVE_API", "ML_STACK_LIVE_NET", "ML_STACK_NOTIFY", "DEV_TEST_SLOTS")
+ENV_FIXED = ("PATH", "CI", "TZ", "LANG", "LC_ALL", "CLAUDECODE", "POOLHOUSE_NONINTERACTIVE",
+             "POOLHOUSE_LIVE_API", "POOLHOUSE_LIVE_NET", "POOLHOUSE_NOTIFY", "DEV_TEST_SLOTS")
 ENV_SKIP = frozenset({"PYTHONPATH", "DEV_TEST_PYTEST_TOKEN", "DEV_TEST_PYTEST_ENDPOINT",
                       "DEV_TEST_WORKERS", "DEV_TEST_SLOTS_DIR", "DEV_TEST_REMOTE_BROKER",
                       "DEV_TEST_LEASE", "DEV_TEST_REMOTE_LEASE", "DEV_TEST_REUSE_DIR",
                       "DEV_TEST_REUSE_CANARY", "DEV_TEST_REUSE_RECORD", "DEV_TEST_REUSE_ROOT",
-                      "DEV_TEST_JOB", "DEV_TEST_AGENT", "ML_STACK_SHIM_LOG", "DEV_TEST_CLASS",
+                      "DEV_TEST_JOB", "DEV_TEST_AGENT", "POOLHOUSE_SHIM_LOG", "DEV_TEST_CLASS",
                       "DEV_TEST_ESTIMATE_S", "DEV_TEST_HISTORY"})
 CONFIG = ("pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg", "tests/heavy-modules.txt", *RUNNER_FILES)
 TREE_DIRS = ("src", "scripts", "tests", "docs", "packaging")
@@ -233,9 +233,9 @@ def env_digest(root: Path, name: str) -> str:
 
 
 def runtime_pin(root: Path) -> str:
-    """The installed ml-stack distribution and how it was installed, or empty."""
+    """The installed poolhouse distribution and how it was installed, or empty."""
     try:
-        dist = metadata.distribution("ml-stack")
+        dist = metadata.distribution("poolhouse")
     except metadata.PackageNotFoundError:
         return ""
     return f"{dist.version} {dist.read_text('direct_url.json') or ''}".replace(str(root), "<root>")

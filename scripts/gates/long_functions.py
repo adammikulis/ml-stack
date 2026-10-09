@@ -12,7 +12,7 @@ from ._util import parse
 NAME = "long-functions"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 LIMIT = 80
 
 

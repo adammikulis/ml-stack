@@ -4,17 +4,17 @@ import math
 
 import pytest
 
-from ml_stack.gym.cosim import make_cosim
-from ml_stack.gym.cosim_physics import Physics
-from ml_stack.gym.traffic import traffic_defaults
+from poolhouse.gym.cosim import make_cosim
+from poolhouse.gym.cosim_physics import Physics
+from poolhouse.gym.traffic import traffic_defaults
 
 pytestmark = pytest.mark.slow
 
 
 @pytest.fixture(autouse=True)
 def native_dependencies():
-    pytest.importorskip("metadrive", reason="ml-stack[gym-driving]")
-    pytest.importorskip("sumo", reason="ml-stack[gym-traffic]")
+    pytest.importorskip("metadrive", reason="poolhouse[gym-driving]")
+    pytest.importorskip("sumo", reason="poolhouse[gym-traffic]")
 
 
 def test_native_signal_policy_controls_physical_vehicles_and_sensors():

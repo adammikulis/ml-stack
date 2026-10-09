@@ -10,11 +10,11 @@ except ModuleNotFoundError:
 
     @pytest.fixture
     def daemon():
-        raise pytest.skip.Exception("needs playwright: ml-stack[scrape]", allow_module_level=False)
+        raise pytest.skip.Exception("needs playwright: poolhouse[scrape]", allow_module_level=False)
 
     @pytest.fixture
     def joined():
-        raise pytest.skip.Exception("needs playwright: ml-stack[scrape]", allow_module_level=False)
+        raise pytest.skip.Exception("needs playwright: poolhouse[scrape]", allow_module_level=False)
 
     @pytest.fixture
     def open_page(daemon):

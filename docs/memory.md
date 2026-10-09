@@ -3,8 +3,8 @@
 What the chat agent keeps across sessions, in two scopes: **user** (the person's preferences, this
 machine, what works on it, standing decisions) and **project** (facts true only in one project:
 conventions, decisions and their reasons, what worked or failed in that repository, who owns what). The code is
-`src/ml_stack/memory/`; the command is `ml-stack-memory`. Install the extra with
-`pip install ml-stack[memory,store]` (`cryptography`, `keyring`, `ladybug`).
+`src/poolhouse/memory/`; the command is `poolhouse-memory`. Install the extra with
+`pip install poolhouse[memory,store]` (`cryptography`, `keyring`, `ladybug`).
 
 ## Scopes
 
@@ -22,9 +22,9 @@ exists). The project id is `git:<origin url>` when the repository has an `origin
 and names the store directory. A git repository therefore keeps its memory when the folder is
 moved, renamed or cloned again with the same origin, and every worktree of one repository shares
 it. A folder with no origin is identified by its path: after moving it, run
-`ml-stack-memory relink OLD_PATH` inside the new location (person only) to move the old project's
+`poolhouse-memory relink OLD_PATH` inside the new location (person only) to move the old project's
 facts into the new one (the new store must be empty; the old one is emptied). The project's name
-and root are kept inside the sealed file, and `ml-stack-memory projects` lists every project
+and root are kept inside the sealed file, and `poolhouse-memory projects` lists every project
 that has memory.
 
 **Keys.** One key per user and profile in the OS keystore seals every file, so `rekey` re-seals
@@ -73,7 +73,7 @@ options are built by the tool; nothing the model writes can pick one. Without a 
 
 ## The graph
 
-Facts and the things they are about are nodes of ml-stack's own `GraphStore`
+Facts and the things they are about are nodes of Poolhouse's own `GraphStore`
 (`docs/graph.md`), so a fact comes back with its neighbourhood and the graph's search and path
 queries apply to it.
 
@@ -88,7 +88,7 @@ queries apply to it.
 | `learned_on` | fact, build entity | the build a `machine` or `result` fact was learned on (added automatically from the build in use) |
 | `supersedes` | new fact, old fact | the old fact is marked `superseded` and no longer recalled |
 | `contradicts` | new note, old note | both stay current and both are recalled, each showing the link |
-| `related` | fact, fact | set by the person with `ml-stack-memory link` |
+| `related` | fact, fact | set by the person with `poolhouse-memory link` |
 
 **Entities.** `remember` takes `entities`, a list of `kind:name` strings
 (`model:Qwen3.8-Flash-Next`, `build:b11380`, `topic:slot count`). Each name goes through the
@@ -123,7 +123,7 @@ runs hostile text through every path).
   few hundred facts) and plaintext exists in this process's memory, which swap or a core dump
   could reach.
 - **Whose.** A store belongs to the OS account the process runs as (real uid and login name),
-  and to a profile (`default`, or `$ML_STACK_MEMORY_PROFILE`, or `Setup(profile=...)`, 1-32 of
+  and to a profile (`default`, or `$POOLHOUSE_MEMORY_PROFILE`, or `Setup(profile=...)`, 1-32 of
   `a-z0-9_-`). The user is never read from a model, a tool argument or a request; a daemon
   serving several people passes each its own `Setup(user=...)` from its own authentication.
   The key account, the path and the authenticated owner all differ per user and profile, so a
@@ -131,20 +131,20 @@ runs hostile text through every path).
 - **Key.** A subkey of the user's master key (`docs/keystore.md`): HKDF-SHA256 over the master
   with the purpose `memory`, the user, profile and directory, and the file's own salt, so a new
   salt is a new key. The master lives in the OS keystore, never in a file. A store written by
-  an older version under a random key in the service `ml-stack-memory` is re-sealed on first
+  an older version under a random key in the service `poolhouse-memory` is re-sealed on first
   open and that item is deleted once every file reads back. With no usable keystore the
   store fails closed: reads see an empty, `locked` store, writes raise `KeyUnavailable` naming
-  the fallback. The fallback is explicit: `ML_STACK_MEMORY_KEYS=passphrase` derives the key with
-  scrypt from `$ML_STACK_MEMORY_PASSPHRASE` or a prompt on a terminal. A file records which mode
+  the fallback. The fallback is explicit: `POOLHOUSE_MEMORY_KEYS=passphrase` derives the key with
+  scrypt from `$POOLHOUSE_MEMORY_PASSPHRASE` or a prompt on a terminal. A file records which mode
   it was written in and is never opened by the other.
 - **Integrity.** The AES-GCM tag covers the ciphertext and header. A file that fails it falls
   back to the previous copy (`recovered`), otherwise the store reads empty and refuses writes
-  (`tampered`) until `ml-stack-memory forget --all`. Replacing the file with an older sealed
+  (`tampered`) until `poolhouse-memory forget --all`. Replacing the file with an older sealed
   copy made under the same key is not detected.
-- **Rekey.** `ml-stack-memory rekey` (person only) chooses a new salt, re-seals the store and
+- **Rekey.** `poolhouse-memory rekey` (person only) chooses a new salt, re-seals the store and
   the previous copy under the key it gives, and the old key is no longer used; an interruption
   leaves a file that still opens under its own salt. Old ciphertext still opens for whoever
-  holds the master key; `ml-stack-security keystore-reset` is what ends that. A version 1 file
+  holds the master key; `poolhouse-security keystore-reset` is what ends that. A version 1 file
   imported by the migration below is sealed under the same key.
 
 Stats and `export` are the only places text leaves the store: `export` writes plain JSON to
@@ -167,7 +167,7 @@ was not.
 `machine` and `result` facts are marked `RE-CHECK` when the managed llama.cpp build in use
 differs from the one they were learned on, or when they were last confirmed more than 90 days
 (`machine`) or 30 days (`result`) ago. Preferences and notes are never marked. Storing the same
-text again, or `ml-stack-memory confirm ID`, records a confirmation under the current build.
+text again, or `poolhouse-memory confirm ID`, records a confirmation under the current build.
 
 ## Retrieval
 
@@ -189,7 +189,7 @@ first, then the facts that match the task. Without an embedder only words and en
   removed, one line) and refused when it holds a credential, reads like an instruction to a
   model, claims or waives a permission, a role or a confirmation, names sentinel's state, or
   (from a model) holds an email address, phone number or id number. The person's own
-  `ml-stack-memory add` may hold personal details but never a credential or a permission claim.
+  `poolhouse-memory add` may hold personal details but never a credential or a permission claim.
 - Facts come back only inside `<untrusted source='memory'>` fences, one line each (neighbours
   indented under it) with kind, source, confirmation count, date, scope, entities, links and
   any re-check reason, under a header saying they are notes and not instructions. A fact cannot
@@ -202,8 +202,8 @@ first, then the facts that match the task. Without an embedder only words and en
   same write checks (a fact copied from a README that reads as an instruction is refused), come
   back only inside the fence, one line each and labelled `scope project`, and cannot change a
   role, a rule or a tool; the scope prompt is built by code, not by model text.
-- `ml-stack-memory` refuses a process started by an agent (`CLAUDECODE`, `ML_STACK_AGENT`,
-  `ML_STACK_NONINTERACTIVE`); commands that write also need a terminal on stdin and stdout.
+- `poolhouse-memory` refuses a process started by an agent (`CLAUDECODE`, `POOLHOUSE_AGENT`,
+  `POOLHOUSE_NONINTERACTIVE`); commands that write also need a terminal on stdin and stdout.
 
 Limits: 400 characters a fact, 80 an entity name, 300 facts a store (per scope), 6 entities and 8
 links a fact, 10 facts added per session (both scopes together).
@@ -211,7 +211,7 @@ links a fact, 10 facts added per session (both scopes together).
 ## Wiring contract
 
 ```python
-from ml_stack import memory
+from poolhouse import memory
 
 mem = memory.Memory.open()                       # user store + the project of the working directory
 memory_tools = memory.tools(confirm=person.choose, store=mem.user, project=mem.project)
@@ -219,7 +219,7 @@ context = memory.session_context(task_or_none, store=mem.merged())   # "" when t
 guide = memory.guidance(project_name)           # for the system message
 ```
 
-`ml_stack.chat.extensions(person, mem)` does exactly this and returns the `roles.Extension`
+`poolhouse.chat.extensions(person, mem)` does exactly this and returns the `roles.Extension`
 (`docs/agent-roles.md`).
 
 - `memory.READ` (`recall`) only looks and is in the extension's `reads`. `memory.ACTING`
@@ -256,20 +256,20 @@ left alone.
 ## Commands
 
 ```
-ml-stack-memory list [--json]
-ml-stack-memory show ID
-ml-stack-memory add TEXT --scope user|project [--kind K --source S --model M --entity kind:name]
-ml-stack-memory edit ID TEXT
-ml-stack-memory confirm ID
-ml-stack-memory forget ID
-ml-stack-memory forget --all [--yes]
-ml-stack-memory link ID supersedes|contradicts|related OTHER
-ml-stack-memory unlink ID REL OTHER
-ml-stack-memory rekey
-ml-stack-memory export
-ml-stack-memory stats [--json]
-ml-stack-memory projects
-ml-stack-memory relink OLD_PATH
+poolhouse-memory list [--json]
+poolhouse-memory show ID
+poolhouse-memory add TEXT --scope user|project [--kind K --source S --model M --entity kind:name]
+poolhouse-memory edit ID TEXT
+poolhouse-memory confirm ID
+poolhouse-memory forget ID
+poolhouse-memory forget --all [--yes]
+poolhouse-memory link ID supersedes|contradicts|related OTHER
+poolhouse-memory unlink ID REL OTHER
+poolhouse-memory rekey
+poolhouse-memory export
+poolhouse-memory stats [--json]
+poolhouse-memory projects
+poolhouse-memory relink OLD_PATH
 every command: [--scope user|project] [--project PATH]
 ```
 
@@ -281,5 +281,5 @@ or `both`); with `--yes` it needs `--scope`.
 ## Not yet
 
 Exporting and importing a project bundle between users, ranking tools from outcomes with a decider, syncing across devices, proposing facts
-automatically after a task, ingesting documents (`ml-stack-ingest`) into the same graph, the
-chat session files (`~/.ml-stack/chat/ID.json`) under the same per-user encryption.
+automatically after a task, ingesting documents (`poolhouse-ingest`) into the same graph, the
+chat session files (`~/.poolhouse/chat/ID.json`) under the same per-user encryption.

@@ -242,7 +242,7 @@ load on the unsloth fork prebuilt — the fork's `mtp_only` path looks for `next
 only heads exported by #27836/#144's converter have that name (alternatives 1 and 2 carry
 `output_hc_*`). Untested either way; a header read would settle it.
 
-## 7. Recommendation for ml-stack
+## 7. Recommendation for Poolhouse
 
 Measure first, on this machine: the fork asset `llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz`
 (sha256 in `llama-prebuilt-sha256.json`; or a Metal build of #144 at `586b15e`) against the
@@ -251,12 +251,12 @@ local `UD-IQ4_XS` with the head files already in
 Arms, all with `--spec-type draft-mtp --spec-draft-backend-sampling --ctx-checkpoints 0`:
 `shared-Q8_0` (unsloth's pick), `Q8_0` (the 8% seen on #144), `shared-Q4_K_M`
 (the match-the-target result from alternative 2), each at n-max 2 / 3 / 6 with
-`--spec-draft-p-min 0.7`, plus one bare arm. Smoke it (`ml-stack-bench drafts --smoke`) before
+`--spec-draft-p-min 0.7`, plus one bare arm. Smoke it (`poolhouse-bench drafts --smoke`) before
 the sweep, and check greedy identity off/on, because Apple Silicon is where every published
 number is weakest and where output diverged. Do not spend time on mainline for this until §2
 moves.
 
-`ml-stack-serve --draft auto` picks "the `mtp-*.gguf` beside the weights"; here there are six
+`poolhouse-serve --draft auto` picks "the `mtp-*.gguf` beside the weights"; here there are six
 in `MTP/`, none beside the shards, and three need a binary that can borrow — the chooser needs
 to know which binary is serving before it picks `shared-*`.
 

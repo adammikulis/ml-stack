@@ -12,12 +12,12 @@ import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
-from ml_stack import net
-from ml_stack.fleet import tls
-from ml_stack.http import Server
-from ml_stack.httpguard import Limits
-from ml_stack.serve.llamacpp_compile import Toolchain, find_make
-from ml_stack.serve.llamacpp_upstream import Upstream
+from poolhouse import net
+from poolhouse.fleet import tls
+from poolhouse.http import Server
+from poolhouse.httpguard import Limits
+from poolhouse.serve.llamacpp_compile import Toolchain, find_make
+from poolhouse.serve.llamacpp_upstream import Upstream
 
 CMAKE = """cmake_minimum_required(VERSION 3.14)
 project(stub NONE)

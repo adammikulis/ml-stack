@@ -1,0 +1,581 @@
+"""A Python environment for training jobs, separate from the app itself."""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from dataclasses import dataclass, field
+from importlib import metadata
+from pathlib import Path
+from typing import Any
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+from poolhouse import net
+from poolhouse.files import promote
+from poolhouse.http import ServerError
+from poolhouse.httpguard import Refused
+from poolhouse.lock import only_one
+from poolhouse.net import packages
+
+from .managed_compute import process_environment
+from .runtime_wheel import cache_wheel, current_wheel, wheel_commit
+
+__all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
+
+METADRIVE_SOURCE = ("metadrive-simulator @ git+https://github.com/metadriverse/"
+                    "metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db")
+
+PYTHON = "3.13"
+STANDALONE = ("https://api.github.com/repos/astral-sh/"
+              "python-build-standalone/releases/latest")
+
+
+@dataclass(frozen=True, slots=True)
+class Library:
+    """One thing that can be installed, and what it is for."""
+
+    name: str
+    title: str
+    blurb: str
+    packages: tuple[str, ...]
+    index: str = ""
+    size_mb: int = 0
+    default: bool = False
+    platforms: tuple[str, ...] = ()
+    vendors: tuple[str, ...] = ()
+    python_version: str = ""
+    bootstrap_packages: tuple[str, ...] = ()
+
+    def applies(self, vendor: str = "") -> bool:
+        if self.platforms and sys.platform not in self.platforms:
+            return False
+        return not self.vendors or vendor in self.vendors
+
+
+CATALOG: tuple[Library, ...] = (
+    Library("core", "Training essentials",
+            "Arrays, checkpoint files, and poolhouse's own training code. "
+            "Needed by everything below.",
+            ("poolhouse[train]",),
+            size_mb=40, default=True),
+    Library("torch-cuda", "PyTorch for NVIDIA",
+            "Training on an NVIDIA card.",
+            ("torch",), size_mb=2500, default=True, vendors=("nvidia",)),
+    Library("torch-rocm", "PyTorch for AMD",
+            "Training on an AMD card through ROCm.",
+            ("torch",), index="https://download.pytorch.org/whl/rocm6.2",
+            size_mb=2200, default=True, vendors=("amd",)),
+    Library("torch-cpu", "PyTorch",
+            "Training on the processor. Slower, but works anywhere.",
+            ("torch",), index="https://download.pytorch.org/whl/cpu",
+            size_mb=200, default=False, vendors=("cpu", "apple")),
+    Library("mlx", "MLX",
+            "Training on Apple silicon, using the GPU.",
+            ("mlx>=0.18",), size_mb=120, default=True,
+            platforms=("darwin",), vendors=("apple",)),
+    Library("train-mlx", "MLX language model fine-tuning",
+            "Train adapters for cached language models on Apple silicon.",
+            ("poolhouse[train-mlx]",), size_mb=150,
+            platforms=("darwin",), vendors=("apple",)),
+    Library("bench", "Measuring",
+            "Running the model sweeps other machines send this one.",
+            ("poolhouse[graph,store,hub]",), size_mb=150),
+    Library("vision", "Images",
+            "Reading and resizing pictures.",
+            ("pillow>=10.0",), size_mb=15),
+    Library("huggingface", "Hugging Face models",
+            "Starting from a downloaded model rather than from scratch.",
+            ("transformers>=4.40", "datasets>=2.19"), size_mb=300),
+    Library("decide-pointer", "Decision models",
+            "CPU pointer-head inference, trained checkpoints and the Strands 2B decision model. Download model weights in Tools.",
+            ("poolhouse[decide-pointer]",), size_mb=500),
+    Library("gym", "All live environments",
+            "MetaDrive, RWARE, SUMO-RL and Stable-Baselines3 including traffic-driving co-simulation.",
+            ("poolhouse[gym]", METADRIVE_SOURCE), size_mb=1400),
+    Library("gym-driving", "Smart car · MetaDrive",
+            "Native 3D driving, lidar, traffic and vehicle dynamics.",
+            ("poolhouse[gym-driving]", METADRIVE_SOURCE), size_mb=800),
+    Library("gym-warehouse", "Warehouse · RWARE",
+            "Cooperative warehouse robot environments.",
+            ("poolhouse[gym-warehouse]",), size_mb=30),
+    Library("gym-traffic", "Traffic · SUMO-RL",
+            "Traffic simulation and reinforcement-learning signal control.",
+            ("poolhouse[gym-traffic]",), size_mb=250),
+    Library("gym-drone", "Forest search drones · PyFlyt",
+            "Native quadrotor flight with RGB and thermal search cameras in isolated Python 3.12.",
+            ("PyFlyt==0.29.0", "poolhouse[gym-drone,gym-rl]"), size_mb=400, python_version="3.12", bootstrap_packages=("numpy<2", "wheel")),
+    Library("gym-rl", "Reinforcement learning · Stable-Baselines3",
+            "PPO training, checkpoints and policy evaluation.",
+            ("poolhouse[gym-rl]",), size_mb=300),
+    Library("telemetry", "Temperature and clocks",
+            "Reporting this machine's temperature and GPU clock.",
+            ("metal-smi>=1.1.0",), size_mb=5, default=True,
+            platforms=("darwin",)),
+)
+
+
+def catalog_for(vendor: str = "") -> list[Library]:
+    """The libraries worth offering on this machine."""
+    return [lib for lib in CATALOG if lib.applies(vendor)]
+
+
+@dataclass
+class Environment:
+    """A virtual environment the daemon owns and runs training jobs with."""
+
+    root: Path
+    _cache: dict[str, Any] = field(default_factory=dict)
+    python_version: str = PYTHON
+
+    def for_library(self, library: Library) -> Environment:
+        """Keep incompatible simulator dependencies in an owned sibling environment."""
+        if library.python_version and library.python_version != self.python_version:
+            return Environment(Path(self.root) / "simulators" / library.name, python_version=library.python_version)
+        return self
+
+    @property
+    def path(self) -> Path:
+        return Path(self.root).expanduser() / "env"
+
+    @property
+    def python(self) -> Path:
+        bindir = "Scripts" if sys.platform == "win32" else "bin"
+        name = "python.exe" if sys.platform == "win32" else "python"
+        return self.path / bindir / name
+
+    @property
+    def exists(self) -> bool:
+        return self.python.exists()
+
+    # -- finding an interpreter -----------------------------------------
+    def host_python(self) -> Path | None:
+        """A verified installed Python to build the environment with."""
+        current = f"{sys.version_info.major}.{sys.version_info.minor}"
+        if not getattr(sys, "frozen", False) and self.python_version == current:
+            return Path(sys.executable)
+        name = f"python{self.python_version}"
+        candidates = [shutil.which(name)]
+        pyenv = shutil.which("pyenv")
+        if pyenv:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                installed = subprocess.run([pyenv, "whence", "--path", name],
+                                           capture_output=True, text=True, timeout=10)
+                if installed.returncode == 0:
+                    candidates.extend(installed.stdout.splitlines())
+        for found in candidates:
+            if not found:
+                continue
+            try:
+                checked = subprocess.run(
+                    [found, "-c", "import json,sys;print(json.dumps([sys.executable,sys.version_info[:2]]))"],
+                    capture_output=True, text=True, timeout=10)
+                if checked.returncode:
+                    continue
+                executable, version = json.loads(checked.stdout)
+                if ".".join(map(str, version)) == self.python_version:
+                    return Path(executable)
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+                continue
+        return None
+
+    # -- fetching one --------------------------------------------------
+    def standalone_python(self) -> Path | None:
+        """A Python this app downloaded for itself, if it has one."""
+        base = Path(self.root).expanduser() / "python"
+        found = base / ("python.exe" if sys.platform == "win32" else "bin/python3")
+        return found if found.exists() else None
+
+    def _asset_name(self) -> str:
+        machine = platform.machine().lower()
+        arch = "aarch64" if machine in ("arm64", "aarch64") else "x86_64"
+        target = {"darwin": "apple-darwin",
+                  "win32": "pc-windows-msvc"}.get(sys.platform, "unknown-linux-gnu")
+        return f"-{arch}-{target}-install_only_stripped"
+
+    def fetch_python(self, *, on_progress: Any = None) -> Path:
+        """Download a Python to build the environment with."""
+        found = self.standalone_python()
+        if found:
+            return found
+        if on_progress:
+            on_progress("Downloading Python")
+
+        try:
+            release = net.default().json(STANDALONE, net.Ask(purpose="python builds", tries=3)) or {}
+        except (ServerError, ValueError) as exc:
+            raise OSError(f"could not reach the Python builds: {exc}") from None
+        want = self._asset_name()
+        assets = [a for a in release.get("assets", ())
+                  if want in a["name"] and a["name"].endswith(".tar.gz")
+                  and f"cpython-{self.python_version}." in a["name"]]
+        if not assets:
+            raise OSError(
+                f"no Python {self.python_version} build for this machine ({want.strip('-')})")
+
+        base = Path(self.root).expanduser() / "python"
+        base.parent.mkdir(parents=True, exist_ok=True)
+        asset = assets[0]
+        digest = str(asset.get("digest") or "").removeprefix("sha256:")
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "python.tar.gz"
+            try:
+                net.download(asset["browser_download_url"], archive, net.Want(
+                    sha256=digest, require_digest=True, size=int(asset.get("size") or 0),
+                    max_bytes=2 << 30, purpose="python download"))
+            except (net.Blocked, net.Truncated, ServerError, Refused) as exc:
+                raise OSError(f"could not download Python: {exc}") from None
+            if on_progress:
+                on_progress("Unpacking Python")
+            with tarfile.open(archive) as tf:
+                try:
+                    tf.extractall(tmp, filter="data")
+                except tarfile.FilterError as exc:
+                    raise OSError(f"refusing an archive that escapes its directory: "
+                                  f"{exc}") from None
+            unpacked = Path(tmp) / "python"
+            if not unpacked.is_dir():
+                raise OSError("the download did not contain a python directory")
+            shutil.rmtree(base, ignore_errors=True)
+            promote(unpacked, base)
+
+        got = self.standalone_python()
+        if got is None:
+            raise OSError("the downloaded Python is not where it was expected")
+        return got
+
+    # -- building it ----------------------------------------------------
+    def create(self, *, on_progress: Any = None) -> Path:
+        """Make the environment if it is not there. Returns the interpreter."""
+        if self.exists:
+            return self.python
+        base = self.host_python() or self.standalone_python()
+        if base is None:
+            base = self.fetch_python(on_progress=on_progress)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if on_progress:
+            on_progress("Creating the environment")
+        made = subprocess.run([str(base), "-m", "venv", str(self.path)],
+                              capture_output=True, text=True)
+        if made.returncode != 0:
+            raise OSError(
+                f"could not build the environment: {_last_error(made.stderr)}")
+        return self.python
+
+    def wheels(self) -> Path | None:
+        """Wheels shipped alongside the app, for the poolhouse packages themselves.
+
+        They are not on an index, so without these the environment can hold torch and
+        still not be able to run a training job.
+        """
+        if getattr(sys, "frozen", False):
+            bundled = Path(getattr(sys, "_MEIPASS", "")) / "wheels"
+            return bundled if bundled.is_dir() else None
+        cached = current_wheel()
+        if cached is not None:
+            return cached.parent
+        for parent in Path(__file__).resolve().parents:
+            candidate = parent / "dist"
+            if candidate.is_dir() and any(candidate.glob("poolhouse-*.whl")):
+                return candidate
+        return None
+
+    def pip(self, args: list[str], *, timeout: float = 3600.0
+            ) -> subprocess.CompletedProcess:
+        installing = bool(args and args[0] == "install")
+        wheel = None
+        found = self.wheels() if installing else None
+        rewritten = [args[0], "--find-links", str(found), *args[1:]] if found else list(args)
+        for index, argument in enumerate(rewritten):
+            if not installing or argument.startswith("-") or argument == "install":
+                continue
+            try:
+                requirement = Requirement(argument)
+            except ValueError:
+                continue
+            if canonicalize_name(requirement.name) == "poolhouse":
+                wheels = list(found.glob("poolhouse-*.whl")) if found else []
+                if len(wheels) != 1:
+                    raise OSError("the current poolhouse wheel is required to install managed libraries")
+                wheel = wheels[0].resolve()
+                extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
+                rewritten[index] = f"poolhouse{extras} @ {wheel.as_uri()}"
+        environment = self.build_environment() if installing else dict(os.environ)
+        output = packages.run(self.python, rewritten, timeout=timeout, env=environment)
+        if output.returncode == 0 and wheel is not None:
+            refreshed = packages.run(self.python, ["install", "--force-reinstall", "--no-deps", "--no-index", str(wheel)],
+                                     timeout=timeout, env=environment)
+            if refreshed.returncode:
+                return refreshed
+            commit = wheel_commit(wheel)
+            if commit:
+                cache_wheel(wheel, commit, prefix=self.path)
+        return output
+
+    def build_environment(self):
+        """Use the installed macOS SDK when Bullet needs a native wheel build."""
+        environment = dict(os.environ)
+        if sys.platform != "darwin" or self.python_version != "3.12":
+            return environment
+        sdk = environment.get("SDKROOT")
+        if not sdk:
+            try:
+                found = subprocess.run(["xcrun", "--show-sdk-path"], capture_output=True, text=True, timeout=10)
+                sdk = found.stdout.strip() if found.returncode == 0 else ""
+            except (OSError, subprocess.SubprocessError):
+                sdk = ""
+            fallback = Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+            if not sdk or not (Path(sdk) / "usr/include/math.h").is_file():
+                sdk = str(fallback) if fallback.is_dir() else ""
+        if sdk:
+            environment["SDKROOT"] = sdk
+            for key in ["CFLAGS", "CXXFLAGS"]:
+                flags = f"{environment.get(key, '')} -isysroot {shlex.quote(sdk)}"
+                environment[key] = flags + (" -Dfdopen=fdopen" if key == "CFLAGS" else "")
+        return environment
+
+    # -- what is in it --------------------------------------------------
+    def daemon_installed(self) -> dict[str, str]:
+        """Package name to version, for what the daemon's own interpreter can import."""
+        out: dict[str, str] = {}
+        for dist in metadata.distributions():
+            name = dist.metadata.get("Name") if dist.metadata else None
+            if name:
+                out[canonicalize_name(name)] = dist.version
+        return out
+
+    def installed(self) -> dict[str, str]:
+        """Package versions available to the managed job interpreter."""
+        if not self.exists:
+            return {}
+        try:
+            out = self.pip(["inspect", "--local"], timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return {}
+        if out.returncode != 0:
+            return {}
+        try:
+            payload = json.loads(out.stdout)
+            rows = payload["installed"]
+            self._cache["marker_environment"] = payload.get("environment", {"python_version": self.python_version})
+            self._cache["metadata"] = {canonicalize_name(row["metadata"]["name"]): row["metadata"] for row in rows}
+            self._cache["direct_urls"] = {canonicalize_name(row["metadata"]["name"]): row.get("direct_url") for row in rows}
+            return {canonicalize_name(row["metadata"]["name"]): row["metadata"]["version"] for row in rows}
+        except (ValueError, KeyError, TypeError):
+            return {}
+
+    def has(self, library: Library) -> bool:
+        target = self.for_library(library)
+        have = target.installed()
+        return _library_installed(library, have, target._cache)
+
+    def require_current_runtime(self, *, python: Path | str | None = None) -> None:
+        """Require the bundled source revision in a frozen app's job interpreter."""
+        if not getattr(sys, "frozen", False):
+            return
+        found = self.wheels()
+        wheels = list(found.glob("poolhouse-*.whl")) if found else []
+        expected = wheel_commit(wheels[0]) if len(wheels) == 1 else ""
+        if not expected:
+            raise OSError("The app's stamped runtime wheel is unavailable")
+        script = ("from importlib.metadata import distribution; from pathlib import Path; "
+                  "p=Path(distribution('poolhouse').locate_file('poolhouse/fleet/built-from')); "
+                  "print(p.read_text().strip() if p.is_file() else '')")
+        result = subprocess.run([str(python or self.python), "-I", "-c", script],
+                                capture_output=True, text=True, timeout=15, env=process_environment())
+        actual = result.stdout.strip() if result.returncode == 0 else ""
+        if actual != expected:
+            raise OSError("Refresh Training essentials in Libraries before starting work: "
+                          f"managed runtime {actual or 'unstamped'}; app runtime {expected}")
+
+    def state(self, vendor: str = "") -> dict[str, Any]:
+        have = self.installed()
+        return {
+            "ready": self.exists,
+            "python": str(self.python) if self.exists else "",
+            "host_python": str(self.host_python() or self.standalone_python() or ""),
+            "can_build": True,
+            "libraries": [
+                self.library_state(lib, have)
+                for lib in catalog_for(vendor)
+            ],
+        }
+
+    def library_state(self, lib, have):
+        target = self.for_library(lib)
+        if target is not self:
+            have = target.installed()
+        installed = _library_installed(lib, have, target._cache)
+        if installed and lib.name == "core":
+            try:
+                target.require_current_runtime()
+            except (OSError, subprocess.SubprocessError):
+                installed = False
+        return {"name": lib.name, "title": lib.title, "blurb": lib.blurb,
+                "size_mb": lib.size_mb, "default": lib.default,
+                "installed": installed,
+                "version": have.get(_base(lib.packages[0]), ""),
+                "python_version": target.python_version,
+                "python": str(target.python) if target.exists else ""}
+
+    # -- changing it ----------------------------------------------------
+    @contextlib.contextmanager
+    def _mutation(self, names):
+        targets = sorted({self.for_library(lib).path for lib in CATALOG if lib.name in names})
+        with contextlib.ExitStack() as stack:
+            for target in targets:
+                stack.enter_context(only_one(target.parent / ".env-install.lock"))
+            yield
+
+    def install(self, names: list[str], *, on_progress: Any = None) -> dict[str, Any]:
+        """Install libraries under shared target-environment mutation leases."""
+        with self._mutation(names):
+            return self._install(names, on_progress=on_progress)
+
+    def _install(self, names: list[str], *, on_progress: Any = None) -> dict[str, Any]:
+        """Install the named libraries. Returns what happened, per library."""
+        wanted = {lib.name: lib for lib in CATALOG}
+        done: dict[str, Any] = {}
+        for name in names:
+            lib = wanted.get(name)
+            if lib is None:
+                done[name] = {"ok": False, "error": "no such library"}
+                continue
+            target = self.for_library(lib)
+            try:
+                target.create(on_progress=on_progress)
+            except OSError as exc:
+                done[name] = {"ok": False, "error": str(exc)}
+                continue
+            if on_progress:
+                on_progress(f"Installing {lib.title}")
+            args = ["install", "--upgrade", *lib.packages]
+            if lib.index:
+                args += ["--index-url", lib.index]
+            try:
+                if lib.bootstrap_packages:
+                    prepared = target.pip(["install", *lib.bootstrap_packages])
+                    if prepared.returncode:
+                        done[name] = {"ok": False, "error": _last_error(prepared.stderr)}
+                        continue
+                out = target.pip(args)
+            except subprocess.TimeoutExpired:
+                done[name] = {"ok": False, "error": "timed out"}
+                continue
+            done[name] = ({"ok": True} if out.returncode == 0
+                          else {"ok": False, "error": _last_error(out.stderr)})
+        return done
+
+    def uninstall(self, names: list[str]) -> dict[str, Any]:
+        with self._mutation(names):
+            return self._uninstall(names)
+
+    def _uninstall(self, names: list[str]) -> dict[str, Any]:
+        wanted = {lib.name: lib for lib in CATALOG}
+        done: dict[str, Any] = {}
+        for name in names:
+            lib = wanted.get(name)
+            if lib is None:
+                done[name] = {"ok": False, "error": "not installed"}
+                continue
+            target = self.for_library(lib)
+            if not target.exists:
+                done[name] = {"ok": False, "error": "not installed"}
+                continue
+            have = target.installed()
+            protected = self.shared_packages(names, target, have)
+            requirements = [req for spec in lib.packages for req in (_requirements(spec, target._cache.get("metadata"), target._cache.get("marker_environment")) or [])]
+            packages = sorted({canonicalize_name(req.name) for req in requirements} - protected)
+            if not packages:
+                done[name] = {"ok": True, "kept_shared": True}
+                continue
+            out = target.pip(["uninstall", "-y", *packages])
+            done[name] = ({"ok": True} if out.returncode == 0
+                          else {"ok": False, "error": _last_error(out.stderr)})
+        return done
+
+    def shared_packages(self, names, target, have):
+        return {canonicalize_name(req.name)
+                for lib in CATALOG if lib.name not in names and self.for_library(lib).path == target.path
+                and _library_installed(lib, have, target._cache)
+                for spec in lib.packages for req in
+                (_requirements(spec, target._cache.get("metadata"), target._cache.get("marker_environment")) or [])}
+
+    def remove(self) -> None:
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
+def _base(spec: str) -> str:
+    return canonicalize_name(Requirement(spec).name)
+
+
+def _last_error(stderr: str) -> str:
+    lines = [ln for ln in (stderr or "").splitlines() if ln.strip()]
+    for line in reversed(lines):
+        if "error" in line.lower():
+            return line.strip()[:200]
+    return (lines[-1][:200] if lines else "failed")
+
+
+def _requirements(spec: str, installed_metadata=None, marker_environment=None) -> list[Requirement] | None:
+    requirement = Requirement(spec)
+    if requirement.marker and not requirement.marker.evaluate(marker_environment):
+        return []
+    if not requirement.extras:
+        return [requirement]
+    if installed_metadata is not None:
+        info = installed_metadata.get(canonicalize_name(requirement.name))
+        if info is None:
+            return None
+        provided = set(info.get("provides_extra", []))
+        requires = info.get("requires_dist", [])
+    else:
+        try:
+            distribution = metadata.distribution(requirement.name)
+        except metadata.PackageNotFoundError:
+            return None
+        provided = set(distribution.metadata.get_all("Provides-Extra", []))
+        requires = distribution.requires or []
+    if not requirement.extras <= provided:
+        return None
+    dependencies = [Requirement(text) for text in requires]
+    return [requirement, *(dependency for dependency in dependencies
+             if dependency.marker is None or any(dependency.marker.evaluate({**(marker_environment or {}), "extra": extra})
+                                                 for extra in requirement.extras))]
+
+
+def _library_installed(library: Library, have: dict[str, str], cache=None) -> bool:
+    cache = cache or {}
+    for spec in library.packages:
+        requirements = _requirements(spec, cache.get("metadata"), cache.get("marker_environment"))
+        if requirements is None:
+            return False
+        for requirement in requirements:
+            version = have.get(canonicalize_name(requirement.name))
+            if version is None or version not in requirement.specifier:
+                return False
+            if requirement.url and not _direct_matches(requirement, cache.get("direct_urls", {})):
+                return False
+    return True
+
+
+def _direct_matches(requirement: Requirement, urls) -> bool:
+    direct = urls.get(canonicalize_name(requirement.name)) or {}
+    expected = requirement.url or ""
+    if expected.startswith("git+"):
+        base, separator, revision = expected.removeprefix("git+").rpartition("@")
+        if not separator:
+            return False
+        vcs = direct.get("vcs_info", {})
+        return (direct.get("url") == base and vcs.get("vcs") == "git"
+                and revision == vcs.get("commit_id"))
+    return direct.get("url") == expected

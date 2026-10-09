@@ -12,7 +12,7 @@ from ._util import dotted, parse
 NAME = "broad-excepts"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 
 
 def _broad(handler: ast.ExceptHandler) -> str:

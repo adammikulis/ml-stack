@@ -52,7 +52,7 @@ the client by a MAC over the request, not by a client certificate and not bound 
 | Store | Today | Primitive | Key custody | Gap |
 |---|---|---|---|---|
 | Memory store, `requests` store, `reputation` graph, activity log, workspace posted-files store | encrypted (`memory/vault.py`, `reputation/sealed.py`, `activity/log.py`, `workspace/filestore.py`) | AES-256-GCM, `cryptography` | HKDF subkey of a 32 byte master in the OS keystore (`keystore.py`); passphrase+scrypt mode when headless | Good where attended. Background processes never create the master |
-| Cluster key (`~/.ml-stack/cluster.key`, `clusters.json`) | **plaintext**, 0600 (`private_file`) | none | file | Root of all fleet trust sits in a file. The recovery file and passphrase are kept in the keystore (`fleet/recovery.py`) but the key itself is not |
+| Cluster key (`~/.poolhouse/cluster.key`, `clusters.json`) | **plaintext**, 0600 (`private_file`) | none | file | Root of all fleet trust sits in a file. The recovery file and passphrase are kept in the keystore (`fleet/recovery.py`) but the key itself is not |
 | Fleet TLS private key (`cert.pem`, `key.pem`) | **plaintext**, 0600, symlink and ACL checks (`tls.py`) | none | file | Same |
 | Cluster signing key (Ed25519) | wrapped | AES-256-GCM under keystore subkey `fleet-signing`; headless: scrypt + ChaCha20-Poly1305 | keystore or passphrase | Good |
 | Credentials | encrypted when stored with `--keychain` | keystore `wrap` | keystore | Others live in the environment or file by the user's choice |
@@ -61,10 +61,10 @@ the client by a MAC over the request, not by a client certificate and not bound 
 | Sentinel events (`sentinel/sealed.py`) | HMAC only | HMAC-SHA256 | key beside the file | Tamper-evident, not confidential |
 | Workspace token files (`workspace/tokens.py`) | plaintext, restricted perms, sentinel-registered | none | file | Agent capability tokens |
 | Journal replica | does not exist yet | planned in `mesh-board.md:450` | planned: device key | Specify in slice 3 |
-| Backups and bundles | no backup writer found that encrypts; the recovery file (`fleet/recovery.py`) is the one export, passphrase-derived | scrypt (check KDF params in slice 1) | passphrase | Anything a person copies from `~/.ml-stack` is plaintext |
+| Backups and bundles | no backup writer found that encrypts; the recovery file (`fleet/recovery.py`) is the one export, passphrase-derived | scrypt (check KDF params in slice 1) | passphrase | Anything a person copies from `~/.poolhouse` is plaintext |
 
 Keystore usage: `keystore.py` is the only importer of `keyring`; unattended processes never create the
-master and read it only after `ml-stack-security unlock`. Consequence: a headless device holds its
+master and read it only after `poolhouse-security unlock`. Consequence: a headless device holds its
 secrets in a passphrase-wrapped key file (decision 8.1), the only mode section 3 counts as protection
 against a stolen disk.
 
@@ -81,7 +81,7 @@ suites, and the phone sets 1.3 then 1.2. The owner has decided to raise the floo
 
 | Adversary | In scope? | What defends today | What the plan adds |
 |---|---|---|---|
-| Passive LAN or Wi-Fi observer | In | Pinned TLS (ECDHE, forward secret at the TLS layer) + sealed bodies. Failure only with `ML_STACK_FLEET_TLS=off` or an `http://` LAN project host | Remove TLS-off; seal streams (slices 1, 2b) |
+| Passive LAN or Wi-Fi observer | In | Pinned TLS (ECDHE, forward secret at the TLS layer) + sealed bodies. Failure only with `POOLHOUSE_FLEET_TLS=off` or an `http://` LAN project host | Remove TLS-off; seal streams (slices 1, 2b) |
 | Active malicious device on the LAN, not paired | In | Pinned certificates, no first-use trust; MAC with nonce; SPAKE2 pairing; `lan.py` | Nothing structural |
 | Malicious or compromised paired device (holds the cluster key) | In, partly. Today it can read and forge everything in the cluster | None: one shared key | Per-device keys, revocation, E2E to addressee (slices 2, 2b, 4, 5) |
 | Network operator or overlay (Tailscale coordination server, relay) | In | Transport never trusted | Keep |
@@ -128,7 +128,7 @@ tests against real sockets and real files, not mocks (`AGENTS.md`).
 
 | # | Slice | Closes | Size | Depends on | Notes |
 |---|---|---|---|---|---|
-| 1 | **Make unencrypted impossible by default.** `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts removed (decision 8.1), loopback http only; seal `/infer` streams and file chunks (framed AES-GCM, per-chunk nonce counter, AAD = request nonce and chunk index); pairing recovery file KDF parameters reviewed | passive observer in every configuration; streamed tokens | M | none | Sealing streams costs CPU at weight-transfer rates; measure on a 20 GB file before deciding to seal weights (private fine-tunes only) |
+| 1 | **Make unencrypted impossible by default.** `POOLHOUSE_FLEET_TLS=off` and `http://` LAN project hosts removed (decision 8.1), loopback http only; seal `/infer` streams and file chunks (framed AES-GCM, per-chunk nonce counter, AAD = request nonce and chunk index); pairing recovery file KDF parameters reviewed | passive observer in every configuration; streamed tokens | M | none | Sealing streams costs CPU at weight-transfer rates; measure on a 20 GB file before deciding to seal weights (private fine-tunes only) |
 | 2 | **Per-device keys and identities, membership record and revocation** (decision 8.1). Each device has its own identity key and a device record (device id, certificate fingerprint, status) in a signed membership log (`mesh-board.md:275`, `member-add`, revocation) or a simple host-signed list as step one; request authority moves from the cluster key to these. Cluster key stays for beacon sealing only | malicious paired device acting as another; revocation by device | L | 1 | Precedes slice 2b: a certificate cannot be pinned to an identity that does not exist yet |
 | 2b | **Mutual TLS 1.3 with pinned per-device certificates** as the floor on every pool link. `server_context` requests the client certificate; request MAC covers the client certificate fingerprint; TLS 1.2 refused | MAC not tied to channel; downgrade | M | 2 | Android below API 29 is refused (decision 8.1) |
 | 3 | **Encrypt the plaintext stores** under keystore subkeys with `keystore.wrap` / the memory vault pattern: board graph, conversations, person log, job records and logs, workspace tokens, cluster key, TLS key. A device with no OS keystore uses the passphrase-wrapped key file of decision 8.1; no 0600 plaintext fallback | stolen disk | M per store, L together | none; reuse `memory/vault.py` | Each store gets a migration (as `memory/migrate.py`). The cluster and TLS keys are the first two: move the file contents into a wrapped blob |
@@ -247,7 +247,7 @@ the guest can verify. What exists and what does not:
   configured for it, and a verifier. NVIDIA H100/Blackwell confidential computing extends this to the
   GPU. Consumer desktops and laptops, which is what this pool is, do not have SEV-SNP/TDX or GPU CC.
   I could not verify here which of the pool's devices (not enumerated in the repository; run
-  `ml-stack` device reports to list them) have TPM 2.0, and no pool device is known to have SEV-SNP,
+  `poolhouse` device reports to list them) have TPM 2.0, and no pool device is known to have SEV-SNP,
   TDX or GPU CC. Claim none.
 - **What Level 2 would protect** (on supported hardware): prompt, weights placed by the guest, code and
   intermediate results from the host owner's software and from a debugger, to the extent the TEE
@@ -291,7 +291,7 @@ read and forge everything in the cluster and a lost device would mean re-keying 
 person's devices, so neither", because a stolen phone or laptop is the likeliest event.
 
 **TLS 1.3 with mutual authentication and pinned per-device certificates is the floor.** Decided: pool links
-accept nothing below it, so `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts are removed (not
+accept nothing below it, so `POOLHOUSE_FLEET_TLS=off` and `http://` LAN project hosts are removed (not
 flagged) in slice 1. Android devices below API 29 are refused. Rejected: TLS 1.2 with ECDHE-only suites,
 because it keeps a downgrade path for the benefit of old phones only. Order: the key model (slice 2) lands
 before certificate pinning (slice 2b); a pinned certificate has nothing to pin to until a device has its own
@@ -354,7 +354,7 @@ is superseded by this section.
 
 ### The first slice (done in part)
 
-- **Done.** `ML_STACK_FLEET_TLS` and `tls.disabled` are removed. `LimitedServer` refuses to be built on an
+- **Done.** `POOLHOUSE_FLEET_TLS` and `tls.disabled` are removed. `LimitedServer` refuses to be built on an
   address beyond this machine without a TLS context, so a plain listener on the LAN cannot exist; a plain
   connection from another address is dropped. Every pool context (`server_context`, `member_context`,
   `pinned_context`, the pairing and install clients) has `minimum_version = TLSv1_3`; the Android client
@@ -395,7 +395,7 @@ is superseded by this section.
   against the fingerprint the SPAKE2 exchange bound). The passphrase join binds the joiner's certificate as
   its SPAKE2 identity (it was the fixed string `joiner`), the automatic Development join and a computer
   invitation carry it too, and each joiner lists the machine that admitted it. A cluster joined from a
-  recovery file, or before this change, has only itself in its record: `ml-stack-peers members adopt` lists the
+  recovery file, or before this change, has only itself in its record: `poolhouse-peers members adopt` lists the
   machines that answer for the cluster with their fingerprints for a person to compare, `members add` enrols
   one by certificate, `members revoke` puts one out (all three need a person at a terminal), and the daemon
   says at start which clusters are still alone.

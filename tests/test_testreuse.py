@@ -21,12 +21,12 @@ import testreuse_key as keys  # noqa: E402
 import testreuse_run as run  # noqa: E402
 import testreuse_store as storage  # noqa: E402
 
-from ml_stack.activity import reuse  # noqa: E402
+from poolhouse.activity import reuse  # noqa: E402
 
 pytestmark = pytest.mark.slow
 
 AGENT = {"id": "alice", "label": "a", "parent": "", "source": "test"}
-TEST_A = "from ml_stack.helper import VALUE\n\n\ndef test_a():\n    assert VALUE == 1\n"
+TEST_A = "from poolhouse.helper import VALUE\n\n\ndef test_a():\n    assert VALUE == 1\n"
 FILE = "tests/test_a.py"
 
 
@@ -34,11 +34,11 @@ FILE = "tests/test_a.py"
 def project(tmp_path, monkeypatch):
     monkeypatch.delenv("DEV_TEST_REUSE_CANARY", raising=False)
     root = tmp_path / "p"
-    (root / "src" / "ml_stack").mkdir(parents=True)
+    (root / "src" / "poolhouse").mkdir(parents=True)
     (root / "tests").mkdir()
-    (root / "src/ml_stack/__init__.py").write_text("")
-    (root / "src/ml_stack/helper.py").write_text("VALUE = 1\n")
-    (root / "src/ml_stack/other.py").write_text("OTHER = 1\n")
+    (root / "src/poolhouse/__init__.py").write_text("")
+    (root / "src/poolhouse/helper.py").write_text("VALUE = 1\n")
+    (root / "src/poolhouse/other.py").write_text("OTHER = 1\n")
     (root / FILE).write_text(TEST_A)
     return root
 
@@ -105,16 +105,16 @@ def test_an_unchanged_passing_file_is_reused_and_reported_as_reused(project, tmp
 def test_a_changed_module_in_the_import_closure_invalidates_the_hit(project, tmp_path):
     store = storage.Store(tmp_path / "store")
     attempt(project, store)
-    (project / "src/ml_stack/helper.py").write_text("VALUE = 1  # edited\n")
+    (project / "src/poolhouse/helper.py").write_text("VALUE = 1  # edited\n")
     report, launches = attempt(project, store)
     assert hows(report) == ["ran"] and len(launches) == 1
-    assert "changed: src/ml_stack/helper.py" in report.outcomes[0].detail
+    assert "changed: src/poolhouse/helper.py" in report.outcomes[0].detail
 
 
 def test_a_change_outside_the_closure_keeps_the_hit(project, tmp_path):
     store = storage.Store(tmp_path / "store")
     attempt(project, store)
-    (project / "src/ml_stack/other.py").write_text("OTHER = 2\n")
+    (project / "src/poolhouse/other.py").write_text("OTHER = 2\n")
     report, launches = attempt(project, store)
     assert hows(report) == ["reused"] and launches == []
 

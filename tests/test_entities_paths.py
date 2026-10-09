@@ -1,6 +1,6 @@
 """Getting from one node to another."""
 
-from ml_stack.entities.paths import between, shortest_path
+from poolhouse.entities.paths import between, shortest_path
 
 
 def edges(*rows):

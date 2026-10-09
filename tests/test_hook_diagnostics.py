@@ -4,8 +4,8 @@ import io
 
 import pytest
 
-from ml_stack import harnesshook
-from ml_stack.workspace.identity import Denied
+from poolhouse import harnesshook
+from poolhouse.workspace.identity import Denied
 
 
 @pytest.mark.parametrize("reason, expected", [
@@ -19,7 +19,7 @@ from ml_stack.workspace.identity import Denied
     ("unknown refusal with secret-token-value", "Denied: unknown refusal with"),
 ])
 def test_run_reports_authorization_category_without_private_values(monkeypatch, capsys, reason, expected):
-    monkeypatch.setenv("ML_STACK_TEST_TOKEN", "secret-token-value")
+    monkeypatch.setenv("POOLHOUSE_TEST_TOKEN", "secret-token-value")
 
     def refused(*_args):
         raise Denied(reason)
@@ -35,7 +35,7 @@ def test_run_reports_authorization_category_without_private_values(monkeypatch, 
 
 
 def test_unexpected_errors_do_not_expose_exception_contents(monkeypatch, capsys):
-    monkeypatch.setenv("ML_STACK_TEST_TOKEN", "secret-token-value")
+    monkeypatch.setenv("POOLHOUSE_TEST_TOKEN", "secret-token-value")
 
     def crashed(*_args):
         raise ValueError("secret-token-value")
@@ -43,7 +43,7 @@ def test_unexpected_errors_do_not_expose_exception_contents(monkeypatch, capsys)
     monkeypatch.setattr(harnesshook, "post", crashed)
     assert harnesshook.run(["post"], io.StringIO("{}"), io.StringIO()) == 0
     diagnostic = capsys.readouterr().err
-    assert "ml-stack hook failed, notification unavailable:" in diagnostic
+    assert "poolhouse hook failed, notification unavailable:" in diagnostic
     assert "ValueError:" in diagnostic
     assert "secret-token-value" not in diagnostic
 

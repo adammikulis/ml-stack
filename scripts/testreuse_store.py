@@ -14,8 +14,8 @@ from pathlib import Path
 import psutil
 import testreuse_key as keys
 
-from ml_stack.activity import reuse
-from ml_stack.activity.reuse import SCHEMA, entry_hash, row_hash
+from poolhouse.activity import reuse
+from poolhouse.activity.reuse import SCHEMA, entry_hash, row_hash
 
 PENDING_S = 10.0
 

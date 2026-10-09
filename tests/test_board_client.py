@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from node_kit import BOARD
 
-from ml_stack import node_binary, node_supervise
-from ml_stack.board import client as board_client, credentials, place, session
+from poolhouse import node_binary, node_supervise
+from poolhouse.board import client as board_client, credentials, place, session
 
 pytest_plugins = ["node_kit"]
 
@@ -60,7 +60,7 @@ def test_clients_that_find_the_socket_dead_at_once_start_exactly_one_node(worksp
     for thread in threads:
         thread.join(30)
     assert not errors and len(set(pids)) == 1 and len(pids) == 6
-    listed = subprocess.run(["pgrep", "-f", f"poolside-node run --state {workspace_node.state}"],
+    listed = subprocess.run(["pgrep", "-f", f"poolhouse-node run --state {workspace_node.state}"],
                             capture_output=True, text=True, check=False).stdout.split()
     assert len(listed) == 1
 
@@ -108,7 +108,7 @@ def test_connect_finds_the_token_by_agent_name_environment_or_file_and_refuses_n
 
 
 def test_a_repository_and_all_its_worktrees_are_one_board_and_a_stranger_directory_has_none(workspace_node, monkeypatch, tmp_path):
-    monkeypatch.delenv("ML_STACK_BOARD")
+    monkeypatch.delenv("POOLHOUSE_BOARD")
     repo = tmp_path / "shop"
     repo.mkdir()
     git("init", "-q", "-b", "main", cwd=repo)
@@ -128,7 +128,7 @@ def test_a_repository_and_all_its_worktrees_are_one_board_and_a_stranger_directo
     with pytest.raises(board_client.Denied, match="not part of a project"):
         place.resolve(workspace_node.client, plain)
     assert place.resolve(workspace_node.client, plain, named="chosen") == "chosen"
-    monkeypatch.setenv("ML_STACK_BOARD", "elsewhere")
+    monkeypatch.setenv("POOLHOUSE_BOARD", "elsewhere")
     assert place.resolve(workspace_node.client, repo) == "elsewhere"
 
 

@@ -6,9 +6,9 @@ import ssl
 
 import pytest
 
-from ml_stack import net
-from ml_stack.fleet import tls
-from ml_stack.httpguard import Limits, Refused
+from poolhouse import net
+from poolhouse.fleet import tls
+from poolhouse.httpguard import Limits, Refused
 from tests.net_site import Site, gguf_bytes
 
 

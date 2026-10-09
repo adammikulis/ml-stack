@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_ingest import EMPTY, a_model
 
-from ml_stack import ingest
+from poolhouse import ingest
 
 pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
 
@@ -39,7 +39,7 @@ def _flipped(triple):
 
 
 def _score(server, passages, script, shape=None):
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     instance, asked = a_model(server, script)
     scored = ingest.gold_score(Client(instance.base_url), passages,

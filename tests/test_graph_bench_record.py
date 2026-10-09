@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.bench.record import Measured, Spread, prompt_digest
+from poolhouse.bench.record import Measured, Spread, prompt_digest
 
 SYSTEM = "Answer from the graph. Show only the entries the question is about."
 
@@ -81,7 +81,7 @@ class TestOneAccessorEach:
     def test_the_build_is_the_name_a_serve_command_takes(self, monkeypatch):
         import pathlib
 
-        from ml_stack.serve import build as build_module
+        from poolhouse.serve import build as build_module
 
         monkeypatch.setattr(build_module, "named_dir", lambda: pathlib.Path("/opt/builds"))
         assert Measured.from_dict(_run()).build == "thornfell"
@@ -89,7 +89,7 @@ class TestOneAccessorEach:
     def test_a_binary_that_is_no_named_build_names_none(self, monkeypatch):
         import pathlib
 
-        from ml_stack.serve import build as build_module
+        from poolhouse.serve import build as build_module
 
         monkeypatch.setattr(build_module, "named_dir", lambda: pathlib.Path("/opt/builds"))
         one = _run(server={"binary": "/usr/local/bin/llama-server"})
@@ -141,7 +141,7 @@ class TestARunKeptBeforeTheRecord:
         assert (got.label, got.model, got.questions, got.made) == ("", "", 0, "-")
 
     def test_the_asking_comes_back_as_the_record_it_was_written_from(self):
-        from ml_stack.asking import Asking
+        from poolhouse.asking import Asking
 
         one = _run(asking={"tight": True, "terse": False, "batch": True, "rounds": 8,
                            "shortlist": 12, "sampling": {"temperature": 0.0}})
@@ -223,7 +223,7 @@ class TestWhatAMeasuredRunKeeps:
                 raw={"usage": {"prompt_tokens": 10, "completion_tokens": 4}})
 
     def test_the_counting_client_digests_what_the_model_was_shown(self):
-        from ml_stack.bench.counting import Counting
+        from poolhouse.bench.counting import Counting
 
         counting = Counting(self._Answering())
         counting.chat([{"role": "system", "content": SYSTEM},
@@ -235,7 +235,7 @@ class TestWhatAMeasuredRunKeeps:
         assert counting.prompts == prompt_digest(SYSTEM, TOOLS)
 
     def test_a_saved_run_carries_the_digest_and_its_rows_do_not(self, tmp_path):
-        from ml_stack.bench import Row, runs, save
+        from poolhouse.bench import Row, runs, save
 
         row = Row(label="sundial-plain", question="who fires kilns?",
                   expected=["person:iris"], shown=["person:iris"])
@@ -249,7 +249,7 @@ class TestWhatAMeasuredRunKeeps:
         assert Measured.from_dict(kept).knows_prompts is True
 
     def test_two_runs_across_a_prompt_edit_are_two_runs_in_the_store(self, tmp_path):
-        from ml_stack.bench import Row, runs, save
+        from poolhouse.bench import Row, runs, save
 
         store = tmp_path / "runs.ladybug"
         for system in (SYSTEM, SYSTEM + "."):

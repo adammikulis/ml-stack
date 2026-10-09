@@ -11,9 +11,9 @@ from email.message import EmailMessage
 
 import pytest
 
-import ml_stack.sources as sources
-from ml_stack.messages import slack_user_id, teams_user_id
-from ml_stack.sources import mbox, rows, slack_export, teams
+import poolhouse.sources as sources
+from poolhouse.messages import slack_user_id, teams_user_id
+from poolhouse.sources import mbox, rows, slack_export, teams
 
 PEOPLE = {"person:ada-lovelace": {"label": "Ada Lovelace"},
           "person:bea-marlow": {"label": "Bea Marlow"}}

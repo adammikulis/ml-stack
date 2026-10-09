@@ -17,7 +17,7 @@ def proj(tmp_path):
 
 
 def mod(n: int, body: str = "") -> dict[str, str]:
-    return {f"src/ml_stack/m{n}.py": f"VALUE = {n}\n{body}", f"tests/test_m{n}.py": f"import ml_stack.m{n}\n"}
+    return {f"src/poolhouse/m{n}.py": f"VALUE = {n}\n{body}", f"tests/test_m{n}.py": f"import poolhouse.m{n}\n"}
 
 
 def test_plan_covers_stacked_and_rebased_branches_by_patch_id(proj):
@@ -39,14 +39,14 @@ def test_plan_covers_stacked_and_rebased_branches_by_patch_id(proj):
 
 
 def test_plan_predicts_conflicts_and_lists_dirty_worktrees(proj):
-    proj.branch("x", {"src/ml_stack/mod.py": "VALUE = 2\n"})
-    proj.branch("y", {"src/ml_stack/mod.py": "VALUE = 3\n"})
+    proj.branch("x", {"src/poolhouse/mod.py": "VALUE = 2\n"})
+    proj.branch("y", {"src/poolhouse/mod.py": "VALUE = 3\n"})
     dirty = proj.branch("z", mod(5))
     (dirty / "scratch.txt").write_text("wip")
     _, _, summary = proj.land("plan", "x", "y", "z")
     flagged = {e["branch"]: e for e in summary["order"]}
-    assert flagged["y"]["conflicts_with_plan"] == ["src/ml_stack/mod.py"] or \
-        flagged["x"]["conflicts_with_plan"] == ["src/ml_stack/mod.py"]
+    assert flagged["y"]["conflicts_with_plan"] == ["src/poolhouse/mod.py"] or \
+        flagged["x"]["conflicts_with_plan"] == ["src/poolhouse/mod.py"]
     assert summary["dirty"] == ["z"]
     assert (dirty / "scratch.txt").read_text() == "wip"
 
@@ -60,8 +60,8 @@ def test_plan_cover_uses_branches_with_worktrees_and_refuses_main(proj):
 
 
 def test_conflicting_branch_is_ejected_and_the_rest_verified(proj):
-    proj.branch("x", {"src/ml_stack/mod.py": "VALUE = 2\n"})
-    proj.branch("y", {"src/ml_stack/mod.py": "VALUE = 3\n"})
+    proj.branch("x", {"src/poolhouse/mod.py": "VALUE = 2\n"})
+    proj.branch("y", {"src/poolhouse/mod.py": "VALUE = 3\n"})
     proj.branch("z", mod(5))
     code, out, summary = proj.land("run", "x", "y", "z")
     assert code == 0 and summary["status"] == "verified"
@@ -71,8 +71,8 @@ def test_conflicting_branch_is_ejected_and_the_rest_verified(proj):
 
 
 def test_conflicts_stop_halts_the_run(proj):
-    proj.branch("x", {"src/ml_stack/mod.py": "VALUE = 2\n"})
-    proj.branch("y", {"src/ml_stack/mod.py": "VALUE = 3\n"})
+    proj.branch("x", {"src/poolhouse/mod.py": "VALUE = 2\n"})
+    proj.branch("y", {"src/poolhouse/mod.py": "VALUE = 3\n"})
     code, _, summary = proj.land("run", "--conflicts=stop", "x", "y")
     assert code == 2 and summary["status"] == "stopped"
     assert proj.calls() == []
@@ -112,7 +112,7 @@ def test_infrastructure_diff_starts_one_background_full_run(proj):
 
 def test_second_full_run_is_refused_while_one_is_in_flight(proj):
     proj.branch("i", {"pyproject.toml": "[project]\nname='x'\n"})
-    proj.branch("j", {"pyproject.toml": "[project]\nname='y'\n", "src/ml_stack/m9.py": "V = 1\n"})
+    proj.branch("j", {"pyproject.toml": "[project]\nname='y'\n", "src/poolhouse/m9.py": "V = 1\n"})
     lock = Path(git(proj.root, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "land"
     lock.mkdir(exist_ok=True)
     (lock / "full.lock").write_text(f"{os.getpid()}\n")
@@ -146,7 +146,7 @@ def test_bisect_ejects_the_branch_that_breaks_the_gate(proj):
 
 def test_failing_test_file_is_attributed_by_selector(proj):
     proj.branch("a", mod(1))
-    proj.branch("bad", mod(2, "# FAILME\n") | {"tests/test_m2.py": "import ml_stack.m2  # FAILME\n"})
+    proj.branch("bad", mod(2, "# FAILME\n") | {"tests/test_m2.py": "import poolhouse.m2  # FAILME\n"})
     _, _, summary = proj.land("run", "a", "bad")
     assert [e["branch"] for e in summary["ejected"]] == ["bad"]
     assert "tests/test_m2.py" in summary["ejected"][0]["evidence"]
@@ -195,7 +195,7 @@ def test_finish_is_a_dry_run_unless_applied_then_fast_forwards_and_cleans_up(pro
 def test_finish_keeps_a_branch_that_still_has_unique_patches(proj):
     a = proj.branch("a", mod(1))
     proj.land("run", "a")
-    Project.write(a, "src/ml_stack/extra.py", "E = 1\n")
+    Project.write(a, "src/poolhouse/extra.py", "E = 1\n")
     proj.commit(a, "feat: after the batch")
     _, _, summary = proj.land("finish", "--apply")
     assert [r["branch"] for r in summary["kept"]] == ["a"]

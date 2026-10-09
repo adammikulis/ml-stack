@@ -1,10 +1,10 @@
 {
- "surfaces": 865,
+ "surfaces": 866,
  "by_status": {
   "covered": 538,
   "partial": 196,
   "uncovered": 53,
-  "n/a": 78,
+  "n/a": 79,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 7,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 29,
+   "n/a": 30,
    "unmapped": 0
   },
   "context": {
@@ -501,9 +501,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack",
+   "id": "cli:poolhouse",
    "kind": "cli",
-   "source": "ml_stack.cli:main",
+   "source": "poolhouse.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -511,9 +511,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-agent",
+   "id": "cli:poolhouse-agent",
    "kind": "cli",
-   "source": "ml_stack.harness:main",
+   "source": "poolhouse.harness:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "partial",
@@ -524,9 +524,9 @@
    "note": "roles, rules and the taint rail are attacked; hostile --resume session files are tested only for shape in tests/test_chat.py"
   },
   {
-   "id": "cli:ml-stack-audit",
+   "id": "cli:poolhouse-audit",
    "kind": "cli",
-   "source": "ml_stack.redact.audit:main",
+   "source": "poolhouse.redact.audit:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -534,9 +534,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-bench",
+   "id": "cli:poolhouse-bench",
    "kind": "cli",
-   "source": "ml_stack.bench.run:main",
+   "source": "poolhouse.bench.run:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -544,9 +544,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-chat",
+   "id": "cli:poolhouse-chat",
    "kind": "cli",
-   "source": "ml_stack.chat:main",
+   "source": "poolhouse.chat:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "partial",
@@ -557,9 +557,9 @@
    "note": "roles, rules and the taint rail are attacked; hostile --resume session files are tested only for shape in tests/test_chat.py"
   },
   {
-   "id": "cli:ml-stack-claude",
+   "id": "cli:poolhouse-claude",
    "kind": "cli",
-   "source": "ml_stack.claude:main",
+   "source": "poolhouse.claude:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -567,9 +567,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-cluster",
+   "id": "cli:poolhouse-cluster",
    "kind": "cli",
-   "source": "ml_stack.fleet.join:main",
+   "source": "poolhouse.fleet.join:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "partial",
@@ -580,9 +580,9 @@
    "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
   },
   {
-   "id": "cli:ml-stack-codex",
+   "id": "cli:poolhouse-codex",
    "kind": "cli",
-   "source": "ml_stack.codex:launch",
+   "source": "poolhouse.codex:launch",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -590,9 +590,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-credentials",
+   "id": "cli:poolhouse-credentials",
    "kind": "cli",
-   "source": "ml_stack.credentials.cli:command",
+   "source": "poolhouse.credentials.cli:command",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -603,9 +603,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack-decide",
+   "id": "cli:poolhouse-decide",
    "kind": "cli",
-   "source": "ml_stack.decide_cli:main",
+   "source": "poolhouse.decide_cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -613,9 +613,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-doctor",
+   "id": "cli:poolhouse-doctor",
    "kind": "cli",
-   "source": "ml_stack.doctor:main",
+   "source": "poolhouse.doctor:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -623,9 +623,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-draft",
+   "id": "cli:poolhouse-draft",
    "kind": "cli",
-   "source": "ml_stack.draft:main",
+   "source": "poolhouse.draft:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -633,9 +633,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-features",
+   "id": "cli:poolhouse-features",
    "kind": "cli",
-   "source": "ml_stack.features_cli:main",
+   "source": "poolhouse.features_cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -643,9 +643,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-graph",
+   "id": "cli:poolhouse-graph",
    "kind": "cli",
-   "source": "ml_stack.graph.serve:main",
+   "source": "poolhouse.graph.serve:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -655,9 +655,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack-gym",
+   "id": "cli:poolhouse-gym",
    "kind": "cli",
-   "source": "ml_stack.gym.cli:main",
+   "source": "poolhouse.gym.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -665,9 +665,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-help",
+   "id": "cli:poolhouse-help",
    "kind": "cli",
-   "source": "ml_stack.cli:help_main",
+   "source": "poolhouse.cli:help_main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -675,9 +675,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-ingest",
+   "id": "cli:poolhouse-ingest",
    "kind": "cli",
-   "source": "ml_stack.ingest:main",
+   "source": "poolhouse.ingest:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -685,9 +685,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-jobs",
+   "id": "cli:poolhouse-jobs",
    "kind": "cli",
-   "source": "ml_stack.jobs:main",
+   "source": "poolhouse.jobs:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -695,9 +695,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-log",
+   "id": "cli:poolhouse-log",
    "kind": "cli",
-   "source": "ml_stack.activity.cli:main",
+   "source": "poolhouse.activity.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -709,9 +709,9 @@
    "note": "the viewer is read-only; an agent's process sees records only fenced and inert, and cannot export or switch the log off"
   },
   {
-   "id": "cli:ml-stack-mcp",
+   "id": "cli:poolhouse-mcp",
    "kind": "cli",
-   "source": "ml_stack.mcp:main",
+   "source": "poolhouse.mcp:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -721,9 +721,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack-memory",
+   "id": "cli:poolhouse-memory",
    "kind": "cli",
-   "source": "ml_stack.memory.cli:main",
+   "source": "poolhouse.memory.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -745,9 +745,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack-models",
+   "id": "cli:poolhouse-migrate",
    "kind": "cli",
-   "source": "ml_stack.serve.models_cli:run",
+   "source": "poolhouse.migrate:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -755,9 +755,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-node",
+   "id": "cli:poolhouse-models",
    "kind": "cli",
-   "source": "ml_stack.node_permission:main",
+   "source": "poolhouse.serve.models_cli:run",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -765,9 +765,19 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-peers",
+   "id": "cli:poolhouse-node",
    "kind": "cli",
-   "source": "ml_stack.fleet.peers:main",
+   "source": "poolhouse.node_permission:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
+   "id": "cli:poolhouse-peers",
+   "kind": "cli",
+   "source": "poolhouse.fleet.peers:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "partial",
@@ -778,9 +788,9 @@
    "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
   },
   {
-   "id": "cli:ml-stack-reputation",
+   "id": "cli:poolhouse-reputation",
    "kind": "cli",
-   "source": "ml_stack.reputation.cli:main",
+   "source": "poolhouse.reputation.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -788,9 +798,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-requests",
+   "id": "cli:poolhouse-requests",
    "kind": "cli",
-   "source": "ml_stack.inbox.cli:main",
+   "source": "poolhouse.inbox.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -798,9 +808,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-security",
+   "id": "cli:poolhouse-security",
    "kind": "cli",
-   "source": "ml_stack.net.cli:command",
+   "source": "poolhouse.net.cli:command",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -822,9 +832,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack-serve",
+   "id": "cli:poolhouse-serve",
    "kind": "cli",
-   "source": "ml_stack.serve.cli:main",
+   "source": "poolhouse.serve.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -832,9 +842,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-setup",
+   "id": "cli:poolhouse-setup",
    "kind": "cli",
-   "source": "ml_stack.setup:main",
+   "source": "poolhouse.setup:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -842,9 +852,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-speech",
+   "id": "cli:poolhouse-speech",
    "kind": "cli",
-   "source": "ml_stack.speech.cli:main",
+   "source": "poolhouse.speech.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -852,9 +862,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-store",
+   "id": "cli:poolhouse-store",
    "kind": "cli",
-   "source": "ml_stack.graph.store_cli:main",
+   "source": "poolhouse.graph.store_cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -862,9 +872,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-suite",
+   "id": "cli:poolhouse-suite",
    "kind": "cli",
-   "source": "ml_stack.train.suite:main",
+   "source": "poolhouse.train.suite:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -872,9 +882,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-surface",
+   "id": "cli:poolhouse-surface",
    "kind": "cli",
-   "source": "ml_stack.surface.cli:main",
+   "source": "poolhouse.surface.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -882,9 +892,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-test-devices",
+   "id": "cli:poolhouse-test-devices",
    "kind": "cli",
-   "source": "ml_stack.testfarm.devices:command",
+   "source": "poolhouse.testfarm.devices:command",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -892,9 +902,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-train-decider",
+   "id": "cli:poolhouse-train-decider",
    "kind": "cli",
-   "source": "ml_stack.train.decider_cli:main",
+   "source": "poolhouse.train.decider_cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -902,9 +912,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-train-run",
+   "id": "cli:poolhouse-train-run",
    "kind": "cli",
-   "source": "ml_stack.train.run:main",
+   "source": "poolhouse.train.run:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -912,9 +922,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-train-tools",
+   "id": "cli:poolhouse-train-tools",
    "kind": "cli",
-   "source": "ml_stack.train.tools:main",
+   "source": "poolhouse.train.tools:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -922,9 +932,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-traind",
+   "id": "cli:poolhouse-traind",
    "kind": "cli",
-   "source": "ml_stack.cli.daemon:main",
+   "source": "poolhouse.cli.daemon:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "partial",
@@ -935,9 +945,9 @@
    "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
   },
   {
-   "id": "cli:ml-stack-walk",
+   "id": "cli:poolhouse-walk",
    "kind": "cli",
-   "source": "ml_stack.walk.cli:main",
+   "source": "poolhouse.walk.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -945,9 +955,9 @@
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
-   "id": "cli:ml-stack-workspace",
+   "id": "cli:poolhouse-workspace",
    "kind": "cli",
-   "source": "ml_stack.workspace.cli:main",
+   "source": "poolhouse.workspace.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "covered",
@@ -969,9 +979,9 @@
    "note": ""
   },
   {
-   "id": "cli:ml-stack-world",
+   "id": "cli:poolhouse-world",
    "kind": "cli",
-   "source": "ml_stack.world.cli:main",
+   "source": "poolhouse.world.cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -1170,7 +1180,7 @@
   {
    "id": "context:gym/vision_process.py:image_request",
    "kind": "context",
-   "source": "src/ml_stack/gym/vision_process.py",
+   "source": "src/poolhouse/gym/vision_process.py",
    "trust": "tool results, pages, files, peers, stored facts",
    "attacker": "text from outside is read by a model as an instruction",
    "status": "covered",
@@ -8742,7 +8752,7 @@
   {
    "id": "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
    "kind": "route",
-   "source": "src/ml_stack/fleet/gym_recording_routes.py",
+   "source": "src/poolhouse/fleet/gym_recording_routes.py",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "covered",
@@ -11348,7 +11358,7 @@
     "tests/test_testfarm_nodes.py::test_at_most_two_run_at_once_and_a_third_is_told_to_wait",
     "tests/test_shard_limits.py::test_a_runner_that_floods_its_output_is_cancelled"
    ],
-   "note": "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolside-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
+   "note": "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolhouse-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
   },
   {
    "id": "spawn:fleet/shard_tree.py:tracked_paths",
@@ -11521,7 +11531,7 @@
   {
    "id": "spawn:gym/decision_process.py:DecisionProcess.__init__",
    "kind": "spawn",
-   "source": "src/ml_stack/gym/decision_process.py",
+   "source": "src/poolhouse/gym/decision_process.py",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
@@ -11546,7 +11556,7 @@
   {
    "id": "spawn:gym/transport.py:Process.start",
    "kind": "spawn",
-   "source": "src/ml_stack/gym/transport.py",
+   "source": "src/poolhouse/gym/transport.py",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
@@ -11864,7 +11874,7 @@
    "tests": [
     "tests/test_pi_harness.py::test_pi_launch_is_offline_and_uses_the_policy_extension"
    ],
-   "note": "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
+   "note": "Pi runs offline with poolhouse's tool-policy extension and an explicit local model endpoint"
   },
   {
    "id": "spawn:platform.py:_windows_sid",
@@ -11950,7 +11960,7 @@
     "tests/test_testfarm_nodes.py::test_at_most_two_run_at_once_and_a_third_is_told_to_wait",
     "tests/test_shard_limits.py::test_a_runner_that_floods_its_output_is_cancelled"
    ],
-   "note": "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolside-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
+   "note": "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolhouse-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
   },
   {
    "id": "spawn:platform.py:start_process",
@@ -12111,7 +12121,7 @@
   {
    "id": "spawn:sandbox/bubblewrap.py:_probe",
    "kind": "spawn",
-   "source": "src/ml_stack/sandbox/bubblewrap.py",
+   "source": "src/poolhouse/sandbox/bubblewrap.py",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",

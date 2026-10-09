@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ml_stack.fleet import discovery, wsl, wsl_network
+from poolhouse.fleet import discovery, wsl, wsl_network
 
 
 def native_socket(*, bind=None, **_options):
@@ -184,8 +184,8 @@ def test_wsl_launcher_cleans_bridge_when_process_creation_fails(monkeypatch):
     monkeypatch.setattr(wsl, "command", lambda *args: list(args))
     monkeypatch.setattr(wsl, "_read", lambda *_args: "/linux/python")
     monkeypatch.setattr(wsl.subprocess, "run", MagicMock(return_value=SimpleNamespace(returncode=0)))
-    monkeypatch.delenv("ML_STACK_HOME", raising=False)
-    monkeypatch.delenv("ML_STACK_CACHE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_HOME", raising=False)
+    monkeypatch.delenv("POOLHOUSE_CACHE", raising=False)
 
     def fail(_argv, **_kwargs):
         raise OSError("child creation failed")

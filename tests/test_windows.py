@@ -75,7 +75,7 @@ FAKE_MSVCRT = textwrap.dedent("""
 
 @pytest.fixture
 def win_lock(monkeypatch):
-    """`ml_stack.lock` believing it is on Windows, with the flock-backed msvcrt."""
+    """`poolhouse.lock` believing it is on Windows, with the flock-backed msvcrt."""
     # monkeypatch first, so the original platform is recorded before the fake source
     # assigns sys.platform itself -- recorded after, the "original" would be win32 and
     # every later test on this worker would inherit it (ssl went looking for the Windows
@@ -86,7 +86,7 @@ def win_lock(monkeypatch):
     exec(FAKE_MSVCRT, scope)            # noqa: S102 - our own source, above
     fake = scope["_m"]
     monkeypatch.setitem(sys.modules, "msvcrt", fake)
-    from ml_stack.lock import Busy, only_one
+    from poolhouse.lock import Busy, only_one
     return only_one, Busy, fake
 
 
@@ -96,7 +96,7 @@ class TestTheLockOnWindows:
         else in the bench could run, which is exactly how it was written."""
         done = subprocess.run(
             [sys.executable, "-c",
-             "import sys; sys.modules['fcntl'] = None; import ml_stack.lock; "
+             "import sys; sys.modules['fcntl'] = None; import poolhouse.lock; "
              "print('imported')"],
             capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(SRC)})
         assert done.returncode == 0, done.stderr
@@ -136,9 +136,9 @@ class TestTheLockOnWindows:
         only_one, _, _ = win_lock
         said = []
         other = subprocess.Popen(
-            [sys.executable, "-c", "import ml_stack\n" + FAKE_MSVCRT + textwrap.dedent(f"""
+            [sys.executable, "-c", "import poolhouse\n" + FAKE_MSVCRT + textwrap.dedent(f"""
                 import time
-                from ml_stack.lock import only_one
+                from poolhouse.lock import only_one
                 with only_one({str(tmp_path / 'l')!r}):
                     print("held", os.getpid(), flush=True)
                     time.sleep(1.5)
@@ -164,7 +164,7 @@ class TestTheLockOnWindows:
             self, win_lock, tmp_path):
         """The locked byte is far past the pid text: a LockFile region is mandatory, so a
         pid that shared a byte with the lock could not be read by the process waiting."""
-        from ml_stack import lock as lock_module
+        from poolhouse import lock as lock_module
 
         only_one, _, _ = win_lock
         with only_one(tmp_path / "l") as held:
@@ -176,31 +176,31 @@ class TestTheLockOnWindows:
 # -- starting and stopping a job -------------------------------------------------------
 class TestProcessGroups:
     def test_windows_gets_a_new_process_group_not_a_session(self, windows):
-        from ml_stack.platform import CREATE_NEW_PROCESS_GROUP, process_group_kwargs
+        from poolhouse.platform import CREATE_NEW_PROCESS_GROUP, process_group_kwargs
 
         kwargs = process_group_kwargs()
         assert kwargs == {"creationflags": CREATE_NEW_PROCESS_GROUP}
         assert CREATE_NEW_PROCESS_GROUP == 0x200, "Win32's own value, the same everywhere"
 
     def test_posix_keeps_its_session(self, posix):
-        from ml_stack.platform import process_group_kwargs
+        from poolhouse.platform import process_group_kwargs
 
         assert process_group_kwargs() == {"start_new_session": True}
 
     def test_a_detached_job_also_leaves_the_console_on_windows(self, windows):
-        from ml_stack.platform import CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, detached_kwargs
+        from poolhouse.platform import CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, detached_kwargs
 
         assert detached_kwargs() == {
             "creationflags": CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}
         assert DETACHED_PROCESS == 0x8, "Win32's own value, the same everywhere"
 
     def test_a_detached_job_on_posix_is_a_session_of_its_own(self, posix):
-        from ml_stack.platform import detached_kwargs
+        from poolhouse.platform import detached_kwargs
 
         assert detached_kwargs() == {"start_new_session": True}
 
     def test_a_windows_job_is_asked_to_stop_with_ctrl_break(self, windows):
-        from ml_stack.platform import CTRL_BREAK_EVENT, stop_gently
+        from poolhouse.platform import CTRL_BREAK_EVENT, stop_gently
 
         sent: list[int] = []
         proc = types.SimpleNamespace(send_signal=sent.append,
@@ -212,7 +212,7 @@ class TestProcessGroups:
     def test_a_job_with_no_console_is_terminated_and_that_is_said(self, windows):
         """GenerateConsoleCtrlEvent fails when the daemon has no console (a Scheduled Task
         with no window). The job still has to stop; what it got is reported, not hidden."""
-        from ml_stack.platform import stop_gently
+        from poolhouse.platform import stop_gently
 
         terminated: list[bool] = []
 
@@ -225,7 +225,7 @@ class TestProcessGroups:
         assert terminated == [True]
 
     def test_posix_still_sends_sigterm(self, posix):
-        from ml_stack.platform import stop_gently
+        from poolhouse.platform import stop_gently
 
         sent: list[int] = []
         proc = types.SimpleNamespace(send_signal=sent.append, terminate=lambda: None)
@@ -238,7 +238,7 @@ class TestStopByPid:
     `stop_gently` for it, and says what it sent."""
 
     def test_a_windows_pid_is_sent_ctrl_break_to_its_group(self, windows, monkeypatch):
-        from ml_stack.platform import CTRL_BREAK_EVENT, stop_pid
+        from poolhouse.platform import CTRL_BREAK_EVENT, stop_pid
 
         sent: list[tuple[int, int]] = []
         monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
@@ -247,9 +247,9 @@ class TestStopByPid:
 
     def test_a_detached_pid_with_no_console_is_terminated_and_that_is_said(self, windows,
                                                                             monkeypatch):
-        """`ml-stack-bench --detach` starts its child DETACHED_PROCESS, so there is no
+        """`poolhouse-bench --detach` starts its child DETACHED_PROCESS, so there is no
         console for a Ctrl+Break to reach; the bench still has to stop."""
-        from ml_stack.platform import CTRL_BREAK_EVENT, stop_pid
+        from poolhouse.platform import CTRL_BREAK_EVENT, stop_pid
 
         sent: list[tuple[int, int]] = []
 
@@ -263,7 +263,7 @@ class TestStopByPid:
         assert sent == [(4242, signal.SIGTERM)]
 
     def test_posix_sends_sigterm_by_pid(self, posix, monkeypatch):
-        from ml_stack.platform import stop_pid
+        from poolhouse.platform import stop_pid
 
         sent: list[tuple[int, int]] = []
         monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
@@ -271,7 +271,7 @@ class TestStopByPid:
         assert sent == [(4242, signal.SIGTERM)]
 
     def test_a_pid_that_is_gone_raises_so_the_caller_can_say_so(self, windows, monkeypatch):
-        from ml_stack.platform import stop_pid
+        from poolhouse.platform import stop_pid
 
         def gone(pid, sig):
             raise OSError(errno.ESRCH, "No such process")
@@ -321,8 +321,8 @@ def _await(predicate, timeout: float = 10.0) -> bool:
 class TestTheDaemonRunsAJobTheWindowsWay:
     def test_a_job_is_started_in_its_own_group_and_stopped_with_ctrl_break(
             self, windows, monkeypatch, tmp_path):
-        from ml_stack.fleet import jobs as jobs_module
-        from ml_stack.platform import CREATE_NEW_PROCESS_GROUP, CTRL_BREAK_EVENT
+        from poolhouse.fleet import jobs as jobs_module
+        from poolhouse.platform import CREATE_NEW_PROCESS_GROUP, CTRL_BREAK_EVENT
 
         started: list[dict] = []
         procs: list[_FakeProc] = []
@@ -350,18 +350,18 @@ class TestTheDaemonRunsAJobTheWindowsWay:
 # -- shutting the daemon down cleanly ----------------------------------------------------
 class TestQuitSignals:
     def test_windows_hooks_sigbreak_as_well_as_sigterm(self, windows, monkeypatch):
-        from ml_stack.platform import quit_signals
+        from poolhouse.platform import quit_signals
 
         monkeypatch.setattr(signal, "SIGBREAK", 21, raising=False)
         assert quit_signals() == [signal.SIGTERM, 21]
 
     def test_posix_hooks_only_sigterm(self, posix):
-        from ml_stack.platform import quit_signals
+        from poolhouse.platform import quit_signals
 
         assert quit_signals() == [signal.SIGTERM]
 
     def test_the_handler_is_installed_from_the_main_thread_and_not_from_a_worker(self, posix):
-        from ml_stack.platform import on_quit
+        from poolhouse.platform import on_quit
 
         before = signal.getsignal(signal.SIGTERM)
         try:
@@ -379,7 +379,7 @@ class TestQuitSignals:
 # -- a file only this user may read ----------------------------------------------------
 class TestPrivateFile:
     def test_windows_cuts_the_acl_to_the_owner(self, windows, monkeypatch, tmp_path):
-        from ml_stack import platform as platform_module
+        from poolhouse import platform as platform_module
 
         ran: list[list[str]] = []
         monkeypatch.setattr(platform_module.subprocess, "run",
@@ -394,7 +394,7 @@ class TestPrivateFile:
                         "fixture-user:F"]]
 
     def test_posix_is_chmod_600(self, posix, monkeypatch, tmp_path):
-        from ml_stack.platform import private_file
+        from poolhouse.platform import private_file
 
         target = tmp_path / "cluster.json"
         target.write_text("[]")
@@ -405,14 +405,14 @@ class TestPrivateFile:
 
     def test_the_cluster_key_goes_through_it(self, windows, monkeypatch, tmp_path):
         """`discovery` used to chmod directly, which on Windows protects nothing."""
-        from ml_stack import platform as platform_module
-        from ml_stack.fleet.discovery import create_cluster_key
+        from poolhouse import platform as platform_module
+        from poolhouse.fleet.discovery import create_cluster_key
 
         ran: list[list[str]] = []
         monkeypatch.setattr(platform_module.subprocess, "run",
                             lambda argv, **k: ran.append(list(argv)) or _ok())
         monkeypatch.setenv("USERNAME", "fixture-user")
-        create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
+        create_cluster_key(tmp_path / "cluster.key", group="poolhouse")
         assert any(argv[0] == "icacls" and argv[1].endswith("cluster.json") for argv in ran)
 
 
@@ -420,7 +420,7 @@ class TestPrivateFile:
 @pytest.fixture
 def win_autostart(monkeypatch, tmp_path):
     """`autostart` on Windows with no task registered yet and a recording schtasks."""
-    from ml_stack.fleet import autostart
+    from poolhouse.fleet import autostart
 
     ran: list[list[str]] = []
     refuse: dict[str, int] = {}
@@ -434,7 +434,7 @@ def win_autostart(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(autostart, "_windows_startup", lambda: tmp_path / "startup.cmd")
     monkeypatch.setattr(autostart, "_executable",
-                        lambda: ["C:\\Tools\\ml stack\\ml-stack-traind.exe"])
+                        lambda: ["C:\\Tools\\poolhouse\\poolhouse-traind.exe"])
     monkeypatch.setattr(autostart, "_windows_task_exists", lambda: False)
     monkeypatch.setattr(autostart, "_windows_login_task_exists", lambda: False)
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -450,13 +450,13 @@ class TestAutostartOnWindows:
 
         assert done.installed
         create = next(c for c in ran if c[:2] == ["schtasks", "/Create"])
-        assert create[create.index("/TN") + 1] == auto.LOGIN_TASK == "com.ml-stack.traind.login"
+        assert create[create.index("/TN") + 1] == auto.LOGIN_TASK == "com.poolhouse.traind.login"
         assert create[create.index("/SC") + 1] == "ONLOGON"
         assert create[create.index("/RL") + 1] == "LIMITED", "no administrator needed"
         wrapper = Path(create[create.index("/TR") + 1].strip('"'))
-        assert wrapper == done.path == tmp_path / "ml-stack-traind.cmd"
+        assert wrapper == done.path == tmp_path / "poolhouse-traind.cmd"
         body = wrapper.read_text()
-        assert "-m ml_stack.fleet.launch --no-browser --slots 2 --label prep" in body
+        assert "-m poolhouse.fleet.launch --no-browser --slots 2 --label prep" in body
         assert str(tmp_path / "traind.log") in body, "a task's /TR cannot redirect; the wrapper does"
         assert ["schtasks", "/Run", "/TN", auto.LOGIN_TASK] in ran, "started now, not at the next logon"
         assert not (tmp_path / "startup.cmd").exists()
@@ -471,7 +471,7 @@ class TestAutostartOnWindows:
         assert done.installed
         assert done.path == tmp_path / "startup.cmd"
         assert "Startup folder" in done.note and "Access is denied" in done.note
-        assert "-m ml_stack.fleet.launch --no-browser" in done.path.read_text()
+        assert "-m poolhouse.fleet.launch --no-browser" in done.path.read_text()
 
     def test_changing_the_answer_ends_and_deletes_the_logon_task(
             self, win_autostart, monkeypatch, tmp_path):
@@ -499,7 +499,7 @@ class TestAutostartOnWindows:
 class TestTraindPersist:
     def test_persist_installs_at_login_with_the_flags_given_and_does_not_serve(
             self, monkeypatch, capsys, tmp_path):
-        from ml_stack.fleet import autostart, daemon as daemon_module
+        from poolhouse.fleet import autostart, daemon as daemon_module
 
         asked: list[dict] = []
 
@@ -513,16 +513,16 @@ class TestTraindPersist:
                             lambda *a, **k: pytest.fail("--persist must not serve"))
 
         code = daemon_module.run(["--persist", "--slots", "2", "--label", "prep",
-                                   "--report", "ml_stack.fleet.device:stdlib_device_report"])
+                                   "--report", "poolhouse.fleet.device:stdlib_device_report"])
 
         assert code == 0
         assert asked == [{"mode": "login", "slots": 2, "labels": ("prep",),
-                          "report": "ml_stack.fleet.device:stdlib_device_report"}]
+                          "report": "poolhouse.fleet.device:stdlib_device_report"}]
         out = capsys.readouterr().out
         assert "installed to start at login" in out and "t.cmd" in out
 
     def test_a_refused_install_says_what_to_run_and_fails(self, monkeypatch, capsys):
-        from ml_stack.fleet import autostart, daemon as daemon_module
+        from poolhouse.fleet import autostart, daemon as daemon_module
 
         monkeypatch.setattr(autostart, "install", lambda mode, **k: autostart.Autostart(
             mode, installed=False, command="schtasks /Create ...", note="no permission"))
@@ -534,7 +534,7 @@ class TestTraindPersist:
 # -- what the firewall has to let through -------------------------------------------
 class TestDiscoveryAndTheFirewall:
     def test_beacons_are_udp_multicast_and_broadcast_on_a_fixed_port(self):
-        from ml_stack.fleet import discovery
+        from poolhouse.fleet import discovery
 
         assert discovery.DEFAULT_GROUP == "239.255.77.70"
         assert discovery.DEFAULT_PORT == 8771 and discovery.DEFAULT_HTTP_PORT == 8770
@@ -543,22 +543,22 @@ class TestDiscoveryAndTheFirewall:
             (("255.255.255.255", 8771), ""), (("127.0.0.1", 8771), "")]
 
     def test_the_two_inbound_rules_name_the_two_ports(self):
-        from ml_stack.fleet.discovery import windows_firewall_line, windows_firewall_rules
+        from poolhouse.fleet.discovery import windows_firewall_line, windows_firewall_rules
 
         rules = dict(windows_firewall_rules())
-        assert rules["ml-stack traind"].endswith("protocol=TCP localport=8770")
-        assert rules["ml-stack discovery"].endswith("protocol=UDP localport=8771")
+        assert rules["poolhouse traind"].endswith("protocol=TCP localport=8770")
+        assert rules["poolhouse discovery"].endswith("protocol=UDP localport=8771")
         line = windows_firewall_line()
         assert line.count("netsh advfirewall firewall add rule") == 2 and " && " in line
         assert "\n" not in line, "one line, for one administrator's prompt"
 
     def test_the_daemon_announces_itself_the_moment_it_starts(self, monkeypatch, tmp_path):
         """The loop's first beacon is interval_s away. A daemon that has just come up must
-        appear in the next `ml-stack-peers ls`, not the one after."""
-        from ml_stack.fleet import discovery
-        from ml_stack.fleet.discovery import Advertiser, Beacon, _verify
+        appear in the next `poolhouse-peers ls`, not the one after."""
+        from poolhouse.fleet import discovery
+        from poolhouse.fleet.discovery import Advertiser, Beacon, _verify
 
-        discovery.create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
+        discovery.create_cluster_key(tmp_path / "cluster.key", group="poolhouse")
         key = discovery.load_cluster_key(tmp_path / "cluster.key")
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ear:
             ear.bind(("127.0.0.1", 0))
@@ -580,7 +580,7 @@ class TestDiscoveryAndTheFirewall:
         assert msg is not None and msg["beacon"]["name"] == "fixture-box"
 
     def test_setup_prints_the_netsh_line_until_both_rules_exist(self, windows, monkeypatch):
-        from ml_stack import setup
+        from poolhouse import setup
 
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         monkeypatch.setattr(setup.subprocess, "run",
@@ -591,30 +591,30 @@ class TestDiscoveryAndTheFirewall:
         assert len(found) == 1
         finding = found[0]
         assert not finding.good and finding.root
-        assert "ml-stack traind" in finding.said and "ml-stack discovery" in finding.said
+        assert "poolhouse traind" in finding.said and "poolhouse discovery" in finding.said
         assert finding.fix[:2] == ["cmd", "/c"]
         assert "protocol=TCP localport=8770" in finding.fix[2]
         assert "protocol=UDP localport=8771" in finding.fix[2]
         assert "administrator" in finding.note
 
     def test_setup_is_satisfied_once_netsh_finds_them(self, windows, monkeypatch):
-        from ml_stack import setup
+        from poolhouse import setup
 
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         monkeypatch.setattr(setup.subprocess, "run",
-                            lambda argv, **k: _ok(0, stdout="Rule Name: ml-stack traind\n"))
+                            lambda argv, **k: _ok(0, stdout="Rule Name: poolhouse traind\n"))
 
         finding = next(f for f in setup.look() if f.name == "firewall")
         assert finding.good and not finding.fix
 
     def test_no_firewall_finding_anywhere_else(self, posix, monkeypatch):
-        from ml_stack import setup
+        from poolhouse import setup
 
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         assert not [f for f in setup.look() if f.name == "firewall"]
 
     def test_peers_init_uses_recovery_on_windows_to_preserve_the_name(self, capsys, tmp_path):
-        from ml_stack.fleet.peers import main
+        from poolhouse.fleet.peers import main
 
         assert main(["--cluster-key", str(tmp_path / "cluster.key"), "init", "--group", "Cedar lab"]) == 0
         out = capsys.readouterr().out

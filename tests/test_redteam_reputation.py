@@ -8,13 +8,13 @@ import json
 
 import pytest
 
-from ml_stack.guard.untrusted import injection_markers
-from ml_stack.reputation import cli, hooks
-from ml_stack.reputation.notice import Notifier
-from ml_stack.reputation.store import Ledger
-from ml_stack.sentinel import observers
-from ml_stack.sentinel.heads_up import Wires
-from ml_stack.testing import injection_corpus as corpus
+from poolhouse.guard.untrusted import injection_markers
+from poolhouse.reputation import cli, hooks
+from poolhouse.reputation.notice import Notifier
+from poolhouse.reputation.store import Ledger
+from poolhouse.sentinel import observers
+from poolhouse.sentinel.heads_up import Wires
+from poolhouse.testing import injection_corpus as corpus
 from tests import memory_keys
 from tests.test_reputation import Clock, Desk, make_established
 
@@ -92,7 +92,7 @@ def test_an_attacker_cannot_farm_reputation_in_a_burst(ledger):
     assert ledger.standing("host", "farm.example").clean == 2
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"])
 def test_an_agent_cannot_run_any_command(monkeypatch, capsys, ledger, marker):
     ledger.observe("host", "a.example", "scan_hit")
     monkeypatch.setenv(marker, "1")

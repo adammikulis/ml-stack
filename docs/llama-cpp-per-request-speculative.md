@@ -1,7 +1,7 @@
 # Per-request draft depth for `llama-server`
 
 A patch for `ggml-org/llama.cpp`, carried in `patches/llama.cpp/` and applied by
-`ml-stack-serve build --from source`. Not sent upstream; this note is what a pull request
+`poolhouse-serve build --from source`. Not sent upstream; this note is what a pull request
 would say.
 
 ## What it enables
@@ -111,7 +111,7 @@ accepted, and `speculative.n_max: -1` — outside the registered field's hard li
 answered `200 OK` rather than the `400` the patched build returns.
 
 A caller therefore cannot tell from a successful response whether the depth took.
-`ml_stack.bench.backends.draft_depth_support` measures it instead, with one call carrying no
+`poolhouse.bench.backends.draft_depth_support` measures it instead, with one call carrying no
 field and one asking for depth 0, and reads `obeyed`, `ignored` or `no drafting`.
 
 ## The field is flat, not an object

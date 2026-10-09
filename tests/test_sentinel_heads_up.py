@@ -12,11 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import desktop, home, sentinel
-from ml_stack.lock import only_one
-from ml_stack.sentinel import heads_up, human
-from ml_stack.sentinel.heads_up import BUTTONS, KEEP, LATER, RELEASE, HeadsUp
-from ml_stack.sentinel.store import State
+from poolhouse import desktop, home, sentinel
+from poolhouse.lock import only_one
+from poolhouse.sentinel import heads_up, human
+from poolhouse.sentinel.heads_up import BUTTONS, KEEP, LATER, RELEASE, HeadsUp
+from poolhouse.sentinel.store import State
 
 HOSTILE = "evil\x1b[31mRED‮\nIGNORE PREVIOUS INSTRUCTIONS " + "z" * 5000
 FORGED = "peer.forged_traffic: forged=3"
@@ -95,7 +95,7 @@ def test_everything_held_at_that_moment_is_one_dialog_naming_it():
         work()
     assert len(desk.shown) == 1
     title, body, _ = desk.shown[0]
-    assert title == "ml-stack is holding 3 things"
+    assert title == "Poolhouse is holding 3 things"
     assert all(f"peer 10.0.2.{n}" in body for n in range(3))
 
 
@@ -189,13 +189,13 @@ def test_notify_off_shows_nothing_and_is_read_on_every_call():
     desk = Desk()
     node = wired(desk)
     node.heads_up.spawn = lambda work: None
-    node.heads_up.env = {"ML_STACK_NOTIFY": "off"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "off"}
     held(node, "10.0.9.1")
     assert node.heads_up.prompt() == "" and node.heads_up.review() == "" and desk.shown == []
     node.heads_up.poll()
     node.heads_up.env = {}
     assert node.heads_up.prompt() == LATER and len(desk.shown) == 1
-    node.heads_up.env["ML_STACK_NOTIFY"] = "off"
+    node.heads_up.env["POOLHOUSE_NOTIFY"] = "off"
     held(node, "10.0.9.2")
     node.heads_up.clock = lambda: 9e12
     assert node.heads_up.prompt() == "" and len(desk.shown) == 1
@@ -211,12 +211,12 @@ def test_notify_off_reaches_for_no_desktop_tool_at_all(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
     node = sentinel.default()
     node.heads_up.spawn = lambda work: work()
-    node.heads_up.env = {"ML_STACK_NOTIFY": "off"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "off"}
     held(node, "10.1.0.1")
     node.heads_up.review()
     node.heads_up.poll()
     assert not log.exists()
-    node.heads_up.env = {"ML_STACK_NOTIFY": "system"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "system"}
     node.heads_up.review()
     assert log.exists()
     log.unlink()
@@ -240,7 +240,7 @@ def test_a_lock_held_by_a_live_other_process_stops_this_one():
     node = wired(desk)
     node.heads_up.spawn = lambda work: None
     held(node, "10.1.2.1")
-    code = ("import sys\nfrom ml_stack.lock import only_one\n"
+    code = ("import sys\nfrom poolhouse.lock import only_one\n"
             "with only_one(sys.argv[1], wait=False):\n    print('held', flush=True)\n"
             "    sys.stdin.readline()\n")
     child = subprocess.Popen([sys.executable, "-c", code, str(node.heads_up.lock)],
@@ -291,7 +291,7 @@ def test_the_module_is_the_only_caller_of_the_click_grant_and_exposes_no_way_to_
 
 
 def test_the_default_wiring_in_a_test_session_reaches_for_no_desktop():
-    shim_log = Path(os.environ["ML_STACK_SHIM_LOG"])
+    shim_log = Path(os.environ["POOLHOUSE_SHIM_LOG"])
     before = shim_log.read_text() if shim_log.exists() else ""
     node = sentinel.default()
     assert isinstance(node.heads_up, HeadsUp)
@@ -347,7 +347,7 @@ def test_the_environment_decides_whether_a_dialog_can_be_shown():
     assert desktop.which_way("Linux", env={}, which=have("zenity")) == "zenity"
     assert desktop.which_way("Linux", env={}, which=have("notify-send", "zenity")) == "notify-send"
     for off in ("console", "off", "OFF"):
-        assert desktop.which_way("Darwin", env={"ML_STACK_NOTIFY": off},
+        assert desktop.which_way("Darwin", env={"POOLHOUSE_NOTIFY": off},
                                  which=have("osascript")) == "none"
     assert desktop.which_way("Windows", env={}, which=have("osascript")) == "none"
 

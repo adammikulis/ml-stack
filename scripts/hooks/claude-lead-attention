@@ -15,7 +15,7 @@ EVERY_S = 600.0
 
 def due(session: str, now: float) -> bool:
     """Whether the interval since this session was last checked has passed; records the check."""
-    every = float(os.environ.get("ML_STACK_ATTENTION_EVERY_S") or EVERY_S)
+    every = float(os.environ.get("POOLHOUSE_ATTENTION_EVERY_S") or EVERY_S)
     stamp = workspace_hook.state_dir() / "attention" / (session if session.replace("-", "").isalnum() else "none")
     try:
         if now - float(stamp.read_text()) < every:
@@ -39,7 +39,7 @@ def main() -> int:
     environment = workspace_hook.session_environment(event, "Attention")
     if environment is None:
         return 0
-    done = workspace_hook.run(["ml-stack-workspace", "attention"], "Attention", environment=environment)
+    done = workspace_hook.run(["poolhouse-workspace", "attention"], "Attention", environment=environment)
     text = done.stdout.strip() if done else ""
     orphans = tree_watch.check("Attention", str(event.get("cwd") or ""), environment)
     text = "\n\n".join(part for part in (text, orphans) if part)

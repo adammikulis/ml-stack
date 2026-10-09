@@ -2,8 +2,8 @@
 
 import json
 
-from ml_stack import hub
-from ml_stack.gym import models
+from poolhouse import hub
+from poolhouse.gym import models
 
 
 def test_fastvlm_safetensors_is_discovered_as_vision_and_explicitly_unsupported(tmp_path, monkeypatch):

@@ -6,7 +6,7 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "package-name": "ml-stack",
+      "package-name": "poolhouse",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
@@ -19,7 +19,7 @@
         },
         {
           "type": "generic",
-          "path": "app/poolside-node/Cargo.toml"
+          "path": "app/poolhouse-node/Cargo.toml"
         }
       ]
     }

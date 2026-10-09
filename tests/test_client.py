@@ -16,7 +16,7 @@ from typing import ClassVar
 import pytest
 from conftest import json_reply
 
-from ml_stack.client import (
+from poolhouse.client import (
     Client,
     EmbeddingError,
     GrammarUnsupportedError,
@@ -36,7 +36,7 @@ from ml_stack.client import (
     strip_thinking,
     wait_for_health,
 )
-from ml_stack.extraction import Checking, Prompting
+from poolhouse.extraction import Checking, Prompting
 
 
 def _chat_reply(content: str, **message: object):
@@ -83,7 +83,7 @@ class TestBuildBody:
         assert body["top_k"] == 40 and body["n_predict"] == 512
 
     def test_output_limits_default_to_none(self):
-        from ml_stack.client import Transport
+        from poolhouse.client import Transport
         assert Request().n_predict is None
         assert Transport().timeout is None
         assert Client("http://x").build_body([])["n_predict"] == -1
@@ -426,7 +426,7 @@ class TestEmptyAnswerIsLoud:
         payload = _completion(UNKNOWN_ID, "")
         payload["choices"][0]["message"]["output_text"] = "the whole answer"
         instance = server(lambda m, p, b: json_reply(payload))
-        with caplog.at_level("WARNING", logger="ml_stack.client.chat"):
+        with caplog.at_level("WARNING", logger="poolhouse.client.chat"):
             reply = Client(instance.base_url).chat([])
         assert not (reply.content or "").strip()
         said = [r.getMessage() for r in caplog.records]
@@ -437,7 +437,7 @@ class TestEmptyAnswerIsLoud:
         payload = _completion(UNKNOWN_ID, "")
         payload["choices"][0]["text"] = "the whole answer"
         instance = server(lambda m, p, b: json_reply(payload))
-        with caplog.at_level("WARNING", logger="ml_stack.client.chat"):
+        with caplog.at_level("WARNING", logger="poolhouse.client.chat"):
             Client(instance.base_url).chat([])
         said = [r.getMessage() for r in caplog.records]
         assert len(said) == 1 and "text" in said[0]
@@ -446,14 +446,14 @@ class TestEmptyAnswerIsLoud:
     def test_a_recovered_reply_stays_quiet(self, server, caplog):
         payload = _completion(GPT_OSS_ID, "", reasoning_content="counting the people")
         instance = server(lambda m, p, b: json_reply(payload))
-        with caplog.at_level("WARNING", logger="ml_stack.client.chat"):
+        with caplog.at_level("WARNING", logger="poolhouse.client.chat"):
             reply = Client(instance.base_url).chat([])
         assert reply.thinking == "counting the people"
         assert caplog.records == []
 
     def test_a_genuinely_empty_reply_stays_quiet(self, server, caplog):
         instance = server(lambda m, p, b: json_reply(_completion(UNKNOWN_ID, "")))
-        with caplog.at_level("WARNING", logger="ml_stack.client.chat"):
+        with caplog.at_level("WARNING", logger="poolhouse.client.chat"):
             Client(instance.base_url).chat([])
         assert caplog.records == []
 
@@ -462,7 +462,7 @@ class TestEmptyAnswerIsLoud:
             {"id": "c1", "type": "function",
              "function": {"name": "look_up", "arguments": "{}"}}])
         instance = server(lambda m, p, b: json_reply(payload))
-        with caplog.at_level("WARNING", logger="ml_stack.client.chat"):
+        with caplog.at_level("WARNING", logger="poolhouse.client.chat"):
             reply = Client(instance.base_url).chat([])
         assert reply.tool_calls is not None
         assert caplog.records == []
@@ -472,7 +472,7 @@ class TestEmptyAnswerIsLoud:
         body = _sse(_stream_of(UNKNOWN_ID, [
             {"role": "assistant"}, {"output_text": "the whole "}, {"output_text": "answer"}]))
         instance = server(lambda m, p, b: (200, body))
-        with caplog.at_level("WARNING", logger="ml_stack.client.chat"):
+        with caplog.at_level("WARNING", logger="poolhouse.client.chat"):
             reply = Client(instance.base_url).chat([], on_delta=lambda k, t: None)
         said = [r.getMessage() for r in caplog.records]
         assert len(said) == 1 and "output_text" in said[0]
@@ -825,22 +825,22 @@ class TestEmbeddings:
         assert not instance.requests
 
     def test_cosine_of_identical_vectors_is_one(self):
-        from ml_stack.client import cosine
+        from poolhouse.client import cosine
 
         assert cosine([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(1.0)
 
     def test_cosine_rejects_a_dimension_mismatch(self):
         """Incomparable vectors are a caller's bug, so this is not a ServerError: a
         handler waiting for an unreachable server must not swallow it."""
-        from ml_stack.client import VectorMismatch, cosine
-        from ml_stack.http import ServerError
+        from poolhouse.client import VectorMismatch, cosine
+        from poolhouse.http import ServerError
 
         with pytest.raises(VectorMismatch):
             cosine([1.0], [1.0, 2.0])
         assert not issubclass(VectorMismatch, ServerError)
 
     def test_rank_pairs_returns_every_pair_once_best_first(self):
-        from ml_stack.client import rank_pairs
+        from poolhouse.client import rank_pairs
 
         vectors = [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]]
         pairs = rank_pairs(vectors)
@@ -848,19 +848,19 @@ class TestEmbeddings:
         assert pairs[0][2] > pairs[-1][2]
 
     def test_rank_pairs_breaks_ties_by_index_so_the_order_is_stable(self):
-        from ml_stack.client import rank_pairs
+        from poolhouse.client import rank_pairs
 
         vectors = [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]]
         assert [(i, j) for i, j, _ in rank_pairs(vectors)] == [(0, 1), (0, 2), (1, 2)]
 
     def test_rank_pairs_limit_keeps_the_best(self):
-        from ml_stack.client import rank_pairs
+        from poolhouse.client import rank_pairs
 
         vectors = [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]]
         assert [(i, j) for i, j, _ in rank_pairs(vectors, limit=1)] == [(0, 1)]
 
     def test_rank_pairs_of_one_vector_is_empty(self):
-        from ml_stack.client import rank_pairs
+        from poolhouse.client import rank_pairs
 
         assert rank_pairs([[1.0, 0.0]]) == []
 
@@ -879,7 +879,7 @@ class TestTokenEstimate:
         assert heuristic_tokens("!!!???<<<>>>...") > heuristic_tokens("aaaaaaaaaaaaaaa")
 
     def test_an_installed_counter_is_used_and_can_be_removed(self):
-        from ml_stack.client import set_token_counter
+        from poolhouse.client import set_token_counter
 
         try:
             set_token_counter(lambda _: 99)
@@ -981,7 +981,7 @@ class TestExtract:
         assert out == {"people": []}
         assert seen["path"] == "/v1/chat/completions"
         assert seen["body"]["response_format"]["type"] == "json_schema"
-        from ml_stack.client.chat import strict_schema
+        from poolhouse.client.chat import strict_schema
         assert seen["body"]["response_format"]["json_schema"]["schema"] == strict_schema(self.SCHEMA)
         assert seen["body"]["response_format"]["json_schema"]["name"] == "extraction"
         assert seen["body"]["chat_template_kwargs"]["enable_thinking"] is False
@@ -1153,7 +1153,7 @@ class TestExtract:
         assert out["_objections"] == ["no people were found"]
 
     def test_a_supplied_prompt_asks_the_completion_endpoint_with_the_grammar(self, server):
-        from ml_stack.contracts import grammar_for
+        from poolhouse.contracts import grammar_for
 
         seen: list[dict] = []
 
@@ -1211,7 +1211,7 @@ class TestExtract:
         assert "no people were found" in seen[1]["prompt"]
 
     def test_a_schema_it_cannot_constrain_never_reaches_the_server(self, server):
-        from ml_stack.contracts import ContractError
+        from poolhouse.contracts import ContractError
 
         calls = {"n": 0}
 
@@ -1233,7 +1233,7 @@ class TestStrictSchema:
     def test_every_object_requires_all_its_properties_and_nothing_else(self, server):
         """Without ``required`` the server's schema-to-grammar makes every key optional,
         and a model that skips ``title`` produces a record nothing downstream can use."""
-        from ml_stack.client.chat import strict_schema
+        from poolhouse.client.chat import strict_schema
         schema = {"type": "object", "properties": {"items": {"type": "array", "items": {
             "type": "object", "properties": {"title": {"type": "string"}, "kind": {"type": "string"}}}}}}
         out = strict_schema(schema)
@@ -1257,8 +1257,8 @@ def test_a_model_card_informs_but_is_never_sent_on_its_own():
     card asks for temperature 1.0, which on a tool-calling task measured 15 points worse
     than greedy. So it is readable, and it is never what goes out.
     """
-    from ml_stack.client.chat import Client
-    from ml_stack.client.families import GEMMA, GPT_OSS
+    from poolhouse.client.chat import Client
+    from poolhouse.client.families import GEMMA, GPT_OSS
 
     gemma = Client("http://nowhere.invalid", family=GEMMA)
     assert gemma.card == {"temperature": 1.0, "top_p": 0.95, "top_k": 64}
@@ -1282,8 +1282,8 @@ def test_the_card_comes_from_the_served_model_before_the_family(monkeypatch, tmp
     hold both, and the file already knows."""
     import struct
 
-    from ml_stack.client.chat import Client
-    from ml_stack.client.families import GEMMA
+    from poolhouse.client.chat import Client
+    from poolhouse.client.families import GEMMA
 
     blob = bytearray(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0)
                      + struct.pack("<Q", 1))
@@ -1292,7 +1292,7 @@ def test_the_card_comes_from_the_served_model_before_the_family(monkeypatch, tmp
     where = tmp_path / "served.gguf"
     where.write_bytes(bytes(blob))
 
-    import ml_stack.client.chat as chat
+    import poolhouse.client.chat as chat
     monkeypatch.setattr(chat, "request_json", lambda *a, **k: {"model_path": str(where)},
                         raising=False)
 
@@ -1310,8 +1310,8 @@ def test_the_card_comes_from_the_served_model_before_the_family(monkeypatch, tmp
 def test_think_becomes_the_familys_template_flag_and_never_a_body_key():
     """`chat(think=False)` must reach the server as the chat template's own switch;
     as a body key it was ignored and the model thought anyway (Flash-Next, 2026-09-02)."""
-    from ml_stack.client import families
-    from ml_stack.client.chat import Client
+    from poolhouse.client import families
+    from poolhouse.client.chat import Client
 
     client = Client("http://127.0.0.1:1", family="qwen")
     body = client.build_body([{"role": "user", "content": "hi"}], think=False)
@@ -1328,7 +1328,7 @@ def test_think_becomes_the_familys_template_flag_and_never_a_body_key():
 # -- the draft depth a request carries ----------------------------------------------------
 
 def test_a_measured_draft_depth_goes_out_with_the_request():
-    from ml_stack.client.chat import Client
+    from poolhouse.client.chat import Client
 
     body = Client("http://127.0.0.1:1", request=Request(spec_draft_max=2)).build_body(
         [{"role": "user", "content": "hi"}])
@@ -1337,7 +1337,7 @@ def test_a_measured_draft_depth_goes_out_with_the_request():
 
 
 def test_a_hosted_endpoint_is_never_asked_to_guess_ahead():
-    from ml_stack.client.chat import Client
+    from poolhouse.client.chat import Client
 
     client = Client("https://api.openai.com/v1", request=Request(spec_draft_max=2),
                     transport=Transport(api="openai"))
@@ -1348,7 +1348,7 @@ def test_a_hosted_endpoint_is_never_asked_to_guess_ahead():
 
 def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
     """A build without the per-request override must still answer, at the served depth."""
-    from ml_stack.client import chat as chat_mod
+    from poolhouse.client import chat as chat_mod
 
     chat_mod.forget_speculative()
     sent: list[dict] = []

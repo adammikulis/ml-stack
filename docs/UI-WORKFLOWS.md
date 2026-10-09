@@ -1,7 +1,7 @@
 # Workspace workflows
 
 The daemon workspace groups interactive screens in its sidebar. Tools exposes every installed
-`ml-stack-*` console entry point, its help, command review, monitored execution, logs, and cancellation.
+`poolhouse-*` console entry point, its help, command review, monitored execution, logs, and cancellation.
 Common controls remain visible; less common settings are grouped under collapsed Advanced
 sections. Model serving labels its token-window setting **Context length**.
 Setup and Settings use the same slider, from 2,048 through 1,048,576 tokens.
@@ -24,14 +24,14 @@ Commands execute in the daemon files root with the existing job environment and 
 | Measurement sweeps, history, capacity and cost charts | Benchmarks |
 | Peers, availability, clusters, fleet coordination | Fleet |
 | Decision ask, probabilities, evaluation, calibration, fetching | Tools decision lab |
-| Graph store and graph server | Tools: ml-stack-store, ml-stack-graph |
-| World model, ingestion, walking, retrieval surfaces | Tools: ml-stack-world, ml-stack-ingest, ml-stack-walk, ml-stack-surface |
-| Speech providers, transcription and synthesis | Tools: ml-stack-speech |
-| Security, audit and credentials | Tools: ml-stack-security, ml-stack-audit, ml-stack-credentials |
-| Diagnostics and installation | Tools: ml-stack-doctor, ml-stack-setup |
-| Workspace coordination, jobs, suites | Tools: ml-stack-workspace, ml-stack-jobs, ml-stack-suite |
-| Agent and MCP workflows | Tools: ml-stack-agent, ml-stack-claude, ml-stack-mcp |
-| Serving, drafts, native chat agents and memory | Tools: ml-stack-serve, ml-stack-draft, ml-stack-chat, ml-stack-memory |
+| Graph store and graph server | Tools: poolhouse-store, poolhouse-graph |
+| World model, ingestion, walking, retrieval surfaces | Tools: poolhouse-world, poolhouse-ingest, poolhouse-walk, poolhouse-surface |
+| Speech providers, transcription and synthesis | Tools: poolhouse-speech |
+| Security, audit and credentials | Tools: poolhouse-security, poolhouse-audit, poolhouse-credentials |
+| Diagnostics and installation | Tools: poolhouse-doctor, poolhouse-setup |
+| Workspace coordination, jobs, suites | Tools: poolhouse-workspace, poolhouse-jobs, poolhouse-suite |
+| Agent and MCP workflows | Tools: poolhouse-agent, poolhouse-claude, poolhouse-mcp |
+| Serving, drafts, native chat agents and memory | Tools: poolhouse-serve, poolhouse-draft, poolhouse-chat, poolhouse-memory |
 | Libraries, machine preferences, updates | Settings |
 
 ## Native environment integration
@@ -52,7 +52,7 @@ Uploads create new UTF-8 files up to 10 MB. Previews are limited to 1 MB. Use th
 CLI for larger files. Training paths are relative to the same files root. Gym training stores its
 own artifacts under the Gym cache.
 
-The specialist runner accepts installed ml-stack commands and a JSON array of CLI arguments.
+The specialist runner accepts installed Poolhouse commands and a JSON array of CLI arguments.
 Command review produces the exact argv without running it. Help is executed as a monitored job.
 Detached execution is rejected so the runner retains lifecycle ownership. Jobs use the daemon's
 existing capacity and resource gate; failures, output, structured metrics and cancellation remain
@@ -68,9 +68,9 @@ The exported JSONL path is handed directly to the decision-model training form. 
 checkpoint directory into a live decision controller to test it on fresh scenarios.
 
 Gym dependencies install through Settings' managed environment and the environment catalog's
-Install button. An existing simulator interpreter can be selected with `ml-stack-traind
+Install button. An existing simulator interpreter can be selected with `poolhouse-traind
 --root ROOT --gym-python PYTHON`; keep the same root on later launches to retain completed
-setup and the saved interpreter. `ML_STACK_GYM_PYTHON` takes precedence over that selection,
+setup and the saved interpreter. `POOLHOUSE_GYM_PYTHON` takes precedence over that selection,
 which takes precedence over the managed environment. Readiness reflects the selected
 simulator interpreter's package versions and the wheel's selected extra requirements. The daemon's own packages are reported separately from job readiness.
 

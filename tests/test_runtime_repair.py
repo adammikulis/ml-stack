@@ -11,25 +11,25 @@ from types import SimpleNamespace
 import pytest
 from rail import reach
 
-from ml_stack.fleet import daemon, runtime_repair
-from ml_stack.fleet.initial_setup_routes import InitialSetupRoutes
-from ml_stack.fleet.runtime_repair_routes import RuntimeRepairRoutes
-from ml_stack.fleet.session import Sessions
-from ml_stack.fleet.setup_jobs import Jobs
+from poolhouse.fleet import daemon, runtime_repair
+from poolhouse.fleet.initial_setup_routes import InitialSetupRoutes
+from poolhouse.fleet.runtime_repair_routes import RuntimeRepairRoutes
+from poolhouse.fleet.session import Sessions
+from poolhouse.fleet.setup_jobs import Jobs
 
 
 @pytest.mark.slow
 def test_frozen_agent_runtime_probe_and_repair_dispatch(tmp_path):
-    binary = os.environ.get("ML_STACK_FROZEN_BINARY", "")
+    binary = os.environ.get("POOLHOUSE_FROZEN_BINARY", "")
     if not binary:
-        pytest.skip("set ML_STACK_FROZEN_BINARY to the built standalone daemon")
-    environment = {**os.environ, "ML_STACK_HOME": str(tmp_path / "home"), "PYTHONPATH": "",
+        pytest.skip("set POOLHOUSE_FROZEN_BINARY to the built standalone daemon")
+    environment = {**os.environ, "POOLHOUSE_HOME": str(tmp_path / "home"), "PYTHONPATH": "",
                    "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
     probe = subprocess.run([binary, "--check-agent-runtime"], env=environment,
                            capture_output=True, text=True, timeout=30, check=True)
     observed = json.loads(probe.stdout)
     assert observed["runtime_ready"] and re.fullmatch("[0-9a-f]{40}", observed["commit"])
-    repair = subprocess.run([binary, "-m", "ml_stack.cli.daemon", "--root", str(tmp_path / "daemon"),
+    repair = subprocess.run([binary, "-m", "poolhouse.cli.daemon", "--root", str(tmp_path / "daemon"),
                              "--agent-runtime-job", "a" * 32], env=environment, capture_output=True, text=True, timeout=30)
     assert repair.returncode == 1 and "repair job is not waiting" in repair.stderr
 
@@ -67,7 +67,7 @@ class Route(InitialSetupRoutes, RuntimeRepairRoutes):
         person = sessions.open("setup")
         self.ui = SimpleNamespace(root=tmp_path, sessions=sessions, setup_jobs=None,
                                   _setup_jobs_lock=threading.Lock(), peer_port=8770)
-        self.cookie = "ml_stack_ui=" + person.sid
+        self.cookie = "poolhouse_ui=" + person.sid
         self.path = "/ui/agent-runtime/install"
         self.method = "POST"
         self.client_ip = "127.0.0.1"
@@ -96,9 +96,9 @@ def test_install_requires_authenticated_local_browser(tmp_path, monkeypatch, cha
     elif change == "remote":
         route.client_ip = "192.0.2.5"
     elif change == "agent":
-        route.headers["X-ML-Stack-Agent"] = "worker"
+        route.headers["X-Poolhouse-Agent"] = "worker"
     elif change == "token":
-        route.cookie = "ml_stack_ui=" + route.ui.sessions.open("token").sid
+        route.cookie = "poolhouse_ui=" + route.ui.sessions.open("token").sid
     elif change == "no-session":
         route.cookie = ""
     elif change == "foreign-host":
@@ -147,7 +147,7 @@ def test_repair_rechecks_selected_artifact_before_admission(tmp_path, monkeypatc
     queue = Jobs(tmp_path)
     row = queue.start(runtime_repair.KIND, {}, None)
     queue._update(row, result={"candidate": {"sha256": "a" * 64}})
-    monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: Path("/owned/Poolside.app"))
+    monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: Path("/owned/Poolhouse.app"))
     monkeypatch.setattr(runtime_repair, "Candidates", lambda root: SimpleNamespace(select=lambda name: {"sha256": "b" * 64}))
     admitted = []
     monkeypatch.setattr(runtime_repair, "request_replacement", lambda *args: admitted.append(args))
@@ -188,7 +188,7 @@ def test_replacement_requires_exact_full_health_commit_and_preserves_recovery(tm
     root = tmp_path / "root"
     queue = Jobs(root)
     row = queue.start(runtime_repair.KIND, {}, None)
-    target = tmp_path / "Poolside.app"
+    target = tmp_path / "Poolhouse.app"
     target.mkdir()
     (target / "identity").write_text("previous")
     candidate = {"sha256": "a" * 64, "commit": "b" * 40}
@@ -196,7 +196,7 @@ def test_replacement_requires_exact_full_health_commit_and_preserves_recovery(tm
     cache = root / "runtime-candidates"
     cache.mkdir()
     with zipfile.ZipFile(cache / (candidate["sha256"] + ".zip"), "w") as archive:
-        archive.writestr("Poolside.app/identity", "replacement")
+        archive.writestr("Poolhouse.app/identity", "replacement")
     monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: target)
     monkeypatch.setattr(runtime_repair, "Candidates", lambda root: SimpleNamespace(select=lambda name: candidate))
     monkeypatch.setattr(runtime_repair, "_admit", lambda *args: 8770)
@@ -218,7 +218,7 @@ def test_replacement_requires_exact_full_health_commit_and_preserves_recovery(tm
     assert (target / "identity").read_text() == "previous"
     assert len(starts) == 2
     assert not target.with_name(target.name + ".old").exists()
-    retained = list(tmp_path.glob("ml-stack-failed-runtime-*/Poolside.app/identity"))
+    retained = list(tmp_path.glob("poolhouse-failed-runtime-*/Poolhouse.app/identity"))
     assert len(retained) == 1 and retained[0].read_text() == "replacement"
     assert "restored and restarted" in queue.all()[0]["error"]
 
@@ -228,10 +228,10 @@ def test_missing_runtime_install_runs_in_background_and_readiness_enables_chat(t
     from playwright.sync_api import expect
     from test_fleet_ui import Serving
 
-    from ml_stack import agent_dependency
-    from ml_stack.fleet.conversations import Conversations
-    from ml_stack.fleet.serving import Serving as ModelsServing
-    from ml_stack.testing.fakes import FakeLlamaServer, Served
+    from poolhouse import agent_dependency
+    from poolhouse.fleet.conversations import Conversations
+    from poolhouse.fleet.serving import Serving as ModelsServing
+    from poolhouse.testing.fakes import FakeLlamaServer, Served
 
     ready = {"value": False}
     monkeypatch.setattr(agent_dependency, "problem", lambda: "" if ready["value"] else "The agent runtime is not installed.")
@@ -244,13 +244,13 @@ def test_missing_runtime_install_runs_in_background_and_readiness_enables_chat(t
     served.ui.serving = ModelsServing(tmp_path / "models.json")
     served.ui.serving.register(model.port, ["qwen3.8-test.gguf"])
     served.ui.conversations = Conversations(tmp_path / "chats")
-    from ml_stack.scrape.browser import Window, browser
+    from poolhouse.scrape.browser import Window, browser
 
     driver = browser(Window(profile=tmp_path / "browser", channel="chromium"), playwright)
     page = driver.__enter__()
     try:
         person = served.ui.sessions.open("setup")
-        page.context.add_cookies([{"name": "ml_stack_ui", "value": person.sid,
+        page.context.add_cookies([{"name": "poolhouse_ui", "value": person.sid,
                                   "url": f"http://127.0.0.1:{served.port}"}])
         page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
         install = page.get_by_role("button", name="Install agent runtime", exact=True)
@@ -278,7 +278,7 @@ def test_missing_runtime_install_runs_in_background_and_readiness_enables_chat(t
 @pytest.mark.parametrize("client", [
     ({"Origin": "https://foreign.example"}, "127.0.0.1", "127.0.0.1:8770", ""),
     ({}, "192.0.2.5", "127.0.0.1:8770", ""),
-    ({"X-ML-Stack-Agent": "worker"}, "127.0.0.1", "127.0.0.1:8770", ""),
+    ({"X-Poolhouse-Agent": "worker"}, "127.0.0.1", "127.0.0.1:8770", ""),
     ({}, "127.0.0.1", "foreign.example:8770", ""),
     ({"Authorization": "Bearer untrusted"}, "127.0.0.1", "127.0.0.1:8770", ""),
 ])
@@ -315,7 +315,7 @@ def test_preparation_launches_fixed_central_protocol_without_credentials(tmp_pat
     row = queue.start(runtime_repair.KIND, {"repair": True}, None)
     ui = SimpleNamespace(root=tmp_path, peer_port=8770)
     candidate = {"commit": "a" * 40, "sha256": "b" * 64}
-    monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: Path("/owned/Poolside.app"))
+    monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: Path("/owned/Poolhouse.app"))
     monkeypatch.setattr(runtime_repair, "Candidates", lambda root: SimpleNamespace(select=lambda name: candidate))
     monkeypatch.setattr(runtime_repair, "wait_for_health", lambda *args, **kwargs: {"launcher_control": "generation"})
     monkeypatch.setenv("TEST_ACCESS_TOKEN", "private-worker-credential")
@@ -324,7 +324,7 @@ def test_preparation_launches_fixed_central_protocol_without_credentials(tmp_pat
     monkeypatch.setattr(runtime_repair, "started_at", lambda pid: 11)
     runtime_repair._prepare(ui, queue)
     argv, options = calls[0]
-    assert argv == [runtime_repair.sys.executable, "-m", "ml_stack.cli.daemon", "--root", str(tmp_path), "--agent-runtime-job", row["id"]]
+    assert argv == [runtime_repair.sys.executable, "-m", "poolhouse.cli.daemon", "--root", str(tmp_path), "--agent-runtime-job", row["id"]]
     assert "TEST_ACCESS_TOKEN" not in options["env"] and "shell" not in options
     assert queue.all()[0]["worker_born"] == 11
 
@@ -333,7 +333,7 @@ def test_failed_candidate_never_launches_worker(tmp_path, monkeypatch):
     queue = Jobs(tmp_path)
     row = queue.start(runtime_repair.KIND, {"repair": True}, None)
     ui = SimpleNamespace(root=tmp_path, peer_port=8770)
-    monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: Path("/owned/Poolside.app"))
+    monkeypatch.setattr(runtime_repair.updates, "running_path", lambda: Path("/owned/Poolhouse.app"))
     def reject(name):
         raise ValueError("Registered candidate artifact has changed.")
     monkeypatch.setattr(runtime_repair, "Candidates", lambda root: SimpleNamespace(select=reject))
@@ -347,10 +347,10 @@ def test_replacement_launch_uses_literal_paths_and_secret_free_environment(tmp_p
     calls = []
     monkeypatch.setenv("TEST_ACCESS_TOKEN", "private-replacement-credential")
     monkeypatch.setattr(runtime_repair, "start_process", lambda argv, **kwargs: calls.append((argv, kwargs)))
-    target, root = tmp_path / "Poolside.app", tmp_path / "root;$(not-a-command)"
+    target, root = tmp_path / "Poolhouse.app", tmp_path / "root;$(not-a-command)"
     runtime_repair._start(target, root, 8770)
     argv, options = calls[0]
-    assert argv == [str(target / "Contents/MacOS/ml-stack-headless"), "--port", "8770", "--root", str(root), "--no-browser"]
+    assert argv == [str(target / "Contents/MacOS/poolhouse-headless"), "--port", "8770", "--root", str(root), "--no-browser"]
     assert "TEST_ACCESS_TOKEN" not in options["env"] and "shell" not in options
 
 
@@ -359,11 +359,11 @@ def test_failed_runtime_job_survives_reload_and_retries_through_actual_api(tmp_p
     from playwright.sync_api import expect
     from test_fleet_ui import Serving
 
-    from ml_stack import agent_dependency
-    from ml_stack.fleet.conversations import Conversations
-    from ml_stack.fleet.serving import Serving as ModelsServing
-    from ml_stack.scrape.browser import Window, browser
-    from ml_stack.testing.fakes import FakeLlamaServer, Served
+    from poolhouse import agent_dependency
+    from poolhouse.fleet.conversations import Conversations
+    from poolhouse.fleet.serving import Serving as ModelsServing
+    from poolhouse.scrape.browser import Window, browser
+    from poolhouse.testing.fakes import FakeLlamaServer, Served
 
     monkeypatch.setattr(agent_dependency, "problem", lambda: "The agent runtime is not installed.")
     monkeypatch.setattr(runtime_repair, "resume", lambda *args: None)
@@ -378,7 +378,7 @@ def test_failed_runtime_job_survives_reload_and_retries_through_actual_api(tmp_p
     try:
         with browser(Window(profile=tmp_path / "retry-browser", channel="chromium"), playwright) as page:
             person = served.ui.sessions.open("setup")
-            page.context.add_cookies([{"name": "ml_stack_ui", "value": person.sid,
+            page.context.add_cookies([{"name": "poolhouse_ui", "value": person.sid,
                                       "url": f"http://127.0.0.1:{served.port}"}])
             page.goto(f"http://127.0.0.1:{served.port}/ui/#chat", wait_until="domcontentloaded")
             page.get_by_role("button", name="Install agent runtime", exact=True).click()

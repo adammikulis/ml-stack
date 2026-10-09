@@ -1,4 +1,4 @@
-"""What a peer may be asked to run: `POST /jobs` takes an allowlist of ml-stack commands and nothing else."""
+"""What a peer may be asked to run: `POST /jobs` takes an allowlist of poolhouse commands and nothing else."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ import threading
 
 import pytest
 
-from ml_stack.fleet import calibration, commands
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.rates import Rates
-from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.fleet.work import Unit, run
-from ml_stack.http import Server
+from poolhouse.fleet import calibration, commands
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.rates import Rates
+from poolhouse.fleet.remote import Peer, PeerError
+from poolhouse.fleet.work import Unit, run
+from poolhouse.http import Server
 
 
 class Box:
@@ -57,9 +57,9 @@ def box(tmp_path):
     [sys.executable, "-c", "print(1)"],
     ["python3", "-c", "print(1)"],
     ["python3", "-m", "http.server"],
-    ["python3", "-m", "ml_stack.serve"],
-    ["/usr/local/bin/ml-stack-bench", "--help"],
-    ["ml-stack-claude", "hello"],
+    ["python3", "-m", "poolhouse.serve"],
+    ["/usr/local/bin/poolhouse-bench", "--help"],
+    ["poolhouse-claude", "hello"],
     [],
 ])
 def test_a_program_that_is_not_on_the_list_is_refused_and_no_job_exists(box, argv):
@@ -72,12 +72,12 @@ def test_a_program_that_is_not_on_the_list_is_refused_and_no_job_exists(box, arg
 @pytest.mark.parametrize("extra", [{"env": {"LD_PRELOAD": "/tmp/x.so"}}, {"cwd": "/"}, {"cwd": "/tmp", "env": {"A": "b"}}])
 def test_an_environment_or_folder_from_the_wire_is_refused(box, extra):
     with pytest.raises(PeerError, match="cwd and env are not accepted"):
-        box.peer._json("POST", "/jobs", {"argv": ["ml-stack-bench", "--help"], **extra})
+        box.peer._json("POST", "/jobs", {"argv": ["poolhouse-bench", "--help"], **extra})
     assert box.peer.jobs() == []
 
 
 def test_an_allowed_command_runs_in_the_daemons_folder_with_its_own_interpreter(box):
-    job = box.peer.submit(["python3", "-m", "ml_stack.fleet.calibration", "--budget", "0.05"])
+    job = box.peer.submit(["python3", "-m", "poolhouse.fleet.calibration", "--budget", "0.05"])
     done = box.peer.wait(job["id"], poll_s=0.1, timeout_s=60)
     assert done["state"] == "done", box.peer.log(job["id"])
     assert done["argv"][0] == sys.executable and done["cwd"].endswith("files")
@@ -85,8 +85,8 @@ def test_an_allowed_command_runs_in_the_daemons_folder_with_its_own_interpreter(
 
 
 def test_a_console_script_on_the_list_is_resolved_and_run(box):
-    job = box.peer.submit(["ml-stack-bench", "--help"])
-    assert job["argv"][0].endswith("ml-stack-bench") and job["argv"][1:] == ["--help"]
+    job = box.peer.submit(["poolhouse-bench", "--help"])
+    assert job["argv"][0].endswith("poolhouse-bench") and job["argv"][1:] == ["--help"]
     done = box.peer.wait(job["id"], poll_s=0.1, timeout_s=60)
     assert done["state"] == "done", box.peer.log(job["id"])
     assert "usage" in box.peer.log(job["id"]).lower()
@@ -106,7 +106,7 @@ def test_a_fleet_sweep_runs_end_to_end_on_two_daemons(tmp_path):
 
 
 def test_the_list_resolves_a_name_and_refuses_a_path():
-    assert commands.allowed(["python", "-m", "ml_stack.fleet.calibration"])[0] == sys.executable
-    assert commands.allowed(["ml-stack-bench", "sweep"])[1:] == ["sweep"]
+    assert commands.allowed(["python", "-m", "poolhouse.fleet.calibration"])[0] == sys.executable
+    assert commands.allowed(["poolhouse-bench", "sweep"])[1:] == ["sweep"]
     with pytest.raises(ValueError, match="not a command a peer may be asked to run"):
-        commands.allowed(["./ml-stack-bench"])
+        commands.allowed(["./poolhouse-bench"])

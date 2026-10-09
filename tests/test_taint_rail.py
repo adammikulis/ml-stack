@@ -7,21 +7,21 @@ import json
 
 from taint_session import EVIL, PAGE, SCHEMAS, agent_for, calls, drive, served_fixture  # noqa: F401
 
-from ml_stack import chat, do, guard as rails
-from ml_stack.agent import Denied
-from ml_stack.interventions import Call, Confirm, Context, Deny, Proceed
-from ml_stack.taint import (
+from poolhouse import chat, do, guard as rails
+from poolhouse.agent import Denied
+from poolhouse.interventions import Call, Confirm, Context, Deny, Proceed
+from poolhouse.taint import (
     Arg,
     Capability,
     Sink,
     Sinks,
     TaintRail,
     ledger_of,
-    ml_stack_tools,
+    poolhouse_tools,
     sinks_from_mcp,
 )
-from ml_stack.testing import canary
-from ml_stack.testing.tool_server import Turn
+from poolhouse.testing import canary
+from poolhouse.testing.tool_server import Turn
 
 TOOLS = [{"type": "function", "function": {"name": "act", "parameters": {
     "type": "object", "properties": {
@@ -33,7 +33,7 @@ TOOLS = [{"type": "function", "function": {"name": "act", "parameters": {
 
 
 def rail_with(capability: Capability, **args: Arg) -> TaintRail:
-    return TaintRail(ml_stack_tools().with_(act=Sink(capability, args)),
+    return TaintRail(poolhouse_tools().with_(act=Sink(capability, args)),
                      registries={"models": lambda: ["quince-2b.gguf"]})
 
 
@@ -176,7 +176,7 @@ def test_run_task_accepts_a_model_that_is_installed_after_an_outside_read(tmp_pa
     weights = tmp_path / "quince-2b.gguf"
     weights.write_bytes(b"GGUF")
     monkeypatch.setattr(do.hub, "weight_paths", lambda: [weights])
-    monkeypatch.setenv("MLSTACK_GUARD_JUDGE", "off")
+    monkeypatch.setenv("POOLHOUSE_GUARD_JUDGE", "off")
     assert do.on_disk_ids() == ["quince-2b.gguf", str(weights)]
     attack = canary.Attack("serve-installed", "benign", (
         ("models_find", {"words": "quince"}),
@@ -190,7 +190,7 @@ def test_run_task_accepts_a_model_that_is_installed_after_an_outside_read(tmp_pa
 
 
 def reader() -> TaintRail:
-    sinks = ml_stack_tools().with_(read_page=Sink(Capability.READ))
+    sinks = poolhouse_tools().with_(read_page=Sink(Capability.READ))
     return TaintRail(sinks, registries={"hosts": lambda: ["docs.example"]})
 
 

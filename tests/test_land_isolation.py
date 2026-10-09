@@ -24,7 +24,7 @@ import land_git as lg
 import land_recover as recover
 import land_run
 
-from ml_stack.workspace import landing
+from poolhouse.workspace import landing
 
 
 @pytest.fixture
@@ -53,18 +53,18 @@ def test_moved_tip_and_wrong_sha_are_refused_alone(world):
     stale, _ = world.ready("stale", plus(20))
     wrong = world.ask("bob", "wrongsha", world.branch("other", plus(21)))
     good, _ = world.ready("good", plus(22))
-    Project.write(world.proj.base / "stale", "src/ml_stack/extra.py", "X = 1\n")
+    Project.write(world.proj.base / "stale", "src/poolhouse/extra.py", "X = 1\n")
     Project.commit(world.proj.base / "stale", "feat: moved")
     world.runner.once()
     assert world.status(stale) == "refused" and "request it again" in detail(world, stale)
-    assert world.status(good) == "landed" and on_origin(world, "src/ml_stack/m22.py")
+    assert world.status(good) == "landed" and on_origin(world, "src/poolhouse/m22.py")
     assert world.status(wrong) == "needs-review"
     assert not any("refused" in t for t in texts(world, "bob"))
 
 
 def test_conflict_ejects_only_the_conflicting_request_and_names_the_requester(world):
-    first, _ = world.ready("x", {"src/ml_stack/mod.py": "VALUE = 2\n"})
-    second, _ = world.ready("y", {"src/ml_stack/mod.py": "VALUE = 3\n"}, who="bob")
+    first, _ = world.ready("x", {"src/poolhouse/mod.py": "VALUE = 2\n"})
+    second, _ = world.ready("y", {"src/poolhouse/mod.py": "VALUE = 3\n"}, who="bob")
     other, _ = world.ready("z", plus(23), who="alice")
     world.runner.once()
     states = {world.status(first), world.status(second)}
@@ -82,7 +82,7 @@ def test_red_test_ejects_the_culprit_with_its_test_name_and_the_rest_lands(world
     assert result["status"] == "landed", result
     assert world.status(bad) == "failed" and "tests/test_m25.py" in detail(world, bad)
     assert world.status(one) == world.status(two) == "landed"
-    assert on_origin(world, "src/ml_stack/m24.py") and not on_origin(world, "src/ml_stack/m25.py")
+    assert on_origin(world, "src/poolhouse/m24.py") and not on_origin(world, "src/poolhouse/m25.py")
     assert any("failed" in t and "tests/test_m25.py" in t for t in texts(world, "bob"))
     assert not any("failed" in t for t in texts(world, "alice"))
 
@@ -115,7 +115,7 @@ def test_a_hanging_request_is_stopped_alone_and_the_rest_lands(world):
     assert result["status"] == "split", result
     assert world.status(one) == world.status(two) == "landed"
     assert world.status(hang) == "needs-human" and "no progress" in detail(world, hang)
-    assert on_origin(world, "src/ml_stack/m33.py") and not on_origin(world, "HANG_GATE")
+    assert on_origin(world, "src/poolhouse/m33.py") and not on_origin(world, "HANG_GATE")
     assert not list(world.proj.base.glob("*-land-*"))
 
 
@@ -302,13 +302,13 @@ def test_a_rejected_push_merges_the_new_tip_regates_and_pushes_without_dropping_
     assert result["status"] == "landed", result
     assert world.status(first) == world.status(second) == "landed"
     assert world.origin_head() == world.local_head()
-    assert on_origin(world, "elsewhere.txt") and on_origin(world, "src/ml_stack/m48.py")
-    assert on_origin(world, "src/ml_stack/m49.py")
+    assert on_origin(world, "elsewhere.txt") and on_origin(world, "src/poolhouse/m48.py")
+    assert on_origin(world, "src/poolhouse/m49.py")
 
 
 def test_a_rejected_push_that_conflicts_is_reported_not_dropped_and_not_repeated(world):
-    rid, _ = world.ready("q1", {"src/ml_stack/mod.py": "VALUE = 2\n"})
-    runner = move_after_gate(world, {"src/ml_stack/mod.py": "VALUE = 9\n"})
+    rid, _ = world.ready("q1", {"src/poolhouse/mod.py": "VALUE = 2\n"})
+    runner = move_after_gate(world, {"src/poolhouse/mod.py": "VALUE = 9\n"})
     result = runner.once()
     assert result["status"] == "landed-unpushed" and "does not merge cleanly" in result["push"], result
     assert world.status(rid) == "landed-unpushed"

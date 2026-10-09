@@ -5,8 +5,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from ml_stack.fleet.page import WEB, render
-from ml_stack.ui import assets_dir
+from poolhouse.fleet.page import WEB, render
+from poolhouse.ui import assets_dir
 
 pytestmark = pytest.mark.slow
 
@@ -20,7 +20,7 @@ def project_response(path, state):
     if path.endswith("/board"):
         return state.get("project_board") or {"state": "awaiting_agents", "agents": [], "messages": []}
     if path.endswith("/invite"):
-        return {"code": "test-code", "command": "ml-stack-workspace join test-code", "ttl_s": 600}
+        return {"code": "test-code", "command": "poolhouse-workspace join test-code", "ttl_s": 600}
     return {"checkout": "/isolated/shared-app", "attached": False}
 
 
@@ -124,7 +124,7 @@ def test_projects_keep_source_checkout_separate_from_explicit_agent_access(app):
     assert not any("invite" in path for path, _ in state["posts"])
     page.get_by_label("Agent label (optional)").fill("Mac reviewer")
     page.get_by_role("button", name="Create agent access code", exact=True).click()
-    page.get_by_text("ml-stack-workspace join test-code", exact=True).wait_for()
+    page.get_by_text("poolhouse-workspace join test-code", exact=True).wait_for()
     assert ("/ui/projects/project-a/invite", {"hint": "Mac reviewer", "uses": 1}) in state["posts"]
     state["project_board"] = {"state": "connected", "agents": [{"id": "agent-a", "label": "Mac reviewer", "role": "agent"}],
                               "messages": [{"from": "Mac reviewer", "text": "Review ready"}]}
@@ -247,7 +247,7 @@ def test_benchmark_has_labelled_selection_and_preserves_form_across_poll(app):
     page.evaluate("window.savedRunName = document.getElementById('label'); document.querySelector('cluster-view').draw()")
     page.wait_for_function("() => document.getElementById('label') === window.savedRunName")
     assert page.get_by_label("Run name", exact=False).input_value() == "evening comparison"
-    assert "ml-stack-bench" not in page.locator("#cluster-sweep").inner_text()
+    assert "poolhouse-bench" not in page.locator("#cluster-sweep").inner_text()
     page.get_by_role("button", name="Start benchmark", exact=True).click()
     page.get_by_text("Benchmark started. You can leave this screen while it runs.", exact=True).wait_for()
     assert ("/ui/bench/sweep", {"models": ["quill-27B.gguf"], "peers": ["local-test", "remote-test"],
@@ -354,7 +354,7 @@ def test_streamed_reasoning_is_collapsed_separate_and_keeps_user_expansion(app):
     page.get_by_role("textbox", name="Message", exact=True).fill("A question")
     page.get_by_role("button", name="Send", exact=True).click()
     page.wait_for_function("() => window.streamController !== undefined")
-    event(page, {"ml_stack": {"state": "rebuilding", "conversation": "chat-test"}})
+    event(page, {"poolhouse": {"state": "rebuilding", "conversation": "chat-test"}})
     page.locator(".reply-activity").get_by_text("Restoring conversation…", exact=True).wait_for()
     event(page, {"choices": [{"delta": {"reasoning_content": "First thought."}}]})
     details = page.locator(".model-reasoning")

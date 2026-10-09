@@ -1,4 +1,4 @@
-"""`ml-stack-log`: filters, order, escaping, the timeline, the relation walk, verify, and the
+"""`poolhouse-log`: filters, order, escaping, the timeline, the relation walk, verify, and the
 refusals. Real log under an isolated home."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from ml_stack.activity import cli, query, writer
+from poolhouse.activity import cli, query, writer
 from tests.activity_support import entries, person, ring
 
 __all__ = ["person", "ring"]
@@ -179,7 +179,7 @@ def tty(monkeypatch):
     monkeypatch.setattr(cli.sys, "stdout", Terminal())
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"])
 def test_an_agent_cannot_export(person, capsys, monkeypatch, tmp_path, marker):
     seeded()
     tty(monkeypatch)

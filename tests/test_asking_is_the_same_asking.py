@@ -13,9 +13,9 @@ import json
 
 import pytest
 
-from ml_stack.asking import Asking
-from ml_stack.graph.conversation import converse
-from ml_stack.graph.looking import tools_for
+from poolhouse.asking import Asking
+from poolhouse.graph.conversation import converse
+from poolhouse.graph.looking import tools_for
 
 GRAPH = {
     "nodes": [
@@ -41,7 +41,7 @@ GRAPH = {
 
 QUESTION = "who works on compilers?"
 
-# Every way `ml-stack-bench --also` measures, and the riders `_askings` puts on each of them.
+# Every way `poolhouse-bench --also` measures, and the riders `_askings` puts on each of them.
 FLAGS = {
     "plain": Asking(),
     "terse": Asking(terse=True),
@@ -97,7 +97,7 @@ class _First:
         self.seen = 0
 
     def chat(self, messages, *, tools=None, **extra):
-        from ml_stack.client import Reply
+        from poolhouse.client import Reply
 
         if not self.seen:
             self.system = str(messages[0]["content"])

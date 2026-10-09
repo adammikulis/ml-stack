@@ -1,9 +1,9 @@
 # Agent roles and saved rules
 
-`ml-stack-chat` is the one agent command. `ml-stack-chat` is a conversation; `ml-stack-chat
+`poolhouse-chat` is the one agent command. `poolhouse-chat` is a conversation; `poolhouse-chat
 "run benchmarks with quince-2b"` (or `--task`) is a task: the agent asks what the task leaves
 open, shows its plan once, asks go, runs the calls the plan names and ends on `done`, printing
-a cost line. What differs between the two is a role, a row in `ml_stack.roles.ROLES`.
+a cost line. What differs between the two is a role, a row in `poolhouse.roles.ROLES`.
 
 | role | tools | who is asked | default for | limits (calls, GPU time) |
 | --- | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ A plan step names a tool first and every value the call will carry
 the tool matches and each of its values appears in a step; the step then covers that one call.
 A call outside the plan asks. A run that has read text from outside (a model card, a log) asks
 for every acting call whatever the role, in one question that names why. A path outside
-ml-stack's state always asks. A call the destructive-action classifier labels destructive or unsure asks in every role, and no
+Poolhouse's state always asks. A call the destructive-action classifier labels destructive or unsure asks in every role, and no
 Always rule can be saved for it ([destructive actions](destructive-actions.md)).
 
 ## Every question has three answers
@@ -43,17 +43,17 @@ expressions), a verdict, an optional role and a created date, and a count of how
 fired. A call matches only when it carries exactly the arguments the rule names. A never rule
 beats an always rule, which beats asking, and a never rule stops a call even inside a plan-and-go
 plan. Always is not offered, and an existing always rule does not apply, for a downloaded
-model (its size is not known first), a path outside ml-stack's state, a wildcard in a value, a
+model (its size is not known first), a path outside Poolhouse's state, a wildcard in a value, a
 tool a feature added that asks for itself, or a run that has read outside text (unless the
 rule was given `/rules tainted N`; the taint rail still asks its own question, merged into the
 same prompt).
 
-Rules live in `~/.ml-stack/agent-rules.json` (`schema_version` 2; version 1 files with the earlier role names reader, operator and runner are read as `read-only`, `approve-first` and `plan-and-go` and written in the new names on the next save), mode 0600, written atomically, only by the
+Rules live in `~/.poolhouse/agent-rules.json` (`schema_version` 2; version 1 files with the earlier role names reader, operator and runner are read as `read-only`, `approve-first` and `plan-and-go` and written in the new names on the next save), mode 0600, written atomically, only by the
 answer at this prompt and by:
 
 | | |
 | --- | --- |
-| `/rules` or `ml-stack-chat rules` | the numbered rules in words, with count and date |
+| `/rules` or `poolhouse-chat rules` | the numbered rules in words, with count and date |
 | `/rules remove 3` | delete rule 3; the call asks again |
 | `/rules flip 3` | always <-> never |
 | `/rules tainted 3` | let always rule 3 apply after outside text was read |

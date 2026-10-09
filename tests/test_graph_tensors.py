@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.backend import available, get_backend
-from ml_stack.graph.data import _to_list
-from ml_stack.graph.tensors import relations_in, tensors
+from poolhouse.backend import available, get_backend
+from poolhouse.graph.data import _to_list
+from poolhouse.graph.tensors import relations_in, tensors
 
 each_backend = pytest.mark.parametrize("name", available())
 

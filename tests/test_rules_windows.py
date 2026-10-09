@@ -5,12 +5,12 @@ import sys
 
 import pytest
 
-from ml_stack.rules import Rule, Rules
+from poolhouse.rules import Rule, Rules
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows file permissions")
 def test_rules_use_private_windows_acl_after_atomic_replacement(tmp_path):
-    from ml_stack import windows_private
+    from poolhouse import windows_private
 
     path = tmp_path / "rules.json"
     rules = Rules(path)
@@ -29,7 +29,7 @@ def test_rules_reject_windows_acl_grant_to_everyone(tmp_path):
     import ntsecuritycon
     import win32security
 
-    from ml_stack import windows_private
+    from poolhouse import windows_private
 
     path = tmp_path / "rules.json"
     rules = Rules(path)
@@ -54,7 +54,7 @@ def test_rules_reject_windows_acl_grant_to_everyone(tmp_path):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows file permissions")
 def test_rules_do_not_promote_when_windows_acl_restriction_fails(tmp_path, monkeypatch):
-    from ml_stack import windows_private
+    from poolhouse import windows_private
 
     path = tmp_path / "rules.json"
     rules = Rules(path)
@@ -101,7 +101,7 @@ def test_rules_reject_junction_parent(tmp_path):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows file permissions")
 def test_rules_read_saved_schema_version_and_save_current_version(tmp_path):
-    from ml_stack import windows_private
+    from poolhouse import windows_private
 
     path = tmp_path / "rules.json"
     path.write_text(json.dumps({"schema_version": 2, "rules": [{

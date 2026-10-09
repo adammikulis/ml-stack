@@ -9,7 +9,7 @@ scripts/test all tests/test_x.py --on "Windows PC"     those files on one device
 scripts/test quick --on all                            the files the change reaches, on every other device
 scripts/test gate --on wsl-box                         the structural checks there
 scripts/test full --on all --split                     divide the list between this machine and the devices
-ml-stack-test-devices                                  the devices: platform, free slots out of two, last result
+poolhouse-test-devices                                  the devices: platform, free slots out of two, last result
 ```
 
 The exit status is the worst of the runs; 70 means a device never ran its part (not in the pool, shards off,
@@ -20,18 +20,18 @@ unreachable, refused, Python 3.13 missing). A refused or unreachable device is n
 Nothing runs on a device until its person says so, per device, and the default is off. There are two switches,
 both off, and both audited:
 
-1. The experimental feature `remote-tests` (`ml_stack.features`), on each machine that sends or takes tests:
-   `ml-stack features enable remote-tests`. `scripts/test --on` refuses to start while it is off on the asking
+1. The experimental feature `remote-tests` (`poolhouse.features`), on each machine that sends or takes tests:
+   `poolhouse features enable remote-tests`. `scripts/test --on` refuses to start while it is off on the asking
    machine, and `consent on` refuses while it is off on the device. It is recorded in the authority audit log
    with who did it.
 2. The device's own switch, at the device (its agent does it on the person's order; see `docs/windows-wsl.md`),
    from this repository's checkout, with the Python 3.13 the tests should use:
 
 ```
-python -m ml_stack.testfarm.consent on --from "MAC NAME"     # allow DEVICE... | deny DEVICE... | off | status
+python -m poolhouse.testfarm.consent on --from "MAC NAME"     # allow DEVICE... | deny DEVICE... | off | status
 ```
 
-A DEVICE is a name from `ml-stack-test-devices` or a fingerprint. **Being in the pool is not being allowed.**
+A DEVICE is a name from `poolhouse-test-devices` or a fingerprint. **Being in the pool is not being allowed.**
 The device takes tests only from the devices in its `allowed` list, which is empty until a person names some
 (`--from`, `allow`), so a device that joined the pool by itself (for instance under policy `open` on the same
 network) can ask whether tests are taken (`shard_caps`) and nothing else: `shard_put`, `shard_start`,
@@ -44,7 +44,7 @@ that are going, and a revoked member is also refused at the connection.
 checkout), refuses a Python that is not 3.13 and writes an `audit` entry to the pool board naming the session
 that did it. `off` stops the next upload at once (the file is read at every request). Turning it on lets any
 other device of the pool run a tree's tests here as this user, so do it only on a device whose pool you trust;
-revoking a pool member (`member_revoke`) refuses it at its next request. `ml-stack features disable remote-tests` also switches this device's node off.
+revoking a pool member (`member_revoke`) refuses it at its next request. `poolhouse features disable remote-tests` also switches this device's node off.
 
 ## What runs where
 
@@ -60,7 +60,7 @@ revoking a pool member (`member_revoke`) refuses it at its next request. `ml-sta
 
 ## Mechanism
 
-The node (`app/poolside-node/src/shard/`) is the transport, so a shard rides the pool's own membership: a
+The node (`app/poolhouse-node/src/shard/`) is the transport, so a shard rides the pool's own membership: a
 request is a peer op on a TLS 1.3 connection pinned to the certificate the pool record holds for the device, and
 the sender is that certificate, never a field of the request. Revoked or unknown devices are refused at every
 op. The local API has two methods: `shard_call` (a registered session asks one op of a pool device; the node adds
@@ -90,12 +90,12 @@ op. The local API has two methods: `shard_call` (a registered session asks one o
 - Output and results: a runner that writes more than 64 MiB is cancelled (exit 124); a result is at most 900 KiB
   (3000 slowest tests, 200 failures); the executor's own output tail is 8000 characters.
 - Environment: the executor starts without `PYTHONPATH`, `PYTHONHOME` and the variables that mark an agent's
-  shell (`CLAUDECODE`, `AI_AGENT`, `ML_STACK_WORKSPACE_*`, `ML_STACK_SESSION_*`, ...); the runner also loses
-  anything that looks like a credential, and gets its own `ML_STACK_HOME` inside the scratch folder.
+  shell (`CLAUDECODE`, `AI_AGENT`, `POOLHOUSE_WORKSPACE_*`, `POOLHOUSE_SESSION_*`, ...); the runner also loses
+  anything that looks like a credential, and gets its own `POOLHOUSE_HOME` inside the scratch folder.
 - Per-device results: the reuse key holds the device's fingerprint, its platform (`wsl` included), Python and the
   tier besides the file's content key, so a pass on Windows never satisfies macOS or WSL. Only a run that ended
   with pytest's exit 0 or 1 records passes, and only for files with passes and no failures. The ledger is
-  `remote-results.json` in the project's reuse folder; `ml-stack-test-devices` reads the last result from it.
+  `remote-results.json` in the project's reuse folder; `poolhouse-test-devices` reads the last result from it.
 - Retired: the paired-device HTTP route (`/workspace/v1/test-shards`), `Settings.test_shards` and
   `fleet/shard_consent.py`. There is one remote path.
 
@@ -110,7 +110,7 @@ joins them with its own separators, and a name with a backslash or a drive is re
 
 ## Tests
 
-`app/poolside-node/tests/shard.rs` (two real devices, TLS on loopback, a shell stub for the interpreter): consent
+`app/poolhouse-node/tests/shard.rs` (two real devices, TLS on loopback, a shell stub for the interpreter): consent
 off by default, membership and revocation, a forged requester, every malformed request, ordering and size of an
 upload, the lease, two at once, cancel killing a grandchild. `tests/test_testfarm.py` (the executor as the node
 starts it, over a real git tree whose `scripts/test` is a stub: hostile trees and jobs, the environment, the

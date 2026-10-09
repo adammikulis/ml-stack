@@ -9,13 +9,13 @@ import time
 
 import pytest
 
-from ml_stack import hub
-from ml_stack.serve import cli, holding, ops
-from ml_stack.serve.backend import LlamaServerBackend
-from ml_stack.serve.broker import Ask, Broker
-from ml_stack.serve.leases import lease_file
-from ml_stack.serve.manager import ServerManager
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import hub
+from poolhouse.serve import cli, holding, ops
+from poolhouse.serve.backend import LlamaServerBackend
+from poolhouse.serve.broker import Ask, Broker
+from poolhouse.serve.leases import lease_file
+from poolhouse.serve.manager import ServerManager
+from poolhouse.testing.fakes import fake_llama_binary
 
 MIB = 1024 * 1024
 Q4_K_XL = "Qwen3.8-27B-UD-Q4_K_XL.gguf"
@@ -111,7 +111,7 @@ def test_a_shape_that_cannot_fit_is_refused_with_the_reason_and_the_human_comman
     text = out + err
     assert code == 2 and holding.holds() == []
     assert "refused:" in text and "this machine lets a model use 256" in text
-    assert "ml-stack-serve memory --for" in text and "--apply" in text
+    assert "poolhouse-serve memory --for" in text and "--apply" in text
     assert "never by an agent" in text
 
 
@@ -155,7 +155,7 @@ def test_down_leaves_a_server_another_lease_still_holds(tmp_path, machine, capsy
 
 
 def test_the_idle_timeout_releases_the_lease(tmp_path, machine, capsys, monkeypatch):
-    from ml_stack.serve import reclaim
+    from poolhouse.serve import reclaim
 
     monkeypatch.setattr(reclaim, "busy_now", lambda base_url, **k: False)
     assert up(capsys, gguf(tmp_path, "idle.gguf"), "--idle", "1s", "--json")[0] == 0
@@ -205,7 +205,7 @@ def test_two_simultaneous_ups_for_one_shape_start_one_holder(tmp_path, machine, 
 def test_a_larger_context_is_never_served_by_a_smaller_server(tmp_path, machine):
     """Sharing is by the shape that matters, not by model: a 256K ask next to a 32K server
     for the same file gets its own server (or waits), never the 32K one."""
-    from ml_stack.serve.broker import Ask
+    from poolhouse.serve.broker import Ask
 
     model = gguf(tmp_path, "ctx.gguf")
     manager = ops.manager_for()

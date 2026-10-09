@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from conftest import threaded_server
 
-from ml_stack.graph.page import render
-from ml_stack.graph.serve import Handler, bind
+from poolhouse.graph.page import render
+from poolhouse.graph.serve import Handler, bind
 
 SECRET = "TOP-SECRET-OUTSIDE-THE-EXPORT-ROOT"
 

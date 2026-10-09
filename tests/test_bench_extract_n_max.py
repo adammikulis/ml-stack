@@ -1,4 +1,4 @@
-"""`ml-stack-bench extract --n-max N`: a draft length over the profile's, for the workload
+"""`poolhouse-bench extract --n-max N`: a draft length over the profile's, for the workload
 that repeats what it just read."""
 
 import contextlib
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import hub
+from poolhouse import hub
 from tests.test_bench_extract import _world_dir
 
 
@@ -25,7 +25,7 @@ def _args(tmp_path, **over):
 
 
 def _serving_seam(monkeypatch, seen, *, draft):
-    from ml_stack.serve import Serving
+    from poolhouse.serve import Serving
 
     class Found:
         def serving(self, port, slots):
@@ -35,18 +35,18 @@ def _serving_seam(monkeypatch, seen, *, draft):
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     def fake_serve(model, manager=None, **lease):
         seen["lease"] = lease
         raise SystemExit(0)
 
-    monkeypatch.setattr("ml_stack.serve.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.serve", fake_serve)
 
 
 def test_n_max_lengthens_the_profiles_draft(monkeypatch, tmp_path):
-    from ml_stack.bench import extract as ex
+    from poolhouse.bench import extract as ex
 
     seen: dict = {}
     _serving_seam(monkeypatch, seen, draft="mtp.gguf")
@@ -60,7 +60,7 @@ def test_n_max_lengthens_the_profiles_draft(monkeypatch, tmp_path):
 
 
 def test_n_max_without_a_head_is_refused_rather_than_ignored(monkeypatch, tmp_path, capsys):
-    from ml_stack.bench import extract as ex
+    from poolhouse.bench import extract as ex
 
     seen: dict = {}
     _serving_seam(monkeypatch, seen, draft="")
@@ -70,7 +70,7 @@ def test_n_max_without_a_head_is_refused_rather_than_ignored(monkeypatch, tmp_pa
 
 
 def test_the_subcommand_parses_n_max():
-    from ml_stack.bench import _parser
+    from poolhouse.bench import _parser
 
     args = _parser().parse_args(["extract", "x", "--world", "w", "--n-max", "6"])
     assert args.n_max == 6
@@ -79,10 +79,10 @@ def test_the_subcommand_parses_n_max():
 def test_the_kept_record_carries_the_draft_settings_as_served(monkeypatch, tmp_path):
     """`extract --serve`'s kept run's ``server`` carries ``spec_draft_max`` and
     ``spec_p_min`` as the profile served them."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.bench import extract as ex
-    from ml_stack.serve import Serving
-    from ml_stack.testing.fakes import FakeClient, FakeServe
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.bench import extract as ex
+    from poolhouse.serve import Serving
+    from poolhouse.testing.fakes import FakeClient, FakeServe
 
     class Found:
         def serving(self, port, slots):
@@ -92,10 +92,10 @@ def test_the_kept_record_carries_the_draft_settings_as_served(monkeypatch, tmp_p
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
-    monkeypatch.setattr("ml_stack.serve.serve", FakeServe())
-    monkeypatch.setattr("ml_stack.client.Client", FakeClient.scripted({}))
+    monkeypatch.setattr("poolhouse.serve.serve", FakeServe())
+    monkeypatch.setattr("poolhouse.client.Client", FakeClient.scripted({}))
 
     kept = tmp_path / "served.ladybug"
     assert ex.run(_args(tmp_path, kept=str(kept))) == 0

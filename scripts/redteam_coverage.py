@@ -34,11 +34,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from gates import _redteam_memo as memo  # noqa: E402
 from gates._util import calls, dotted, parse, python_files, rel  # noqa: E402
 
-SRC = "src/ml_stack"
+SRC = "src/poolhouse"
 OUT = ROOT / "docs/redteam/coverage.json"
 MAP = ROOT / "docs/redteam/coverage-map.toml"
 STATUSES = ("covered", "partial", "uncovered", "n/a")
-SKIP = ("src/ml_stack/testing/", "src/ml_stack/redteam/")
+SKIP = ("src/poolhouse/testing/", "src/poolhouse/redteam/")
 
 ATTACKER = {
     "route": "reach a protected path, crash the handler, read or write a file outside the root",
@@ -87,7 +87,7 @@ EGRESS = {
     "urllib.request.urlopen", "http.client.HTTPConnection", "http.client.HTTPSConnection",
     "socket.create_connection",
 }
-EGRESS_PREFIX = ("ml_stack.http.", "ml_stack.httpguard.")
+EGRESS_PREFIX = ("poolhouse.http.", "poolhouse.httpguard.")
 HUMAN = {"require_person", "mint", "mint_gated", "mint_pressed", "mint_clicked", "protect", "agent_may"}
 DESKTOP_WORDS = ("osascript", "notify-send", "powershell", "toast")
 KEYSTORE_WORDS = ("add-generic-password", "find-generic-password", "keyring", "secret-tool")
@@ -263,11 +263,11 @@ def find_calls(found: dict[str, Surface], where: str, tree: ast.Module) -> None:
         last = name.rsplit(".", 1)[-1]
         if name in SPAWN:
             add(found, "spawn", f"{sub}:{sym}", f"{sub}:{sym}")
-        elif name in LISTEN or (last in LISTEN_ATTRS and not name.startswith("ml_stack")) or (last == "bind" and node.args):
+        elif name in LISTEN or (last in LISTEN_ATTRS and not name.startswith("poolhouse")) or (last == "bind" and node.args):
             add(found, "listener", f"{sub}:{sym}", f"{sub}:{sym}")
         elif name in EGRESS or name.startswith(EGRESS_PREFIX):
             add(found, "egress", f"{sub}:{sym}", f"{sub}:{sym}")
-        elif name in ("authority.require", "ml_stack.authority.require") or (last in HUMAN and (name == last or "human" in name or name.startswith("ml_stack"))):
+        elif name in ("authority.require", "poolhouse.authority.require") or (last in HUMAN and (name == last or "human" in name or name.startswith("poolhouse"))):
             add(found, "human", f"{sub}:{sym}", f"{sub}:{sym}")
 
 
@@ -340,7 +340,7 @@ def find_scripts(found: dict[str, Surface]) -> None:
 def find_tools(found: dict[str, Surface]) -> None:
     import io
 
-    from ml_stack import chat, do, mcp
+    from poolhouse import chat, do, mcp
     for tool in mcp.TOOLS:
         add(found, "mcp-tool", tool.name, f"mcp.py:{tool.name}")
     person = do.Person(io.StringIO(""), io.StringIO(""))
@@ -361,11 +361,11 @@ def discover() -> dict[str, Surface]:
     for kind, name, source in (
         ("desktop", "app/src-tauri/capabilities/main.json", "app/src-tauri/capabilities/main.json"),
         ("spawn", "scripts/test-on-linux", "scripts/test-on-linux"),
-        ("spawn", "gym/transport.py:Process.start", "src/ml_stack/gym/transport.py"),
-        ("spawn", "gym/decision_process.py:DecisionProcess.__init__", "src/ml_stack/gym/decision_process.py"),
-        ("context", "gym/vision_process.py:image_request", "src/ml_stack/gym/vision_process.py"),
-        ("spawn", "sandbox/bubblewrap.py:_probe", "src/ml_stack/sandbox/bubblewrap.py"),
-        ("route", "fleet/gym_recording_routes.py:/ui/gym/recordings*", "src/ml_stack/fleet/gym_recording_routes.py"),
+        ("spawn", "gym/transport.py:Process.start", "src/poolhouse/gym/transport.py"),
+        ("spawn", "gym/decision_process.py:DecisionProcess.__init__", "src/poolhouse/gym/decision_process.py"),
+        ("context", "gym/vision_process.py:image_request", "src/poolhouse/gym/vision_process.py"),
+        ("spawn", "sandbox/bubblewrap.py:_probe", "src/poolhouse/sandbox/bubblewrap.py"),
+        ("route", "fleet/gym_recording_routes.py:/ui/gym/recordings*", "src/poolhouse/fleet/gym_recording_routes.py"),
     ):
         if (ROOT / source).is_file():
             add(found, kind, name, source)

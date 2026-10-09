@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from ml_stack import net
-from ml_stack.httpguard import Limits
-from ml_stack.net import cli, policy, provenance
-from ml_stack.net.scan import ScanPolicy
-from ml_stack.sentinel import human
+from poolhouse import net
+from poolhouse.httpguard import Limits
+from poolhouse.net import cli, policy, provenance
+from poolhouse.net.scan import ScanPolicy
+from poolhouse.sentinel import human
 from tests.net_site import Site, gguf_bytes
 
 
@@ -103,14 +103,14 @@ def test_the_scan_policy_defaults_and_can_be_changed_by_a_person(person, capsys)
 
 
 def test_the_scan_policy_is_not_changed_by_an_agent(person, capsys, monkeypatch):
-    monkeypatch.setenv("ML_STACK_AGENT", "1")
+    monkeypatch.setenv("POOLHOUSE_AGENT", "1")
     code = run(capsys, "scan-policy", "archive", "allow")[0]
     assert code == 2 and ScanPolicy.load().archive == "refuse"
 
 
 def test_the_environment_overrides_the_saved_policy(person, capsys, monkeypatch):
     run(capsys, "scan-policy", "archive", "warn")
-    monkeypatch.setenv("ML_STACK_NET_UNSCANNED", "archive:refuse")
+    monkeypatch.setenv("POOLHOUSE_NET_UNSCANNED", "archive:refuse")
     assert ScanPolicy.load().archive == "refuse"
 
 

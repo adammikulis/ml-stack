@@ -20,8 +20,8 @@ import testreuse_store as storage
 from test_testreuse import FILE, hows, project  # noqa: F401  (fixture)
 from test_testreuse_review import attempt
 
-from ml_stack.activity import reuse
-from ml_stack.workspace import testruns
+from poolhouse.activity import reuse
+from poolhouse.workspace import testruns
 
 pytestmark = pytest.mark.slow
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,9 +128,9 @@ def test_a_pin_that_is_no_longer_installed_is_a_change():
 
 def test_an_unstored_pass_says_which_input_changed(project, tmp_path, monkeypatch):
     store = storage.Store(tmp_path / "store")
-    monkeypatch.setattr(keys, "manifest_holds", lambda root, manifest, closures: "changed: src/ml_stack/helper.py")
+    monkeypatch.setattr(keys, "manifest_holds", lambda root, manifest, closures: "changed: src/poolhouse/helper.py")
     report, _ = attempt(project, store)
-    assert "(not stored: changed: src/ml_stack/helper.py)" in report.outcomes[0].detail
+    assert "(not stored: changed: src/poolhouse/helper.py)" in report.outcomes[0].detail
     assert reuse.rows(store.folder) == []
 
 

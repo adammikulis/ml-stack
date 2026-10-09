@@ -10,13 +10,13 @@ import tempfile
 from functools import cache
 from pathlib import Path
 
-FORCE = "ML_STACK_GATES_FULL"
+FORCE = "POOLHOUSE_GATES_FULL"
 """Set to any value to ignore what is cached and compute every result afresh."""
 
 
 def directory() -> Path:
     """Where the incremental results live, beside the whole-tree results."""
-    return Path(tempfile.gettempdir()) / "ml-stack-gates" / "incremental"
+    return Path(tempfile.gettempdir()) / "poolhouse-gates" / "incremental"
 
 
 def forced() -> bool:

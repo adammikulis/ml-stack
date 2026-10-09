@@ -9,13 +9,13 @@ deterministic and does not depend on a judge model noticing an attack.
 Every agent loop gets a `taint.Ledger`, kept in the run's `Context.notes`. The loop feeds it
 without the application doing anything: the person's messages are recorded as trusted, every tool
 result and every message that arrives from outside as untrusted. A `TaintRail` (an intervention,
-`ml_stack.taint.TaintRail`) answers `before_tool_call`. When the ledger says untrusted content has
+`poolhouse.taint.TaintRail`) answers `before_tool_call`. When the ledger says untrusted content has
 entered the context, a call to a sink whose arguments are not individually vouched for is
 `Deny` (proven flow into a hard sink) or `Confirm` (everything else). It is on by default in
-`ml_stack.chat.run_task` and `ml_stack.agent.Agent` (both run `guard.default()` unless told otherwise), and
+`poolhouse.chat.run_task` and `poolhouse.agent.Agent` (both run `guard.default()` unless told otherwise), and
 turning it off needs a reason that is logged.
 
-Status: accepted and implemented in `src/ml_stack/taint/`. The dual-model extractor ships as a helper; the dual-model
+Status: accepted and implemented in `src/poolhouse/taint/`. The dual-model extractor ships as a helper; the dual-model
 architecture as the default is left for later (see "Dual model").
 
 ## Information-flow model
@@ -176,11 +176,11 @@ A blocked or confirm-gated tainted call writes a `TaintEvent` (`kind`, `severity
 `subject`, `ts`, `evidence`) to subscribers (`taint.subscribe`). Evidence holds ids, digests and
 counts, never argument text. The shape is the one `docs/sentinel.md` describes for its bus, so
 sentinel subscribes with `taint.subscribe(bus.emit)`; the adapter is written on the sentinel
-branch, where the bus lives. The `ml_stack.guard` logger gets a warning for each.
+branch, where the bus lives. The `poolhouse.guard` logger gets a warning for each.
 
 ## Opting out
 
-`guard.rails(without=["taint"], because="...")`, for `ml_stack.chat.run_task(guard=...)` and for
+`guard.rails(without=["taint"], because="...")`, for `poolhouse.chat.run_task(guard=...)` and for
 `Agent(..., interventions=...)`. It needs the reason, logs it at warning level and prints it, the
 same as every other rail. `Agent` with no `interventions` runs `guard.default()`, which includes
 the taint rail.
@@ -222,13 +222,13 @@ from the model, not the person: a reference picked from search results, text the
 say, the largest file of a repository the person named, and a path the model chose. A person who
 types the reference, or agrees to a plan that names it, is not asked.
 
-**Canary** (`python -m ml_stack.testing.canary`, scripted worst-case model, 18 attacks, 2 benign
+**Canary** (`python -m poolhouse.testing.canary`, scripted worst-case model, 18 attacks, 2 benign
 tasks): rails off 17 succeed; rails without taint 3 succeed (`injected-fleet-join`,
 `injected-download`, `injected-serve`); default 0 succeed; benign tasks completed 2 of 2 in
 all three. (A guard built before the scenario sets its environment variable misses that
 variable; the figure above builds the guard after.)
 
-**Red-team** (`ml_stack.redteam` pages and toolbox, scripted gullible model, indirect-web: 13
+**Red-team** (`poolhouse.redteam` pages and toolbox, scripted gullible model, indirect-web: 13
 page variants (PDF text layer not built here) times 4 goals, 52 attempts per arm; the agent loop
 with no other rail and the web guard off, so only taint tracking differs; PyRIT not installed, so
 its scorers and converters were not used; the evidence is the red-team canary file and honeypot):
@@ -250,7 +250,7 @@ attacks put the instruction in the person's own turn; taint tracking treats that
 and does not stop it.
 
 **Tests and mutations.** 115 tests in `tests/test_taint*.py` on real objects: the real rails
-chained by `ml_stack.guard`, the real agent loop against a scripted llama-server on a socket, the
+chained by `poolhouse.guard`, the real agent loop against a scripted llama-server on a socket, the
 real `compact`. 72 textual mutants of the core (a flipped comparison, a dropped branch, a
 constant, a removed call, one per rule): the first run killed 47 of 72 and left 25, each a rule
 no test read; tests were added for each, and the final run kills all 71 that still apply (one

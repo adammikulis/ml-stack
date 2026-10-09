@@ -5,10 +5,10 @@ the passage behind one; `grounded` says, afterwards, which of the entries the an
 about had a source and which the model never read.
 """
 
-from ml_stack.asking import Asking
-from ml_stack.graph.answers import Answer
-from ml_stack.graph.ground import grounded, ungrounded
-from ml_stack.graph.looking import look_around, look_at, quotes, tools_for
+from poolhouse.asking import Asking
+from poolhouse.graph.answers import Answer
+from poolhouse.graph.ground import grounded, ungrounded
+from poolhouse.graph.looking import look_around, look_at, quotes, tools_for
 
 PASSAGE = ("A glimmer node is a point of the lattice that holds charge between pulses. "
            "Every glimmer node sits inside a cinder vault.")
@@ -157,8 +157,8 @@ def test_an_answer_that_selected_nothing_grounds_nothing():
 def test_a_store_is_read_the_same_way_as_a_graph(tmp_path):
     import pytest
 
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     with GraphStore(tmp_path / "sources.ladybug") as store:
         store.write({"nodes": GRAPH["nodes"], "edges": GRAPH["edges"]})

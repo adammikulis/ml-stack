@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack import httpguard
-from ml_stack.decide import router
-from ml_stack.decide.logprob import LogprobDecider, require_decider_host
-from ml_stack.decide.types import DecideError
+from poolhouse import httpguard
+from poolhouse.decide import router
+from poolhouse.decide.logprob import LogprobDecider, require_decider_host
+from poolhouse.decide.types import DecideError
 
 REMOTE = "http://203.0.113.7:8080"          # TEST-NET-3: never routable, never contacted by these tests
 

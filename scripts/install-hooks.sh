@@ -12,7 +12,7 @@
 # no-data-files refuses graph, data and weight files, large files and data directories.
 # budgets refuses a staged file that adds a site to any metric in budgets.json (SKIP_BUDGETS=1 to override);
 # budgets-only-fall refuses a staged budgets.json whose numbers rose, and refuses it
-# outright when CLAUDECODE is set (ML_STACK_BUDGET_RISE=yes for a person's own terminal).
+# outright when CLAUDECODE is set (POOLHOUSE_BUDGET_RISE=yes for a person's own terminal).
 #
 # scripts/hooks/claude-bash-guard is not a git hook and is not installed here. It is a
 # Claude Code PreToolUse hook on Bash; a project wires it into its .claude/settings.json:

@@ -12,22 +12,22 @@ from collections.abc import Sequence
 
 import pytest
 
-mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
-pytest.importorskip("mlx_vlm.models.qwen4_exp", reason="ml-stack[spec]")
+mx = pytest.importorskip("mlx.core", reason="poolhouse[spec]")
+pytest.importorskip("mlx_vlm.models.qwen4_exp", reason="poolhouse[spec]")
 
 from mlx_vlm.models.qwen4_exp.config import ModelConfig  # noqa: E402
 from mlx_vlm.models.qwen4_exp.language import LanguageModel  # noqa: E402
 
-from ml_stack.spec.decode import Asked, Session, decode  # noqa: E402
-from ml_stack.spec.drafters import Budget  # noqa: E402
-from ml_stack.spec.drafters.dflash import DFlashDrafter  # noqa: E402
-from ml_stack.spec.drafters.dflash_model import DFlashConfig, DFlashDraftModel  # noqa: E402
-from ml_stack.spec.drafters.mtp import Beam, MtpDrafter  # noqa: E402
-from ml_stack.spec.drafters.mtp_qwen4 import Qwen4MtpHead  # noqa: E402
-from ml_stack.spec.drafters.ngram import NgramDrafter  # noqa: E402
-from ml_stack.spec.qwen4 import Qwen4ExpLayout  # noqa: E402
-from ml_stack.spec.tree import Tree, chain  # noqa: E402
-from ml_stack.spec.verify import TreeVerifier  # noqa: E402
+from poolhouse.spec.decode import Asked, Session, decode  # noqa: E402
+from poolhouse.spec.drafters import Budget  # noqa: E402
+from poolhouse.spec.drafters.dflash import DFlashDrafter  # noqa: E402
+from poolhouse.spec.drafters.dflash_model import DFlashConfig, DFlashDraftModel  # noqa: E402
+from poolhouse.spec.drafters.mtp import Beam, MtpDrafter  # noqa: E402
+from poolhouse.spec.drafters.mtp_qwen4 import Qwen4MtpHead  # noqa: E402
+from poolhouse.spec.drafters.ngram import NgramDrafter  # noqa: E402
+from poolhouse.spec.qwen4 import Qwen4ExpLayout  # noqa: E402
+from poolhouse.spec.tree import Tree, chain  # noqa: E402
+from poolhouse.spec.verify import TreeVerifier  # noqa: E402
 
 EOS = 96
 TREE = Tree([31, 37, EOS, 43, 47, 53, 59, 61, 62, 63], [-1, 0, 0, 1, 1, 2, 3, 6, 7, 8])

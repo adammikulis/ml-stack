@@ -6,12 +6,12 @@ import pytest
 from launch_support import sign_in, ticket
 from test_fleet_ui import Serving
 
-from ml_stack import credentials
+from poolhouse import credentials
 
 
 @pytest.fixture
 def server(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
     made = Serving(tmp_path, secure=False)
@@ -109,7 +109,7 @@ def test_agent_access_cannot_change_person_credentials(server, method, access):
     elif access == "authorization":
         headers["Authorization"] = "Bearer isolated-agent-token"
     else:
-        headers["X-ML-Stack-Token"] = "isolated-agent-token"
+        headers["X-Poolhouse-Token"] = "isolated-agent-token"
     body = {"name": "HF_TOKEN"}
     if method == "POST":
         body["value"] = "isolated-agent-secret"

@@ -5,8 +5,8 @@ import queue
 
 import pytest
 
-from ml_stack.gym import simulation, training
-from ml_stack.gym.live_learning import learn_rollout
+from poolhouse.gym import simulation, training
+from poolhouse.gym.live_learning import learn_rollout
 
 
 @pytest.mark.slow

@@ -11,7 +11,7 @@ audit said so; those items are listed at the end.
 |---|---|---|---|---|---|---|
 | Test runner, confinement kernel, Linux runner | 2 | 4 | 3 | 2 | 1 | land after fixes |
 | NATS JetStream board transport | 3 | 2 | 3.5 | 1 (fit with the pool design) | 2 | park; reuse parts |
-| Poolside UI, app, conversations | 3 | 3 | 4 | 3 | 2 | land the publication stack after fixes |
+| Poolhouse UI, app, conversations | 3 | 3 | 4 | 3 | 2 | land the publication stack after fixes |
 | Runtime, restart, attribution, jobs | 3.5 | 4 | 4 | 3 | n/a | land after fixes |
 
 Scores are 1 to 5. The work is strong where it is narrow and tested (private-file handling, durable job records,
@@ -79,7 +79,7 @@ transport.
 Decision (owner, 2026-10-08): mesh journals are the board data model; NATS is at most an optional link with no
 authority. The JetStream commits are preserved in a git bundle and recorded in `HANDOFF.md`.
 
-## Poolside UI, app, conversations
+## Poolhouse UI, app, conversations
 
 One lineage under many SHAs: the publication stack carries the shared composer, the local sign-in, the rail
 reorganisation, the direct-message sidebar fixes, agent runtime install and repair, and the Studio MLX recipe. The
@@ -138,9 +138,9 @@ claims are forced to `agent-reported` until the authenticated peer is bound.
 | fix/restart-integration (restart, durable jobs, worker recovery, source recovery grants) | land after fixes |
 | fix/hook-performance | land |
 | feat/agent-device-registration, fix/model-work-attribution | rework: extract attribution, unify device metadata |
-| integrate/poolside-ui-publication and its single-lineage branches | land after fixes |
-| feat/poolside-studio-mlx | land after the publication stack |
-| feat/board-history-pages, feat/poolside-rebuild-conversations | rework: legacy paging lands, index parked |
+| integrate/poolhouse-ui-publication and its single-lineage branches | land after fixes |
+| feat/poolhouse-studio-mlx | land after the publication stack |
+| feat/board-history-pages, feat/poolhouse-rebuild-conversations | rework: legacy paging lands, index parked |
 | integrate/dev-cpu | land after fixes, after the restart branch |
 | fix/hook-message-alerts, fix/native-harness-registration, fix/claude-workspace-hook-regressions | already landed; removed |
 

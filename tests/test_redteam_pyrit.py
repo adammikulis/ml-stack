@@ -7,10 +7,10 @@ import asyncio
 
 import pytest
 
-from ml_stack.redteam import pyrit_bridge
-from ml_stack.redteam.run import Plan, execute
-from ml_stack.redteam.scenarios import Options
-from ml_stack.redteam.targets import Answer, from_callable
+from poolhouse.redteam import pyrit_bridge
+from poolhouse.redteam.run import Plan, execute
+from poolhouse.redteam.scenarios import Options
+from poolhouse.redteam.targets import Answer, from_callable
 
 pytestmark = pytest.mark.redteam
 
@@ -72,7 +72,7 @@ def test_a_run_against_the_stub_reports_what_the_stub_does(mode):
 
 
 def test_another_projects_agent_is_attacked_the_way_the_guide_shows():
-    from ml_stack.redteam import ToolSpy, mcp_tool_agent
+    from poolhouse.redteam import ToolSpy, mcp_tool_agent
 
     class Agent:
         def __init__(self, call_tool):

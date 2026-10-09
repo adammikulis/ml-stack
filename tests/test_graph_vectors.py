@@ -11,12 +11,12 @@ import json
 import pytest
 from conftest import json_reply
 
-from ml_stack.client.embed import DOCUMENT, QUERY
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.vectors import RememberOptions, embedded, remember
-from ml_stack.testing import needs_a_backend
+from poolhouse.client.embed import DOCUMENT, QUERY
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.vectors import RememberOptions, embedded, remember
+from poolhouse.testing import needs_a_backend
 
-pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
 
 # a toy space where the first number is "about machines" and the second "about selling"
 SAID = {
@@ -177,14 +177,14 @@ class TestSmoothing:
     @needs_a_backend
     def test_a_node_with_no_vector_ends_where_its_neighbours_mean(self):
         """Cyd wrote nothing; one hop leaves them pointing at the mean of Ada and Bea."""
-        from ml_stack.graph.vectors import smooth
+        from poolhouse.graph.vectors import smooth
 
         spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=1)
         assert _cosine(spread["person:cyd"], [0.5, 0.5]) == pytest.approx(1.0, abs=1e-6)
 
     @needs_a_backend
     def test_a_node_nothing_reaches_and_nothing_wrote_is_left_out(self):
-        from ml_stack.graph.vectors import smooth
+        from poolhouse.graph.vectors import smooth
 
         spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=2)
         assert "topic:robotics" not in spread
@@ -192,7 +192,7 @@ class TestSmoothing:
 
     @needs_a_backend
     def test_every_vector_comes_back_the_width_it_went_in_and_unit_long(self):
-        from ml_stack.graph.vectors import smooth
+        from poolhouse.graph.vectors import smooth
 
         spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=2)
         for vector in spread.values():
@@ -200,7 +200,7 @@ class TestSmoothing:
             assert sum(v * v for v in vector) ** 0.5 == pytest.approx(1.0, abs=1e-6)
 
     def test_no_vectors_at_all_is_nothing_to_spread(self):
-        from ml_stack.graph.vectors import smooth
+        from poolhouse.graph.vectors import smooth
 
         assert smooth(SMOOTHED, {}) == {}
         assert smooth({"nodes": [], "edges": []}, {"person:ada": [1.0, 0.0]}) == {}
@@ -211,7 +211,7 @@ class TestSmoothingAStore:
     def test_the_smoothed_vectors_round_trip_and_find_the_one_that_wrote_nothing(
             self, server, tmp_path):
         """Cyd is embedded by nobody and is still found by "who fixes machines"."""
-        from ml_stack.graph.store_cli import main
+        from poolhouse.graph.store_cli import main
 
         instance = server(embeddings())
         path = tmp_path / "g.ladybug"
@@ -254,7 +254,7 @@ class TestSmoothingAStore:
 
 
 def test_embed_over_a_store_with_no_vectors_says_so(tmp_path, capsys):
-    from ml_stack.graph.store_cli import main
+    from poolhouse.graph.store_cli import main
 
     path = tmp_path / "g.ladybug"
     with GraphStore(path) as store:

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.sentinel import explain
-from ml_stack.sentinel.policy import NEVER_ACT
-from ml_stack.sentinel.store import KINDS, Record, State
+from poolhouse.sentinel import explain
+from poolhouse.sentinel.policy import NEVER_ACT
+from poolhouse.sentinel.store import KINDS, Record, State
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "ml_stack"
+SRC = Path(__file__).resolve().parents[1] / "src" / "poolhouse"
 DYNAMIC = {"_found": "honey", "_changed": "integrity"}
 """Helpers that pass a kind to ``finding`` as a variable, and the family of kinds they build."""
 

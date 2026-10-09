@@ -15,12 +15,12 @@ class CudaServerInstallTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        isolated = patch.dict(os.environ, {"ML_STACK_HOME": str(self.root / "state"),
-                                          "ML_STACK_CACHE": str(self.root / "cache"),
-                                          "ML_STACK_NO_REAL_KEYSTORE": "1"})
+        isolated = patch.dict(os.environ, {"POOLHOUSE_HOME": str(self.root / "state"),
+                                          "POOLHOUSE_CACHE": str(self.root / "cache"),
+                                          "POOLHOUSE_NO_REAL_KEYSTORE": "1"})
         isolated.start()
         self.addCleanup(isolated.stop)
-        self.llama = importlib.import_module("ml_stack.fleet.llama")
+        self.llama = importlib.import_module("poolhouse.fleet.llama")
         self.token = "ubuntu-cuda-{version}-x64"
         self.name = "llama-nightly-bin-ubuntu-cuda-12.8-x64.zip"
         self.asset = {"name": self.name}
@@ -36,7 +36,7 @@ class CudaServerInstallTests(unittest.TestCase):
             self.assertEqual(self.llama._tokens(), (self.token,))
 
     def test_cuda_discovery_does_not_depend_on_help_initializing_devices(self):
-        backend = importlib.import_module("ml_stack.serve.backend")
+        backend = importlib.import_module("poolhouse.serve.backend")
         binary = self.root / "llama-server"
         binary.write_text("test binary")
         def inspect(argv, **options):
@@ -50,7 +50,7 @@ class CudaServerInstallTests(unittest.TestCase):
                              [[str(binary), "--help"], [str(binary), "--list-devices"]])
 
     def test_failed_or_non_cuda_device_discovery_is_refused(self):
-        backend = importlib.import_module("ml_stack.serve.backend")
+        backend = importlib.import_module("poolhouse.serve.backend")
         for code, output in ((1, "CUDA0: failed"), (0, "CPU: host"), (0, "CUDA0:")):
             with self.subTest(code=code, output=output), patch.object(
                     backend.subprocess, "run", return_value=subprocess.CompletedProcess(

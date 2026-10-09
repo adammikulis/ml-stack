@@ -1,4 +1,4 @@
-"""`ml-stack-cluster nearby | listen | pair | requests | accept | decline | revoke | bootstrap` as
+"""`poolhouse-cluster nearby | listen | pair | requests | accept | decline | revoke | bootstrap` as
 separate processes on loopback with throwaway state: the owner's terminal and the new machine
 are different processes sharing nothing but a TCP port."""
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import discovery
+from poolhouse.fleet import discovery
 from tests.cluster_support import join as cluster_join
 
 FP1 = "1" * 64
@@ -32,25 +32,25 @@ def needs_cryptography():
 
 def env_for(root):
     root.mkdir(exist_ok=True)
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(root),
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "POOLHOUSE_HOME": str(root),
             "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
-            "ML_STACK_TEST_KEYRING": str(root / "keyring.json"), "DISPLAY": ":0",
-            "ML_STACK_CLUSTER_KEY": str(root / "cluster.key"), "PYTHONUNBUFFERED": "1"}
+            "POOLHOUSE_TEST_KEYRING": str(root / "keyring.json"), "DISPLAY": ":0",
+            "POOLHOUSE_CLUSTER_KEY": str(root / "cluster.key"), "PYTHONUNBUFFERED": "1"}
     prepared = subprocess.run(
-        [sys.executable, "-c", "from ml_stack.keystore import Keystore; Keystore().provision()"],
+        [sys.executable, "-c", "from poolhouse.keystore import Keystore; Keystore().provision()"],
         env=env, capture_output=True, text=True, timeout=30, check=False)
     assert prepared.returncode == 0, prepared.stderr
     return env
 
 
 def fleet(env, *args, stdin=None, timeout=60):
-    return subprocess.run([sys.executable, "-m", "ml_stack.fleet.join", *args], env=env,
+    return subprocess.run([sys.executable, "-m", "poolhouse.fleet.join", *args], env=env,
                           capture_output=True, text=True, timeout=timeout, input=stdin,
                           check=False)
 
 
 def spawn(env, *args):
-    return subprocess.Popen([sys.executable, "-m", "ml_stack.fleet.join", *args], env=env,
+    return subprocess.Popen([sys.executable, "-m", "poolhouse.fleet.join", *args], env=env,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True)
 
@@ -139,7 +139,7 @@ def test_the_whole_conversation_across_three_processes(owner, tmp_path):
     assert mine and mine[0].key == theirs[0].key
     # each machine lists the other's certificate as a device of the cluster
     def devices_of(env, key_path):
-        listing = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers", "--cluster-key", str(key_path),
+        listing = subprocess.run([sys.executable, "-m", "poolhouse.fleet.peers", "--cluster-key", str(key_path),
                                   "members", "list"], env=env, capture_output=True, text=True, timeout=60, check=False)
         assert listing.returncode == 0, listing.stderr
         return listing.stdout
@@ -236,14 +236,14 @@ def test_bootstrap_prints_an_offer_with_a_pinned_certificate(tmp_path):
     env = env_for(tmp_path / "x")
     share = tmp_path / "share"
     share.mkdir()
-    (share / "ml_stack-0.2-py3-none-any.whl").write_bytes(b"wheel" * 100)
+    (share / "poolhouse-0.2-py3-none-any.whl").write_bytes(b"wheel" * 100)
     proc = spawn(env, "bootstrap", "--share", str(share), "--valid", "60s", "--json",
                  "--state", str(tmp_path / "x" / "s"))
     try:
         doc = json.loads(read_document(proc))
         assert doc["url"].startswith("https://127.0.0.1:") and doc["url"].endswith(
             f"#fp={doc['certificate']}")
-        assert doc["files"] == ["ml_stack-0.2-py3-none-any.whl"]
+        assert doc["files"] == ["poolhouse-0.2-py3-none-any.whl"]
         assert "--pinnedpubkey" in doc["command"]
         state = tmp_path / "x" / "s"
         assert (state / "signing.json").stat().st_mode & 0o077 == 0
@@ -283,7 +283,7 @@ def test_after_pairing_the_new_machine_fetches_files_from_the_owner(owner, tmp_p
     shared = tmp_path / "shared"
     shared.mkdir()
     wheel = os.urandom(300_000)
-    (shared / "ml_stack-0.2-py3-none-any.whl").write_bytes(wheel)
+    (shared / "poolhouse-0.2-py3-none-any.whl").write_bytes(wheel)
     (shared / "gated.gguf").write_bytes(b"GGUF" * 1000)
     sharing = spawn(owner.env, "share", "--port", "0", "--dir", str(shared),
                     "--sharing", "gated.gguf=never", "--licence", "gated.gguf=nocopy,https://x/l",
@@ -291,9 +291,9 @@ def test_after_pairing_the_new_machine_fetches_files_from_the_owner(owner, tmp_p
     try:
         started = json.loads(read_document(sharing))
         assert {f["name"]: f["sharing"] for f in started["files"]} == {
-            "ml_stack-0.2-py3-none-any.whl": "open", "gated.gguf": "never"}
+            "poolhouse-0.2-py3-none-any.whl": "open", "gated.gguf": "never"}
         source = f"127.0.0.1:{started['port']}"
-        got = fleet(env, "fetch", "ml_stack-0.2-py3-none-any.whl", "--from", source, "--json",
+        got = fleet(env, "fetch", "poolhouse-0.2-py3-none-any.whl", "--from", source, "--json",
                     "--state", str(state))
         assert got.returncode == 0, got.stdout + got.stderr
         staged = json.loads(got.stdout)["staged"]
@@ -304,7 +304,7 @@ def test_after_pairing_the_new_machine_fetches_files_from_the_owner(owner, tmp_p
         assert refused.returncode == 2 and "may not be shared" in json.loads(refused.stdout)["error"]
         # a machine that never paired has no pinned key and no cluster, and is turned away
         stranger = env_for(tmp_path / "stranger")
-        nope = fleet(stranger, "fetch", "ml_stack-0.2-py3-none-any.whl", "--from", source,
+        nope = fleet(stranger, "fetch", "poolhouse-0.2-py3-none-any.whl", "--from", source,
                      "--json", "--state", str(tmp_path / "stranger" / "state"))
         assert nope.returncode == 2
     finally:
@@ -332,8 +332,8 @@ def test_an_older_manifest_than_one_already_seen_is_refused(owner, tmp_path):
 def test_share_answers_only_requests_signed_with_the_cluster_secret(owner, tmp_path):
     import http.client
 
-    from ml_stack import macauth
-    from ml_stack.fleet.onboard.pairing import unverified_context
+    from poolhouse import macauth
+    from poolhouse.fleet.onboard.pairing import unverified_context
     shared = tmp_path / "shared"
     shared.mkdir()
     (shared / "a-0.1-py3-none-any.whl").write_bytes(b"w" * 70_000)
@@ -369,7 +369,7 @@ def test_a_click_on_accept_in_the_dialog_accepts_the_request_and_the_code_comes_
         'printf "%s\\n" "$@" >> "$FAKE_DIALOGS"\n'
         'case "$2" in *"set answer"*) echo "button returned:Accept as mine, gave up:false";; esac\n')
     fake.chmod(0o755)
-    env = {**env_for(tmp_path / "owner"), "ML_STACK_NOTIFY": "system", "FAKE_DIALOGS": str(record),
+    env = {**env_for(tmp_path / "owner"), "POOLHOUSE_NOTIFY": "system", "FAKE_DIALOGS": str(record),
            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
     key_path = tmp_path / "owner" / "cluster.key"
     cluster_join("a-long-enough-passphrase", path=key_path)
@@ -410,6 +410,6 @@ def test_cli_fixture_provisions_only_its_file_keyring(tmp_path):
     root = tmp_path / "isolated-device"
     env = env_for(root)
     assert env["PYTHON_KEYRING_BACKEND"] == "onboard_support.FileKeyring"
-    assert env["ML_STACK_NO_REAL_KEYSTORE"] == "1"
+    assert env["POOLHOUSE_NO_REAL_KEYSTORE"] == "1"
     assert json.loads((root / "keyring.json").read_text())
     assert json.loads((root / "keystore" / "provisioned.json").read_text())["at"]

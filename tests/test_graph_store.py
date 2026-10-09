@@ -7,9 +7,9 @@ about what was persisted.
 
 import pytest
 
-from ml_stack.graph.store import GraphStore
+from poolhouse.graph.store import GraphStore
 
-pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
 
 GRAPH = {
     "nodes": [
@@ -142,7 +142,7 @@ def test_read_counts_the_nodes_and_edges_it_hands_back(tmp_path):
 
 def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
     """The real thing this exists for: a rebuild that goes wrong is not the end of the graph."""
-    from ml_stack.graph.rebuild import count_store, roll_back, snapshot
+    from poolhouse.graph.rebuild import count_store, roll_back, snapshot
 
     path = tmp_path / "g"
     with GraphStore(path) as store:
@@ -229,8 +229,8 @@ def a_store_of(tmp_path, n):
 
 def test_a_write_that_would_take_most_of_the_store_is_refused(tmp_path):
     """A pipeline that read nothing produces an empty graph, which looks exactly like this."""
-    from ml_stack.graph.rebuild import count_store, replace
-    from ml_stack.graph.store import WouldLoseTooMuch
+    from poolhouse.graph.rebuild import count_store, replace
+    from poolhouse.graph.store import WouldLoseTooMuch
 
     path = a_store_of(tmp_path, 10)
     with pytest.raises(WouldLoseTooMuch, match="10 of 10"):
@@ -243,7 +243,7 @@ def test_a_write_that_would_take_most_of_the_store_is_refused(tmp_path):
 
 
 def test_an_ordinary_rebuild_still_goes_through(tmp_path):
-    from ml_stack.graph.rebuild import count_store, replace
+    from poolhouse.graph.rebuild import count_store, replace
 
     path = a_store_of(tmp_path, 10)
     keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 2, "attrs": {}}
@@ -253,8 +253,8 @@ def test_an_ordinary_rebuild_still_goes_through(tmp_path):
 
 
 def test_a_write_that_takes_a_tenth_leaves_a_copy_behind(tmp_path):
-    from ml_stack.graph.rebuild import replace
-    from ml_stack.graph.snapshots import snapshots
+    from poolhouse.graph.rebuild import replace
+    from poolhouse.graph.snapshots import snapshots
 
     path = a_store_of(tmp_path, 10)
     keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 1, "attrs": {}}
@@ -266,7 +266,7 @@ def test_a_write_that_takes_a_tenth_leaves_a_copy_behind(tmp_path):
 
 
 def test_dropping_most_of_a_store_by_hand_is_refused_too(tmp_path):
-    from ml_stack.graph.store import WouldLoseTooMuch
+    from poolhouse.graph.store import WouldLoseTooMuch
 
     path = a_store_of(tmp_path, 10)
     with GraphStore(path) as store:
@@ -277,7 +277,7 @@ def test_dropping_most_of_a_store_by_hand_is_refused_too(tmp_path):
 
 
 def test_a_store_that_does_not_exist_yet_is_simply_written(tmp_path):
-    from ml_stack.graph.rebuild import count_store, replace
+    from poolhouse.graph.rebuild import count_store, replace
 
     fresh = tmp_path / "new" / "g"
     assert replace(fresh, GRAPH) == {"nodes": 5, "edges": 3}
@@ -298,7 +298,7 @@ def test_a_write_that_fails_partway_leaves_nothing(tmp_path):
 
 
 def test_a_rebuild_that_fails_leaves_the_old_graph(tmp_path):
-    from ml_stack.graph.rebuild import count_store, replace
+    from poolhouse.graph.rebuild import count_store, replace
 
     path = tmp_path / "g"
     with GraphStore(path) as store:
@@ -404,10 +404,10 @@ def test_an_old_store_is_upgraded_on_open_for_writing(tmp_path):
 
 
 def test_an_old_store_opened_read_only_says_it_needs_upgrading(tmp_path):
-    from ml_stack.graph.store import StoreNeedsUpgrade
+    from poolhouse.graph.store import StoreNeedsUpgrade
 
     path = an_old_store_at(tmp_path / "g")
-    with pytest.raises(StoreNeedsUpgrade, match="older ml-stack"):
+    with pytest.raises(StoreNeedsUpgrade, match="older poolhouse"):
         GraphStore(path, read_only=True)
 
 
@@ -435,7 +435,7 @@ def test_the_word_index_is_built_while_writing_so_a_reader_can_use_it(tmp_path):
     graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"},
                        {"id": "person:ada", "label": "Ada Lovelace", "kind": "person"}],
              "edges": [], "messages": {}}
-    from ml_stack.graph.rebuild import replace
+    from poolhouse.graph.rebuild import replace
 
     replace(path, graph)
 
@@ -459,7 +459,7 @@ def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(
     A rebuild is the moment to give them one — otherwise retrieval stays silent on exactly
     the graphs people already have.
     """
-    from ml_stack.graph.rebuild import replace
+    from poolhouse.graph.rebuild import replace
 
     path = tmp_path / "old.ladybug"
     graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"}],
@@ -481,7 +481,7 @@ def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(
 def test_a_value_that_will_not_encode_is_refused_by_path_rather_than_kept_as_nothing(tmp_path):
     """`_json` used to return "{}" when json.dumps raised. A run with one unencodable
     field anywhere in it was then kept as an empty document, and nothing said so."""
-    from ml_stack.graph.columns import as_json
+    from poolhouse.graph.columns import as_json
 
     record = {"label": "tried", "server": {"concurrency": {"per_turn": {(0, 1): 2.0}}}}
     with pytest.raises(ValueError) as why:
@@ -551,7 +551,7 @@ def test_a_document_can_be_deleted_and_says_whether_it_was_there(tmp_path):
 def test_a_document_that_does_not_read_back_is_refused_at_the_write(tmp_path, monkeypatch):
     """Every put_doc reads its own document back by key, and a write the store cannot read
     back is refused rather than believed."""
-    from ml_stack.graph.store import StoreMismatch
+    from poolhouse.graph.store import StoreMismatch
 
     with GraphStore(tmp_path / "g") as store:
         monkeypatch.setattr(store, "get_doc", lambda key, default=None: {"label": "other"})
@@ -563,7 +563,7 @@ def test_a_document_that_does_not_read_back_is_refused_at_the_write(tmp_path, mo
 
 
 def test_a_node_or_edge_that_does_not_read_back_is_refused_at_the_write(tmp_path):
-    from ml_stack.graph.store import StoreMismatch
+    from poolhouse.graph.store import StoreMismatch
 
     with GraphStore(tmp_path / "g") as store:
         store.write(GRAPH)
@@ -585,8 +585,8 @@ def test_a_node_or_edge_that_does_not_read_back_is_refused_at_the_write(tmp_path
 
 
 def test_a_rebuild_whose_count_does_not_match_is_rolled_back(tmp_path, monkeypatch):
-    from ml_stack.graph.rebuild import count_store, replace
-    from ml_stack.graph.store import StoreMismatch
+    from poolhouse.graph.rebuild import count_store, replace
+    from poolhouse.graph.store import StoreMismatch
 
     path = tmp_path / "g"
     with GraphStore(path) as store:
@@ -752,7 +752,7 @@ def test_each_vector_search_on_a_handle_answers_its_own_question(tmp_path):
 # -- a column that does not hold an object is refused, never read as an empty one ----------
 
 def test_a_json_value_that_is_not_an_object_is_refused_by_name():
-    from ml_stack.graph.columns import from_json
+    from poolhouse.graph.columns import from_json
 
     assert from_json(None) == {}
     assert from_json("") == {}

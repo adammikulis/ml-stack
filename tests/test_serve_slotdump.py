@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from ml_stack.serve import cli
-from ml_stack.serve.slotdump import (
+from poolhouse.serve import cli
+from poolhouse.serve.slotdump import (
     SlotGuardRefused,
     current_guard,
     dump_name,
@@ -18,7 +18,7 @@ from ml_stack.serve.slotdump import (
     save_all,
     save_slot,
 )
-from ml_stack.testing import FakeLlamaServer, Served
+from poolhouse.testing import FakeLlamaServer, Served
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 

@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import home
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import (
+from poolhouse import home
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import (
     integration_git as repo,
     project_connection as connection,
     worktree_lifecycle as lifecycle,
 )
-from ml_stack.workspace.device_accounts import account_for
+from poolhouse.workspace.device_accounts import account_for
 
 PROJECT = "a" * 32
 
@@ -29,7 +29,7 @@ class Remote:
 
 
 def test_binding_an_unchanged_connection_does_not_rewrite_the_record(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     project, other = tmp_path / "project", tmp_path / "second"
     project.mkdir()
     other.mkdir()

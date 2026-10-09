@@ -25,11 +25,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 
-from ml_stack import credentials, person  # noqa: E402
+from poolhouse import credentials, person  # noqa: E402
 
 REPO_NAME = "RELEASE_SIGNING_KEY"
-ITEM = "ML_STACK_RELEASE_SIGNING_KEY"
-SIGNING = ROOT / "src" / "ml_stack" / "fleet" / "signing.py"
+ITEM = "POOLHOUSE_RELEASE_SIGNING_KEY"
+SIGNING = ROOT / "src" / "poolhouse" / "fleet" / "signing.py"
 LINE = re.compile(r'^RELEASE_KEY = ".*"$', re.M)
 
 
@@ -76,7 +76,7 @@ def _generate() -> bytes:
     try:
         work.chmod(0o700)
         key = work / "key"
-        _run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "ml-stack-release", "-f", str(key)])
+        _run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "poolhouse-release", "-f", str(key)])
         return key.read_bytes()
     finally:
         _wipe(work)

@@ -70,7 +70,7 @@ def test_decider_fetch_validation_and_pending_action(journey_page):
     page.get_by_role("button", name="Run operation", exact=True).click()
     expect(page.get_by_role("button", name="Run operation", exact=True)).to_be_disabled()
     page.evaluate("document.querySelector('tools-view').decide()")
-    assert page.evaluate("window.toolPosts") == [{"command": "ml-stack-decide", "args": ["fetch", "--yes"], "name": "Decision fetch"}]
+    assert page.evaluate("window.toolPosts") == [{"command": "poolhouse-decide", "args": ["fetch", "--yes"], "name": "Decision fetch"}]
     page.evaluate("window.finishTool({ok:false,status:503,error:'Downloads are unavailable'})")
     expect(page.locator("tools-view #decision .status")).to_contain_text("Downloads are unavailable")
     expect(page.get_by_role("button", name="Run operation", exact=True)).to_be_enabled()

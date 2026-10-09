@@ -6,9 +6,9 @@ import pytest
 from taskboard_kit import accepted, board as board_fixture
 from test_task_credit import ledger as ledger_fixture, reviewed
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import localagent, resource_allocations, task_credit, work_reputation
-from ml_stack.workspace.task_provenance import snapshot
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import localagent, resource_allocations, task_credit, work_reputation
+from poolhouse.workspace.task_provenance import snapshot
 
 board = board_fixture
 ledger = ledger_fixture
@@ -104,7 +104,7 @@ def test_award_reference_cannot_credit_a_different_actor_or_review(board, ledger
 
 @pytest.mark.redteam
 def test_review_cannot_attribute_a_hashed_proposal_to_another_worker(board, ledger):
-    from ml_stack.workspace.task_schema import fingerprint
+    from poolhouse.workspace.task_schema import fingerprint
 
     reviewed(board)
     task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
@@ -122,7 +122,7 @@ def test_history_filters_actor_exact_runtime_and_family_over_the_same_review(boa
     from playwright.sync_api import expect
     from test_fleet_ui import Serving
 
-    from ml_stack.workspace import tokens
+    from poolhouse.workspace import tokens
 
     reviewed(board)
     task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
@@ -145,7 +145,7 @@ def test_history_filters_actor_exact_runtime_and_family_over_the_same_review(boa
             expect(card.get_by_text('These are views of the same contributions; credits are awarded once.', exact=True)).to_be_visible()
             expect(card.get_by_text(f'Account identity: {board.worker_id}', exact=True)).to_be_visible()
             view.locator('#history-dimension').select_option('model')
-            card = credits.locator('details.history-action').filter(has_text='qwen · ml-stack-agent · 10 credits')
+            card = credits.locator('details.history-action').filter(has_text='qwen · poolhouse-agent · 10 credits')
             card.locator(':scope > summary').click()
             expect(card.get_by_text('Model source: verified-serving-resource · Runtime source: registered-worker-configuration · Artifact: unknown', exact=True)).to_be_visible()
             card.locator('summary').filter(has_text=f'Task {board.task["id"]} · verified by lead').click()

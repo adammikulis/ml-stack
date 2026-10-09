@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ml_stack import tar_libraries
-from ml_stack.net.sniff import audit_archive
-from ml_stack.safenames import Unsafe
+from poolhouse import tar_libraries
+from poolhouse.net.sniff import audit_archive
+from poolhouse.safenames import Unsafe
 
 
 class LibraryArchiveTests(unittest.TestCase):

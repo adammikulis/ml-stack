@@ -2,9 +2,9 @@
 
 import pytest
 
-from ml_stack.contracts import grammar_for
-from ml_stack.entities import PICK_SCHEMA, pick, validate_pick
-from ml_stack.entities.pick import objections
+from poolhouse.contracts import grammar_for
+from poolhouse.entities import PICK_SCHEMA, pick, validate_pick
+from poolhouse.entities.pick import objections
 
 RECORDS = {"n:1": {"label": "Ada"}, "n:2": {"label": "Alan"}, "n:3": {"label": "looms"}}
 IDS = list(RECORDS)

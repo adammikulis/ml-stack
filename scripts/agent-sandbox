@@ -35,7 +35,7 @@ def worktrees(checkout: Path) -> list[Path]:
 
 def device() -> str:
     """The app-scoped device id, or ``unknown`` when the provider is unavailable."""
-    from ml_stack import home
+    from poolhouse import home
 
     try:
         return home.device_id()
@@ -45,7 +45,7 @@ def device() -> str:
 
 def layout_from(args: argparse.Namespace) -> profile.Layout:
     """The machine layout from the arguments, the environment and `git worktree list`."""
-    from ml_stack import home
+    from poolhouse import home
 
     found = worktrees(Path.cwd())
     primary = found[0] if found else Path.cwd()
@@ -102,7 +102,7 @@ def status(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-sandbox", description=__doc__.splitlines()[0])
-    parser.add_argument("--state", help="the ml-stack state root")
+    parser.add_argument("--state", help="the poolhouse state root")
     parser.add_argument("--home", help="the account's home directory")
     parser.add_argument("--platform", choices=("darwin", "linux"))
     parser.add_argument("--scratch", action="append", default=[], help="a scratch directory the agent may write")

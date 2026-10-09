@@ -9,26 +9,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import gym_interpreters
-from ml_stack.fleet.environment import CATALOG, Environment, _requirements
-from ml_stack.fleet.settings import Settings
-from ml_stack.gym.catalog import catalogue
-from ml_stack.gym.transport import Process, interpreter
+from poolhouse.fleet import gym_interpreters
+from poolhouse.fleet.environment import CATALOG, Environment, _requirements
+from poolhouse.fleet.settings import Settings
+from poolhouse.gym.catalog import catalogue
+from poolhouse.gym.transport import Process, interpreter
 
 
 @pytest.fixture
 def isolated_routing(monkeypatch):
-    monkeypatch.delenv('ML_STACK_GYM_PYTHON', raising=False)
-    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+    monkeypatch.delenv('POOLHOUSE_GYM_PYTHON', raising=False)
+    monkeypatch.setenv('POOLHOUSE_GYM_PYTHONS', '{}')
 
 
 def test_child_python_markers_do_not_use_host_python():
-    metadata = {'ml-stack': {'provides_extra': ['gym-drone'], 'requires_dist': [
+    metadata = {'poolhouse': {'provides_extra': ['gym-drone'], 'requires_dist': [
         'PyFlyt==0.29.0; extra == "gym-drone" and python_version < "3.13"']}}
-    child = _requirements('ml-stack[gym-drone]', metadata, {'python_version': '3.12'})
-    host = _requirements('ml-stack[gym-drone]', metadata, {'python_version': '3.13'})
-    assert {requirement.name for requirement in child} == {'ml-stack', 'PyFlyt'}
-    assert {requirement.name for requirement in host} == {'ml-stack'}
+    child = _requirements('poolhouse[gym-drone]', metadata, {'python_version': '3.12'})
+    host = _requirements('poolhouse[gym-drone]', metadata, {'python_version': '3.13'})
+    assert {requirement.name for requirement in child} == {'poolhouse', 'PyFlyt'}
+    assert {requirement.name for requirement in host} == {'poolhouse'}
 
 
 def test_drone_install_is_scoped_and_does_not_change_default_packages(monkeypatch, tmp_path):
@@ -46,19 +46,19 @@ def test_drone_install_is_scoped_and_does_not_change_default_packages(monkeypatc
     target = environment.for_library(drone)
     assert made == [(tmp_path / 'simulators/gym-drone/env', '3.12')]
     assert calls == [(target.path, ['install', 'numpy<2', 'wheel']),
-                     (target.path, ['install', '--upgrade', 'PyFlyt==0.29.0', 'ml-stack[gym-drone,gym-rl]'])]
+                     (target.path, ['install', '--upgrade', 'PyFlyt==0.29.0', 'poolhouse[gym-drone,gym-rl]'])]
     assert not environment.exists and environment.python_version == '3.13'
 
 
 def test_incompatible_version_uses_matching_host_or_standalone(monkeypatch, tmp_path):
     environment = Environment(tmp_path, python_version='3.12')
     monkeypatch.setattr(sys, 'version_info', SimpleNamespace(major=3, minor=13))
-    monkeypatch.setattr('ml_stack.fleet.environment.shutil.which', lambda name: None)
+    monkeypatch.setattr('poolhouse.fleet.environment.shutil.which', lambda name: None)
     assert environment.host_python() is None
     paths = []
     executable = tmp_path / 'standalone/python'
     monkeypatch.setattr(environment, 'fetch_python', lambda **kwargs: executable)
-    monkeypatch.setattr('ml_stack.fleet.environment.subprocess.run',
+    monkeypatch.setattr('poolhouse.fleet.environment.subprocess.run',
                         lambda args, **kwargs: paths.append(args) or subprocess.CompletedProcess(args, 0))
     environment.create()
     assert paths == [[str(executable), '-m', 'venv', str(environment.path)]]
@@ -73,7 +73,7 @@ def test_scoped_readiness_and_uninstall_preserve_other_environment(monkeypatch, 
     calls = []
     payload = {'environment': {'python_version': '3.12'}, 'installed': [
         {'metadata': {'name': 'PyFlyt', 'version': '0.29.0'}},
-        {'metadata': {'name': 'ml-stack', 'version': '0.3', 'provides_extra': ['gym-drone', 'gym-rl'],
+        {'metadata': {'name': 'poolhouse', 'version': '0.3', 'provides_extra': ['gym-drone', 'gym-rl'],
                       'requires_dist': ['pillow>=10; extra == "gym-drone" and python_version < "3.13"',
                                         'stable-baselines3>=2.7; extra == "gym-rl"']}},
         {'metadata': {'name': 'pillow', 'version': '12.0'}},
@@ -90,7 +90,7 @@ def test_scoped_readiness_and_uninstall_preserve_other_environment(monkeypatch, 
     assert entry['installed'] and entry['python_version'] == '3.12'
     assert environment.uninstall(['gym-drone'])['gym-drone']['ok']
     assert all(path == target.path for path, _ in calls)
-    assert calls[-1][1] == ['uninstall', '-y', 'ml-stack', 'pillow', 'pyflyt', 'stable-baselines3']
+    assert calls[-1][1] == ['uninstall', '-y', 'poolhouse', 'pillow', 'pyflyt', 'stable-baselines3']
 
 
 def test_managed_scope_is_rediscovered_after_settings_reload(isolated_routing, tmp_path):
@@ -122,11 +122,11 @@ def test_catalogue_probes_chosen_drone_python_without_recursive_mapping(isolated
     monkeypatch.setenv('PYTHONUTF8', 'on')
     python = tmp_path / 'native Python'
     python.write_text(f'#!{sys.executable}\nimport json,os\n'
-                      'assert "ML_STACK_GYM_PYTHON" not in os.environ\n'
-                      'assert "ML_STACK_GYM_PYTHONS" not in os.environ\n'
+                      'assert "POOLHOUSE_GYM_PYTHON" not in os.environ\n'
+                      'assert "POOLHOUSE_GYM_PYTHONS" not in os.environ\n'
                       'print(json.dumps([{"id":"drone","available":True,"library":"native fixture"}]))\n')
     python.chmod(0o755)
-    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', json.dumps({'drone': str(python)}))
+    monkeypatch.setenv('POOLHOUSE_GYM_PYTHONS', json.dumps({'drone': str(python)}))
     entries = catalogue()
     drone = next(row for row in entries if row['id'] == 'drone')
     assert drone['available'] and drone['interpreter'] == str(python)
@@ -137,8 +137,8 @@ def test_catalogue_probes_chosen_drone_python_without_recursive_mapping(isolated
 def test_worker_launch_uses_saved_drone_python_without_parent_routes(isolated_routing, tmp_path):
     python = tmp_path / 'worker Python'
     python.write_text(f'#!{sys.executable}\nimport json,os,sys\n'
-                      'assert "ML_STACK_GYM_PYTHON" not in os.environ\n'
-                      'assert "ML_STACK_GYM_PYTHONS" not in os.environ\n'
+                      'assert "POOLHOUSE_GYM_PYTHON" not in os.environ\n'
+                      'assert "POOLHOUSE_GYM_PYTHONS" not in os.environ\n'
                       'settings=json.loads(sys.argv[-1])\n'
                       'print(json.dumps({"environment":settings["environment"],"status":"ready"}),flush=True)\n')
     python.chmod(0o755)
@@ -164,11 +164,11 @@ def test_installed_native_drone_relaunches_from_saved_settings(isolated_routing,
     import os
     from pathlib import Path
 
-    from ml_stack.gym.runtime import SessionManager
-    configured = os.environ.get('ML_STACK_TEST_DRONE_PYTHON')
+    from poolhouse.gym.runtime import SessionManager
+    configured = os.environ.get('POOLHOUSE_TEST_DRONE_PYTHON')
     if not configured or not Path(configured).is_file():
-        pytest.skip('Set ML_STACK_TEST_DRONE_PYTHON to a native PyFlyt interpreter')
-    monkeypatch.setenv('ML_STACK_CACHE', str(tmp_path / 'cache'))
+        pytest.skip('Set POOLHOUSE_TEST_DRONE_PYTHON to a native PyFlyt interpreter')
+    monkeypatch.setenv('POOLHOUSE_CACHE', str(tmp_path / 'cache'))
     settings_path = tmp_path / 'settings.json'
     Settings(setup_done=True, gym_pythons={'drone': configured}).save(settings_path)
     for _ in range(2):
@@ -211,7 +211,7 @@ def test_macos_bullet_build_selects_sdk_without_shell(monkeypatch, tmp_path):
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout=str(sdk) + '\n')
 
-    monkeypatch.setattr('ml_stack.fleet.environment.subprocess.run', run)
+    monkeypatch.setattr('poolhouse.fleet.environment.subprocess.run', run)
     environment = Environment(tmp_path, python_version='3.12').build_environment()
     assert calls[0][0] == ['xcrun', '--show-sdk-path']
     assert not calls[0][1].get('shell', False)

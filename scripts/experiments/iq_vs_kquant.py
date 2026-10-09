@@ -7,8 +7,8 @@
     iq_vs_kquant.py --run      run the cells one at a time, writing results as it goes
     iq_vs_kquant.py --analyse  read the results and write the table and the verdict
 
-Every cell is one call of the existing machinery: `ml-stack-decide jevbench` (the logprob
-backend), `ml-stack-bench sweep` (the question set) or `ml-stack-bench speed`.
+Every cell is one call of the existing machinery: `poolhouse-decide jevbench` (the logprob
+backend), `poolhouse-bench sweep` (the question set) or `poolhouse-bench speed`.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def label(cell: Cell) -> str:
 
 def model_of(ref: str) -> str:
     """The file ``ref`` names when it is installed, else ``ref``."""
-    from ml_stack import hub
+    from poolhouse import hub
 
     found = hub.installed_for(ref) if ref.startswith("hf:") else None
     return str(found.path) if found else ref
@@ -92,10 +92,10 @@ def command(config: dict[str, Any], cell: Cell, out_dir: Path) -> list[str]:
     common = ["--serve", model, "--serve-label", label(cell), "--no-profile", "--no-draft",
               "--context", str(config["context"]), "--kept", str(expand(config["store"])),
               "--no-queue", "--yes"]
-    bench = [sys.executable, "-m", "ml_stack.bench.run"]
+    bench = [sys.executable, "-m", "poolhouse.bench.run"]
     if cell.task == "jevbench":
         spec = config["tasks"]["jevbench"]
-        return [sys.executable, "-m", "ml_stack.decide_cli", "jevbench", "--yes", "--backend",
+        return [sys.executable, "-m", "poolhouse.decide_cli", "jevbench", "--yes", "--backend",
                 "logprob", "--gguf", model, "--context", str(spec["context"]), "--tier",
                 spec["tier"], "--limit", str(spec["limit"]),
                 "--out", str(out_dir / f"{cell.id}.json")]
@@ -133,8 +133,8 @@ def problems(config: dict[str, Any]) -> list[str]:
 
 
 def _files(pair: dict[str, Any]) -> list[str]:
-    from ml_stack import hub
-    from ml_stack.serve import quant_guard
+    from poolhouse import hub
+    from poolhouse.serve import quant_guard
 
     out: list[str] = []
     for side, want_iq in (("iq", True), ("kquant", False)):
@@ -148,8 +148,8 @@ def _files(pair: dict[str, Any]) -> list[str]:
 
 
 def _flags(config: dict[str, Any]) -> list[str]:
-    from ml_stack import decide_cli
-    from ml_stack.bench import run as bench_run
+    from poolhouse import decide_cli
+    from poolhouse.bench import run as bench_run
 
     out: list[str] = []
     for cell in cells(config):
@@ -171,7 +171,7 @@ def busy() -> str:
 
 
 def build_id() -> str:
-    from ml_stack.serve import binary, build_platform
+    from poolhouse.serve import binary, build_platform
 
     try:
         return build_platform.version_of(binary.require_binary())
@@ -185,8 +185,8 @@ def harvest(config: dict[str, Any], cell: Cell, out_dir: Path) -> dict[str, Any]
         got = json.loads((out_dir / f"{cell.id}.json").read_text())["runs"]["logprob"]["all"]
         return {"accuracy": got["accuracy"] * 100, "n": got["n"], "errors": got["errors"],
                 "ms_per_decision": got["p50_ms"]}
-    from ml_stack import bench
-    from ml_stack.bench.peer_runs import exported
+    from poolhouse import bench
+    from poolhouse.bench.peer_runs import exported
 
     store = expand(config["store"])
     if cell.task == "generation":

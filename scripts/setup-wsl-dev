@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-VENV="${ML_STACK_WSL_VENV:-$HOME/.venvs/ml-stack-dev}"
+VENV="${POOLHOUSE_WSL_VENV:-$HOME/.venvs/poolhouse-dev}"
 UV="${UV:-$(command -v uv || true)}"
 if [[ -z "$UV" && -x "$HOME/.local/bin/uv" ]]; then
   UV="$HOME/.local/bin/uv"
 fi
 BASHRC="${BASHRC:-$HOME/.bashrc}"
-CONFIG="$HOME/.config/ml-stack/wsl-dev.sh"
+CONFIG="$HOME/.config/poolhouse/wsl-dev.sh"
 
 case "$(uname -r)" in
   *[Mm]icrosoft*) ;;
@@ -34,7 +34,7 @@ else:
     print("ok")
 ' "$VENV")"
   if [[ "$venv_check" != ok ]]; then
-    printf 'Existing environment at %s %s; remove it or set ML_STACK_WSL_VENV to a Python 3.13 venv.\n' \
+    printf 'Existing environment at %s %s; remove it or set POOLHOUSE_WSL_VENV to a Python 3.13 venv.\n' \
       "$VENV" "$venv_check" >&2
     exit 2
   fi
@@ -54,60 +54,60 @@ ln -sfn -- "$ffmpeg_binary" "$VENV/bin/ffmpeg"
 mkdir -p "$(dirname -- "$CONFIG")"
 tmp="$CONFIG.tmp"
 {
-  printf 'export ML_STACK_DEV_ROOT=%q\n' "$ROOT"
-  printf 'export ML_STACK_DEV_VENV=%q\n' "$VENV"
+  printf 'export POOLHOUSE_DEV_ROOT=%q\n' "$ROOT"
+  printf 'export POOLHOUSE_DEV_VENV=%q\n' "$VENV"
   cat <<'ENV'
 case ":$PATH:" in
-    *":$ML_STACK_DEV_VENV/bin:"*) ;;
-    *) export PATH="$ML_STACK_DEV_VENV/bin:$PATH" ;;
+    *":$POOLHOUSE_DEV_VENV/bin:"*) ;;
+    *) export PATH="$POOLHOUSE_DEV_VENV/bin:$PATH" ;;
 esac
-export PYTHON="$ML_STACK_DEV_VENV/bin/python"
-_ml_stack_cuda_home="$ML_STACK_DEV_VENV/lib/python3.13/site-packages/nvidia/cu13"
-if [[ -x "$_ml_stack_cuda_home/bin/nvcc" ]]; then
-    export CUDA_HOME="$_ml_stack_cuda_home"
-    export CUDA_PATH="$_ml_stack_cuda_home"
+export PYTHON="$POOLHOUSE_DEV_VENV/bin/python"
+_poolhouse_cuda_home="$POOLHOUSE_DEV_VENV/lib/python3.13/site-packages/nvidia/cu13"
+if [[ -x "$_poolhouse_cuda_home/bin/nvcc" ]]; then
+    export CUDA_HOME="$_poolhouse_cuda_home"
+    export CUDA_PATH="$_poolhouse_cuda_home"
     case ":$PATH:" in
-        *":$_ml_stack_cuda_home/bin:"*) ;;
-        *) export PATH="$_ml_stack_cuda_home/bin:$PATH" ;;
+        *":$_poolhouse_cuda_home/bin:"*) ;;
+        *) export PATH="$_poolhouse_cuda_home/bin:$PATH" ;;
     esac
 fi
-unset _ml_stack_cuda_home
+unset _poolhouse_cuda_home
 case ":${PYTHONPATH:-}:" in
-    *":$ML_STACK_DEV_ROOT/src:"*) ;;
-    *) export PYTHONPATH="$ML_STACK_DEV_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" ;;
+    *":$POOLHOUSE_DEV_ROOT/src:"*) ;;
+    *) export PYTHONPATH="$POOLHOUSE_DEV_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" ;;
 esac
 
 if [[ -d /mnt/c/Users ]]; then
-    _ml_stack_windows_home="$(find /mnt/c/Users -mindepth 1 -maxdepth 1 -type d -iname "${ML_STACK_WINDOWS_USER:-${USER:-}}" -print -quit 2>/dev/null || true)"
-    for _ml_stack_model_root in \
-        "$_ml_stack_windows_home/.ml-stack/models" \
-        "$_ml_stack_windows_home/.cache/huggingface/hub" \
-        "$_ml_stack_windows_home/.ollama/models" \
-        "$_ml_stack_windows_home/.lmstudio/models" \
-        "$_ml_stack_windows_home/.local/share/llama.cpp" \
-        "$_ml_stack_windows_home/AppData/Local/llama.cpp" \
-        "$_ml_stack_windows_home/jan/models" \
-        "$_ml_stack_windows_home/AppData/Roaming/Jan/data/models"; do
-        [[ -d "$_ml_stack_model_root" ]] || continue
-        case ":${ML_STACK_MODEL_PATHS:-}:" in
-            *":$_ml_stack_model_root:"*) ;;
-            *) export ML_STACK_MODEL_PATHS="${ML_STACK_MODEL_PATHS:+$ML_STACK_MODEL_PATHS:}$_ml_stack_model_root" ;;
+    _poolhouse_windows_home="$(find /mnt/c/Users -mindepth 1 -maxdepth 1 -type d -iname "${POOLHOUSE_WINDOWS_USER:-${USER:-}}" -print -quit 2>/dev/null || true)"
+    for _poolhouse_model_root in \
+        "$_poolhouse_windows_home/.poolhouse/models" \
+        "$_poolhouse_windows_home/.cache/huggingface/hub" \
+        "$_poolhouse_windows_home/.ollama/models" \
+        "$_poolhouse_windows_home/.lmstudio/models" \
+        "$_poolhouse_windows_home/.local/share/llama.cpp" \
+        "$_poolhouse_windows_home/AppData/Local/llama.cpp" \
+        "$_poolhouse_windows_home/jan/models" \
+        "$_poolhouse_windows_home/AppData/Roaming/Jan/data/models"; do
+        [[ -d "$_poolhouse_model_root" ]] || continue
+        case ":${POOLHOUSE_MODEL_PATHS:-}:" in
+            *":$_poolhouse_model_root:"*) ;;
+            *) export POOLHOUSE_MODEL_PATHS="${POOLHOUSE_MODEL_PATHS:+$POOLHOUSE_MODEL_PATHS:}$_poolhouse_model_root" ;;
         esac
     done
-    unset _ml_stack_windows_home _ml_stack_model_root
+    unset _poolhouse_windows_home _poolhouse_model_root
 fi
 ENV
 } > "$tmp"
 chmod 600 "$tmp"
 mv -f -- "$tmp" "$CONFIG"
 
-source_line='[ -f "$HOME/.config/ml-stack/wsl-dev.sh" ] && . "$HOME/.config/ml-stack/wsl-dev.sh"'
+source_line='[ -f "$HOME/.config/poolhouse/wsl-dev.sh" ] && . "$HOME/.config/poolhouse/wsl-dev.sh"'
 touch "$BASHRC"
 if ! grep -Fqx "$source_line" "$BASHRC"; then
   printf '\n%s\n' "$source_line" >> "$BASHRC"
 fi
 
-printf 'Installed ml-stack with all supported extras and test dependencies in %s\n' "$VENV"
+printf 'Installed poolhouse with all supported extras and test dependencies in %s\n' "$VENV"
 printf 'Installed CUDA-matched torchaudio and exposed the bundled ffmpeg executable in %s/bin.\n' "$VENV"
 printf 'Opened shells will use source at %s and scan configured Windows model caches.\n' "$ROOT"
 printf 'Run: source %s\n' "$BASHRC"

@@ -1,6 +1,6 @@
 """Regenerates the screenshots in docs/brand-ui: every main screen, in both vocabularies.
 
-Skipped unless ``ML_STACK_UI_SHOTS`` is set, because it writes into the docs folder. The
+Skipped unless ``POOLHOUSE_UI_SHOTS`` is set, because it writes into the docs folder. The
 devices, the shared project and the board messages are invented samples (the daemon here has no
 second machine and no project registry), served to the page the way the real routes would.
 """
@@ -29,8 +29,8 @@ with_peers = fleet_page.with_peers
 @pytest.fixture(autouse=True)
 def only_when_asked():
     """Writing into docs/ is opt-in."""
-    if not os.environ.get("ML_STACK_UI_SHOTS"):
-        pytest.skip("writes docs/brand-ui; set ML_STACK_UI_SHOTS")
+    if not os.environ.get("POOLHOUSE_UI_SHOTS"):
+        pytest.skip("writes docs/brand-ui; set POOLHOUSE_UI_SHOTS")
 
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "brand-ui"

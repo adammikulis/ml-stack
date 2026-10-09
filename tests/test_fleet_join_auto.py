@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import join as joining
+from poolhouse.fleet import join as joining
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def isolated_join(monkeypatch):
 @pytest.mark.parametrize("mode", [None, "dev", "prod"])
 def test_no_passphrase_uses_automatic_cluster_without_enrollment(
         isolated_join, monkeypatch, tmp_path, mode):
-    from ml_stack.fleet import automatic_clusters
+    from poolhouse.fleet import automatic_clusters
 
     asked = []
     actual = mode or "dev"
@@ -35,7 +35,7 @@ def test_no_passphrase_uses_automatic_cluster_without_enrollment(
 
 
 def test_automatic_cluster_uses_explicit_discovery_port(isolated_join, monkeypatch, tmp_path):
-    from ml_stack.fleet import automatic_clusters
+    from poolhouse.fleet import automatic_clusters
 
     asked = []
     monkeypatch.setattr(automatic_clusters, "ensure", lambda path, **kw:
@@ -72,8 +72,8 @@ def test_no_argument_terminal_does_not_prompt_or_read_stdin(monkeypatch, tmp_pat
     import sys
 
     monkeypatch.setattr(sys, "stdin", Terminal())
-    monkeypatch.delenv("ML_STACK_PASSPHRASE", raising=False)
-    monkeypatch.delenv("ML_STACK_CLUSTER", raising=False)
+    monkeypatch.delenv("POOLHOUSE_PASSPHRASE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_CLUSTER", raising=False)
     monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("automatic join prompted"))
     asked = []
     monkeypatch.setattr(joining, "join_machine", lambda **kw: asked.append(kw) or joining.Joined(name="larch", port=1, root=tmp_path, group=""))
@@ -84,7 +84,7 @@ def test_no_argument_terminal_does_not_prompt_or_read_stdin(monkeypatch, tmp_pat
 
 def test_automatic_admission_finishes_before_first_daemon_start(isolated_join, monkeypatch,
                                                                tmp_path):
-    from ml_stack.fleet import automatic_clusters
+    from poolhouse.fleet import automatic_clusters
 
     events = []
     monkeypatch.setattr(joining, "already_running", lambda port: None)
@@ -98,8 +98,8 @@ def test_automatic_admission_finishes_before_first_daemon_start(isolated_join, m
 
 
 def test_automatic_admission_failure_does_not_start_daemon(isolated_join, monkeypatch, tmp_path):
-    from ml_stack.fleet import automatic_clusters
-    from ml_stack.fleet.discovery import DiscoveryError
+    from poolhouse.fleet import automatic_clusters
+    from poolhouse.fleet.discovery import DiscoveryError
 
     def refuse(*a, **kw):
         raise DiscoveryError("Production mode needs an explicitly admitted Production cluster")

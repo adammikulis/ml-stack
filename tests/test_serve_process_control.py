@@ -19,13 +19,13 @@ def _blocked(module: str, body: str) -> subprocess.CompletedProcess:
 
 
 def test_process_control_refuses_to_import_without_psutil():
-    done = _blocked("ml_stack.serve.process", "print('imported')")
+    done = _blocked("poolhouse.serve.process", "print('imported')")
     assert done.returncode != 0 and "psutil" in done.stderr
     assert "imported" not in done.stdout
 
 
 def test_port_scanning_refuses_to_run_without_psutil():
-    done = _blocked("ml_stack.serve.ports", "print(ml_stack.serve.ports.server_pids_on_port(1))")
+    done = _blocked("poolhouse.serve.ports", "print(poolhouse.serve.ports.server_pids_on_port(1))")
     assert done.returncode != 0 and "psutil" in done.stderr
     assert done.stdout.strip() != "[]"
 
@@ -40,7 +40,7 @@ def test_a_live_child_is_killed_with_its_own_children():
 
         import psutil
 
-        from ml_stack.serve.process import kill_process_tree
+        from poolhouse.serve.process import kill_process_tree
         deadline = time.monotonic() + 10
         while not psutil.Process(parent.pid).children() and time.monotonic() < deadline:
             time.sleep(0.05)

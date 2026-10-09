@@ -6,7 +6,7 @@ import socket
 
 import pytest
 
-from ml_stack.fleet.discovery import Advertiser, Beacon, mint_cluster
+from poolhouse.fleet.discovery import Advertiser, Beacon, mint_cluster
 from tests.test_fleet_ui import Serving, primary_ip
 
 
@@ -23,7 +23,7 @@ def test_first_run_lists_the_clusters_the_network_offers(serving, tmp_path, monk
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", 0))
         udp = s.getsockname()[1]
-    monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+    monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
     key = mint_cluster("lab", tmp_path / "other.key").key
     with Advertiser(Beacon(name="larch", port=9), key, port=udp, cluster="lab", interval_s=5.0):
         status, body, _ = serving.call("/ui/setup/clusters")

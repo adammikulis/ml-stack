@@ -1,14 +1,14 @@
-ml-stack
+poolhouse
 Licensed under the Apache License, Version 2.0 (LICENSE).
 
 This product includes software derived from the following projects, under their own terms.
 
 ------------------------------------------------------------------------------------------
 qwen-spec -- https://github.com/JonasLoos/qwen-spec
-src/ml_stack/spec/ (tree verification, tree attention mask, the DeltaNet path walk, the
+src/poolhouse/spec/ (tree verification, tree attention mask, the DeltaNet path walk, the
 acceptance rules, the fused sampling kernel, the cost curve, the session, the ngram, MTP
-and DFlash drafters) is a port of qwen-spec, and src/ml_stack/spec/data/draft_vocab.npy
-and src/ml_stack/spec/data/calibration/Qwen3.8-27B-DFlash2-b32.json are its data files.
+and DFlash drafters) is a port of qwen-spec, and src/poolhouse/spec/data/draft_vocab.npy
+and src/poolhouse/spec/data/calibration/Qwen3.8-27B-DFlash2-b32.json are its data files.
 
 Under the MIT license:
 
@@ -34,19 +34,19 @@ SOFTWARE.
 
 ------------------------------------------------------------------------------------------
 DFlash -- https://github.com/z-lab/dflash
-src/ml_stack/spec/drafters/dflash_model.py holds the DFlash drafter's model classes from
+src/poolhouse/spec/drafters/dflash_model.py holds the DFlash drafter's model classes from
 dflash/model_mlx.py, under the MIT license, copyright (c) 2026 Z Lab; the full notice is at
 the top of that file. Its DFlash2 grouped convolution and candidate selector follow
 SGLang's srt/models/dflash.py (https://github.com/sgl-project/sglang, Apache-2.0).
 
 ------------------------------------------------------------------------------------------
 mlx-lm -- https://github.com/ml-explore/mlx-lm
-src/ml_stack/spec/ drives mlx-lm's qwen3_5 model, cache and gated-delta code, and ports
+src/poolhouse/spec/ drives mlx-lm's qwen3_5 model, cache and gated-delta code, and ports
 the verification passes over them. Under the MIT license, copyright (c) 2023 Apple Inc.
 
 ------------------------------------------------------------------------------------------
 Strands Decider -- https://github.com/strands-labs/strands-decider
-src/ml_stack/decide/pointer.py and pointer_prompt.py re-implement the architecture its
+src/poolhouse/decide/pointer.py and pointer_prompt.py re-implement the architecture its
 documentation describes: a language-model torso without its output head, scored by a
 pointer readout that compares the hidden state at an `<answer>` marker with the hidden state
 at the end of each option's line, and the prompt layout the released checkpoint was trained

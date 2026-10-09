@@ -7,12 +7,12 @@ from types import SimpleNamespace
 import pytest
 from test_fleet_ui import Serving
 
-from ml_stack.fleet import gym_recording_routes, gym_routes, workspace_routes
+from poolhouse.fleet import gym_recording_routes, gym_routes, workspace_routes
 
 
 @pytest.fixture
 def daemon(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_GYM_FILES_ROOT", str(tmp_path / "untrusted-root"))
+    monkeypatch.setenv("POOLHOUSE_GYM_FILES_ROOT", str(tmp_path / "untrusted-root"))
     server = Serving(tmp_path)
     try:
         yield server
@@ -23,7 +23,7 @@ def daemon(tmp_path, monkeypatch):
 def raw_request(server, path, body):
     connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=5)
     try:
-        connection.request('POST', path, body=body, headers={'X-ML-Stack-UI': '1'})
+        connection.request('POST', path, body=body, headers={'X-Poolhouse-UI': '1'})
         response = connection.getresponse()
         return response.status, json.loads(response.read())
     finally:
@@ -78,13 +78,13 @@ def test_manual_world_uses_daemon_root_and_rejects_symlink(daemon, monkeypatch, 
     assert daemon.call('/ui/gym/sessions', method='POST', body=body)[0] == 201
     assert calls[0][0] == ('car',)
     import os
-    assert os.environ['ML_STACK_GYM_FILES_ROOT'] == str(daemon.files)
+    assert os.environ['POOLHOUSE_GYM_FILES_ROOT'] == str(daemon.files)
 
 
 @pytest.mark.parametrize('extra', [{'metadata': []}, {'preview': 'yes'}, {'name': []}, {'args': ['--help', 1]}])
 def test_job_structure_is_validated_before_submission(daemon, monkeypatch, extra):
-    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'ml-stack-doctor'}])
-    assert daemon.call('/ui/workspace/jobs', method='POST', body={'command': 'ml-stack-doctor', **extra})[0] == 400
+    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'poolhouse-doctor'}])
+    assert daemon.call('/ui/workspace/jobs', method='POST', body={'command': 'poolhouse-doctor', **extra})[0] == 400
     assert daemon.runner.snapshot() == []
 
 
@@ -108,7 +108,7 @@ def test_recording_frame_and_review_symlinks_remain_jailed(daemon, monkeypatch, 
 
 
 def test_native_manager_rejects_unknown_commands_without_dispatch(daemon, monkeypatch):
-    from ml_stack.gym.runtime import SessionManager
+    from poolhouse.gym.runtime import SessionManager
     monkeypatch.setattr(gym_routes, 'manager', SessionManager())
     code, _, _ = daemon.call('/ui/gym/sessions/nonexistent', method='POST',
                             body={'command': 'shell', 'payload': {'args': ['touch', 'outside']}})
@@ -116,9 +116,9 @@ def test_native_manager_rejects_unknown_commands_without_dispatch(daemon, monkey
 
 
 def test_workspace_argv_is_literal_and_never_shell_parsed(daemon, monkeypatch):
-    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'ml-stack-doctor'}])
+    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'poolhouse-doctor'}])
     value = '; touch outside $(whoami)'
     code, result, _ = daemon.call('/ui/workspace/jobs', method='POST',
-        body={'command': 'ml-stack-doctor', 'args': [value], 'preview': True})
-    assert code == 200 and result['argv'] == ['ml-stack-doctor', value]
+        body={'command': 'poolhouse-doctor', 'args': [value], 'preview': True})
+    assert code == 200 and result['argv'] == ['poolhouse-doctor', value]
     assert daemon.runner.snapshot() == []

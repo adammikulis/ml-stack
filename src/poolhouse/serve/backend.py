@@ -1,0 +1,897 @@
+"""Launching a model server, and the shape every backend presents."""
+
+from __future__ import annotations
+
+import contextlib
+import difflib
+import json
+import logging
+import math
+import os
+import re
+import subprocess
+import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+from poolhouse import home, sentinel, serverkeys
+from poolhouse.client import families, wait_for_health
+from poolhouse.platform import process_group_kwargs
+from poolhouse.serve import confined as confinement, exit_guard, grant
+from poolhouse.serve.binary import child_env, require_binary
+from poolhouse.serve.leases import recorded_servers
+from poolhouse.serve.logs import prune
+from poolhouse.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
+
+logger = logging.getLogger(__name__)
+
+
+LOGS_KEPT = 5
+"""How many logs are kept for each server name and port, the newest first."""
+
+
+def log_dir() -> Path:
+    """Where each model server this machine started writes its log, one file a start."""
+    return home.state("logs")
+
+
+def logs_of(name: str, port: int) -> list[Path]:
+    """Every log ``name`` has written on ``port``, oldest first."""
+    found = [one for one in log_dir().glob(f"{name}-{port}-*.log") if one.is_file()]
+    return sorted(found, key=lambda one: (one.stat().st_mtime, one.name))
+
+
+def server_log(name: str, port: int) -> Path:
+    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`
+    and, across every port, past the count, size and age `poolhouse.serve.logs.limits` allows."""
+    logs = log_dir()
+    logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for old in logs_of(name, port)[:-(LOGS_KEPT - 1) or None]:
+        old.unlink(missing_ok=True)
+    prune(logs, [Path(str(one["log"])) for one in recorded_servers().values() if one.get("log")])
+    return logs / f"{name}-{port}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
+
+
+def default_slot_save_path() -> Path:
+    """Where a slot's KV cache is saved when a lease escalates slots without naming one."""
+    return home.cache("slots")
+
+
+class ServerFailed(RuntimeError):
+    """The server never became healthy. Carries whatever it managed to say."""
+
+
+class UnknownFlag(ValueError):
+    """The argv names a flag this build of llama-server does not have.
+
+    Raised before the process is started, because the alternative is finding out at the
+    far end of a 70 GB load: `--draft-max` became `--spec-draft-n-max` between releases,
+    and a build that lacks a flag exits saying only "invalid argument". One line per flag,
+    each naming the nearest flag the build does have.
+    """
+
+
+# A build's `--help`, keyed by (resolved path, mtime) so a rebuilt binary at the same path
+# is read again and an unchanged one is never read twice.
+_HELP: dict[tuple[str, float], str] = {}
+
+# A flag at the start of a help line, or after a comma: llama-server prints
+# `-c,    --ctx-size N`, and `-hfd, -hfrd, --hf-repo-draft REPO`. The first character after
+# the dashes must be a letter, so `(default: -1)` reads as a number and not a flag.
+_FLAG_IN_HELP = re.compile(r"(?:^|,)\s*(-{1,2}[A-Za-z][\w-]*)")
+
+# `                    allowed values: f32, f16, bf16, q8_0, q4_0` under the flag it belongs to.
+_ALLOWED_IN_HELP = re.compile(r"allowed values:\s*(.+?)\s*$")
+
+
+def _binary_info(path: Path, *, devices: bool, timeout: float) -> str:
+    """Read a fixed information command without loading a model or starting a server."""
+    option = "--list-devices" if devices else "--help"
+    try:
+        got = subprocess.run([str(path), option], capture_output=True, text=True,
+                             errors="replace", timeout=timeout, env=child_env(path))
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if devices and got.returncode != 0:
+        return ""
+    return got.stdout + "\n" + got.stderr
+
+
+def devices_of(binary: str | Path, *, timeout: float = 20.0) -> str:
+    """Currently available devices; unlike help, this initializes backend discovery."""
+    return _binary_info(Path(binary), devices=True, timeout=timeout)
+
+
+def help_of(binary: str | Path, *, timeout: float = 20.0) -> str:
+    """A build's ``--help``, stdout and stderr together; ``""`` when it cannot be read."""
+    path = Path(binary)
+    try:
+        key = (str(path.resolve()), path.stat().st_mtime)
+    except OSError:
+        return ""
+    if key in _HELP:
+        return _HELP[key]
+    text = _binary_info(path, devices=False, timeout=timeout)
+    if not text.strip():
+        return ""
+    _HELP[key] = text
+    return text
+
+
+def flags_of(binary: str | Path, *, timeout: float = 20.0) -> frozenset[str]:
+    """The option strings a llama-server build accepts, read out of its ``--help``.
+
+    Empty means *unknown* -- the binary is missing, hung, or printed nothing that looks
+    like usage -- and an unknown build is given no opinion, never "supports none". Reading
+    help costs a fraction of a second where loading a model to find out costs minutes.
+    """
+    found: set[str] = set()
+    for line in help_of(binary, timeout=timeout).splitlines():
+        # A retired flag stays in the parser only to say so: llama.cpp 0.3.0 lists
+        # `--draft, --draft-n, --draft-max N  the argument has been removed. use
+        # --spec-draft-n-max`, and passing it is an error just the same. Not known.
+        if "has been removed" in line:
+            continue
+        found.update(_FLAG_IN_HELP.findall(line))
+    return frozenset(found)
+
+
+def values_of(binary: str | Path, flag: str, *, timeout: float = 20.0) -> frozenset[str]:
+    """The values a build's ``--help`` lists as allowed for ``flag``.
+
+    Empty is no opinion: the build could not be read, has no such flag, or names no list
+    for it. A flag's aliases share one list, so ``--spec-draft-type-k`` and
+    ``--cache-type-k-draft`` answer the same.
+    """
+    named: set[str] = set()
+    for line in help_of(binary, timeout=timeout).splitlines():
+        if line[:1] not in (" ", "\t") and line.strip().startswith("-"):
+            named = set(_FLAG_IN_HELP.findall(line))
+        allowed = _ALLOWED_IN_HELP.search(line)
+        if allowed and flag in named:
+            return frozenset(word.strip() for word in allowed.group(1).split(",")
+                             if word.strip())
+    return frozenset()
+
+
+def unknown_flags(argv: list[str], known: frozenset[str] | set[str]) -> list[tuple[str, str]]:
+    """The flags in ``argv`` that ``known`` lacks, each with the nearest flag it has.
+
+    The nearest is "" when nothing is close. An empty ``known`` is an unknown build, and
+    an unknown build gets no opinion: the result is ``[]``.
+    """
+    if not known:
+        return []
+    lacking: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token in argv:
+        if not (token.startswith("-") and len(token) > 1 and token.lstrip("-")[:1].isalpha()):
+            continue
+        if token in known or token in seen:
+            continue
+        seen.add(token)
+        near = difflib.get_close_matches(token, sorted(known), n=1, cutoff=0.6)
+        lacking.append((token, near[0] if near else ""))
+    return lacking
+
+
+def _load_mode(spec: ServerSpec) -> str:
+    """``--load-mode``'s value for ``spec.mmap`` and ``spec.mlock``; "" for the server's own."""
+    no_mmap = spec.mmap is not None and not spec.mmap
+    if spec.mlock:
+        return "mlock" if no_mmap else "mmap+mlock"
+    return "none" if no_mmap else ""
+
+
+_CONTEXT_SUFFIX = {"": 1, "k": 1_000, "m": 1_000_000}
+
+
+def parse_context(text: str | int) -> int:
+    """A context size the way a person names it: ``32768``, ``256k``, ``1m``.
+
+    ``k`` and ``m`` are the plain decimal multipliers a model card's own round figures
+    use -- 1,000 and 1,000,000 -- not a file size's binary kibi/mebi, so ``1m`` is
+    1,000,000 tokens, not 1,048,576.
+    """
+    if isinstance(text, int):
+        return text
+    raw = str(text).strip().lower()
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([km]?)", raw)
+    if not match:
+        raise ValueError(f"not a context size: {text!r} (want e.g. 32768, 256k, 1m)")
+    number, suffix = match.groups()
+    return int(float(number) * _CONTEXT_SUFFIX[suffix])
+
+
+def trained_context(model: str | Path) -> int:
+    """The context this model trained at, off its own GGUF header.
+
+    0 when that cannot be read -- an ``hf:`` reference not yet on disk, or a header that
+    does not name one -- which is unknown, not zero: a caller asking whether a context is
+    beyond it must treat 0 as no opinion rather than as a real training length.
+    """
+    if isinstance(model, str) and model.startswith("hf:"):
+        return 0
+    path = Path(model)
+    if not path.is_file():
+        return 0
+    try:
+        from poolhouse.serve.layout import layout
+
+        return layout(path).context_length
+    except Exception:  # noqa: BLE001 - an unreadable header names no trained length
+        return 0
+
+
+@dataclass(frozen=True, slots=True)
+class ServerSpec:
+    """What to serve, and how."""
+
+    model: str | Path
+    port: int = 8080
+    context: int = 4096
+    n_gpu_layers: int | str = "auto"
+    device: str = ""
+    parallel: int = 1
+    embedding: bool = False
+    # A reranker (llama-server --reranking, serving /v1/rerank): it scores a query against
+    # documents, so it never shares a server with chat or embedding.
+    reranking: bool = False
+    mmproj: str | Path | None = None
+    flash_attn: bool = True
+    jinja: bool = True
+    api_key: str = ""
+    # A small model of the same family, guessing ahead so the large one only has to agree.
+    # Same two forms as `model`: a path, or hf:owner/repo[/file.gguf].
+    draft: str | Path | None = None
+    # How to guess ahead. "" leaves the server's own default, which is `none` -- passing a
+    # draft model turns on draft-simple by itself, but the n-gram kinds must be asked for.
+    #
+    # The n-gram kinds need no second model at all: they propose tokens by looking up
+    # sequences already seen in the prompt, which the large model then checks in one pass.
+    # That suits work that copies from its context -- answering out of retrieved text,
+    # transcribing, summarising -- and costs no weights and no memory, where a draft head
+    # costs both. `ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-mod`, `ngram-cache`.
+    spec_type: str = ""
+    # Multi-token prediction: None serves the model's MTP head when one is found and trusted
+    # (`serve.mtp.plan`); False serves without; True marks a head that default picked.
+    mtp: bool | None = None
+    spec_draft_max: int | None = None       # tokens guessed ahead (server default 3)
+    spec_p_min: float | None = None         # draft's minimum probability (server default 0.00)
+    # Guess ahead in a tree rather than a chain: the branches the drafter expands per depth,
+    # each proposing that many children, up to `spec_draft_max` nodes. The target verifies the
+    # whole tree in one pass, every node seeing only the prefix and its own ancestors, and keeps
+    # the path it agrees with. One conversation at a time: the server refuses a tree beside
+    # `parallel > 1`. A build without `0003-speculative-tree.patch` has no such flag.
+    spec_tree: int | None = None
+    spec_draft_min: int | None = None
+    spec_ngram_min: int | None = None       # ngram-mod lookup floor (server default 48)
+    spec_ngram_max: int | None = None
+    spec_draft_ngl: int | None = None       # draft layers on the GPU; without it, the CPU
+    # A draft that is a whole model keeps its **own KV cache**, at the same context as the
+    # target, because it has to read the same prompt to predict against it. That is the real
+    # cost of drafting with a model rather than a head -- on shared memory the two caches
+    # compete for one pool -- and it is why llama.cpp lets the draft's cache be quantised
+    # separately. A head like EAGLE3 reuses the target's own states and keeps almost nothing.
+    spec_draft_type_k: str = ""
+    spec_draft_type_v: str = ""
+    # Where the n-gram table lives. The in-context kinds keep none: they look up sequences
+    # already in the prompt, in memory, and touch no disk. `ngram-cache` is the exception --
+    # `lookup_static` is read and never written, `lookup_dynamic` is updated as it
+    # generates, so it carries what was learnt from one question into the next. That is
+    # worth having when the same names keep coming back, which is what answering about one
+    # community is.
+    lookup_static: str | Path | None = None
+    lookup_dynamic: str | Path | None = None
+    # Carry a KV cache across prompts that merely *share a prefix*, by shifting rather than
+    # reprocessing. Worth having wherever a system prompt and a set of tool schemas go out
+    # ahead of every question -- a benchmark reprocesses that same preamble once per
+    # question otherwise, twenty or thirty times a run.
+    cache_reuse: int | None = None
+    # The empty run at startup. Off saves a little of every load, which matters when a
+    # comparison puts the same model up several times.
+    warmup: bool = True
+    # Context per slot, said directly. The alternative is a total divided by the slot count,
+    # which is arithmetic done at the call site and got wrong once here -- a model served at
+    # 8k per slot against everything else at 32k, visible only because the table prints it.
+    context_per_slot: int | None = None
+    # How the server holds several conversations at once. None on each leaves the build's
+    # own default, so a spec that says nothing about them serves as it always has.
+    #
+    # One KV buffer shared across the slots, rather than one buffer each: a slot that is
+    # idle costs nothing and a busy one may use what the idle ones are not. False emits the
+    # `--no-` form, for a build whose default has gone the other way.
+    kv_unified: bool | None = None
+    # A prompt evicted from a slot is kept in RAM, up to this many MiB, and restored when a
+    # conversation comes back -- the cost of holding more conversations than there are
+    # slots is then a copy rather than a reprocessing of the whole history. 0 disables it.
+    cache_ram_mb: int | None = None
+    # Whether an idle slot's cache is moved to RAM to make room, or left where it is.
+    cache_idle_slots: bool | None = None
+    # How alike (0..1) a new prompt must be to a slot's held one before that slot is chosen
+    # for it, so a returning conversation lands on the slot that still holds its prefix.
+    slot_prompt_similarity: float | None = None
+    # A directory a slot's cache can be saved to and restored from through the `/slots`
+    # API -- a conversation put down and picked up across a restart.
+    slot_save_path: str | Path | None = None
+    # A chat template file to serve with, in place of the one the weights carry.
+    chat_template_file: str | Path | None = None
+    # Where individual tensors live, as `pattern=buffer` -- the way to keep part of a model
+    # off the GPU without keeping all of it off.
+    #
+    # The case for it is Qwen3.8-Flash-Next's N-gram Embedding on a *discrete* GPU -- a
+    # different thing entirely from the n-gram *speculation* above. That is a decoding
+    # trick; this is architecture: a 51B-parameter table looked up by the current token
+    # and the few before it, adding capacity at almost no compute per token. A gather
+    # touches a few rows a token, so on a card whose VRAM the 27G table would not fit
+    # beside the weights, naming its tensor here keeps it in host memory at no real cost.
+    #
+    # On unified memory -- a Mac -- do not: the CPU and GPU halves are one pool of RAM,
+    # the build already leaves the table mapped on the host side of its own accord (the
+    # `CPU_Mapped` line of the load log, which `fit` reads back), and an override changes nothing
+    # but adds a flag to explain. poolhouse never sets one by itself; `--on-cpu` is the
+    # person's call, for the machine in front of them.
+    #
+    # Find the pattern from the model rather than guessing: `gguf_dump` or llama-server's
+    # own load log lists the tensor names.
+    override_tensor: tuple[str, ...] = ()
+    # MoE experts on the CPU: all of them, or the first N layers' worth. The same trade for
+    # a different shape of model -- a 35B with 3B active fits a small machine this way.
+    cpu_moe: bool = False
+    n_cpu_moe: int | None = None
+    # How the *main* model's KV cache is stored -- not the draft's, which
+    # `spec_draft_type_k/v` already covers. "" leaves the server's own default, which is
+    # f16; every serving poolhouse leases through (`Serving.cache_type`) asks for q8_0. A
+    # preflight's fit estimate reads these back to size the KV cache it predicts.
+    cache_type_k: str = ""
+    cache_type_v: str = ""
+    # mmap is the server's own default; False trades load-time paging for a slower first
+    # load that pages in once rather than on every touch, which matters on a machine where
+    # a model larger than RAM would otherwise thrash. mlock pins what is loaded so it
+    # cannot be swapped back out; True costs the whole model's weight in wired memory.
+    mmap: bool | None = None
+    mlock: bool | None = None
+    # How many tokens a thinking model may spend reasoning before it is made to answer.
+    # `n_predict` is a ceiling over thinking, tool calls and answer together, and what a low
+    # ceiling cuts is always the answer; this is the budget that stops the thinking instead.
+    # None leaves the server's own default (-1: unlimited). Measured 2026-09-01: gemma-4-26B
+    # spent 252 s and 505 s on two questions under a 16k ceiling, all of it in the thinking.
+    reasoning_budget: int | None = None
+    # RoPE/YaRN: how a context longer than the model's own training length is read. ""
+    # leaves the server's own default (linear unless the model's header names one) --
+    # LlamaServerBackend.resolved_context sets these to "yarn" plus a scale and the
+    # trained length itself when a spec asks for more context than the model trained at,
+    # and leaves them untouched otherwise. None on the ext/attn/beta factors leaves
+    # llama.cpp's own YaRN defaults, which is what a person who has not measured a better
+    # one should serve with.
+    rope_scaling: str = ""
+    rope_scale: float | None = None
+    yarn_orig_ctx: int | None = None
+    yarn_ext_factor: float | None = None
+    yarn_attn_factor: float | None = None
+    yarn_beta_fast: float | None = None
+    yarn_beta_slow: float | None = None
+    extra_args: tuple[str, ...] = ()
+    # "" serves with llama-server (or tree decoding for MLX weights); "vllm" or "sglang"
+    # serves Hugging Face weights with that engine.
+    engine: str = ""
+
+    @property
+    def is_hf_ref(self) -> bool:
+        """``hf:owner/repo/file.gguf`` -- let llama-server do the download and caching."""
+        return isinstance(self.model, str) and self.model.startswith("hf:")
+
+    @staticmethod
+    def hf_parts(value: str | Path) -> tuple[str, str] | None:
+        """``hf:owner/repo[/file]`` split into ``(repo, file)``, or None when it is a path."""
+        if not (isinstance(value, str) and value.startswith("hf:")):
+            return None
+        parts = [p for p in str(value).partition("hf:")[2].split("/") if p]
+        if len(parts) < 2:
+            raise ServerFailed(
+                f"malformed HF reference {value!r}; expected hf:owner/repo[/file.gguf]")
+        # the file keeps its subdirectory: a draft head lives under MTP/, and a reference
+        # that lost it fetched nothing and served an empty draft path (measured 2026-09-01)
+        return f"{parts[0]}/{parts[1]}", ("/".join(parts[2:]) if len(parts) > 2 else "")
+
+
+@dataclass(frozen=True, slots=True)
+class ServerInfo:
+    base_url: str
+    port: int
+    pid: int | None
+    backend: str
+    adopted: bool = False
+    """True when this server was already running and we did not start it."""
+    log_path: Path | None = field(default=None, repr=False)
+    # Wall time from the process starting to the health check answering -- a fact, not a
+    # log line to be grepped for later, and where `status --json` reads it from.
+    load_s: float | None = None
+    # Wall time the post-health warm-up completion took, when one was sent. Compiling
+    # shaders and allocating the KV cache happen on the first real request whether or not
+    # anything measures them; this is what makes the *next* one the first that pays for it.
+    warmup_s: float | None = None
+    #: the broker's id for the lease this info was granted under; "" for a record read back
+    lease: str = ""
+    mtp: str = ""
+    """What multi-token prediction the server was started with: ``embedded``, a head's file
+    name, or "" for none; ``mtp_note`` says which and why."""
+    mtp_note: str = ""
+    # The ``Popen`` for a server this process started, for whoever stops it to wait on.
+    # Never serialised: it is not a value, and it is None for an adopted server.
+    process: Any = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class Lease:
+    """The manager's proof that a server about to start is already on the record.
+
+    A backend launches nothing without one, so a server this code base spawns is recorded
+    by construction -- before the process exists, with the pid filled in after -- and
+    "a server nobody recorded" cannot come out of the library. Only `ServerManager` makes
+    these, inside the broker's `grant.broker_grant()`; a test that wants a server goes
+    through a manager and a broker on a temporary state file.
+    """
+
+    port: int
+    owner_pid: int
+    state_file: str
+    stop_on_exit: bool = True
+
+    def __post_init__(self) -> None:
+        grant.require()
+
+
+class ServerBackend(ABC):
+    """One way of putting a model behind an HTTP endpoint."""
+
+    name: str
+
+    @abstractmethod
+    def start(self, spec: ServerSpec, *, lease: Lease, timeout: float = 300.0) -> ServerInfo:
+        ...
+
+    @abstractmethod
+    def command(self, spec: ServerSpec) -> list[str]:
+        """The argv this backend would run. Separate from ``start`` so it is testable"""
+
+
+def claim_port(spec: ServerSpec, lease: Lease) -> None:
+    """Refuse a start whose lease names another port, or a port held by a process not ours."""
+    if lease.port != spec.port:
+        raise ServerFailed(f"the lease is for port {lease.port}, not {spec.port}: a server "
+                           "starts only on the port its record names")
+    if not port_is_free(spec.port):
+        reclaim_port(spec.port)
+        if not port_is_free(spec.port):
+            raise ServerFailed(
+                f"port {spec.port} is held by a process that is not one of ours; "
+                "refusing to kill it"
+            )
+
+
+def launch(  # noqa: PLR0913 - the independent facts of one spawn; a bundle type would only rename them
+        argv: list[str], lease: Lease, *, log_path: Path, timeout: float,
+        env: dict[str, str], cwd: str | None = None) -> tuple[Any, str, float]:
+    """``(process, base_url, load seconds)`` for ``argv`` started and answering its health check.
+
+    The server stops with this process when the lease says ``stop_on_exit``. Raises
+    ``ServerFailed`` with the log's tail when it exits or never answers.
+    """
+    grant.require(lease, Lease)
+    port = lease.port
+    started_at = time.monotonic()
+    with log_path.open("wb") as log_handle:
+        process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT,
+                                   env=sentinel.default().scrub_env(env),
+                                   cwd=cwd, **process_group_kwargs())
+    if lease.stop_on_exit:
+        exit_guard.protect(process.pid)
+    base_url = f"http://{DEFAULT_HOST}:{port}"
+    if not wait_for_health(base_url, timeout=timeout, is_alive=lambda: process.poll() is None):
+        code = process.poll()
+        process.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5.0)
+        exit_guard.release(process.pid)
+        raise ServerFailed(
+            f"{Path(argv[0]).name} did not become healthy on {base_url}"
+            + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
+            + f"\n--- {log_path} ---\n"
+            + tail(log_path)
+        )
+    return process, base_url, time.monotonic() - started_at
+
+
+class LlamaServerBackend(ServerBackend):
+    """llama.cpp's ``llama-server``."""
+
+    name = "llama.cpp"
+
+    def __init__(
+        self,
+        *,
+        binary: str | Path | None = None,
+        vendor_dir: Path | None = None,
+        build: str | None = None,
+        quiet: bool = True,
+        sandboxed: bool | None = None,
+    ) -> None:
+        self.sandboxed = sandboxed
+        self._explicit = binary
+        self._vendor_dir = vendor_dir
+        self._build = build
+        self.quiet = quiet
+
+    def options(self) -> dict[str, Any]:
+        """The arguments that make another backend like this one, for the broker to rebuild."""
+        return {k: str(v) if isinstance(v, Path) else v for k, v in {
+            "binary": self._explicit, "vendor_dir": self._vendor_dir, "build": self._build,
+            "quiet": self.quiet, "sandboxed": self.sandboxed}.items() if v is not None}
+
+    @property
+    def binary(self) -> Path:
+        return require_binary("llama-server", explicit=self._explicit,
+                              vendor_dir=self._vendor_dir, build=self._build)
+
+    def checked(self, argv: list[str]) -> list[str]:
+        """``argv`` against this build's own flags, with ``--metrics`` where it has it.
+
+        Raises `UnknownFlag` for anything the build does not list. ``--metrics`` carries the
+        speculative counters and the route 501s without it, but a build that lacks the flag
+        is served without it rather than refused.
+        """
+        known = flags_of(self.binary)
+        lacking = unknown_flags(argv, known)
+        if lacking:
+            raise UnknownFlag("\n".join(
+                f"this llama-server has no {flag}" + (f"; it has {near}" if near else "")
+                for flag, near in lacking))
+        return [*argv, "--metrics"] if "--metrics" in known else argv
+
+    def command(self, spec: ServerSpec) -> list[str]:
+        """Build the argv."""
+        argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
+        if spec.api_key:
+            argv += ["--api-key", spec.api_key]
+        argv += self._model_source_argv(spec)
+        argv += self._companion_argv(spec)
+        argv += self._speculative_argv(spec)
+        argv += self._placement_argv(spec)
+        argv += self._cache_argv(spec)
+        argv += self._runtime_argv(spec)
+        argv += self._rope_argv(spec)
+        defaults = families.thinkingcap_defaults(spec.model)
+        overridden = any(flag.split("=", 1)[0] == "--chat-template-kwargs"
+                         for flag in spec.extra_args)
+        if defaults and spec.jinja and not spec.embedding and not spec.reranking and not overridden:
+            argv += ["--chat-template-kwargs", json.dumps(defaults, separators=(",", ":"))]
+        argv += list(spec.extra_args)
+        return argv
+
+    @staticmethod
+    def _model_source_argv(spec: ServerSpec) -> list[str]:
+        """The model itself: where it comes from, its context, layers and slots."""
+        argv: list[str] = []
+        if spec.is_hf_ref:
+            repo, name = spec.hf_parts(spec.model)
+            argv += ["--hf-repo", repo]
+            if name:
+                argv += ["--hf-file", name]
+        else:
+            argv += ["-m", str(spec.model)]
+
+        argv += ["-c", str(spec.context)]
+
+        if spec.device == "cpu":
+            argv += ["-ngl", "0"]
+        elif spec.n_gpu_layers == "auto":
+            argv += ["-ngl", "99"]
+        elif spec.n_gpu_layers is not None:
+            argv += ["-ngl", str(spec.n_gpu_layers)]
+
+        argv += ["-np", str(max(1, spec.parallel))]
+        if spec.embedding:
+            argv += ["--embeddings", "--pooling", "mean"]
+        if spec.reranking:
+            argv += ["--reranking"]
+        return argv
+
+    @staticmethod
+    def _companion_argv(spec: ServerSpec) -> list[str]:
+        """A projector and a draft model, each served beside the main one."""
+        argv: list[str] = []
+        if spec.mmproj:
+            # `--mmproj` takes a file on disk, so an `hf:` reference has to become the URL
+            # it stands for; `--mmproj-url` fetches it. Passing the reference itself is a
+            # path that does not exist, and llama-server says so in a way that reads like
+            # the projector is corrupt rather than misspelled.
+            seeing = spec.hf_parts(spec.mmproj)
+            if seeing is None:
+                argv += ["--mmproj", str(spec.mmproj)]
+            else:
+                repo, name = seeing
+                argv += ["--mmproj-url",
+                         f"https://huggingface.co/{repo}/resolve/main/{name}"]
+        if spec.draft:
+            # A draft guesses several tokens ahead and the large model checks them in one
+            # pass, so an agreeing run costs about what one token used to. The flags differ
+            # from the main model's: -hfd takes owner/repo[:quant], not a separate file.
+            drafted = spec.hf_parts(spec.draft)
+            if drafted is None:
+                argv += ["-md", str(spec.draft)]
+            elif not drafted[1]:
+                argv += ["-hfd", drafted[0]]
+            else:
+                # llama-server's -hfd takes owner/repo[:quant], never a file, so a head named
+                # by file is fetched into the cache first (`resolved_draft`) and passed as a
+                # path. Reaching here means start() was bypassed.
+                raise ServerFailed(
+                    f"a draft named by file ({spec.draft}) must be fetched before serving; "
+                    f"LlamaServerBackend.start does that, or `poolhouse-models fetch`")
+        return argv
+
+    @staticmethod
+    def _speculative_argv(spec: ServerSpec) -> list[str]:
+        """How the drafted tokens are guessed and checked."""
+        argv: list[str] = []
+        if spec.spec_type:
+            argv += ["--spec-type", str(spec.spec_type)]
+        for flag, value in (("--spec-draft-type-k", spec.spec_draft_type_k or None),
+                            ("--spec-draft-type-v", spec.spec_draft_type_v or None),
+                            ("--spec-draft-n-max", spec.spec_draft_max),
+                            ("--spec-draft-p-min", spec.spec_p_min),
+                            ("--spec-tree", spec.spec_tree),
+                            ("--spec-draft-n-min", spec.spec_draft_min),
+                            ("--spec-ngram-mod-n-min", spec.spec_ngram_min),
+                            ("--spec-ngram-mod-n-max", spec.spec_ngram_max),
+                            ("--spec-draft-ngl", spec.spec_draft_ngl)):
+            if value is not None:
+                argv += [flag, str(value)]
+        return argv
+
+    @staticmethod
+    def _placement_argv(spec: ServerSpec) -> list[str]:
+        """Which tensors and experts sit on the CPU rather than the GPU."""
+        argv: list[str] = []
+        for pattern in spec.override_tensor:
+            argv += ["--override-tensor", str(pattern)]
+        if spec.cpu_moe:
+            argv += ["--cpu-moe"]
+        if spec.n_cpu_moe is not None:
+            argv += ["--n-cpu-moe", str(spec.n_cpu_moe)]
+        return argv
+
+    @staticmethod
+    def _cache_argv(spec: ServerSpec) -> list[str]:
+        """The KV cache, slots, and what carries a conversation across them."""
+        argv: list[str] = []
+        if spec.cache_reuse is not None:
+            argv += ["--cache-reuse", str(spec.cache_reuse)]
+        if not spec.warmup:
+            argv += ["--no-warmup"]
+        if spec.context_per_slot is not None:
+            argv += ["--kv-unified-per-slot", str(spec.context_per_slot)]
+        for flag, choice in (("--kv-unified", spec.kv_unified),
+                             ("--cache-idle-slots", spec.cache_idle_slots)):
+            if choice is not None:
+                argv += [flag if choice else flag.replace("--", "--no-", 1)]
+        if spec.cache_ram_mb is not None:
+            argv += ["--cache-ram", str(spec.cache_ram_mb)]
+        if spec.slot_prompt_similarity is not None:
+            argv += ["--slot-prompt-similarity", str(spec.slot_prompt_similarity)]
+        if spec.slot_save_path:
+            argv += ["--slot-save-path", str(spec.slot_save_path)]
+        if spec.chat_template_file:
+            argv += ["--chat-template-file", str(spec.chat_template_file)]
+        if spec.lookup_static:
+            argv += ["--lookup-cache-static", str(spec.lookup_static)]
+        if spec.lookup_dynamic:
+            argv += ["--lookup-cache-dynamic", str(spec.lookup_dynamic)]
+        return argv
+
+    @staticmethod
+    def _runtime_argv(spec: ServerSpec) -> list[str]:
+        """Attention, quantisation, memory residency and reasoning."""
+        argv: list[str] = []
+        if spec.flash_attn:
+            argv += ["-fa", "on"]
+        if spec.jinja and not spec.embedding and not spec.reranking:
+            argv += ["--jinja"]
+        if spec.cache_type_k:
+            argv += ["--cache-type-k", str(spec.cache_type_k)]
+        if spec.cache_type_v:
+            argv += ["--cache-type-v", str(spec.cache_type_v)]
+        load_mode = _load_mode(spec)
+        if load_mode:
+            argv += ["--load-mode", load_mode]
+        if spec.reasoning_budget is not None:
+            argv += ["--reasoning-budget", str(spec.reasoning_budget)]
+        return argv
+
+    @staticmethod
+    def _rope_argv(spec: ServerSpec) -> list[str]:
+        """RoPE/YaRN: how a context beyond the model's training length is read."""
+        argv: list[str] = []
+        if spec.rope_scaling:
+            argv += ["--rope-scaling", str(spec.rope_scaling)]
+        if spec.rope_scale is not None:
+            argv += ["--rope-scale", str(spec.rope_scale)]
+        if spec.yarn_orig_ctx is not None:
+            argv += ["--yarn-orig-ctx", str(spec.yarn_orig_ctx)]
+        for flag, value in (("--yarn-ext-factor", spec.yarn_ext_factor),
+                            ("--yarn-attn-factor", spec.yarn_attn_factor),
+                            ("--yarn-beta-fast", spec.yarn_beta_fast),
+                            ("--yarn-beta-slow", spec.yarn_beta_slow)):
+            if value is not None:
+                argv += [flag, str(value)]
+        return argv
+
+    @staticmethod
+    def resolved_model(spec: ServerSpec) -> ServerSpec:
+        """The spec with a model named by `hf:` reference fetched into the model store and
+        served by path."""
+        return replace(spec, model=fetched(spec.model, "model"))
+
+    @staticmethod
+    def resolved_draft(spec: ServerSpec) -> ServerSpec:
+        """The spec with a draft named by `hf:` file turned into the cached file's path.
+
+        `-hfd` downloads a repository's quant, not a file, and a head under `MTP/` is a file;
+        so the file is fetched (or found in the cache) with `poolhouse.hub.fetch` and served
+        by path. A quant-style reference (`hf:owner/repo`) is left for the server.
+        """
+        return replace(spec, draft=fetched(spec.draft, "draft")) if spec.draft else spec
+
+    @staticmethod
+    def resolved_context(spec: ServerSpec) -> tuple[ServerSpec, str]:
+        """The spec with YaRN turned on when ``context`` asks for more than the model
+        trained at, and the line to say about it -- "" when nothing changed.
+
+        Untouched when the spec already names any rope or YaRN field: whoever set one has
+        already made the choice. Untouched too when the trained length is not known -- the
+        file is not on disk yet, or its header does not say -- since an unknown length
+        gets no opinion rather than a guess. Otherwise ``rope_scaling`` is set to
+        ``"yarn"``, ``yarn_orig_ctx`` to the trained length, and ``rope_scale`` to the
+        ratio between the two, rounded up to two places so the served context always
+        covers what was asked.
+        """
+        if (spec.rope_scaling or spec.rope_scale is not None
+                or spec.yarn_orig_ctx is not None):
+            return spec, ""
+        trained = trained_context(spec.model)
+        if trained <= 0 or spec.context <= trained:
+            return spec, ""
+        scale = math.ceil((spec.context / trained) * 100) / 100
+        said = (
+            f"{spec.context:,} tokens is beyond the {trained:,} this model trained at; "
+            f"turning on YaRN (--rope-scaling yarn --rope-scale {scale} --yarn-orig-ctx "
+            f"{trained}). llama.cpp applies this scaling to every position, so a "
+            f"conversation shorter than {trained:,} tokens on this server pays for it too "
+            "-- ask for that much or less to keep the model's own trained context unscaled."
+        )
+        return replace(spec, rope_scaling="yarn", rope_scale=scale,
+                       yarn_orig_ctx=trained), said
+
+    def start(self, spec: ServerSpec, *, lease: Lease, timeout: float = 300.0,
+              **starting: bool) -> ServerInfo:
+        """Launch and wait until healthy. Raises ``ServerFailed`` with the log tail.
+
+        ``starting`` takes ``check_flags``, ``preflight`` and ``warmup_request``, each
+        ``True`` unless passed otherwise.
+        """
+        spec = self.resolved_draft(self.resolved_model(spec))
+        if spec.mmproj:
+            spec = replace(spec, mmproj=fetched(spec.mmproj, "projector"))
+        spec, yarn_said = self.resolved_context(spec)
+        if yarn_said:
+            logger.warning(yarn_said)
+        if not spec.is_hf_ref:
+            model = Path(spec.model)
+            if not model.is_file():
+                raise ServerFailed(f"no model file at {model}")
+
+        spec = replace(spec, api_key=serverkeys.issue(spec.port))
+        argv = self.command(spec)
+        if starting.get("check_flags", True):
+            argv = self.checked(argv)
+
+        claim_port(spec, lease)
+
+        if starting.get("preflight", True):
+            from poolhouse.hub import room
+            from poolhouse.serve.preflight import Preflight, PreflightFailed
+
+            report = Preflight(spec, binary=self.binary, limit_bytes=room())
+            if not report.ok:
+                raise PreflightFailed(report.said())
+
+        if spec.slot_save_path:
+            # llama-server refuses to start rather than create this itself: "not a
+            # directory" is its whole complaint.
+            Path(spec.slot_save_path).mkdir(parents=True, exist_ok=True)
+        log_path = server_log("llama-server", spec.port)
+        logger.info("starting: %s", " ".join("***" if prev == "--api-key" else a
+                                             for prev, a in zip(["", *argv], argv, strict=False)))
+
+        extra_env = {}
+        if spec.slot_save_path:
+            # A slot's own prompt text is otherwise unreadable -- to_json() only fills
+            # "prompt"/"generated" when slots_debug is set, and that is env-only, read
+            # once at startup. Without it, escalate()'s summariser has a token count and
+            # nothing to summarise.
+            extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
+
+        env = child_env(self.binary, extra_env or None)
+        confined = None
+        if confinement.wanted(self.sandboxed):
+            confined = confinement.confine(
+                argv, env, self.binary, writable=[spec.slot_save_path] if spec.slot_save_path else [])
+            argv, env = confined.argv, confined.env
+        try:
+            process, base_url, load_s = launch(argv, lease, log_path=log_path, timeout=timeout,
+                                               env=env, cwd=confined.cwd if confined else None)
+        except ServerFailed as failure:
+            refused = confined.refusals() if confined else ""
+            raise ServerFailed(f"{failure}\n{refused}" if refused else str(failure)) from failure
+
+        serverkeys.bind(spec.port, process.pid)
+        warmup_s = None
+        if starting.get("warmup_request", True):
+            warmup_s = self._warm_up(base_url, timeout=timeout)
+
+        return ServerInfo(
+            base_url=base_url,
+            port=spec.port,
+            pid=process.pid,
+            backend=self.name,
+            adopted=False,
+            log_path=log_path,
+            load_s=load_s,
+            warmup_s=warmup_s,
+            process=process,
+        )
+
+    def _warm_up(self, base_url: str, *, timeout: float) -> float | None:
+        """One short completion through the real client, not curl -- shader compilation
+        and the first KV allocation happen on some request; better this one than the first
+        measured question. A warm-up that fails is logged and otherwise ignored: a server
+        that answered health is a server, and what it does with a real prompt is somebody
+        else's check to make."""
+        from poolhouse.client import Client, Request, Transport
+
+        started = time.monotonic()
+        try:
+            Client(base_url, request=Request(n_predict=8),
+                   transport=Transport(timeout=min(timeout, 60.0))).complete(
+                "hello", n_predict=8)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("warm-up request to %s did not complete: %s", base_url, exc)
+            return None
+        return time.monotonic() - started
+
+
+def fetched(ref: str | Path, what: str) -> str | Path:
+    """``ref`` downloaded into the model store through the net pipeline when it is an `hf:`
+    reference (a repository alone takes its default build), else ``ref``. llama-server is
+    never handed an `hf:` reference, so it never downloads anything itself."""
+    parts = ServerSpec.hf_parts(ref)
+    if not parts:
+        return ref
+    from poolhouse.hub import fetch, pull
+
+    try:
+        return str(fetch(str(ref)) if parts[1] else pull(str(ref)))
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise ServerFailed(f"could not fetch the {what} {ref}: {exc}") from exc
+
+
+def tail(path: Path, lines: int = 40) -> str:
+    """The last ``lines`` of a log file, for an error message."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return f"(no log at {path})"
+    return "\n".join(content[-lines:])

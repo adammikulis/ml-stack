@@ -1,7 +1,7 @@
 """The relations an invented world says out loud, and the gold they leave behind.
 
 A templated corpus used to be first names and pronouns: an extraction run over forty of its
-messages had one relation to find, which made the relation columns of ``ml-stack-bench
+messages had one relation to find, which made the relation columns of ``poolhouse-bench
 extract`` meaningless. Now most messages state one relation the graph already holds --
 who works with whom, who reports to whom, what somebody works on, which unit they belong
 to -- naming both ends in full, and carry it as gold.
@@ -16,12 +16,12 @@ import json
 
 import pytest
 
-from ml_stack.files import write_json
-from ml_stack.world.organisation import make
-from ml_stack.world.questions import questions
-from ml_stack.world.sentences import _SHAPE, _STATED
-from ml_stack.world.simulate import run
-from ml_stack.world.story import OUTCOMES
+from poolhouse.files import write_json
+from poolhouse.world.organisation import make
+from poolhouse.world.questions import questions
+from poolhouse.world.sentences import _SHAPE, _STATED
+from poolhouse.world.simulate import run
+from poolhouse.world.story import OUTCOMES
 
 SEED = 7
 DAYS = 10
@@ -65,7 +65,7 @@ def stated(messages):
 def test_a_stratified_sample_of_forty_messages_asserts_twenty_relations_or_more(community):
     """The bench reads forty messages; the gold it scores relations against is only what
     those forty said, so the corpus has to say enough of it in forty."""
-    from ml_stack.bench.truth import gold, sample_messages
+    from poolhouse.bench.truth import gold, sample_messages
 
     graph, messages = community
     picked = sample_messages(messages, SAMPLE, seed=SEED)

@@ -9,10 +9,10 @@ import io
 
 import pytest
 
-from ml_stack import chat, do
-from ml_stack.client import Reply
-from ml_stack.testing import injection_corpus as corpus
-from ml_stack.testing.fakes import reply_from
+from poolhouse import chat, do
+from poolhouse.client import Reply
+from poolhouse.testing import injection_corpus as corpus
+from poolhouse.testing.fakes import reply_from
 from tests import memory_keys
 from tests.test_chat import registry
 
@@ -77,7 +77,7 @@ class Raiser:
 
 @pytest.mark.parametrize("text", TEXTS)
 def test_planted_text_cannot_raise_the_role_or_write_a_rule(text):
-    from ml_stack import rules as saved
+    from poolhouse import rules as saved
 
     ran: list = []
     person = do.Person(io.StringIO("n\n" * 30), io.StringIO())
@@ -91,7 +91,7 @@ def test_planted_text_cannot_raise_the_role_or_write_a_rule(text):
 
 @pytest.mark.parametrize("text", TEXTS)
 def test_planted_text_in_project_memory_cannot_raise_the_role_or_write_a_rule(text, tmp_path):
-    from ml_stack import memory, rules as saved
+    from poolhouse import memory, rules as saved
     from tests.test_memory import inject
     from tests.test_memory_scopes import repo
 

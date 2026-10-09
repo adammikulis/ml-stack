@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import land_git as lg
 
-from ml_stack import trees, trees_notice
+from poolhouse import trees, trees_notice
 
 COMMANDS = ("close", "sweep", "scan", "claim", "finish", "notify", "lead")
 MAX_COMMITS = 10
@@ -144,7 +144,7 @@ def command(argv: list[str]) -> int:
     sub.add_parser("lead").add_argument("name")
     args = parser.parse_args(argv)
     root, now = lg.toplevel(Path.cwd()), time.time()
-    caller = os.environ.get("ML_STACK_WORKSPACE_AGENT", "")
+    caller = os.environ.get("POOLHOUSE_WORKSPACE_AGENT", "")
     name = getattr(args, "owner", "") or caller
     claim = (name, root) if getattr(args, "here", False) and name else None
     try:

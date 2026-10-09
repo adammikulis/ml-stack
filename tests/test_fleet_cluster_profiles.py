@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from ml_stack.fleet import automatic_clusters, discovery, recovery
-from ml_stack.fleet.onboard import joining
+from poolhouse.fleet import automatic_clusters, discovery, recovery
+from poolhouse.fleet.onboard import joining
 
 KEY = base64.urlsafe_b64encode(bytes(range(32))).rstrip(b"=")
 

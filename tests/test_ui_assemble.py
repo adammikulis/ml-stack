@@ -1,4 +1,4 @@
-"""`ml_stack.ui.assemble`: a page out of component files, read back as a string."""
+"""`poolhouse.ui.assemble`: a page out of component files, read back as a string."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import re
 
 import pytest
 
-from ml_stack.graph import page as graph_page
-from ml_stack.ui import Component, assemble, load
+from poolhouse.graph import page as graph_page
+from poolhouse.ui import Component, assemble, load
 
 SHELL = """<title>__TITLE__</title>
 <style>body {}</style>

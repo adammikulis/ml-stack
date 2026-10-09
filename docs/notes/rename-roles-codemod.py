@@ -17,7 +17,7 @@ WORD = re.compile(r"\b(reader|operator|runner)\b(?!\.\w)(?!, model)")
 
 # every occurrence of the three words in these files is a role name
 WHOLE = [
-    "src/ml_stack/chat.py", "docs/agent-roles.md", "tests/test_roles.py", "tests/test_redteam_chat.py",
+    "src/poolhouse/chat.py", "docs/agent-roles.md", "tests/test_roles.py", "tests/test_redteam_chat.py",
     "tests/test_chat_task.py", "tests/test_redteam_human_floor.py", "tests/test_memory_chat.py",
     "tests/test_reputation_safety.py", "tests/test_activity_feeds.py", "tests/test_redteam_memory.py",
     "tests/test_activity_viewer.py", "tests/test_requests_floor.py",
@@ -28,7 +28,7 @@ ROLE_LINE = re.compile(
     r"|\b(?:operator|runner) role|^runner\), a project|role=\"(reader|operator|runner)\"|subject=\"reader\"")
 LINES = [
     "README.md", "HANDOFF.md", "docs/FEATURES.md", "docs/memory.md", "docs/assistant-security.md",
-    "docs/commands.md", "src/ml_stack/cli/reference.py", "docs/notes/agent-control-plane.md",
+    "docs/commands.md", "src/poolhouse/cli/reference.py", "docs/notes/agent-control-plane.md",
     "scripts/redteam_coverage.py", "tests/test_activity_log.py",
 ]
 # literal rewrites for prose that names the role without the word "role"

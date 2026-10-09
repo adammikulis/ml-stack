@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.gym import adapters, catalog, decision_process, simulation as runtime
-from ml_stack.gym.cli import argument_parser
-from ml_stack.gym.provenance import native_provenance
-from ml_stack.gym.runtime import SessionManager
+from poolhouse.gym import adapters, catalog, decision_process, simulation as runtime
+from poolhouse.gym.cli import argument_parser
+from poolhouse.gym.provenance import native_provenance
+from poolhouse.gym.runtime import SessionManager
 
 
 def test_worker_reports_constructor_errors_and_closes_initialized_environment(monkeypatch):
@@ -130,7 +130,7 @@ def test_invalid_action_does_not_replace_manual_action(simulation):
 
 
 def test_catalogue_missing_dependencies_and_unknown_environment(monkeypatch):
-    monkeypatch.delenv("ML_STACK_GYM_PYTHON", raising=False)
+    monkeypatch.delenv("POOLHOUSE_GYM_PYTHON", raising=False)
     monkeypatch.setattr(catalog, "find_spec", lambda _: None)
     monkeypatch.setattr(catalog.shutil, "which", lambda _: None)
     entries = catalog.catalogue()

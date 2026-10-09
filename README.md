@@ -1,4 +1,4 @@
-# ml-stack
+# Poolhouse
 
 **Run and train models across every machine in your house.**
 
@@ -9,7 +9,7 @@ the box with the card trains, the spare CPUs prepare data, and any of them can b
 back the moment you want it.
 
 ```
-$ ml-stack-peers ls
+$ poolhouse-peers ls
 NAME             URL                          FREE    STATE      DEVICE
 gpubox           http://192.168.2.27:8770     0/1     busy       NVIDIA GeForce RTX 4090  6.2/24.0 GB free
 radeon           http://192.168.2.31:8770     1/1     idle       AMD Radeon RX 7900 XTX  22.1/24.0 GB free
@@ -42,7 +42,7 @@ Everything runs on your own hardware. Nothing leaves the network.
   before it believes what it says about a page.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
   in one cluster, each reporting its own temperature, clocks and throttle state.
-- **An agent that asks first.** `ml-stack-chat` operates ml-stack for you under a role
+- **An agent that asks first.** `poolhouse-chat` operates Poolhouse for you under a role
   (`read-only`, `approve-first` or `plan-and-go`): reads run, anything that starts, stops, downloads or
   measures asks, and each question offers Allow this time, Always allow or Never allow.
   Releasing quarantine, approving a host and changing the roles or rules are yours alone
@@ -61,14 +61,14 @@ Everything runs on your own hardware. Nothing leaves the network.
 From this Git checkout, use the shared Dev pool and project Board:
 
 ```sh
-ml-stack-peers ls
-ml-stack-workspace remote-agent --device DEVICE_NAME --json \
+poolhouse-peers ls
+poolhouse-workspace remote-agent --device DEVICE_NAME --json \
   --max-output-tokens 4096 --max-rounds 12 --max-tool-calls 30 \
   --max-model-calls 24 --max-task-seconds 600 \
   --task "Read AGENTS.md, README.md and docs/workspace.md. Recommend documentation changes with file references, priorities and evidence. Do not edit files."
 ```
 
-Replace `DEVICE_NAME` with the other device's name from `ml-stack-peers ls`; omit
+Replace `DEVICE_NAME` with the other device's name from `poolhouse-peers ls`; omit
 `--device` when there is only one remote device. Both devices need running Dev cluster
 services; the target needs a registered checkout of this project and a downloaded Qwen.
 The broker admits the model on that device and the worker receives the task on the shared
@@ -78,8 +78,8 @@ Keep the returned `requested_by` (launcher), `identity` (worker), `model` and `t
 Use those returned values to read the answer:
 
 ```sh
-ml-stack-workspace inbox --agent LAUNCHER_ID --all
-ml-stack-workspace thread TASK_SEQ --agent LAUNCHER_ID
+poolhouse-workspace inbox --agent LAUNCHER_ID --all
+poolhouse-workspace thread TASK_SEQ --agent LAUNCHER_ID
 ```
 
 `state: starting` means the model is loading. Reuse the same launcher and worker name
@@ -145,28 +145,28 @@ answers every prompt without a terminal to type at.
 Make this machine a peer, and see who else answers:
 
 ```
-ml-stack-cluster join --persist
-ml-stack-cluster status
+poolhouse-cluster join --persist
+poolhouse-cluster status
 ```
 
 Put a model up and talk to it:
 
 ```
-ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
-ml-stack-serve status
+poolhouse-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
+poolhouse-serve status
 ```
 
-`ml-stack` on its own starts the daemon and opens the interface in your browser;
-`ml-stack --list` prints every command with the first line of its help.
+`poolhouse` on its own starts the daemon and opens the interface in your browser;
+`poolhouse --list` prints every command with the first line of its help.
 
 ## Documents into a knowledge graph
 
 Point it at a shelf of PDFs and get back a graph you can ask questions of.
 
 ```
-ml-stack-ingest ~/texts/*.pdf --out ./sources.ladybug --images --resume --detach
-ml-stack-ingest status  --out ./sources.ladybug
-ml-stack-ingest ask     --out ./sources.ladybug "how is heart rate controlled"
+poolhouse-ingest ~/texts/*.pdf --out ./sources.ladybug --images --resume --detach
+poolhouse-ingest status  --out ./sources.ladybug
+poolhouse-ingest ask     --out ./sources.ladybug "how is heart rate controlled"
 ```
 
 Each book is cut where it cuts itself -- chapters, sections, figures -- because a section is
@@ -190,9 +190,9 @@ in use rather than coining a third spelling of it.
 **A model is handed tools, not the graph.** It finds entries by name or by the words
 attached to them, reads what one holds, reads a whole neighbourhood in a single call, traces
 how two entries connect, and lists everything of one kind -- so a question is answered by
-looking things up, and the answer names the entries it rests on. `ml-stack-ingest ask` does
+looking things up, and the answer names the entries it rests on. `poolhouse-ingest ask` does
 that over a store, `converse` and `hybrid` do it from Python over any graph, and
-`ml-stack-graph serve` puts the graph on a page with the same asking behind it, on loopback:
+`poolhouse-graph serve` puts the graph on a page with the same asking behind it, on loopback:
 whoever has the file has the graph, so a private one is served rather than sent.
 
 An extraction somebody else produced comes in as a source of its own, and a graph that has
@@ -205,20 +205,20 @@ A job here is a command you start and walk away from, not a chat window you sit 
 Reading a shelf of books is hours, so `--detach` gives the shell straight back and puts the
 run in its own session with a log; `status` says how far it has got, how fast the model is
 reading and how long is left; `--resume` starts where a killed run stopped.
-`ml-stack-jobs wait ingest` blocks until it has ended, so the next step is `wait && next`
+`poolhouse-jobs wait ingest` blocks until it has ended, so the next step is `wait && next`
 rather than a loop you wrote by hand.
 
-`ml-stack-chat "..."` takes the task in words instead: a model on your own hardware, holding
+`poolhouse-chat "..."` takes the task in words instead: a model on your own hardware, holding
 the serving, download and benchmark commands here as tools, asks what the task leaves open,
 prints a plan, waits for the go, runs the calls that plan names and says where the results
-are; bare `ml-stack-chat` is the same agent as a conversation, and `--role` sets what it may do
-(`docs/agent-roles.md`). `ml-stack-mcp` hands the same functions to an
+are; bare `poolhouse-chat` is the same agent as a conversation, and `--role` sets what it may do
+(`docs/agent-roles.md`). `poolhouse-mcp` hands the same functions to an
 agent over MCP, and anything long returns a log and a pid rather than blocking the call.
 
 ## Pictures and speech
 
 A model with a projector is given the picture, not a description of one. `--mmproj auto`
-finds the projector shipped beside the weights, `ml-stack-ingest --images` hands the model
+finds the projector shipped beside the weights, `poolhouse-ingest --images` hands the model
 each section's figures rather than only their captions, `graph.tree.read(client, ORG,
 images=[chart])` reads an org chart or a family tree out of a photograph, and `web_look`
 brings back a full-page screenshot with the page's largest pictures. A tool of your own
@@ -226,7 +226,7 @@ that returns pictures puts them in front of the model the same way. A second mod
 transcribe first and the first one structure what it said, which is the slot a document
 model -- DeepSeek-OCR, GLM-OCR, surya -- is good in.
 
-**Then it checks the model can see.** `ml_stack.vision.VisionGate` draws a PNG of coloured
+**Then it checks the model can see.** `poolhouse.vision.VisionGate` draws a PNG of coloured
 bands, asks the model to name them left to right, and raises rather than let a run believe
 a model that is answering from the words alone. A server started without a projector says
 so instead of quietly reading captions.
@@ -234,9 +234,9 @@ so instead of quietly reading captions.
 Speech is three protocols and one resolver, so the engine is a detail:
 
 ```
-ml-stack-speech providers
-ml-stack-speech transcribe recording.m4a
-ml-stack-speech say "the run has finished" --out done.wav
+poolhouse-speech providers
+poolhouse-speech transcribe recording.m4a
+poolhouse-speech say "the run has finished" --out done.wav
 ```
 
 faster-whisper, whisper.cpp, Whisper through transformers, piper, kokoro, the operating
@@ -253,7 +253,7 @@ on whichever machine is free rather than the one you are typing at.
 | [What it does](docs/FEATURES.md) | every feature; `docs/verify_release.py` checks claims from each section but Entities |
 | [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
 | [The agent workspace](docs/workspace.md) | one bus for the agents on a machine: messages, boards and threads, subscriptions, notes, claims, and a read-only Board page for you |
-| [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
+| [The commands](docs/commands.md) | every `poolhouse-<command>`, what it takes and what it prints |
 | [Clusters](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
 | [Finding and serving a model](docs/serving.md) | one manager per machine, the settings each model scored best with, how many people fit in a card, llama.cpp builds and draft heads |
 | [Working with a graph](docs/graph.md) | the six things a model is given instead of the graph, how a question is asked, and a conversation of any length |
@@ -262,20 +262,20 @@ on whichever machine is free rather than the one you are typing at.
 | [Studio and live Gym](docs/studio-gym.md) | organized workspaces, live sensor/decision views, specialist simulators, PPO, and reviewed training trajectories |
 | [Measuring](docs/bench.md) | timing and scoring a model's answers, what that settled here, and an evening of runs as a file |
 | [An invented world](docs/world.md) | a community with people who talk, the days they talk over, and the exports their corpus arrives as; nobody real in any of it |
-| [Chatting and roles](docs/chat.md) | `ml-stack-chat`: conversation or task, the three roles, saved Always/Never rules ([roles](docs/agent-roles.md)) |
-| [Agent memory](docs/memory.md) | the encrypted fact graph, user and project scopes, `ml-stack-memory` |
-| [The keystore](docs/keystore.md) | the one OS keystore item, what prompts, `ml-stack-security unlock` and `keystore-reset` |
-| [Sentinel](docs/sentinel.md) | what is watched and held, the one click-to-release dialog, `ML_STACK_NOTIFY` |
-| [Reputation](docs/reputation.md) | how each source has behaved, `ml-stack-reputation` |
-| [The activity log](docs/activity-log.md) | one encrypted, tamper-evident record of what agents, people and the stack did, and `ml-stack-log` to read it |
+| [Chatting and roles](docs/chat.md) | `poolhouse-chat`: conversation or task, the three roles, saved Always/Never rules ([roles](docs/agent-roles.md)) |
+| [Agent memory](docs/memory.md) | the encrypted fact graph, user and project scopes, `poolhouse-memory` |
+| [The keystore](docs/keystore.md) | the one OS keystore item, what prompts, `poolhouse-security unlock` and `keystore-reset` |
+| [Sentinel](docs/sentinel.md) | what is watched and held, the one click-to-release dialog, `POOLHOUSE_NOTIFY` |
+| [Reputation](docs/reputation.md) | how each source has behaved, `poolhouse-reputation` |
+| [The activity log](docs/activity-log.md) | one encrypted, tamper-evident record of what agents, people and the stack did, and `poolhouse-log` to read it |
 | [Security](docs/security.md) | the threat model, findings and what is fixed ([assistant contract](docs/assistant-security.md), [red-teaming](docs/redteam.md)) |
-| [Requests](docs/requests.md) | one place for everything that waits for a person: raised by any component, answered at the terminal, in the browser page or in the desktop dialog, first answer wins, `ml-stack-requests` |
+| [Requests](docs/requests.md) | one place for everything that waits for a person: raised by any component, answered at the terminal, in the browser page or in the desktop dialog, first answer wins, `poolhouse-requests` |
 | [Destructive actions](docs/destructive-actions.md) | the classifier that makes destructive or unsure tool calls ask first: what asks and why, how it meets roles and rules, measured recall |
 | [Decision models](docs/decision-models.md) | typed answers with probabilities, training and evaluating one, JevBench ([integration plan](docs/decision-model-integration-plan.md)) |
 | [Packages](docs/packages.md) | what each module is, and the extras it carries |
 | [Model ranking](docs/model-ranking.md) | one line per model: its best run, and what that run cost |
 | [Architectures](docs/architectures/README.md) | the models that behave unlike a dense transformer when served |
-| [Working on ml-stack](docs/development.md) | `contracts/`, the git hooks, and how the tests are written |
+| [Working on Poolhouse](docs/development.md) | `contracts/`, the git hooks, and how the tests are written |
 
 ## Licence
 

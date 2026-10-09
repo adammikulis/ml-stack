@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 
-from ml_stack.graph.grammar import CAP, ID_FIELDS, call_from, call_schema, constrained, ids_grammar
-from ml_stack.graph.prompts import TERSE, TOOLS, schema_for
+from poolhouse.graph.grammar import CAP, ID_FIELDS, call_from, call_schema, constrained, ids_grammar
+from poolhouse.graph.prompts import TERSE, TOOLS, schema_for
 
 IDS = ["person:ada", "person:bea", 'org:pel"lard']
 

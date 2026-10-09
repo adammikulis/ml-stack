@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack import memory
-from ml_stack.memory import recall as recalling
-from ml_stack.memory.entities import MAX_ENTITIES, parse
-from ml_stack.memory.facts import Fact, Refused
-from ml_stack.memory.migrate import import_v1
-from ml_stack.memory.store import Setup
-from ml_stack.sentinel.sealed import SealedFile
+from poolhouse import memory
+from poolhouse.memory import recall as recalling
+from poolhouse.memory.entities import MAX_ENTITIES, parse
+from poolhouse.memory.facts import Fact, Refused
+from poolhouse.memory.migrate import import_v1
+from poolhouse.memory.store import Setup
+from poolhouse.sentinel.sealed import SealedFile
 from tests import memory_keys
 from tests.test_memory import Here, Person, by_name, inject
 

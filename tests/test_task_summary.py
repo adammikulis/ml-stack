@@ -1,6 +1,6 @@
 """Task overview derives counts and activity from evidence."""
 
-from ml_stack.workspace.task_summary import inspection, overview
+from poolhouse.workspace.task_summary import inspection, overview
 
 
 def test_overview_counts_unfinished_integration_and_expired_worker_leases():

@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import runtime, runtime_cli, runtime_coalesce, runtime_deploy, runtime_store
-from ml_stack.fleet import runtime_wheel
-from ml_stack.net import uvinstall
+from poolhouse import runtime, runtime_cli, runtime_coalesce, runtime_deploy, runtime_store
+from poolhouse.fleet import runtime_wheel
+from poolhouse.net import uvinstall
 
 
 class Tips:
@@ -106,7 +106,7 @@ def test_uv_installs_with_a_shared_cache_link_mode_and_no_config(tmp_path, monke
     calls = []
     monkeypatch.setattr(uvinstall, "program", lambda path=None: "/bin/uv")
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
-    done = uvinstall.install(tmp_path / "python", "ml-stack @ file:///tmp/w.whl", timeout=5, environment={"PATH": "/bin"})
+    done = uvinstall.install(tmp_path / "python", "poolhouse @ file:///tmp/w.whl", timeout=5, environment={"PATH": "/bin"})
     assert done is not None and done.returncode == 0
     argv = calls[0]
     assert argv[:3] == ["/bin/uv", "pip", "install"] and "--no-config" in argv
@@ -120,7 +120,7 @@ def test_uv_installs_with_a_shared_cache_link_mode_and_no_config(tmp_path, monke
 def test_uv_defers_to_pip_when_the_environment_redirects_package_sources(tmp_path, monkeypatch, environment):
     monkeypatch.setattr(uvinstall, "program", lambda path=None: "/bin/uv")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("uv must not run"))
-    assert uvinstall.install(tmp_path / "python", "ml-stack", timeout=5, environment=environment) is None
+    assert uvinstall.install(tmp_path / "python", "poolhouse", timeout=5, environment=environment) is None
 
 
 def test_the_runtime_install_falls_back_to_pip_without_uv_and_reports_a_uv_failure(tmp_path, monkeypatch):
@@ -144,7 +144,7 @@ def tree(root, n, launcher_text=""):
 
 
 def test_collection_never_removes_a_tree_a_launcher_names_nor_a_tree_without_the_marker(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     root = runtime.directory()
     old = [tree(root, n) for n in range(1, 6)]
     for n, prefix in enumerate(old):
@@ -152,7 +152,7 @@ def test_collection_never_removes_a_tree_a_launcher_names_nor_a_tree_without_the
         (prefix / row).write_text((prefix / row).read_text().replace('"verified_at": ', f'"verified_at": {1000 + n}, "x": '))
     launchers = tmp_path / "bin"
     launchers.mkdir()
-    (launchers / "ml-stack-demo").write_text(f"python = {str(old[0] / 'bin' / 'python')!r}\n")
+    (launchers / "poolhouse-demo").write_text(f"python = {str(old[0] / 'bin' / 'python')!r}\n")
     runtime_store.write_state({"launchers": str(launchers)}, root)
     foreign = root / f"{9:040x}" / f"{9:032x}"
     foreign.mkdir(parents=True)

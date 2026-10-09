@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import Denied, tokens
-from ml_stack.workspace.boardapi import Follow
-from ml_stack.workspace.files import Attachment
+from poolhouse.workspace import Denied, tokens
+from poolhouse.workspace.boardapi import Follow
+from poolhouse.workspace.files import Attachment
 
 
 @pytest.fixture

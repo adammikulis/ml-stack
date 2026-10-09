@@ -14,7 +14,7 @@ import sys
 import pytest
 import testwritedeny as deny
 
-from ml_stack import home
+from poolhouse import home
 
 CLAIMED = os.environ.get(deny.ENV) == "1"
 WHY = "this run is not under the real-state write denial"

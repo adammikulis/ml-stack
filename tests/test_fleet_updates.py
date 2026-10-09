@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import autostart, signing, updates
+from poolhouse.fleet import autostart, signing, updates
 
 pytestmark = pytest.mark.usefixtures("loopback_net")
 
@@ -57,7 +57,7 @@ def _release_key(monkeypatch):
 
 OLD = "1111111111111111111111111111111111111111"
 NEW = "2222222222222222222222222222222222222222"
-REPO = "https://example.invalid/wrenfield/ml-stack"
+REPO = "https://example.invalid/wrenfield/poolhouse"
 
 
 def _git(**over: tuple[int, str]) -> FakeGit:
@@ -67,7 +67,7 @@ def _git(**over: tuple[int, str]) -> FakeGit:
         "rev-parse": (0, OLD),
         "fetch": (0, ""),
         "merge-base": (0, ""),
-        "diff": (0, "src/ml_stack/fleet/join.py\nREADME.md\n"),
+        "diff": (0, "src/poolhouse/fleet/join.py\nREADME.md\n"),
         "merge": (0, "Updating 1111111..2222222"),
     }
     base.update(over)
@@ -139,7 +139,7 @@ class TestFollowingABranch:
         assert restarts == []
 
     def test_a_pull_that_touches_packaging_reinstalls_first(self, tmp_path):
-        git = _git(**{"diff": (0, "pyproject.toml\nsrc/ml_stack/fleet/join.py\n")})
+        git = _git(**{"diff": (0, "pyproject.toml\nsrc/poolhouse/fleet/join.py\n")})
         installed = []
         got = updates.track_once(
             updates.TrackedBranch(REPO, 'main', tmp_path),
@@ -352,31 +352,31 @@ class TestFollowingReleases:
 
         here = tmp_path / "bin"
         here.mkdir()
-        (here / "ml-stack-headless").write_text("old daemon")
-        (here / "ml-stack").write_text("old cli")
+        (here / "poolhouse-headless").write_text("old daemon")
+        (here / "poolhouse").write_text("old cli")
         archive = tmp_path / "release.zip"
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr("ml-stack-headless", "new daemon")
-            zf.writestr("ml-stack", "new cli")
+            zf.writestr("poolhouse-headless", "new daemon")
+            zf.writestr("poolhouse", "new cli")
 
-        updates.install(archive, app_path=here / "ml-stack-headless")
+        updates.install(archive, app_path=here / "poolhouse-headless")
 
-        assert (here / "ml-stack-headless").read_text() == "new daemon"
-        assert (here / "ml-stack").read_text() == "new cli"
+        assert (here / "poolhouse-headless").read_text() == "new daemon"
+        assert (here / "poolhouse").read_text() == "new cli"
 
     def test_nothing_new_is_put_on_a_machine_that_had_not_got_it(self, tmp_path):
         import zipfile
 
         here = tmp_path / "bin"
         here.mkdir()
-        (here / "ml-stack-headless").write_text("old")
+        (here / "poolhouse-headless").write_text("old")
         archive = tmp_path / "release.zip"
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr("ml-stack-headless", "new")
-            zf.writestr("ml-stack", "a window they never installed")
+            zf.writestr("poolhouse-headless", "new")
+            zf.writestr("poolhouse", "a window they never installed")
 
-        updates.install(archive, app_path=here / "ml-stack-headless")
-        assert not (here / "ml-stack").exists()
+        updates.install(archive, app_path=here / "poolhouse-headless")
+        assert not (here / "poolhouse").exists()
 
 
 class TestWhatThisMachineSays:
@@ -513,7 +513,7 @@ class TestWhatIsFetchedAndFrom:
                 self.end_headers()
                 self.wfile.write(body)
 
-        from ml_stack.http import Server
+        from poolhouse.http import Server
 
         srv = Server(("127.0.0.1", 0), Serves)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -535,9 +535,9 @@ class TestWhatIsFetchedAndFrom:
 
         archive = tmp_path / "evil.zip"
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr("ml-stack", "fine")
+            zf.writestr("poolhouse", "fine")
             zf.writestr("../../escaped", "bad")
-        target = tmp_path / "app" / "ml-stack"
+        target = tmp_path / "app" / "poolhouse"
         target.parent.mkdir()
         target.write_text("old")
         with pytest.raises(updates.UpdateError, match="refusing"):

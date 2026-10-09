@@ -7,10 +7,10 @@ one device it accepts. It prints its port and serves until killed.
 import sys
 from pathlib import Path
 
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.onboard.requests import Device
-from ml_stack.http import Server
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.onboard.requests import Device
+from poolhouse.http import Server
 
 
 def main(root, fingerprint, secret):

@@ -12,11 +12,11 @@ from dataclasses import replace
 import pytest
 from onboard_support import Clock, Recorder, identity
 
-from ml_stack.fleet.onboard import (
+from poolhouse.fleet.onboard import (
     bootstrap as bs,
     manifest as mf,
 )
-from ml_stack.fleet.onboard.transfer import Share
+from poolhouse.fleet.onboard.transfer import Share
 
 WHEEL = b"PK-this-is-a-wheel" * 5000
 
@@ -30,10 +30,10 @@ def needs_cryptography():
 def offer(tmp_path):
     share = tmp_path / "share"
     share.mkdir()
-    (share / "ml_stack-0.2-py3-none-any.whl").write_bytes(WHEEL)
+    (share / "poolhouse-0.2-py3-none-any.whl").write_bytes(WHEEL)
     (share / "tiny-model.gguf").write_bytes(b"GGUF" * 100)
     signer = mf.Signer.generate()
-    entries = [signer.entry(share / "ml_stack-0.2-py3-none-any.whl", kind="wheel"),
+    entries = [signer.entry(share / "poolhouse-0.2-py3-none-any.whl", kind="wheel"),
                signer.entry(share / "tiny-model.gguf", kind="model")]
     raw = signer.sign(entries, serial=1)
     rec, clock = Recorder(), Clock()
@@ -67,7 +67,7 @@ def test_the_page_says_what_will_happen_and_escapes_the_owner_name(offer):
     status, body = get(offer, "")
     page = body.decode()
     assert status == 200 and "Nothing has been installed" in page
-    assert "ml_stack-0.2-py3-none-any.whl" in page and "tiny-model" not in page   # programs only
+    assert "poolhouse-0.2-py3-none-any.whl" in page and "tiny-model" not in page   # programs only
     assert "&lt;b&gt;" in page and "<b>" not in page
     assert offer.server.offer.fingerprint in page and offer.server.offer.manifest_sha256 in page
 
@@ -75,11 +75,11 @@ def test_the_page_says_what_will_happen_and_escapes_the_owner_name(offer):
 def test_the_installer_verifies_and_stops_before_pip_on_a_dry_run(offer):
     done = run_installer(offer, "--dry-run")
     assert done.returncode == 0, done.stderr
-    assert "verified ml_stack-0.2-py3-none-any.whl" in done.stdout
+    assert "verified poolhouse-0.2-py3-none-any.whl" in done.stdout
 
 
 def test_a_tampered_file_makes_the_installer_install_nothing(offer):
-    (offer.share / "ml_stack-0.2-py3-none-any.whl").write_bytes(WHEEL[:-1] + b"X")
+    (offer.share / "poolhouse-0.2-py3-none-any.whl").write_bytes(WHEEL[:-1] + b"X")
     done = run_installer(offer, "--dry-run")
     assert done.returncode != 0 and "does not match the manifest" in done.stderr
 

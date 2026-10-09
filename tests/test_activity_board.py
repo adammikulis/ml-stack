@@ -8,8 +8,8 @@ import threading
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import boardroute, chat, tokens
-from ml_stack.workspace.boardapi import Follow
+from poolhouse.workspace import boardroute, chat, tokens
+from poolhouse.workspace.boardapi import Follow
 from tests.activity_support import entries, person, ring
 
 __all__ = ["person", "ring"]

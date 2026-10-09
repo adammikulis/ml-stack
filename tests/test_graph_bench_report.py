@@ -1,4 +1,4 @@
-"""``ml-stack-bench report``: every measurement arranged as one document.
+"""``poolhouse-bench report``: every measurement arranged as one document.
 
 The report is composed rather than measured, so what is tested here is the arranging: that
 runs group by the model they were served from, that a run served with a bound reasoning
@@ -7,7 +7,7 @@ tabled beside a full run, and that the serving line at the end says "not measure
 part nothing measured rather than filling it in.
 
 Everything is built in ``tmp_path``: runs through `bench.save` with `Row` fixtures, memory
-records through the `fit` seams. Nothing here reads ``~/.ml-stack``, serves a model or
+records through the `fit` seams. Nothing here reads ``~/.poolhouse``, serves a model or
 touches a GPU.
 """
 
@@ -18,8 +18,8 @@ import pathlib
 import pytest
 from conftest import scored_rows
 
-from ml_stack import bench
-from ml_stack.bench.gathered import (
+from poolhouse import bench
+from poolhouse.bench.gathered import (
     across,
     answering,
     asking_of,
@@ -28,8 +28,8 @@ from ml_stack.bench.gathered import (
     recommended_head,
     thinking_of,
 )
-from ml_stack.bench.report import report
-from ml_stack.serve.fit import Fit
+from poolhouse.bench.report import report
+from poolhouse.serve.fit import Fit
 
 GIB = 1024 ** 3
 
@@ -109,7 +109,7 @@ def test_the_cache_column_is_blank_at_f16_and_short_otherwise():
 
 
 def test_a_head_carries_how_far_it_guessed():
-    from ml_stack.bench.record import of
+    from poolhouse.bench.record import of
 
     assert of({"server": {}}).head_said == "-"
     assert of({"server": {"draft_model": "mtp-alder.gguf",
@@ -230,7 +230,7 @@ def test_another_room_is_answered_beside_this_machine(store, fits):
 
 def test_nothing_measured_for_memory_says_how_to_measure_it(store):
     body = report(bench.runs(store))
-    assert "ml-stack-serve fit MODEL --measure" in body
+    assert "poolhouse-serve fit MODEL --measure" in body
 
 
 # -- the serving line --------------------------------------------------------------------
@@ -269,14 +269,14 @@ def test_the_text_rendering_has_no_pipes_and_the_same_numbers(store, fits):
 def test_an_empty_store_says_what_to_run(tmp_path):
     body = report([])
     assert "Nothing kept yet" in body
-    assert "ml-stack-bench sweep" in body
+    assert "poolhouse-bench sweep" in body
 
 
 # -- the subcommand ----------------------------------------------------------------------
 
 @pytest.fixture()
 def measured_fit(fit_files, fits):
-    """The fit records the subcommand reads, in ``tmp_path`` -- never ``~/.ml-stack`` and
+    """The fit records the subcommand reads, in ``tmp_path`` -- never ``~/.poolhouse`` and
     never the file that ships with the package. The shipped half is left empty so what the
     subcommand prints came from `fits` alone. (``bench.home_dir()`` is already elsewhere: the
     suite-wide `_no_machine_state` in ``conftest.py`` puts it there.)"""
@@ -300,7 +300,7 @@ def test_the_subcommand_narrows_to_one_model(store, measured_fit, capsys):
 def test_md_writes_the_file_and_open_opens_it(store, measured_fit, tmp_path, capsys,
                                               monkeypatch):
     opened = []
-    monkeypatch.setattr("ml_stack.platform.open_path",
+    monkeypatch.setattr("poolhouse.platform.open_path",
                         lambda where: opened.append(str(where)) or "open")
     out = tmp_path / "written" / "report.md"
     assert bench.main(["report", "--kept", store, "--md", str(out), "--open"]) == 0

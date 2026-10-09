@@ -1,6 +1,6 @@
 # Windows runtime
 
-The Windows `ml-stack` launcher runs the daemon and model backend in Ubuntu on WSL and opens
+The Windows `poolhouse` launcher runs the daemon and model backend in Ubuntu on WSL and opens
 the interface in your Windows browser at `http://127.0.0.1:8770/ui/`.
 Ubuntu must use the virtual-machine WSL architecture. The launcher checks its kernel,
 Python interpreter, and bubblewrap namespaces before starting the application.
@@ -14,16 +14,16 @@ sudo freshclam
 
 Install the NVIDIA driver on Windows to expose the GPU to Ubuntu. The launcher does not
 change administrator settings, firewall rules, or WSL configuration. Set
-`ML_STACK_WSL_DISTRO` to select an Ubuntu distribution with a different name.
+`POOLHOUSE_WSL_DISTRO` to select an Ubuntu distribution with a different name.
 
-Run `ml-stack` from the committed Windows installation. Its first launch creates a
-Python environment under `~/.local/share/ml-stack/runtime` in Ubuntu and installs the
+Run `poolhouse` from the committed Windows installation. Its first launch creates a
+Python environment under `~/.local/share/poolhouse/runtime` in Ubuntu and installs the
 application and dependencies from its cached runtime wheel. Ubuntu retains the wheel
 by commit for managed library installations. When the Windows installation records a
 source checkout, its path is translated for Ubuntu updates. Subsequent launches reuse
 the environment; a changed runtime wheel refreshes it. Models download only when you choose
 to install one in the interface. State and caches live in Ubuntu by default. Windows
-`ML_STACK_HOME`, `ML_STACK_CACHE`, and explicit daemon filesystem arguments are translated
+`POOLHOUSE_HOME`, `POOLHOUSE_CACHE`, and explicit daemon filesystem arguments are translated
 to Linux paths.
 
 The model process runs in bubblewrap with its own network namespace. It communicates

@@ -27,11 +27,11 @@ PROTECTED = (
     ".github/", ".claude/", "packaging/", "SECURITY.md", "pyproject.toml", "budgets.json",
     "scripts/hooks/", "scripts/gates/", "scripts/budgets", "scripts/land*", "scripts/test*",
     "scripts/release-key", "scripts/github-protection", "scripts/audit_gate.py",
-    "tests/known-fixtures.txt", "src/ml_stack/fleet/signing.py", "src/ml_stack/guard/",
-    "src/ml_stack/person.py", "src/ml_stack/worktreerules.py",
-    "src/ml_stack/workspace/person_*.py", "scripts/github-protection-apply", "scripts/notices.py",
-    "release-please-config.json", ".release-please-manifest.json", "src/ml_stack/fleet/updates.py",
-    "src/ml_stack/redact/", "tests/test_budgets.py", "tests/test_wiring.py", "tests/test_layers.py",
+    "tests/known-fixtures.txt", "src/poolhouse/fleet/signing.py", "src/poolhouse/guard/",
+    "src/poolhouse/person.py", "src/poolhouse/worktreerules.py",
+    "src/poolhouse/workspace/person_*.py", "scripts/github-protection-apply", "scripts/notices.py",
+    "release-please-config.json", ".release-please-manifest.json", "src/poolhouse/fleet/updates.py",
+    "src/poolhouse/redact/", "tests/test_budgets.py", "tests/test_wiring.py", "tests/test_layers.py",
 )
 """Paths whose change decides what the gates, the guards or the release signing accept."""
 

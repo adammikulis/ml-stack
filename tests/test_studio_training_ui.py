@@ -27,7 +27,7 @@ def test_training_steps_validate_dataset_and_preserve_recipe_arguments(joined, o
     page.get_by_role('button', name='Review command', exact=True).click()
     expect(page.locator('training-view #config > .status')).to_contain_text('trains for 20 steps')
     spec = page.evaluate("document.querySelector('training-view').spec()")
-    from ml_stack.train.run import _parser
+    from poolhouse.train.run import _parser
     parsed = _parser().parse_args(spec['args'])
     assert parsed.recipe == 'tool-calls' and parsed.lora
     assert parsed.data == 'datasets/demo.jsonl' and 'base=models/demo-base' in parsed.set
@@ -43,7 +43,7 @@ def test_training_steps_validate_dataset_and_preserve_recipe_arguments(joined, o
 
 def test_dataset_handoff_opens_model_step_and_keeps_run_summary(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#training')
-    page.evaluate("sessionStorage.setItem('ml-stack-dataset','datasets/chosen.jsonl')")
+    page.evaluate("sessionStorage.setItem('poolhouse-dataset','datasets/chosen.jsonl')")
     page.evaluate("window.fleetModel.go('models'); window.fleetModel.go('training')")
     expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
     expect(page.locator('training-view #run-summary')).to_contain_text('datasets/chosen.jsonl')
@@ -83,7 +83,7 @@ def test_decision_tools_handoff_opens_recipe_step(joined, open_page):
     expect(page.get_by_label('Recipe', exact=True)).to_be_visible()
     page.get_by_role('button', name='Review this run').click()
     spec = page.evaluate("document.querySelector('training-view').spec()")
-    assert spec['command'] == 'ml-stack-decide'
+    assert spec['command'] == 'poolhouse-decide'
     assert spec['args'][spec['args'].index('--data') + 1] == 'datasets/decisions.jsonl'
     assert not errors
 
@@ -124,7 +124,7 @@ def test_fresh_rl_workflow_requires_no_dataset(joined, open_page):
     assert page.get_by_label('Dataset path (relative to files root)').input_value() == ''
     assert not page.get_by_label('Dataset path (relative to files root)').is_visible()
     spec = page.evaluate("document.querySelector('training-view').spec()")
-    assert spec['command'] == 'ml-stack-gym' and '--data' not in spec['args']
+    assert spec['command'] == 'poolhouse-gym' and '--data' not in spec['args']
     assert not errors
 
 

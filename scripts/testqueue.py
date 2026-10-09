@@ -11,7 +11,7 @@ from pathlib import Path
 
 import testslots_policy as policy
 
-from ml_stack.lock import release, take
+from poolhouse.lock import release, take
 
 QUEUED, RUNNING = "queued", "running"
 

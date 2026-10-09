@@ -7,22 +7,22 @@ The unit that survives being read alone is a **section**: the book itself decide
 idea, it names itself, and it carries its own figures.
 
 ```sh
-ml-stack-ingest textbook.pdf --out ./sources.ladybug --model Qwen3.8-Flash-Next --chapter 2
-ml-stack-ingest ~/texts/*.pdf --out ./sources.ladybug --model Qwen3.8-Flash-Next --resume --detach
-ml-stack-ingest status  --out ./sources.ladybug     # how far, what failed, how long is left
-ml-stack-ingest show    --out ./sources.ladybug     # what each source was read as
-ml-stack-ingest sources --out ./sources.ladybug     # what every source holds together
-ml-stack-ingest fold    --out ./sources.ladybug     # every source so far into the store
-ml-stack-ingest import ./extraction --out ./sources.ladybug --dry-run   # a pair somebody else extracted
-ml-stack-ingest ask     --out ./sources.ladybug "how is heart rate controlled"   # ask the store
-ml-stack-ingest ask     --out ./sources.ladybug --gold ./questions.json  # score the answers, not the reading
-ml-stack-ingest retry   --out ./sources.ladybug   # read again the units that gave up
-ml-stack-ingest tidy    --out ./sources.ladybug   # the hygiene pass; --apply to write it
-ml-stack-ingest migrate --out ./sources.ladybug   # a store from the books era becomes a sources store
-ml-stack-ingest stop                              # end the run, after it folds what it read
+poolhouse-ingest textbook.pdf --out ./sources.ladybug --model Qwen3.8-Flash-Next --chapter 2
+poolhouse-ingest ~/texts/*.pdf --out ./sources.ladybug --model Qwen3.8-Flash-Next --resume --detach
+poolhouse-ingest status  --out ./sources.ladybug     # how far, what failed, how long is left
+poolhouse-ingest show    --out ./sources.ladybug     # what each source was read as
+poolhouse-ingest sources --out ./sources.ladybug     # what every source holds together
+poolhouse-ingest fold    --out ./sources.ladybug     # every source so far into the store
+poolhouse-ingest import ./extraction --out ./sources.ladybug --dry-run   # a pair somebody else extracted
+poolhouse-ingest ask     --out ./sources.ladybug "how is heart rate controlled"   # ask the store
+poolhouse-ingest ask     --out ./sources.ladybug --gold ./questions.json  # score the answers, not the reading
+poolhouse-ingest retry   --out ./sources.ladybug   # read again the units that gave up
+poolhouse-ingest tidy    --out ./sources.ladybug   # the hygiene pass; --apply to write it
+poolhouse-ingest migrate --out ./sources.ladybug   # a store from the books era becomes a sources store
+poolhouse-ingest stop                              # end the run, after it folds what it read
 ```
 
-`ml_stack.sources.pdf` does the reading (pdfminer.six, MIT, in a bounded child process, with figures and datasheet pages drawn by PDFium in another; `ML_STACK_PDF_ENGINE=pymupdf` with the AGPL `pdf-agpl` extra reads with MuPDF instead). `read(path)` gives a `Document` of `Chapter`s of
+`poolhouse.sources.pdf` does the reading (pdfminer.six, MIT, in a bounded child process, with figures and datasheet pages drawn by PDFium in another; `POOLHOUSE_PDF_ENGINE=pymupdf` with the AGPL `pdf-agpl` extra reads with MuPDF instead). `read(path)` gives a `Document` of `Chapter`s of
 `Section`s: a publisher's PDF carries an outline (`doc.get_toc()`) and that is believed, and
 a book printed to PDF by a browser has none, so the headings are found by the way they are
 set -- a section heading is numbered `N.M` and set larger than the body, a chapter opens with
@@ -37,7 +37,7 @@ bold. `units()` is the last cut, splitting a section over ~2,500 tokens on parag
 boundaries and never inside one. `is_openstax()` reads the licence page, because a file
 renamed by whoever downloaded it says nothing.
 
-`ml-stack-ingest` is the other half. Each unit goes through `Client.extract` against
+`poolhouse-ingest` is the other half. Each unit goes through `Client.extract` against
 `contracts/extraction-document.schema.json` -- concepts with a kind and a one-line definition
 *in the book's words or empty*, relations whose verb phrase is one of nineteen glossed core
 ones or, where none of those says what the page says, one the model names itself in the same
@@ -47,7 +47,7 @@ snake_case shape, what each figure shows and which concepts it illustrates, and 
 source uses more. The core verbs and kinds are what every source shares; a verb from
 outside them is marked `extension` on its edge and a kind `extension_kind` on its node --
 the same mark an imported predicate carries -- so a source's own vocabulary can be read
-back. `ml-stack-ingest sources` prints it, and `--core-only` reads a source with the core
+back. `poolhouse-ingest sources` prints it, and `--core-only` reads a source with the core
 lists and nothing else.
 
 The vocabulary grows as the store is read into. What earlier sections named for themselves
@@ -62,7 +62,7 @@ chapter, section and pages, and points in turn at the hidden `run` node that rea
 model, its build and head, sampling, the schema and instructions hashes, the version, the
 host, when. `located()` and `origin()` walk the pointers back to a page and a model, so a
 claim in a knowledge graph always has a page and a model behind it, without a string
-copied onto every node. Each extraction's `ml_stack.telemetry.Call` is kept, so "the run
+copied onto every node. Each extraction's `poolhouse.telemetry.Call` is kept, so "the run
 took nine hours" breaks down into which source, which section and how much of it was prompt.
 
 The model is served the way the bench serves one: `--model` takes a lease for the whole run
@@ -71,13 +71,13 @@ server that is already up. `--images` hands the model each section's rendered fi
 pictures rather than only their captions -- the `_images` convention `graph.answers` uses -- and
 without a projector the captions are all it gets, which it says rather than pretending
 otherwise. A run is hours, so `--detach` runs it in its own session with a log under
-`~/.ml-stack/ingest/logs`, a progress file beside the store records every unit that finished,
+`~/.poolhouse/ingest/logs`, a progress file beside the store records every unit that finished,
 `--resume` skips those, and `status` says how many sections of how many sources are done, at
 what rate, what is in the store, and how long the rest will take.
 
 ## A graph somebody else already extracted
 
-`ml-stack-ingest import DIR --out STORE` takes a `nodes.csv`/`edges.csv` pair another
+`poolhouse-ingest import DIR --out STORE` takes a `nodes.csv`/`edges.csv` pair another
 extractor wrote and puts it in the store as one source. The pair becomes this library's own
 reads -- one per section, in the document schema's shape -- and goes in through the same
 fold a read source does, so it has the same node and edge shape, the same `source:<slug>`
@@ -117,7 +117,7 @@ twenty-five sections have gone by since the last fold, and inside a chapter long
 fifty. Writing a source is an upsert and nothing more -- a node the store lacks is added,
 one it has takes the fold's mentions, aliases, definition and provenance, an edge likewise,
 and nothing is merged or removed: a knowledge graph is updated by adding to it. Joining
-duplicates is a separate pass (`ml_stack.graph.tidy`), and `fold --rebuild` -- the source's
+duplicates is a separate pass (`poolhouse.graph.tidy`), and `fold --rebuild` -- the source's
 own nodes and edges out, then the full fold from its reads -- is the one path that removes
 anything, for after a fix that changed what a read means. `fold --dry-run` says what a fold
 would add and writes nothing.
@@ -125,7 +125,7 @@ would add and writes nothing.
 The fold is `entities.fold` comparing every concept name against every other, so its cost
 grows with the square of the vocabulary.
 
-`ml-stack-ingest fold --out STORE [--source SLUG]` does the same from the reads on demand,
+`poolhouse-ingest fold --out STORE [--source SLUG]` does the same from the reads on demand,
 and is idempotent. `show` prints what each source was read as -- concepts with their kind
 and definition, relations with their verb and the page behind them, the spellings and
 plurals the fold joined, how many figures -- and says which sources are partial. `sources`
@@ -149,7 +149,7 @@ deletes them all, and `--source SLUG` one source's. The store keeps its nodes an
 `Sources` is the same thing for an application:
 
 ```python
-from ml_stack.ingest import Sources
+from poolhouse.ingest import Sources
 
 view = Sources("./sources.ladybug")
 for one in view.sources():
@@ -167,7 +167,7 @@ so a kill in the middle of one leaves the file that was there.
 ## Whether it does a good job
 
 ```sh
-ml-stack-ingest --gold tests/fixtures/extraction-gold.json --model Qwen3.8-Flash-Next --fail-under 0.7
+poolhouse-ingest --gold tests/fixtures/extraction-gold.json --model Qwen3.8-Flash-Next --fail-under 0.7
 ```
 
 `--gold FILE` is the measurement, not an opinion. The file holds passages with the triples

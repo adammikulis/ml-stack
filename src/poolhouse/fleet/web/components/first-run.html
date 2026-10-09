@@ -1,0 +1,498 @@
+<!-- first-run: naming this machine, joining a cluster, and what it should be able to do -->
+<template>
+  <div class="centre" id="first-run" hidden><div class="card" id="first-run-card"></div></div>
+</template>
+<style>
+first-run .centre { align-items: start; padding-top: 5vh; }
+first-run #first-run-card { max-width: 760px; width: 100%; border-radius: 18px; }
+first-run #first-run-card > p { letter-spacing: .04em; font-weight: 600; margin-bottom: 20px; }
+first-run .opt { border: 1px solid var(--border, #343b49); border-radius: 10px; padding: 12px; margin: 8px 0; }
+first-run .opt:has(input:checked) { border-color: var(--accent, #6c92ff); background: color-mix(in srgb, var(--accent, #6c92ff) 10%, transparent); }
+first-run .group { margin: 20px 0; }
+first-run .sub { line-height: 1.65; }
+first-run button { margin-top: 12px; }
+</style>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+
+  const STAGES = 9;
+  const stageName = (i) => M.t(`wizard.stage.${i}`);
+
+  class FirstRun extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#first-run");
+      this.card = this.querySelector("#first-run-card");
+      this.stepper = M.ui("ml-stepper", {
+        steps: Array.from({ length: STAGES }, (_, i) => ({ id: String(i), title: stageName(i) })),
+        controls: "none", compact: true });
+      this.summary = el("p", { class: "hint", role: "status", "aria-live": "polite" });
+      this.card.append(this.summary, this.stepper);
+      window.addEventListener("vocabulary-change", () => {
+        this.stepper.steps = Array.from({ length: STAGES }, (_, i) => ({ id: String(i), title: stageName(i) }));
+        this.summary.textContent = M.t("wizard.summary", { at: this.state.step + 1, total: STAGES, name: stageName(this.state.step) });
+      });
+      this.state = { step: 0, name: "", group: "", pass: "", clusters: [],
+                     libraries: null, suggest: null, prefs: null, install: null };
+      M.onRoute((route) => {
+        const on = route === "first-run";
+        this.box.hidden = !on;
+        if (on) this.open();
+      });
+    }
+
+    async open() {
+      this.setup = await api("/ui/setup");
+      this.state.step = 0;
+      this.paint();
+    }
+
+    show(...nodes) {
+      const at = this.state.step;
+      this.stepper.current = at;
+      this.summary.textContent = M.t("wizard.summary", { at: at + 1, total: STAGES, name: stageName(at) });
+      this.stepper.replaceChildren(el("div", { slot: `step-${at}` },
+        ...nodes, this.installStatus, this.modelInstall?.status));
+      M.applyAdvanced?.(this.card);
+    }
+
+    go(n) { this.state.step = n; this.paint(); }
+
+    steps(n, back) {
+      return back ? el("button", { class: "back", onclick: back }, "← Back") : null;
+    }
+
+    paint() {
+      const s = this.state.step;
+      if (s === 0) return this.nameStep();
+      if (s === 1) return this.clustersStep();
+      if (s === 2) return this.jobStep();
+      if (s === 3) return this.startStep();
+      if (s === 4) return this.sourceStep();
+      if (s === 5) return this.runStep();
+      if (s === 6) return this.awayStep();
+      if (s === 7) return this.wiredStep();
+      return this.doneStep();
+    }
+
+    nameStep() {
+      const st = this.state;
+      st.name = st.name || this.setup.name || "";
+      const name = el("input", { type: "text", value: st.name, id: "n" });
+      const mode = el("select", { id: "device-mode" },
+        el("option", { value: "dev" }, "Dev — automatically connect trusted devices on this network"),
+        el("option", { value: "prod" }, "Prod — connect only to clusters you explicitly join"));
+      mode.value = st.mode || this.setup.cluster_mode || "dev";
+      const note = el("div", { role: "status" });
+      this.show(
+        this.steps(0),
+        el("h1", { "data-t": "wizard.title" }, "Set up this machine"),
+        el("p", { class: "sub" },
+          "Name your device, connect its compute, and choose its capabilities. Downloads can run in the background. You can change these choices in Settings."),
+        el("label", { for: "n" }, "What should this machine be called?"),
+        name,
+        el("div", { class: "hint" }, "Other machines will show it under this name."),
+        el("label", { for: "device-mode" }, "Connection policy"), mode,
+        el("div", { class: "hint" }, "Dev finds trusted devices nearby. Prod requires an explicit invitation."),
+        el("button", { onclick: async () => {
+          st.name = name.value.trim() || this.setup.name;
+          st.mode = mode.value;
+          const result = await api("/ui/setup/initial", { method: "POST",
+            body: JSON.stringify({ name: st.name, cluster_mode: st.mode }) });
+          if (result.error || !result.ok) { note.textContent = result.error || "Could not save setup."; return; }
+          this.setup = result;
+          this.go(1);
+        } }, "Continue"), note);
+    }
+
+    async clustersStep() {
+      const st = this.state;
+      const current = (await api("/ui/clusters")).clusters || [];
+      const rows = el("div");
+      const draw = (list) => {
+        st.clusters = list;
+        rows.replaceChildren(...list.map((c, i) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, c.group),
+              el("span", { class: "why" }, i === 0 ? "Primary cluster" : "Also joined")),
+            el("button", { class: "ghost small", onclick: async () => {
+              const left = await api("/ui/clusters", { method: "DELETE",
+                body: JSON.stringify({ group: c.group }) });
+              draw(left.clusters || []);
+            } }, "Leave"))));
+      };
+      const manual = el("div");
+      const manualForm = () => manual.replaceChildren(M.clusterForm({ endpoint: "/ui/setup/join",
+        clusterMode: st.mode, group: current[0]?.group || "default",
+        onComplete: async () => { this.setup = await api("/ui/setup");
+          draw((await api("/ui/clusters")).clusters || []); } }));
+      const automatic = st.mode === "dev";
+      if (!automatic || this.setup.selection === "manual") manualForm();
+      this.show(this.steps(1, () => this.go(0)), el("h1", { "data-t": "wizard.pool" }, "Clusters"),
+        el("p", { class: "sub" }, automatic
+          ? "Automatic connection is the default for trusted devices on this network. You can also pair with a cluster manually."
+          : "Join an explicitly admitted cluster with an invitation or its name and passphrase."),
+        rows,
+        automatic ? el("button", { class: "ghost", onclick: async () => {
+          const result = await api("/ui/setup/initial", { method: "POST", body: JSON.stringify({
+            name: st.name, cluster_mode: "dev", automatic: true }) });
+          if (result.error) { manual.textContent = result.error; return; }
+          this.setup = result; manual.replaceChildren();
+          draw((await api("/ui/clusters")).clusters || []);
+        } }, "Connect automatically") : null,
+        automatic ? el("button", { class: "ghost", onclick: manualForm }, "Pair manually") : null,
+        manual, el("button", { onclick: () => this.go(2) }, "Continue"));
+      draw(current);
+    }
+
+    async asked() {
+      const st = this.state;
+      if (!st.suggest) st.suggest = await api("/ui/setup/suggest");
+      const r = st.suggest;
+      const s = r.suggest || {};
+      const pick = st.prefs || (st.prefs = {
+        labels: (s.labels?.value || []).join(","),
+        autostart: s.autostart?.value || "manual",
+        work_hours: !!s.work_hours?.value,
+        on_paused: s.on_paused?.value || "stop",
+      });
+      const spec = (label, why) => el("span", {},
+        el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+      const radio = (group, value, label, why) => {
+        const id = `${group}-${value}`;
+        const input = el("input", { type: "radio", name: group, id,
+                                    ...(pick[group] === value ? { checked: "1" } : {}) });
+        input.onchange = () => { pick[group] = value; };
+        return el("label", { class: "opt", for: id }, input, spec(label, why));
+      };
+      const check = (key, label, why) => {
+        const input = el("input", { type: "checkbox", id: key,
+                                    ...(pick[key] ? { checked: "1" } : {}) });
+        input.onchange = () => { pick[key] = input.checked; };
+        return el("label", { class: "opt", for: key }, input, spec(label, why));
+      };
+      return { s, machine: r.machine || {}, pick, spec, radio, check };
+    }
+
+    async jobStep() {
+      const { s, machine, pick, spec, radio, check } = await this.asked();
+      const suggested = (s.labels?.value || []).join(",");
+      const why = (value, plain) => (value === suggested && s.labels?.why) || plain;
+      this.show(
+        this.steps(2, () => this.go(1)),
+        el("h1", {}, "What should this machine do?"),
+        el("p", { class: "sub" },
+          machine.gpu ? `Found ${machine.gpu}. These are set from that — change either.`
+                      : "These are set from what this machine is — change either."),
+        el("div", { class: "group" },
+          el("h2", {}, "Its job"),
+          radio("labels", "train", "Train models",
+            why("train", "fine-tuning and training runs, on a machine with a GPU")),
+          radio("labels", "prep", "Prepare data",
+            why("prep", "tokenizing and packing, while others train")),
+          radio("labels", "train,prep", "Both", why("train,prep", ""))),
+        el("div", { class: "group" },
+          el("h2", {}, "When I need the machine"),
+          check("work_hours", "Don't take work on weekdays, 9 to 5",
+            pick.work_hours && s.work_hours?.why
+              ? s.work_hours.why : "for a machine somebody works on"),
+          el("label", { class: "opt" },
+            el("input", { type: "checkbox", checked: "1", disabled: "1" }),
+            spec("Pausing stops what is running", s.on_paused?.why))),
+        el("button", { onclick: () => this.go(3) }, "Continue"));
+    }
+
+    async startStep() {
+      const { s, pick, radio } = await this.asked();
+      const go = el("button", {}, "Continue");
+      const outcome = el("div");
+      go.onclick = async () => {
+        go.disabled = true;
+        go.innerHTML = '<span class="spin"></span> Applying…';
+        const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+          ...pick, name: this.state.name,
+          labels: pick.labels ? pick.labels.split(",") : [] }) });
+        if (res.error || (!res.ok && !res.manual)) {
+          go.disabled = false; go.textContent = "Continue";
+          outcome.replaceChildren(el("div", { class: "err", role: "alert" }, res.error || "Could not save startup preferences. Try again."));
+          return;
+        }
+        if (res.manual) {
+          go.disabled = false;
+          go.textContent = "Continue";
+          outcome.replaceChildren(
+            el("div", { class: "err" },
+              res.manual_why || "This part needs administrator rights."),
+            el("pre", { class: "cmd" }, res.manual),
+            el("button", { class: "ghost", onclick: () => this.go(4) },
+              "Skip this — continue"));
+          return;
+        }
+        this.go(4);
+      };
+      this.show(
+        this.steps(3, () => this.go(2)),
+        el("h1", {}, "When should it start?"),
+        el("p", { class: "sub" },
+          "It keeps running after you close the window, so the other machines can still "
+          + "send it work."),
+        radio("autostart", "login", "When I log in",
+          s.autostart?.value === "login" ? s.autostart.why : ""),
+        radio("autostart", "boot", "When the computer starts",
+          "even before anyone logs in — your computer will ask for your password"),
+        radio("autostart", "manual", "Only when I open it", ""),
+        go, outcome);
+    }
+
+    chosen() {
+      const st = this.state;
+      return st.install || (st.install = {
+        want: [], chat: true, context: 8192, updates: true, getModels: true, onClose: "",
+      });
+    }
+
+    optBox(id, on, label, why, flip) {
+      const input = el("input", { type: "checkbox", id, ...(on ? { checked: "1" } : {}) });
+      input.onchange = () => flip(input.checked);
+      return el("label", { class: "opt", for: id }, input, M.row(label, why));
+    }
+
+    sourceStep() {
+      const kept = this.chosen();
+      const note = el("div", { role: "status" });
+      const go = el("button", { disabled: "1" }, "Save and continue");
+      const choices = [["internet", "Internet only", "Download models from their online source."],
+        ["lan", "LAN only", "Copy models and MTP heads from your cluster. No Internet fallback."],
+        ["both", "Both", "Try your cluster first, then the Internet."]];
+      const rows = choices.map(([value, label, why]) => {
+        const input = el("input", { type: "radio", name: "download-sources", value,
+          id: `source-${value}`, ...(kept.sources === value ? { checked: "1" } : {}) });
+        input.onchange = () => { kept.sources = value; go.disabled = false; };
+        return el("label", { class: "opt", for: input.id }, input, M.row(label, why));
+      });
+      go.disabled = !kept.sources;
+      go.onclick = async () => {
+        go.disabled = true;
+        const r = await api("/ui/setup/prefs", { method: "POST",
+          body: JSON.stringify({ download_sources: kept.sources }) });
+        if (!r.ok || r.error) {
+          note.textContent = r.error || "Could not save download sources.";
+          go.disabled = false;
+          return;
+        }
+        this.go(5);
+      };
+      this.show(this.steps(4, () => this.go(3)), el("h1", {}, "Where should downloads come from?"),
+        el("p", { class: "sub" }, "Choose before installing a model. LAN only also keeps "
+          + "the model server and GPU runtime from downloading from the Internet."), ...rows, go, note);
+    }
+
+    async runStep() {
+      const st = this.state;
+      if (!st.libraries) st.libraries = await api("/ui/libraries");
+      const offered = st.libraries.libraries || [];
+      const kept = this.chosen();
+      if (!this.modelInstall) this.modelInstall = await M.startupModels(kept);
+      if (!kept.picked) {
+        kept.picked = true;
+        kept.want = offered.filter((x) => x.default || x.installed).map((x) => x.name);
+      }
+      const want = new Set(kept.want);
+      const note = el("div");
+      const size = el("div", { class: "hint" });
+      const go = el("button", {}, "Install and continue");
+      const later = el("button", { class: "ghost", onclick: () => this.go(6) }, "Not now");
+
+      const paint = () => {
+        const mb = offered.filter((x) => want.has(x.name))
+                          .reduce((a, x) => a + (x.size_mb || 0), 0);
+        size.textContent = mb
+          ? `About ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} to download, `
+            + "in the Poolhouse runtime."
+          : "Installed in the Poolhouse runtime.";
+      };
+
+      go.onclick = async () => {
+        if (go.disabled) return;
+        go.disabled = true; later.disabled = true;
+        const watch = (result, label) => {
+          if (result.error) throw new Error(result.error);
+          if (!result.job) return;
+          if (!this.installStatus) this.installStatus = el("div", { role: "status", "aria-live": "polite" });
+          const row = el("div", { class: "hint" }, `${label}: queued`);
+          this.installStatus.append(row);
+          M.followSetupJob(result.job, (job) => {
+            row.textContent = `${label}: ${job.note || job.state}`;
+          }).catch((error) => { row.className = "err"; row.textContent = `${label}: ${error.message}. Retry in Settings.`; });
+        };
+        try {
+          if (kept.chat) watch(await api("/ui/serving/install", { method: "POST" }), "Model server");
+          const add = [...want];
+          if (add.length) watch(await api("/ui/libraries", { method: "POST",
+            body: JSON.stringify({ install: add }) }), "Libraries");
+          this.modelInstall.start().catch((error) => {
+            this.modelInstall.status.replaceChildren(el("div", { class: "err" }, String(error)));
+          });
+          if (st.step === 5) this.go(6);
+        } catch (error) { note.textContent = String(error); }
+        finally { go.disabled = false; later.disabled = false; }
+      };
+
+      paint();
+      this.card.className = "card wide";
+      this.show(
+        this.steps(5, () => this.go(4)),
+        el("h1", {}, "What should it be able to do?"),
+        el("p", { class: "sub" },
+          "Ticked from what this machine is. Anything here can be changed later in "
+          + "Settings."),
+        el("div", { class: "cap" }, el("span", {}, "CHATTING")),
+        this.optBox("setup-chat", kept.chat, "Run models and chat with them",
+          "installs the model server and the GPU runtime needed on this machine",
+          (on) => { kept.chat = on; }),
+        this.modelInstall.panel,
+        el("details", { "data-advanced": "", class: "aside" },
+          el("summary", {}, "Advanced model settings"),
+          M.contextPicker(kept.context, (n) => { kept.context = n; })),
+        offered.length ? el("div", { class: "cap" }, el("span", {}, "TRAINING")) : null,
+        ...offered.map((lib) =>
+          this.optBox(`lib_${lib.name}`, want.has(lib.name), lib.title,
+            `${lib.blurb || ""}${lib.size_mb ? ` — about ${lib.size_mb} MB` : ""}`,
+            (on) => {
+              if (on) want.add(lib.name); else want.delete(lib.name);
+              kept.want = [...want];
+              paint();
+            })),
+        size, go, later, note);
+    }
+
+    awayStep() {
+      const kept = this.chosen();
+      const st = this.state;
+      const note = el("div", { class: "err", role: "alert" });
+      const go = el("button", {}, "Continue");
+      go.onclick = async () => {
+        go.disabled = true;
+        go.innerHTML = '<span class="spin"></span> Saving…';
+        const result = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+          context: kept.context, auto_update: kept.updates,
+          autodownload_models: kept.getModels, on_close: kept.onClose,
+          autostart: (st.prefs || {}).autostart || "manual" }) });
+        if (!result.ok || result.error) {
+          go.disabled = false; go.textContent = "Continue";
+          note.textContent = result.error || "Could not save background preferences. Try again.";
+          return;
+        }
+        this.go(7);
+      };
+      this.card.className = "card";
+      this.show(
+        this.steps(6, () => this.go(5)),
+        el("h1", {}, "When you are not using it"),
+        el("p", { class: "sub" },
+          "It keeps itself current, and stays reachable while the window is shut."),
+        el("div", { class: "cap" }, el("span", {}, "KEEPING UP TO DATE")),
+        this.optBox("upd", kept.updates, "Download and install updates automatically",
+          "checked once a day, put on when no job is running, and it restarts itself",
+          (on) => { kept.updates = on; }),
+        this.optBox("getm", kept.getModels, "Get models automatically",
+          "using the download sources you selected",
+          (on) => { kept.getModels = on; }),
+        el("div", { class: "cap" }, el("span", {}, "CLOSING THE WINDOW")),
+        ...[["", "Ask me each time"],
+            ["background", "Keep running so the others can still reach it"],
+            ["quit", "Quit and leave the cluster"]].map(([value, label]) => {
+          const id = `close_${value || "ask"}`;
+          const input = el("input", { type: "radio", name: "onclose", id,
+                                      ...(value === kept.onClose ? { checked: "1" } : {}) });
+          input.onchange = () => { if (input.checked) kept.onClose = value; };
+          return el("label", { class: "opt", for: id }, input, M.row(label, ""));
+        }),
+        go, note);
+    }
+
+    async wiredStep() {
+      const r = await api("/ui/room");
+      if (!r.machine || !r.machine.supported) return this.go(8);
+      const next = el("button", {}, "Continue");
+      next.onclick = () => this.go(8);
+      this.show(
+        this.steps(7, () => this.go(6)),
+        el("h1", {}, "Give models more memory?"),
+        el("p", { class: "sub" },
+          "Large models need more of this computer's memory than macOS gives the GPU by default. "
+          + "You can skip this and change it later in Settings."),
+        document.createElement("wired-memory"),
+        el("button", { class: "ghost", onclick: () => this.go(8) }, "Skip"), next);
+    }
+
+    async doneStep() {
+      const st = this.state;
+      const saved = await api("/ui/setup/done", { method: "POST" });
+      if (!saved.ok || saved.error) return this.show(el("div", { class: "err", role: "alert" }, saved.error || "Could not finish setup. Try again."),
+        el("button", { onclick: () => this.doneStep() }, "Retry"));
+      const joined = st.clusters[0];
+      const open = el("button", { onclick: () => location.reload() },
+        joined ? "Open the cluster" : "Open Poolhouse");
+      const ssh = el("div", { class: "aside" },
+        el("div", { class: "hint" },
+          "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
+        el("pre", { class: "cmd" }, "poolhouse-peers setup"));
+
+      if (!joined) {
+        return this.show(
+          this.steps(8),
+          el("h1", {}, `“${st.name}” is ready`),
+          el("p", { class: "sub" },
+            "It is on its own: it will run models and train here, and nothing else on your "
+            + "network can see it."),
+          el("p", { class: "hint" },
+            "Join a cluster whenever you like, from the Cluster screen."),
+          open, ssh);
+      }
+
+      const looking = el("div", { class: "watching" },
+        el("span", { class: "spin" }), " Watching for other machines…");
+      const found = el("div");
+      const poll = async () => {
+        const r = await api("/ui/setup/peers");
+        const others = (r.peers || []).filter((p) => !p.is_self);
+        if (others.length) {
+          looking.remove();
+          open.remove();
+          found.replaceChildren(
+            el("div", { class: "ok" }, `Found ${others.map((p) => p.name).join(", ")}.`),
+            el("button", { onclick: () => location.reload() }, "Open the cluster"));
+          return;
+        }
+        setTimeout(poll, 3000);
+      };
+      poll();
+
+      const step = (n, title, body) =>
+        el("li", {}, el("span", { class: "num" }, n),
+          el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
+
+      this.show(
+        this.steps(8),
+        el("h1", {}, `Joined “${joined.group}”`),
+        el("p", { class: "sub" }, "Now add your other machines. On each one:"),
+        el("ol", { class: "howto" },
+          step(1, "Install Poolhouse", "The same installer you used here."),
+          step(2, "Open it", "It asks the same questions there."),
+          step(3, st.mode === "dev" && this.setup.selection !== "manual"
+            ? "Choose Dev" : "Join the same cluster", st.mode === "dev" && this.setup.selection !== "manual"
+            ? "Trusted devices on the same network connect automatically."
+            : "Use its invitation or the same cluster name and passphrase.")),
+        el("p", { class: "hint" },
+          "They find each other on their own. Nothing else to configure."),
+        looking, found, ssh, open);
+    }
+  }
+  customElements.define("first-run", FirstRun);
+})();
+</script>

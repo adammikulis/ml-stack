@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import person, requests
-from ml_stack.inbox import route
-from ml_stack.ui import assets_dir
+from poolhouse import person, requests
+from poolhouse.inbox import route
+from poolhouse.ui import assets_dir
 from tests.requests_support import ask, make_server, no_markers
 
 __all__ = ["no_markers"]

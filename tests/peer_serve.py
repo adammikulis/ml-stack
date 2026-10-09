@@ -1,7 +1,7 @@
 """A device that shares model files, as its own process (the serving half of the peer-first
 download tests): ``python peer_serve.py ROOT MANIFEST PUB SECRET TLSDIR STATE``. Prints its
 port, then serves until its input closes. It runs the real `ShareServer` with the real
-quarantine veto; its own ML_STACK_HOME (the environment) holds its sentinel.
+quarantine veto; its own POOLHOUSE_HOME (the environment) holds its sentinel.
 
 ``PEER_LOG`` names a file that gets one line per file request (``bytes=a-b``); ``PEER_CUT_AFTER=N``
 makes the process die after N file requests (a cut connection); ``PEER_STALL=1`` makes file
@@ -16,12 +16,12 @@ import threading
 import time
 from pathlib import Path
 
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard.manifest import verify
-from ml_stack.fleet.onboard.peerfirst import quarantine_veto
-from ml_stack.fleet.onboard.requests import Devices
-from ml_stack.fleet.onboard.sharing import Licences
-from ml_stack.fleet.onboard.transfer import API, Share, ShareServer, mac_gate
+from poolhouse.fleet import tls
+from poolhouse.fleet.onboard.manifest import verify
+from poolhouse.fleet.onboard.peerfirst import quarantine_veto
+from poolhouse.fleet.onboard.requests import Devices
+from poolhouse.fleet.onboard.sharing import Licences
+from poolhouse.fleet.onboard.transfer import API, Share, ShareServer, mac_gate
 
 
 class Logged(ShareServer):

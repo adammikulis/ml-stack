@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from onboard_support import Clock, Recorder, info, requests
 
-from ml_stack.fleet.onboard import notify
+from poolhouse.fleet.onboard import notify
 
 FP = "ab" * 32
 
@@ -122,21 +122,21 @@ def test_the_environment_picks_the_notifier_and_defaults_to_the_desktop():
     assert notify.pick("Linux", which=have, env={}).name == "linux"
     assert notify.pick("Linux", which=lambda n: None, env={}).name == "console"
     assert notify.pick("Windows", env={}).name == "windows"
-    assert notify.pick("Darwin", which=have, env={"ML_STACK_NOTIFY": "console"}).name == "console"
-    assert notify.pick("Darwin", which=have, env={"ML_STACK_NOTIFY": "off"}).name == "off"
-    assert notify.pick("Darwin", which=have, env={"ML_STACK_NOTIFY": "system"}).name == "macos"
+    assert notify.pick("Darwin", which=have, env={"POOLHOUSE_NOTIFY": "console"}).name == "console"
+    assert notify.pick("Darwin", which=have, env={"POOLHOUSE_NOTIFY": "off"}).name == "off"
+    assert notify.pick("Darwin", which=have, env={"POOLHOUSE_NOTIFY": "system"}).name == "macos"
 
 
 def test_console_prints_the_cleaned_text_and_leaves_the_answer_to_the_commands():
     out = []
     c = notify.Console(out.append)
     assert c.ask("a\nb", "\x1b[31mred") == "unavailable"
-    assert out == ["a b: [31mred Answer with: ml-stack cluster accept ID --mine|--other, or "
-                   "ml-stack cluster decline ID"]
+    assert out == ["a b: [31mred Answer with: poolhouse cluster accept ID --mine|--other, or "
+                   "poolhouse cluster decline ID"]
 
 
 def test_the_question_cleans_text_again_even_for_a_request_built_by_hand():
-    from ml_stack.fleet.onboard.requests import Request
+    from poolhouse.fleet.onboard.requests import Request
     r = Request("a" * 32, "pi\n\x1b[31mACCEPT‮", "h\x07", "m\n", "10.0.0.5", FP, "ab" * 16, 0.0)
     for text in notify.compose(r):
         assert "\n" not in text and "\x1b" not in text and "‮" not in text
@@ -145,7 +145,7 @@ def test_the_question_cleans_text_again_even_for_a_request_built_by_hand():
 
 # -- the test suite itself never raises a real notification -------------------------------
 def test_this_session_is_set_to_the_console_and_the_desktop_tools_are_shimmed():
-    assert os.environ["ML_STACK_NOTIFY"] == "console"
+    assert os.environ["POOLHOUSE_NOTIFY"] == "console"
     assert notify.pick().name == "console"
     if os.name != "nt":
         for tool in ("osascript", "notify-send", "zenity", "kdialog"):
@@ -156,9 +156,9 @@ def test_this_session_is_set_to_the_console_and_the_desktop_tools_are_shimmed():
 def test_a_process_that_reaches_for_the_desktop_is_caught_by_the_shim():
     """What the session-end check relies on: asking the system notifier from a child process
     (here built directly, as a buggy test might) fails and leaves a record."""
-    log = Path(os.environ["ML_STACK_SHIM_LOG"])
+    log = Path(os.environ["POOLHOUSE_SHIM_LOG"])
     before = log.read_text() if log.exists() else ""
-    code = ("from ml_stack.fleet.onboard import notify\n"
+    code = ("from poolhouse.fleet.onboard import notify\n"
             "print(notify.MacNotifier().ask('t', 'b'))\n")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                           env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
@@ -169,8 +169,8 @@ def test_a_process_that_reaches_for_the_desktop_is_caught_by_the_shim():
     log.write_text(before)                               # this one attempt was on purpose
 
 
-@pytest.mark.skipif(not os.environ.get("ML_STACK_MANUAL_DIALOG"),
-                    reason="set ML_STACK_MANUAL_DIALOG=1 to see the real dialog on this screen")
+@pytest.mark.skipif(not os.environ.get("POOLHOUSE_MANUAL_DIALOG"),
+                    reason="set POOLHOUSE_MANUAL_DIALOG=1 to see the real dialog on this screen")
 @pytest.mark.skipif(platform.system() != "Darwin", reason="macOS")
 def test_manual_the_real_dialog_appears_and_the_click_comes_back(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")           # past the shim, to the real osascript

@@ -32,9 +32,9 @@ inference — the fine-tune has no shortlist to run and no extra context to read
 1. **Trace.** The bench now keeps the transcript of a traced question on the row and in the
    store: every message sent, every call with its arguments, every result with its size and
    how many ids it held, and per call the timings `Spent.note` reads. On by default for a
-   run of 20 questions or fewer, off for the hundred, `MLSTACK_BENCH_TRACE=1` to force it.
+   run of 20 questions or fewer, off for the hundred, `POOLHOUSE_BENCH_TRACE=1` to force it.
    (`bench.measure.Counting`, `bench.wants_trace`, `Row.trace`.)
-2. **Harvest.** `ml-stack-train-tools from-bench --kept STORE --model e4b --min-f1 0.8
+2. **Harvest.** `poolhouse-train-tools from-bench --kept STORE --model e4b --min-f1 0.8
    --base unsloth/gemma-4-E4B-it --out DIR` turns every traced question that scored well
    enough into one example per model turn. **Pass `--base`**: the manifest's base is what
    the recipe renders the chat template with and fine-tunes, and its default is E4B,
@@ -46,11 +46,11 @@ inference — the fine-tune has no shortlist to run and no extra context to read
    30-minute ceiling the bench uses unless `--yes` (see "Which model, and how").
 4. **Export and serve.** One command does it: `--export-gguf` merges the adapter back into
    the base, converts through the *managed* llama.cpp checkout
-   (`~/.ml-stack/llama.cpp/src`, the same source `ml-stack-serve build` builds the server
-   this machine serves with), quantises, and runs `ml_stack.serve.preflight` over the file
+   (`~/.poolhouse/llama.cpp/src`, the same source `poolhouse-serve build` builds the server
+   this machine serves with), quantises, and runs `poolhouse.serve.preflight` over the file
    — architecture, shards, fit, flags — before anybody waits on a load. Then
-   `ml-stack-serve up`.
-5. **Measure.** `ml-stack-bench run` the fine-tuned caller against its own base, same
+   `poolhouse-serve up`.
+5. **Measure.** `poolhouse-bench run` the fine-tuned caller against its own base, same
    questions, same graph, same finder, same sampling. Nothing below is believed until this
    says so.
 
@@ -87,7 +87,7 @@ given what came back.
 ```
 
 Identical to what `synthesise` writes, so the two sources mix in one directory and
-`ml-stack-train-run --recipe tool-calls --data` reads either. Deliberate choices in it:
+`poolhouse-train-run --recipe tool-calls --data` reads either. Deliberate choices in it:
 
 - **`tools` is what was offered on that call, not every tool that exists.** `graph.conversation`
   takes tools away as a question goes on; an example that offers a tool the model did not
@@ -104,7 +104,7 @@ Identical to what `synthesise` writes, so the two sources mix in one directory a
 
 ### What today's store would yield
 
-Nothing, and that is the finding. `~/.ml-stack/bench/runs.ladybug` on 2026-09-02: **235
+Nothing, and that is the finding. `~/.poolhouse/bench/runs.ladybug` on 2026-09-02: **235
 runs, 751 scored questions at or above F1 0.8, 0 of them traced.** Those questions made
 **4006 model turns** between them — 4006 training examples that no longer exist, recoverable
 only by spending the GPU again. Per model, at the same threshold:
@@ -116,7 +116,7 @@ only by spending the GPU again. Per model, at the same threshold:
 | `oss` | 162 | 742 |
 | `e2b` | 64 | 278 |
 
-(`ml-stack-train-tools from-bench --dry-run` prints this for any store: it is `would_yield`,
+(`poolhouse-train-tools from-bench --dry-run` prints this for any store: it is `would_yield`,
 and it exists so that the answer "0" is never given without the number beside it. Turns per
 question run 4.9 for E4B and 6.3 for Flash-Next — a fuller question, and a fuller lesson.)
 
@@ -129,18 +129,18 @@ Same bench, same graph, same questions, one variable:
 
 ```
 # smoke the whole path first: two questions, serve to score to store, a minute
-ml-stack-bench sweep --smoke \
+poolhouse-bench sweep --smoke \
     --serve hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
     --serve ~/models/gemma-4-E4B-it-tools-Q8_0.gguf --shortlist 8
 
 # the deciding run: one variable, the weights
-ml-stack-bench sweep \
+poolhouse-bench sweep \
     --serve hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
     --serve ~/models/gemma-4-E4B-it-tools-Q8_0.gguf \
     --sample 100 --shortlist 8 --trace \
-    --kept ~/.ml-stack/bench/runs.ladybug
-ml-stack-bench show --rates          # accuracy per second, per 1k tokens, per GB
-ml-stack-bench show --trace <label>  # and what it actually called, when it was wrong
+    --kept ~/.poolhouse/bench/runs.ladybug
+poolhouse-bench show --rates          # accuracy per second, per 1k tokens, per GB
+poolhouse-bench show --trace <label>  # and what it actually called, when it was wrong
 ```
 
 Two models, one sweep, so both are served by the same binary against the same store, the
@@ -201,19 +201,19 @@ underneath is what a checkpoint *is*: `train.lora.LoraStep` writes the adapter, 
 16G base it is identical to, so `checkpoint_every` costs 80M instead of 16G.
 
 The alternative was **MLX-LM's LoRA** — native here and faster, but a second training path
-beside `ml_stack.train`, with the checkpoint, resume, stall and divergence guarantees this
+beside `poolhouse.train`, with the checkpoint, resume, stall and divergence guarantees this
 repository is built on to be rebuilt around it. Worth revisiting if the estimate below
 turns out to be the wall; it is not worth two training paths before anything has been
 trained once.
 
-Merging comes before `ml_stack.gguf.export`, and `--export-gguf` does the whole tail in one
+Merging comes before `poolhouse.gguf.export`, and `--export-gguf` does the whole tail in one
 command. (llama.cpp can also serve a GGUF adapter with `--lora`, which is worth measuring
 separately: it makes A/B on one load possible.)
 
 ```
 # the command, once the traces are harvested
-ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf \
-    --data ~/.ml-stack/train/e4b-traces --out ~/.ml-stack/train/e4b-tools \
+poolhouse-train-run --recipe tool-calls --size e4b --lora --export-gguf \
+    --data ~/.poolhouse/train/e4b-traces --out ~/.poolhouse/train/e4b-tools \
     --set steps=1000 --yes
 ```
 
@@ -234,7 +234,7 @@ fit: 8.0B parameters (4.0B active) ≈ 18.8G resident -- frozen base in bf16, ad
 cost: estimated 65.5 s/step, 18 h 12 min in all (an estimate; --dry-run trains 20 real steps and measures it) -- over the ceiling
 error: estimated 18 h 12 min, over the 30 min ceiling -- a fine-tune is hours, so it is a
 decision and not an accident. Train fewer steps (--set steps=N), raise the ceiling
-(--ceiling MINUTES, or MLSTACK_TRAIN_CEILING), measure first (--dry-run), or pass --yes.
+(--ceiling MINUTES, or POOLHOUSE_TRAIN_CEILING), measure first (--dry-run), or pass --yes.
 ```
 
 Exit 5, the bench's own code for a refused estimate, and nothing downloaded: an 8B base is
@@ -247,19 +247,19 @@ fewer than one epoch.
 | | estimate | how to actually know |
 | --- | --- | --- |
 | data | 3–5k turns from 2–3 traced hundred-question runs | `from-bench --dry-run` after the runs |
-| GPU to gather | ~3 runs × 100 questions × 3–25 s ≈ 0.5–2 h | `ml-stack-bench estimate` before each |
+| GPU to gather | ~3 runs × 100 questions × 3–25 s ≈ 0.5–2 h | `poolhouse-bench estimate` before each |
 | LoRA, E4B, one epoch | 1000 steps at batch 4, ctx 2048, 8192 tokens a step | printed by the command above, from the contract's own numbers |
-| s/step | ~65 s (500 tokens/s per billion active parameters, `lora.TOKENS_PER_S_PER_B`) | `ml-stack-train-run --dry-run` trains 20 real steps, writes nothing, and prints `measured: N s/step` |
+| s/step | ~65 s (500 tokens/s per billion active parameters, `lora.TOKENS_PER_S_PER_B`) | `poolhouse-train-run --dry-run` trains 20 real steps, writes nothing, and prints `measured: N s/step` |
 | wall clock to train | ~18 h for the epoch; ~5 h 30 for 300 steps; 22 min for the 20 a dry run does | the measured s/step × steps, which the dry run restates |
 | export + serve | minutes | — |
-| the deciding bench | 2 × 100 questions ≈ 20 min | `ml-stack-bench estimate`, and the ceiling refuses over it |
+| the deciding bench | 2 × 100 questions ≈ 20 min | `poolhouse-bench estimate`, and the ceiling refuses over it |
 
 The throughput constant is *derived*, not measured: about 4 FLOPs per active parameter per
 token for a LoRA'd forward and backward, against ~2 TFLOP/s of bf16 matmul through torch's
 MPS backend. It is the first thing a dry run should replace, and 20 steps costs 22 minutes
 to find out whether 18 hours was right.
 
-The GPU is busy with sweeps; a training run and a bench must not share it. `ml-stack-bench`
+The GPU is busy with sweeps; a training run and a bench must not share it. `poolhouse-bench`
 already takes the measuring lock — a training run must take it too, or be scheduled after.
 That is still true and still not done: the ceiling makes the length of a run explicit, it
 does not stop two runs from colliding.
@@ -273,7 +273,7 @@ does not stop two runs from colliding.
   only sharpen what it already does; 183 questions is not much to sharpen with.
 - **Whether it survives a graph it has not seen.** Every trace so far is over the invented
   community. A caller that has memorised its ids is worthless. The world generator
-  (`ml-stack-world`) can build a second community to test exactly this, and should.
+  (`poolhouse-world`) can build a second community to test exactly this, and should.
 - **Whether the fine-tune breaks the prose.** Loss on assistant tokens teaches the answer
   turn as well as the call turns. `answer_chars` and a read of a few answers, not just F1.
 - **Cost per step on this hardware.** MPS with `transformers` is not fast, and nobody here
@@ -296,7 +296,7 @@ were built for three questions and now overlap.
 | --- | --- | --- | --- |
 | `client.Spent` | **one answer** — every call totalled | rides with the answer to the page (`Spent.public`, `Spent.totals` for a session) | what did answering this cost, and how fast did it feel |
 | bench `Row.trace` | **one call** | `Row.trace`, kept in the bench store beside the totals | what did it *do*, call by call — and what can be learned from it |
-| `serve.fit` | **one model** | `ml_stack/data/fit.json`, layered with `~/.ml-stack/fit.json` | how many people fit on this machine at this context |
+| `serve.fit` | **one model** | `poolhouse/data/fit.json`, layered with `~/.poolhouse/fit.json` | how many people fit on this machine at this context |
 
 They line up cleanly, and the arithmetic agrees today by construction rather than by
 sharing code: `Spent.note` and `Counting._reply` read the *same* fields off the same reply

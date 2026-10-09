@@ -6,9 +6,9 @@ A classifier labels every tool call the chat agent makes `safe`, `reversible`, `
 classifier only adds a question: no role, plan or saved rule lets a call past it, and nothing it
 reads can lower its answer.
 
-Code: `ml_stack.guard.destructive` (`classify`, `Verdict`, `combine`), the rail
-`ml_stack.guard.destructive_rail.DestructiveRail`, the optional model layer
-`ml_stack.guard.destructive_model.ModelLayer`. Any consumer can call
+Code: `poolhouse.guard.destructive` (`classify`, `Verdict`, `combine`), the rail
+`poolhouse.guard.destructive_rail.DestructiveRail`, the optional model layer
+`poolhouse.guard.destructive_model.ModelLayer`. Any consumer can call
 `classify(Call(name, arguments), roots=..., catalog=..., floors=..., annotations=...)`.
 
 ## Reading the question
@@ -44,7 +44,7 @@ The label is the most severe of these.
   `kubectl delete`, `terraform apply/destroy`, cloud CLIs; `launchctl`/`systemctl stop`;
   package removal and publish; `curl`/`wget` that send data, `scp`, `rsync`, `nc`, `ssh`; a
   download piped to a shell. A path in a protected directory (`/etc`, `~/.ssh`, a `.env`, `.git`) or
-  outside the project and ml-stack's state is called out and raises writes.
+  outside the project and Poolhouse's state is called out and raises writes.
 - SQL, split into statements with comments and literals blanked: `DROP`, `TRUNCATE`, `DELETE`,
   `UPDATE` without a real `WHERE` (`WHERE 1=1` is not one), `ALTER ... DROP`, `GRANT`, `REVOKE`,
   `REPLACE`, `COPY ... PROGRAM`.
@@ -65,10 +65,10 @@ directory (the only filesystem reads are existence checks for `mv`, `cp` and ove
 
 ## Layer 2: the decision model, optional
 
-Off unless the person starts the process with `ML_STACK_DESTRUCTIVE_MODEL=1`
-(`ML_STACK_DESTRUCTIVE_FLOOR`, 0.5 to 1, default 0.8). No tool, message or file the model can
+Off unless the person starts the process with `POOLHOUSE_DESTRUCTIVE_MODEL=1`
+(`POOLHOUSE_DESTRUCTIVE_FLOOR`, 0.5 to 1, default 0.8). No tool, message or file the model can
 reach changes either. It asks the typed question `is_destructive` (choice `safe | reversible |
-destructive`) through `ml_stack.decide.questions` and the default decider path over the
+destructive`) through `poolhouse.decide.questions` and the default decider path over the
 sanitised call (`defang`/`closed`), one token, no text generated. It runs only for calls layer 1 did not
 already stop on. An answer under the floor is `unsure`. A decider that is down, errors or takes
 longer than 3 s gives nothing and the verdict records `layer: deterministic`. Answers are cached
@@ -94,7 +94,7 @@ per tool and exact arguments (not per argument shape, which would let `ls x` sta
 ## Measured
 
 2026-10-03, `scripts/experiments/destructive_eval.py` (add `--misses` to list each wrong call),
-layer 1 only, on this machine, no model. Sets: the corpus in `ml_stack.decide.guards.destructive`
+layer 1 only, on this machine, no model. Sets: the corpus in `poolhouse.decide.guards.destructive`
 (30 safe, 30 reversible, 31 destructive) and `destructive_adversarial` (166 safe look-alikes, 76
 reversible, 374 destructive, with obfuscation). Recall counts `unsure` as caught; strict counts only
 `destructive`. The script fails below 0.99 recall or above 5% of safe calls asked.

@@ -6,12 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet.project_board_routes import ProjectBoardRoutes
-from ml_stack.fleet.routes import Base
-from ml_stack.fleet.session import Sessions
-from ml_stack.workspace import tokens
-from ml_stack.workspace.remote_host import WorkspaceHost
-from ml_stack.workspace.service import Workspace
+from poolhouse.fleet.project_board_routes import ProjectBoardRoutes
+from poolhouse.fleet.routes import Base
+from poolhouse.fleet.session import Sessions
+from poolhouse.workspace import tokens
+from poolhouse.workspace.remote_host import WorkspaceHost
+from poolhouse.workspace.service import Workspace
 
 PROJECT = "a" * 32
 OTHER = "b" * 32
@@ -43,7 +43,7 @@ def project_board(tmp_path):
                                workspace_base=lambda ident: workspaces[ident].base)
     sessions = Sessions()
     session = sessions.open("fixture-person", "launch-ticket")
-    cookie_value = f"ml_stack_ui={session.sid}"
+    cookie_value = f"poolhouse_ui={session.sid}"
     ui = SimpleNamespace(sessions=sessions, projects=registry, record=lambda *a, **k: None,
                          workspaces=WorkspaceHost(registry),
                          authed=lambda cookie: cookie == cookie_value,

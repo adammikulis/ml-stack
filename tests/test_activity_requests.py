@@ -3,7 +3,7 @@ who raised it and the way it was answered, and never the words it was about."""
 
 from __future__ import annotations
 
-from ml_stack import activity, requests
+from poolhouse import activity, requests
 from tests.activity_support import entries, person, ring
 from tests.requests_support import CANARY, ask
 

@@ -18,9 +18,9 @@ import keyring
 import pytest
 from onboard_support import FileKeyring, Recorder
 
-from ml_stack.fleet.onboard import manifest as mf, ssh
-from ml_stack.fleet.onboard.signing import SigningKeys
-from ml_stack.safenames import Unsafe
+from poolhouse.fleet.onboard import manifest as mf, ssh
+from poolhouse.fleet.onboard.signing import SigningKeys
+from poolhouse.safenames import Unsafe
 
 WHEEL = b"PK-not-really-a-wheel" * 400
 FINGERPRINT = "SHA256:" + "A" * 43
@@ -33,7 +33,7 @@ def needs_cryptography():
 
 @pytest.fixture
 def keystore(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_TEST_KEYRING", str(tmp_path / "keystore.json"))
+    monkeypatch.setenv("POOLHOUSE_TEST_KEYRING", str(tmp_path / "keystore.json"))
     before = keyring.get_keyring()
     keyring.set_keyring(FileKeyring())
     yield
@@ -44,7 +44,7 @@ def keystore(tmp_path, monkeypatch):
 def share(tmp_path):
     d = tmp_path / "share"
     d.mkdir()
-    (d / "ml_stack-0.2-py3-none-any.whl").write_bytes(WHEEL)
+    (d / "poolhouse-0.2-py3-none-any.whl").write_bytes(WHEEL)
     return d
 
 
@@ -156,7 +156,7 @@ def test_the_payload_is_plain_files_with_fixed_modes_and_the_script_that_is_prin
     with tarfile.open(tools.payload) as tar:
         members = {m.name: m for m in tar.getmembers()}
         assert set(members) == {"manifest.json", "manifest.sig", "allowed_signers", "KEYID",
-                                "install_remote.py", "ml_stack-0.2-py3-none-any.whl"}
+                                "install_remote.py", "poolhouse-0.2-py3-none-any.whl"}
         assert all(m.isreg() and m.uid == 0 and m.mtime == 0 for m in members.values())
         assert members["install_remote.py"].mode == 0o700 and members["KEYID"].mode == 0o600
         script = tar.extractfile("install_remote.py").read()
@@ -231,15 +231,15 @@ def test_a_missing_openssh_client_is_a_clear_refusal(tmp_path, monkeypatch, keys
 
 # -- the command line ------------------------------------------------------------------------
 def fleet(env, *args):
-    return subprocess.run([sys.executable, "-m", "ml_stack.fleet.join", *args], env=env,
+    return subprocess.run([sys.executable, "-m", "poolhouse.fleet.join", *args], env=env,
                           capture_output=True, text=True, timeout=120, check=False)
 
 
 def cli_env(tmp_path, tools_dir=None):
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path),
-           "ML_STACK_HOME": str(tmp_path / "home"),
+           "POOLHOUSE_HOME": str(tmp_path / "home"),
            "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
-           "ML_STACK_TEST_KEYRING": str(tmp_path / "keystore.json")}
+           "POOLHOUSE_TEST_KEYRING": str(tmp_path / "keystore.json")}
     if tools_dir:
         env["PATH"] = f"{tools_dir}{os.pathsep}{env['PATH']}"
     return env
@@ -257,7 +257,7 @@ def test_the_dry_run_prints_the_script_in_full_with_its_hash_and_runs_nothing(
     import hashlib
     assert doc["script_sha256"] == hashlib.sha256(doc["script"].encode()).hexdigest()
     assert doc["commands"][0][-1] == ssh.REMOTE_UNPACK and doc["commands"][1][-1] == ssh.REMOTE_RUN
-    assert doc["files"][0]["name"] == "ml_stack-0.2-py3-none-any.whl"
+    assert doc["files"][0]["name"] == "poolhouse-0.2-py3-none-any.whl"
     assert tools.calls() == []                                # nothing contacted
     assert not (tmp_path / "state" / "signing.json").exists()    # and no key was made or used
     assert 80 < len(doc["script"].splitlines()) < 160
@@ -277,7 +277,7 @@ def test_a_hostile_target_from_the_command_line_reaches_no_process(
 
 # -- the remote script, run for real in a sandbox HOME ----------------------------------------
 def unpack(tmp_path, tar_bytes):
-    inbox = tmp_path / "home" / ".ml-stack-bootstrap" / "inbox"
+    inbox = tmp_path / "home" / ".poolhouse-bootstrap" / "inbox"
     inbox.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tar:
         tar.extractall(inbox, filter="data")
@@ -310,14 +310,14 @@ def refused(done, needle):
 
 
 def test_a_tampered_wheel_is_refused_before_anything_is_installed(tmp_path, inbox):
-    wheel = inbox / "ml_stack-0.2-py3-none-any.whl"
+    wheel = inbox / "poolhouse-0.2-py3-none-any.whl"
     wheel.write_bytes(wheel.read_bytes()[:-1] + b"X")
     refused(remote(tmp_path, inbox, "--verify-only"), "does not match the signed manifest")
-    assert not (tmp_path / "home" / ".ml-stack" / "venv").exists()
+    assert not (tmp_path / "home" / ".poolhouse" / "venv").exists()
 
 
 def test_a_wheel_of_the_wrong_size_or_a_swapped_wheel_is_refused(tmp_path, inbox):
-    wheel = inbox / "ml_stack-0.2-py3-none-any.whl"
+    wheel = inbox / "poolhouse-0.2-py3-none-any.whl"
     wheel.write_bytes(wheel.read_bytes() + b"more")
     refused(remote(tmp_path, inbox, "--verify-only"), "does not match")
 
@@ -359,10 +359,10 @@ def test_an_expired_manifest_is_refused(tmp_path, keystore, share):
 
 
 def make_wheel(path: Path) -> None:
-    dist = "mlstackfake-0.1.dist-info"
+    dist = "poolhousefake-0.1.dist-info"
     with zipfile.ZipFile(path, "w") as z:
-        z.writestr("mlstackfake.py", "VALUE = 1\n")
-        z.writestr(f"{dist}/METADATA", "Metadata-Version: 2.1\nName: mlstackfake\nVersion: 0.1\n")
+        z.writestr("poolhousefake.py", "VALUE = 1\n")
+        z.writestr(f"{dist}/METADATA", "Metadata-Version: 2.1\nName: poolhousefake\nVersion: 0.1\n")
         z.writestr(f"{dist}/WHEEL", "Wheel-Version: 1.0\nGenerator: t\nRoot-Is-Purelib: true\n"
                                     "Tag: py3-none-any\n")
         z.writestr(f"{dist}/RECORD", "")
@@ -373,28 +373,28 @@ def test_a_verified_wheel_is_installed_into_a_per_user_venv_with_no_sudo(
         tmp_path, keystore):
     share = tmp_path / "share"
     share.mkdir()
-    make_wheel(share / "mlstackfake-0.1-py3-none-any.whl")
+    make_wheel(share / "poolhousefake-0.1-py3-none-any.whl")
     _, signed = signed_for(tmp_path, share)
     inbox = unpack(tmp_path, ssh.build_payload(share, signed))
     done = remote(tmp_path, inbox, "--no-listen")
     assert done.returncode == 0, done.stdout + done.stderr
-    venv = tmp_path / "home" / ".ml-stack" / "venv"
-    out = subprocess.run([str(venv / "bin" / "python"), "-c", "import mlstackfake; "
-                          "print(mlstackfake.VALUE)"], capture_output=True, text=True, check=False)
+    venv = tmp_path / "home" / ".poolhouse" / "venv"
+    out = subprocess.run([str(venv / "bin" / "python"), "-c", "import poolhousefake; "
+                          "print(poolhousefake.VALUE)"], capture_output=True, text=True, check=False)
     assert out.stdout.strip() == "1"
     assert [json.loads(line)["step"] for line in done.stdout.splitlines()] == [
         "verified", "installed"]
 
 
-@pytest.mark.skipif(not os.environ.get("ML_STACK_TEST_SSHD"),
-                    reason="set ML_STACK_TEST_SSHD=1 with a localhost sshd and a key that logs "
+@pytest.mark.skipif(not os.environ.get("POOLHOUSE_TEST_SSHD"),
+                    reason="set POOLHOUSE_TEST_SSHD=1 with a localhost sshd and a key that logs "
                            "in without a prompt, to run the real thing")
 @pytest.mark.slow
 def test_against_a_real_localhost_sshd(tmp_path, keystore, share):
     _, signed = signed_for(tmp_path, share)
     target = ssh.parse_target(f"{os.environ.get('USER', '')}@localhost")
     done = ssh.bootstrap_over_ssh(target, share, signed,
-                                  lambda prints: os.environ.get("ML_STACK_TEST_HOSTKEY", ""))
+                                  lambda prints: os.environ.get("POOLHOUSE_TEST_HOSTKEY", ""))
     assert done["listen_port"]
 
 

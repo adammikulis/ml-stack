@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from ml_stack import mcp
+from poolhouse import mcp
 
 
 @pytest.mark.parametrize("argv", [
@@ -23,7 +23,7 @@ from ml_stack import mcp
     [],
 ])
 def test_bench_run_refuses_what_is_not_allowed(argv, monkeypatch):
-    from ml_stack.bench import underway
+    from poolhouse.bench import underway
 
     monkeypatch.setattr(underway, "detach", lambda a: pytest.fail("detached " + repr(a)))
     with pytest.raises(ValueError):

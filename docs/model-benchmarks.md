@@ -224,7 +224,7 @@ scored the diffs and ran a differential test of old against new code.
 |---|---|---|---|
 | T1 | 11 `RUF059` in `tests/test_graph_cache.py`, `tests/test_graph_bench_standard.py` | 11 fixed, 30 tests pass, 10+/10-, 123 s, 59k tokens | 11 fixed, 30 tests pass, 10+/10-, 101 s, 55k tokens |
 | T2 | 10 `RUF012`/`RUF007` in `tests/test_fleet_work.py` | 10 fixed, 34 tests pass, 19+/14- (reflowed lines), 145 s, 62k | 10 fixed, 34 tests pass, 12+/10-, 168 s, 58k |
-| T4 | `PLR0915` (58 > 50 statements), `UP035`, `RUF046` in `src/ml_stack/bench/history.py` | all fixed, 16 tests pass, 71+/42-, largest function 26 statements, 157 s, 68k | all fixed, 16 tests pass, 51+/36-, largest function 32 statements, 104 s, 57k |
+| T4 | `PLR0915` (58 > 50 statements), `UP035`, `RUF046` in `src/poolhouse/bench/history.py` | all fixed, 16 tests pass, 71+/42-, largest function 26 statements, 157 s, 68k | all fixed, 16 tests pass, 51+/36-, largest function 32 statements, 104 s, 57k |
 
 - Objective checks tie: every target finding fixed, no new finding, every test file passes, the same
   out-of-scope findings remain (3 in T1, 2 in T2, 1 in T4).

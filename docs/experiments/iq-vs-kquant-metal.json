@@ -7,8 +7,8 @@
   "context": 32768,
   "draft": "none",
   "sample": 20,
-  "store": "~/.ml-stack/bench/iq-vs-kquant.ladybug",
-  "results": "~/.ml-stack/bench/iq-vs-kquant-results.json",
+  "store": "~/.poolhouse/bench/iq-vs-kquant.ladybug",
+  "results": "~/.poolhouse/bench/iq-vs-kquant-results.json",
   "pairs": [
     {
       "id": "flash-next",

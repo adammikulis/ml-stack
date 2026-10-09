@@ -6,9 +6,9 @@ import socket
 
 import pytest
 
-from ml_stack.fleet import discovery, lan_clusters, peers
-from ml_stack.fleet.onboard import joining
-from ml_stack.fleet.ui import UI
+from poolhouse.fleet import discovery, lan_clusters, peers
+from poolhouse.fleet.onboard import joining
+from poolhouse.fleet.ui import UI
 
 WORDS = "nine blue lanterns together"
 
@@ -17,7 +17,7 @@ def test_native_named_hint_then_authenticated_join(tmp_path, monkeypatch):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(port))
+    monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(port))
     from test_fleet_handshake import Machine
 
     host = Machine(tmp_path, port)
@@ -26,7 +26,7 @@ def test_native_named_hint_then_authenticated_join(tmp_path, monkeypatch):
         assert lan_clusters.nearby(timeout_s=.4, port=port) == [{"group": "lab"}]
         client = UI(name="desk", cluster_key_path=tmp_path / "client.key")
         remembered = []
-        monkeypatch.setattr("ml_stack.fleet.ui.recovery.remember", lambda *args: remembered.append(args))
+        monkeypatch.setattr("poolhouse.fleet.ui.recovery.remember", lambda *args: remembered.append(args))
         with pytest.raises(discovery.DiscoveryError):
             client.join("the wrong words entirely", "lab", "local", options=joining.JoinOptions(existing=True))
         assert not discovery.memberships(client.cluster_key_path) and not remembered
@@ -123,7 +123,7 @@ def password_cluster(tmp_path, serving):
 def test_browser_named_choices_confirmation_refresh_and_manual(serving, password_cluster, monkeypatch, playwright):
     from playwright.sync_api import expect
 
-    monkeypatch.setattr("ml_stack.fleet.ui.recovery.remember", lambda *args: None)
+    monkeypatch.setattr("poolhouse.fleet.ui.recovery.remember", lambda *args: None)
     with playwright.chromium.launch(headless=True) as browser:
         page = browser.new_page(viewport={"width": 390, "height": 844})
         errors = []
@@ -153,12 +153,12 @@ def test_browser_named_choices_confirmation_refresh_and_manual(serving, password
         assert discovery.memberships(serving.keyfile)[0].group == "lab"
         assert discovery.load_cluster_key(serving.keyfile) == password_cluster.member.key
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-        page.screenshot(path="/private/tmp/ml-stack-named-lan-mobile.png", full_page=True)
+        page.screenshot(path="/private/tmp/poolhouse-named-lan-mobile.png", full_page=True)
         assert not errors
 
 
 def test_prejoin_scan_never_touches_the_keystore(serving, monkeypatch):
-    from ml_stack import keystore
+    from poolhouse import keystore
 
     def forbidden():
         raise AssertionError("discovery must not request the keystore")
@@ -178,7 +178,7 @@ def test_existing_selection_requires_a_boolean(serving, selection):
 
 @pytest.fixture
 def random_cluster(tmp_path, serving, monkeypatch):
-    from ml_stack.fleet import recovery
+    from poolhouse.fleet import recovery
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("127.0.0.1", 0))
@@ -197,7 +197,7 @@ def random_cluster(tmp_path, serving, monkeypatch):
 
 @pytest.mark.redteam
 def test_random_key_hint_and_upload_authenticate_without_keystore(serving, random_cluster, monkeypatch):
-    from ml_stack import keystore
+    from poolhouse import keystore
 
     def forbidden():
         raise AssertionError("random-key onboarding must not touch the keystore")
@@ -260,7 +260,7 @@ def test_browser_random_cluster_recovery_picker(serving, random_cluster, playwri
         assert discovery.load_cluster_key(serving.keyfile) == key
         assert key.decode() not in page.content()
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-        page.screenshot(path="/private/tmp/ml-stack-random-lan-mobile.png", full_page=True)
+        page.screenshot(path="/private/tmp/poolhouse-random-lan-mobile.png", full_page=True)
 
 
 @pytest.mark.redteam
@@ -271,7 +271,7 @@ def test_browser_random_cluster_recovery_picker(serving, random_cluster, playwri
 ])
 def test_authenticated_pake_answer_must_contain_selected_name_and_valid_key(
         serving, password_cluster, monkeypatch, payload):
-    from ml_stack import sealing
+    from poolhouse import sealing
 
     host = password_cluster
     finish = host.joining._finish
@@ -307,7 +307,7 @@ def test_pake_server_confirmation_is_required_before_membership(serving, passwor
 
 
 def test_pake_membership_has_join_secret_without_keystore(tmp_path, monkeypatch):
-    from ml_stack import keystore
+    from poolhouse import keystore
 
     def forbidden():
         raise AssertionError("joining must not open the keystore")

@@ -13,13 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.serve import broker_wire
-from ml_stack.serve.backend import LlamaServerBackend, ServerInfo, ServerSpec
-from ml_stack.serve.broker import Broker
-from ml_stack.serve.manager import ServerManager
-from ml_stack.testing.fakes import FakeBackend
+from poolhouse.serve import broker_wire
+from poolhouse.serve.backend import LlamaServerBackend, ServerInfo, ServerSpec
+from poolhouse.serve.broker import Broker
+from poolhouse.serve.manager import ServerManager
+from poolhouse.testing.fakes import FakeBackend
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "ml_stack"
+SRC = Path(__file__).resolve().parent.parent / "src" / "poolhouse"
 
 LAUNCHERS = {"serve/backend.py", "serve/mlx_tree.py", "serve/python_engines.py"}
 """The modules that call `backend.launch`, the one function that starts a model server
@@ -163,7 +163,7 @@ def test_a_connection_to_a_server_goes_through_the_request_queue():
              if any(dotted(c) in ("urllib.request.urlopen", "urlopen") for c in calls(tree))}
     assert opens == {"http.py"}, where(opens)
     guarded = {name for name, tree in parsed().items()
-               if any(isinstance(node, ast.ImportFrom) and node.module == "ml_stack.http"
+               if any(isinstance(node, ast.ImportFrom) and node.module == "poolhouse.http"
                       and any(alias.name == "_open" for alias in node.names)
                       for node in ast.walk(tree))}
     assert guarded == {"fleet/api.py"}, where(guarded)

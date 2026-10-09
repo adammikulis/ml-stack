@@ -8,11 +8,11 @@ import json
 
 import pytest
 
-from ml_stack import guard
-from ml_stack.agent import Agent, FunctionTools, ToolResult
-from ml_stack.client import Client
-from ml_stack.sandbox.tools import SandboxedBash
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse import guard
+from poolhouse.agent import Agent, FunctionTools, ToolResult
+from poolhouse.client import Client
+from poolhouse.sandbox.tools import SandboxedBash
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 
 pytest_plugins = ["tests.sandbox_kit"]
 

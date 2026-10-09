@@ -8,10 +8,10 @@ import time
 import psutil
 import pytest
 
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-from ml_stack.serve.leases import orphaned, same_process
-from ml_stack.serve.process import cmdline_digest, pid_exists, started_at
-from ml_stack.testing import fake_llama_binary
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from poolhouse.serve.leases import orphaned, same_process
+from poolhouse.serve.process import cmdline_digest, pid_exists, started_at
+from poolhouse.testing import fake_llama_binary
 
 
 def _sleeper(*extra):

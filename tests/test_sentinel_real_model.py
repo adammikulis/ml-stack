@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.client import Client
-from ml_stack.sentinel import Mode, Sentinel, State, canary
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-from ml_stack.serve.process import every_server
+from poolhouse.client import Client
+from poolhouse.sentinel import Mode, Sentinel, State, canary
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from poolhouse.serve.process import every_server
 
 pytestmark = pytest.mark.slow
 
@@ -32,10 +32,10 @@ def _gguf(account: Path, name: str) -> Path | None:
 
 
 def _binary(account: Path) -> Path | None:
-    named = os.environ.get("ML_STACK_TEST_LLAMA_SERVER") or shutil.which("llama-server")
+    named = os.environ.get("POOLHOUSE_TEST_LLAMA_SERVER") or shutil.which("llama-server")
     if named:
         return Path(named)
-    builds = sorted((account / ".ml-stack" / "llama.cpp" / "builds").glob("*/llama-server"))
+    builds = sorted((account / ".poolhouse" / "llama.cpp" / "builds").glob("*/llama-server"))
     return builds[-1] if builds else None
 
 

@@ -1,0 +1,92 @@
+"""Speech recognition, synthesis and voice activity, behind three protocols."""
+
+from __future__ import annotations
+
+from poolhouse.speech.asr import (
+    AudioConversionError,
+    FasterWhisperASR,
+    TransformersWhisperASR,
+    WhisperCppASR,
+    to_wav_16k,
+)
+from poolhouse.speech.protocols import (
+    DEFAULT_SAMPLE_RATE,
+    ASRProvider,
+    NoProviderAvailable,
+    ProviderError,
+    ProviderHealth,
+    Segment,
+    Speech,
+    SpeechRegion,
+    StreamingASR,
+    Transcript,
+    TTSProvider,
+    VADProvider,
+    VoiceActivity,
+)
+from poolhouse.speech.registry import Registry
+from poolhouse.speech.tts import KokoroOnnxTTS, PiperTTS, SystemTTS
+from poolhouse.speech.vad import EnergyVAD, SileroVAD, pcm_to_floats, rms
+
+ASR: Registry = Registry(kind="asr")
+TTS: Registry = Registry(kind="tts")
+VAD: Registry = Registry(kind="vad")
+
+
+def register_defaults() -> None:
+    """Put every provider that needs no arguments on its registry, ahead of them the ones
+    named by ``POOLHOUSE_WHISPER_CPP_MODEL``, ``POOLHOUSE_PIPER_VOICE``, and
+    ``POOLHOUSE_KOKORO_MODEL`` with ``POOLHOUSE_KOKORO_VOICES``."""
+    import os
+
+    ASR.register("faster-whisper", FasterWhisperASR)
+    ASR.register("transformers-whisper", TransformersWhisperASR)
+    if model := os.environ.get("POOLHOUSE_WHISPER_CPP_MODEL", ""):
+        ASR.register("whisper.cpp", lambda: WhisperCppASR(model), prefer=True)
+
+    TTS.register("system", SystemTTS)
+    if voice := os.environ.get("POOLHOUSE_PIPER_VOICE", ""):
+        TTS.register("piper", lambda: PiperTTS(voice), prefer=True)
+    kokoro = os.environ.get("POOLHOUSE_KOKORO_MODEL", "")
+    voices = os.environ.get("POOLHOUSE_KOKORO_VOICES", "")
+    if kokoro and voices:
+        TTS.register("kokoro-onnx", lambda: KokoroOnnxTTS(kokoro, voices), prefer=True)
+
+    VAD.register("energy", EnergyVAD)
+    VAD.register("silero", SileroVAD)
+
+
+register_defaults()
+
+__all__ = [
+    "ASR",
+    "DEFAULT_SAMPLE_RATE",
+    "TTS",
+    "VAD",
+    "ASRProvider",
+    "AudioConversionError",
+    "EnergyVAD",
+    "FasterWhisperASR",
+    "KokoroOnnxTTS",
+    "NoProviderAvailable",
+    "PiperTTS",
+    "ProviderError",
+    "ProviderHealth",
+    "Registry",
+    "Segment",
+    "SileroVAD",
+    "Speech",
+    "SpeechRegion",
+    "StreamingASR",
+    "SystemTTS",
+    "TTSProvider",
+    "Transcript",
+    "TransformersWhisperASR",
+    "VADProvider",
+    "VoiceActivity",
+    "WhisperCppASR",
+    "pcm_to_floats",
+    "register_defaults",
+    "rms",
+    "to_wav_16k",
+]

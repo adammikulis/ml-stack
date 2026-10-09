@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack import trees
+from poolhouse import trees
 
 
 @pytest.mark.parametrize("root", ["$(touch pwned)", "x; touch pwned", "`touch pwned`", "a\nb", "--upload-pack=touch pwned"])

@@ -1,0 +1,690 @@
+"""Putting poolhouse on a machine and keeping it there.
+
+Four things, and the network installer (`packaging/install.sh`, `install.ps1`) is a thin
+caller of each: what starts the daemon at **login** (`install`) or at **boot**
+(`system_service`), how it comes back on new code (`restart`), what happens to the **model
+cache** already on the disk (`plan_cache` -- moved, or better, read where it is), and which
+**model** a new machine should start with (`choose_model`, from the measured profiles).
+
+Everything here that needs root only *generates* the thing root would write, so every
+platform's shape has a test on a machine with no root at all.
+"""
+
+from __future__ import annotations
+
+import os
+import plistlib
+import shlex
+import shutil
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from poolhouse import home, jobs, runtime
+from poolhouse.log import say, warn
+
+from . import autostart_cli, autostart_keystore, wsl_startup
+from .autostart_backends import elevated as _ask_and_run
+from .autostart_models import (
+    ADOPTED,
+    DEFAULT_MODEL,
+    IN_PLACE,
+    LEFT_ALONE,
+    CachePlan,
+    choose_model,
+    models_in,
+    plan_cache,
+)
+from .launch import last_screen
+
+__all__ = [
+    "ADOPTED",
+    "DEFAULT_MODEL",
+    "IN_PLACE",
+    "LABEL",
+    "LEFT_ALONE",
+    "SYSTEM_LABEL",
+    "Autostart",
+    "CachePlan",
+    "SystemService",
+    "choose_model",
+    "install",
+    "main",
+    "models_in",
+    "plan",
+    "plan_cache",
+    "restart",
+    "service_environment",
+    "status",
+    "system_service",
+    "uninstall",
+]
+
+LABEL = "com.poolhouse.traind"
+SERVICE = "poolhouse-traind"
+MODES = ("boot", "login", "manual")
+
+
+@dataclass(frozen=True, slots=True)
+class Autostart:
+    """What was done, or what still needs a human. ``command`` is empty when finished."""
+
+    mode: str
+    installed: bool
+    path: Path | None = None
+    command: str = ""
+    note: str = ""
+
+
+def _runs(argv: list[str]) -> bool:
+    """Whether a command answers ``--help``, which starts nothing."""
+    try:
+        done = subprocess.run([*argv, "--help"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def _executable() -> list[str]:
+    """How to start the daemon on this machine."""
+    found = shutil.which(SERVICE)
+    if found and _runs([found]):
+        return [found]
+    return [sys.executable, "-m", "poolhouse.cli.daemon"]
+
+
+def _args(slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -> list[str]:
+    out: list[str] = []
+    if slots != 1:
+        out += ["--slots", str(slots)]
+    for label in labels:
+        out += ["--label", label]
+    if report:
+        out += ["--report", report]
+    return out
+
+
+# -- macOS ---------------------------------------------------------------
+def _mac_path(mode: str) -> Path:
+    if mode == "boot":
+        return Path("/Library/LaunchDaemons") / f"{LABEL}.plist"
+    return home.user_home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+
+
+def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
+    path = _mac_path(mode)
+    plist = {
+        "Label": LABEL,
+        "ProgramArguments": argv,
+        "RunAtLoad": True,
+        "KeepAlive": {"SuccessfulExit": False},
+        "StandardOutPath": str(log_dir / "traind.log"),
+        "StandardErrorPath": str(log_dir / "traind.log"),
+        "WorkingDirectory": str(home.user_home()),
+        "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+    }
+    body = plistlib.dumps(plist)
+
+    if mode == "boot":
+        command = (f"printf %s {shlex.quote(body.decode())} > {shlex.quote(str(path))} && "
+                   f"launchctl load -w {shlex.quote(str(path))}")
+        ok, why = _ask_and_run(command, "Poolhouse needs permission to start at boot")
+        if ok:
+            return Autostart(mode, installed=True, path=path)
+        return Autostart(
+            mode, installed=False, path=path, command=f"sudo {command}",
+            note=why or "Permission was not given, so it will not start at boot yet.")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    subprocess.run(["launchctl", "unload", str(path)],
+                   capture_output=True, check=False)
+    done = subprocess.run(["launchctl", "load", "-w", str(path)],
+                          capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        return Autostart(mode, installed=False, path=path,
+                         command=f"launchctl load -w {path}",
+                         note=done.stderr.strip() or "launchctl refused the job")
+    return Autostart(mode, installed=True, path=path)
+
+
+# -- systemd -------------------------------------------------------------
+def _unit(argv: list[str], mode: str) -> str:
+    after = "network-online.target"
+    install_target = "multi-user.target" if mode == "boot" else "default.target"
+    return (
+        "[Unit]\n"
+        "Description=poolhouse training daemon\n"
+        f"After={after}\n"
+        f"Wants={after}\n\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"ExecStart={' '.join(argv)}\n"
+        "Restart=on-failure\n"
+        "RestartSec=5\n\n"
+        "[Install]\n"
+        f"WantedBy={install_target}\n"
+    )
+
+
+def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
+    body = _unit(argv, mode)
+    if mode == "boot":
+        target = Path("/etc/systemd/system") / f"{SERVICE}.service"
+        command = (f"printf %s {shlex.quote(body)} > {shlex.quote(str(target))} && "
+                   f"systemctl daemon-reload && systemctl enable --now {SERVICE}")
+        ok, why = _ask_and_run(command, "Poolhouse needs permission to start at boot")
+        if ok:
+            return Autostart(mode, installed=True, path=target)
+        return Autostart(
+            mode, installed=False, path=target, command=f"sudo sh -c \"{command}\"",
+            note=why or "Permission was not given, so it will not start at boot yet.")
+
+    path = home.user_home() / ".config" / "systemd" / "user" / f"{SERVICE}.service"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    subprocess.run(["systemctl", "--user", "daemon-reload"],
+                   capture_output=True, check=False)
+    done = subprocess.run(["systemctl", "--user", "enable", "--now", SERVICE],
+                          capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        return Autostart(mode, installed=False, path=path,
+                         command=f"systemctl --user enable --now {SERVICE}",
+                         note=done.stderr.strip() or "systemctl refused the unit")
+    subprocess.run(["loginctl", "enable-linger", os.environ.get("USER", "")],
+                   capture_output=True, check=False)
+    return Autostart(mode, installed=True, path=path)
+
+
+# -- Windows -------------------------------------------------------------
+# Two Scheduled Tasks, the way `poolhouse-serve build --persist` keeps llama.cpp fresh:
+# LABEL at boot (as SYSTEM, needs an administrator once) and LOGIN_TASK at this user's
+# logon (needs nothing). Both run a .cmd wrapper rather than the daemon directly, because a
+# task's /TR cannot redirect output and a daemon with no log is a daemon nobody can debug.
+# The Startup-folder .cmd is what older installs used for logon; it is still removed, and
+# still the fallback when schtasks refuses.
+LOGIN_TASK = f"{LABEL}.login"
+
+
+def _windows_startup() -> Path:
+    return (Path(os.environ.get("APPDATA", home.user_home()))
+            / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+            / f"{SERVICE}.cmd")
+
+
+def _windows_wrapper(log_dir: Path) -> Path:
+    return log_dir / f"{SERVICE}.cmd"
+
+
+def _windows_wrapper_body(argv: list[str], log_dir: Path) -> str:
+    quoted = _quote(argv)
+    return f'@echo off\r\n{quoted} >> "{log_dir / "traind.log"}" 2>&1\r\n'
+
+
+def _quote(argv: list[str]) -> str:
+    return " ".join(f'"{a}"' if " " in a else a for a in argv)
+
+
+def _windows_task() -> str:
+    return f'schtasks /Delete /F /TN "{LABEL}"'
+
+
+def _windows_task_exists() -> bool:
+    """Whether the boot task is registered."""
+    return _windows_task_named(LABEL)
+
+
+def _windows_login_task_exists() -> bool:
+    return _windows_task_named(LOGIN_TASK)
+
+
+def _windows_task_named(name: str) -> bool:
+    try:
+        done = subprocess.run(["schtasks", "/Query", "/TN", name],
+                              capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def _windows_install(mode: str, argv: list[str], log_dir: Path, *, start_now: bool = True) -> Autostart:
+    quoted = _quote(argv)
+    if mode == "boot":
+        command = (f'schtasks /Create /F /TN "{LABEL}" /TR "{quoted}" '
+                   f'/SC ONSTART /RL HIGHEST /RU SYSTEM')
+        try:
+            done = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"Start-Process -Verb RunAs -Wait -FilePath cmd -ArgumentList '/c {command}'"],
+                capture_output=True, text=True, timeout=120)
+            if done.returncode == 0:
+                return Autostart(mode, installed=True)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return Autostart(mode, installed=False, command=command,
+                         note="Permission was not given, so it will not start at boot.")
+
+    wrapper = _windows_wrapper(log_dir)
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_text(_windows_wrapper_body(argv, log_dir))
+    create = ["schtasks", "/Create", "/F", "/TN", LOGIN_TASK, "/TR", f'"{wrapper}"',
+              "/SC", "ONLOGON", "/RL", "LIMITED"]
+    try:
+        done = subprocess.run(create, capture_output=True, text=True, timeout=60)
+        refused = "" if done.returncode == 0 else (
+            (done.stderr or done.stdout or "").strip() or "schtasks refused the task")
+    except (OSError, subprocess.SubprocessError) as exc:
+        refused = str(exc)
+    if not refused:
+        # Start it now as well: a logon trigger fires at the next logon, and "starts when
+        # you log in" that does nothing until tomorrow reads as broken.
+        if start_now:
+            subprocess.run(["schtasks", "/Run", "/TN", LOGIN_TASK],
+                           capture_output=True, check=False)
+        return Autostart(mode, installed=True, path=wrapper,
+                         note=f"scheduled task {LOGIN_TASK!r} runs it at logon; "
+                              f"log at {log_dir / 'traind.log'}")
+    # The Startup folder needs no schtasks and no permission; it starts the daemon in a
+    # visible console window, which is the price.
+    path = _windows_startup()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_windows_wrapper_body(argv, log_dir))
+    return Autostart(mode, installed=True, path=path,
+                     note=f"schtasks refused ({refused}); placed in the Startup folder "
+                          "instead, which starts it in a console window at logon")
+
+
+
+# -- the interface -------------------------------------------------------
+def plan(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
+         report: str = "") -> list[str]:
+    """The exact command line that would be installed. Shown before anything is."""
+    if sys.platform == "win32":
+        return [sys.executable, "-m", "poolhouse.fleet.launch", "--no-browser", *_args(slots, labels, report)]
+    return _executable() + _args(slots, labels, report)
+
+
+def install(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
+            report: str = "", log_dir: Path | str | None = None) -> Autostart:
+    """Arrange for the daemon to start, or explain what a human must run."""
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    if wsl_startup.guest():
+        result = wsl_startup.call("configure", mode=mode, slots=slots, labels=list(labels), report=report)
+        return Autostart(mode, installed=bool(result.get("installed")), note=str(result.get("note", "")))
+    uninstall()
+    if mode == "manual":
+        left = _left_behind()
+        if left:
+            return Autostart("manual", installed=False, command=left,
+                             note="Removing what starts it at boot needs "
+                                  "administrator rights.")
+        return Autostart("manual", installed=True,
+                         note="Nothing installed. Start it yourself with "
+                              "'poolhouse-traind'.")
+    logs = home.expand(log_dir) if log_dir else home.home()
+    logs.mkdir(parents=True, exist_ok=True)
+    argv = plan(mode, slots=slots, labels=labels, report=report)
+    if not _runs(argv):
+        return Autostart(
+            mode, installed=False, command=" ".join(argv),
+            note="This machine has no working poolhouse to start. Installing it here "
+                 "would leave the operating system retrying a command that fails.")
+    if sys.platform == "darwin":
+        return _mac_install(mode, argv, logs)
+    if sys.platform == "win32":
+        return _windows_install(mode, argv, logs)
+    return _systemd_install(mode, argv, logs)
+
+
+def uninstall(mode: str = "") -> list[Path]:
+    """Remove whatever was installed. Returns what it removed."""
+    removed: list[Path] = []
+    candidates: list[Path] = []
+    if sys.platform == "darwin":
+        candidates = [_mac_path("login"), _mac_path("boot")]
+    elif sys.platform == "win32":
+        candidates = [_windows_startup(), _windows_wrapper(home.home())]
+        if _windows_login_task_exists():
+            subprocess.run(["schtasks", "/End", "/TN", LOGIN_TASK],
+                           capture_output=True, check=False)
+            subprocess.run(["schtasks", "/Delete", "/F", "/TN", LOGIN_TASK],
+                           capture_output=True, check=False)
+        if _windows_task_exists():
+            subprocess.run(["schtasks", "/Delete", "/F", "/TN", LABEL],
+                           capture_output=True, check=False)
+    else:
+        candidates = [home.user_home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
+                      Path("/etc/systemd/system") / f"{SERVICE}.service"]
+    for path in candidates:
+        if not path.exists():
+            continue
+        if sys.platform == "darwin":
+            subprocess.run(["launchctl", "unload", "-w", str(path)],
+                           capture_output=True, check=False)
+        elif sys.platform.startswith("linux"):
+            subprocess.run(["systemctl", "--user", "disable", "--now", SERVICE],
+                           capture_output=True, check=False)
+        try:
+            path.unlink()
+            removed.append(path)
+        except OSError:
+            continue
+    return removed
+
+
+# -- per-machine, at boot, as the person who installed it --------------------------------
+SYSTEM_LABEL = f"{LABEL}.system"
+
+
+@dataclass(frozen=True, slots=True)
+class SystemService:
+    """A definition that starts the daemon at boot, before anybody logs in.
+
+    Generated, never installed from here: writing it needs root, and this is a pure
+    function so every platform's shape has a test on a machine with no root at all.
+    ``install`` is the exact elevated line, which is what an installer runs and what a
+    person is shown when they refuse it.
+
+    It runs **as the user who installed it**, not as SYSTEM or a service account. That is
+    the whole trick for models: ``~/.cache/huggingface`` is already full of weights on the
+    machine somebody has been using, and a service under another account would have its own
+    empty one and download every model again. Same user, same home, one cache -- nothing is
+    copied, symlinked or fetched twice. ``HOME``, ``HF_HOME`` and ``POOLHOUSE_CACHE`` are
+    written into the definition as well, because a process started at boot inherits no
+    login environment to work them out from.
+    """
+
+    platform: str
+    label: str
+    path: str
+    body: str
+    install: str
+    user: str
+    environment: dict[str, str]
+
+
+DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin"
+
+
+def service_environment(home: Path | str, *, path: str = "") -> dict[str, str]:
+    """What the daemon needs in its environment when nobody logged in to give it one.
+
+    ``HF_HOME`` is the point: it names the cache the models are already in, so a service
+    that starts at boot resolves to the same directory the person's own ``poolhouse-models
+    fetch`` writes to, rather than a second one under a service account's home.
+    """
+    where = Path(home).expanduser()
+    return {
+        "HOME": str(where),
+        "HF_HOME": str(where / ".cache" / "huggingface"),
+        "POOLHOUSE_CACHE": str(where / ".cache" / "poolhouse"),
+        "PATH": path or DEFAULT_PATH,
+    }
+
+
+def system_service(user: str, home: Path | str, *, argv: list[str] | None = None,
+                   platform: str = "") -> SystemService:
+    """The boot-time service definition for ``platform`` (this one unless named).
+
+    macOS gets a LaunchDaemon with ``UserName``: it starts at boot with no login, and
+    ``KeepAlive`` brings it back, which is simpler than anything else that survives a
+    reboot on a Mac. Linux gets a system unit with ``User=``. Windows gets a Scheduled Task
+    at ``ONSTART`` with ``/RU <user>`` -- chosen over ``sc create`` because a real service
+    needs a service wrapper to hold a long-lived Python process, while a task at startup is
+    one line, survives reboots and, unlike ``/RU SYSTEM``, keeps the model cache the person
+    already has.
+    """
+    plat = platform or sys.platform
+    argv = argv or _executable()
+    # Never the installing shell's PATH: under sudo that is root's, and it may hold a
+    # tilde no boot-time process expands. The venv the daemon was installed into, then a
+    # plain system PATH.
+    where = Path(argv[0]).parent
+    env = service_environment(home, path=f"{where}:{DEFAULT_PATH}"
+                              if plat != "win32" else str(where))
+    logs = Path("/var/log")
+    if plat == "darwin":
+        body = plistlib.dumps({
+            "Label": SYSTEM_LABEL,
+            "ProgramArguments": argv,
+            "RunAtLoad": True,
+            "KeepAlive": {"SuccessfulExit": False},
+            "UserName": user,
+            "StandardOutPath": str(logs / "poolhouse-traind.log"),
+            "StandardErrorPath": str(logs / "poolhouse-traind.log"),
+            "WorkingDirectory": str(Path(home).expanduser()),
+            "EnvironmentVariables": env,
+        }).decode()
+        path = f"/Library/LaunchDaemons/{SYSTEM_LABEL}.plist"
+        return SystemService(plat, SYSTEM_LABEL, path, body,
+                             f"launchctl load -w '{path}'", user, env)
+    if plat == "win32":
+        path = SYSTEM_LABEL
+        quoted = _quote(argv)
+        body = (f'schtasks /Create /F /TN "{SYSTEM_LABEL}" /TR "{quoted}" '
+                f'/SC ONSTART /RU "{user}" /RL HIGHEST')
+        return SystemService(plat, SYSTEM_LABEL, path, body, body, user, env)
+    lines = "\n".join(f"Environment={k}={v}" for k, v in sorted(env.items()))
+    body = ("[Unit]\n"
+            "Description=poolhouse training daemon (per machine)\n"
+            "After=network-online.target\n"
+            "Wants=network-online.target\n\n"
+            "[Service]\n"
+            "Type=simple\n"
+            f"User={user}\n"
+            f"{lines}\n"
+            f"ExecStart={' '.join(argv)}\n"
+            "Restart=on-failure\n"
+            "RestartSec=5\n\n"
+            "[Install]\n"
+            "WantedBy=multi-user.target\n")
+    path = f"/etc/systemd/system/{SERVICE}.service"
+    return SystemService(plat, SERVICE, path, body,
+                         f"systemctl daemon-reload && systemctl enable --now {SERVICE}",
+                         user, env)
+
+
+def _run(argv: list[str]) -> int:
+    """A short command whose output nobody reads; its exit code is the answer."""
+    try:
+        return subprocess.run(argv, capture_output=True, timeout=60).returncode
+    except (OSError, subprocess.SubprocessError):
+        return 1
+
+
+def _reexec() -> None:
+    """Replace this process with the same command line, reading the code now on disk."""
+    os.execv(sys.executable, [sys.executable, *sys.argv])  # noqa: S606 - this interpreter, its own argv
+
+
+def restart(*, run: Callable[[list[str]], int] | None = None,
+            reexec: Callable[[], None] | None = None) -> str:
+    """Bring the daemon back on the code that is now on disk. Says how it did it.
+
+    Where a login service is installed, stopping is enough: launchd's ``KeepAlive`` and
+    systemd's ``Restart=on-failure`` start it again, so ``launchctl kickstart -k`` and
+    ``systemctl restart`` do the whole thing and this process does not survive the call
+    ("service"). Windows is the exception -- its Scheduled Task fires at logon and would
+    not fire again -- so it re-execs like a daemon somebody started by hand ("exec").
+
+    ``run`` and ``reexec`` are the seams; a test replaces both and nothing is killed.
+    """
+    chosen = runtime.available() if run is None and reexec is None else None
+    if chosen is not None and (getattr(sys, "frozen", False) or Path(sys.prefix) != chosen.prefix):
+        args = [arg for arg in sys.argv[1:] if arg not in {"--restart", "--no-browser"}]
+        jobs.detach("poolhouse.fleet.launch", ["--restart", "--no-browser", *args],
+                    log=runtime.directory() / "restart.log")
+        return "launcher"
+    call = run or _run
+    mode = str(status()["mode"])
+    if mode in ("login", "boot") and sys.platform != "win32":
+        if sys.platform == "darwin":
+            domain = "system" if mode == "boot" else f"gui/{os.getuid()}"
+            if call(["launchctl", "kickstart", "-k", f"{domain}/{LABEL}"]) == 0:
+                return "service"
+            path = _mac_path(mode)
+            call(["launchctl", "unload", str(path)])
+            if call(["launchctl", "load", "-w", str(path)]) == 0:
+                return "service"
+        else:
+            scope = ["--user"] if mode == "login" else []
+            if call(["systemctl", *scope, "restart", SERVICE]) == 0:
+                return "service"
+    (reexec or _reexec)()
+    return "exec"
+
+
+def _left_behind() -> str:
+    """What a person must run by hand to remove what is still installed."""
+    paths = [Path(p) for p in status()["paths"]]  # type: ignore[union-attr]
+    if sys.platform == "win32":
+        return _windows_task() if _windows_task_exists() else ""
+    if not paths:
+        return ""
+    return "sudo rm " + " ".join(f"'{p}'" for p in paths)
+
+
+def status() -> dict[str, object]:
+    if wsl_startup.guest():
+        return wsl_startup.call("status")
+    """Which mode, if any, is currently installed on this machine."""
+    out: dict[str, object] = {"platform": sys.platform, "mode": "manual", "paths": []}
+    checks = {
+        "darwin": {"login": _mac_path("login"), "boot": _mac_path("boot")},
+        "win32": {"login": _windows_startup()},
+    }.get(sys.platform, {
+        "login": home.user_home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
+        "boot": Path("/etc/systemd/system") / f"{SERVICE}.service",
+    })
+    for mode, path in checks.items():
+        if path.exists():
+            out["mode"] = mode
+            out["paths"].append(str(path))       # type: ignore[union-attr]
+    if sys.platform == "win32":
+        if _windows_login_task_exists():
+            out["mode"] = "login"
+            out["paths"].append(LOGIN_TASK)      # type: ignore[union-attr]
+        if _windows_task_exists():
+            out["mode"] = "boot"
+            out["paths"].append(LABEL)           # type: ignore[union-attr]
+    return out
+
+
+# -- the installer's side of it ----------------------------------------------------------
+def _install_system(user: str, home_dir: str, *, only_print: bool = False) -> int:
+    """Write and load the boot service; 0 once installed, 2 when it needs root."""
+    made = system_service(user, home_dir)
+    if why := autostart_keystore.notice(user, home_dir, made.platform):
+        warn(why)
+    if only_print:
+        say(made.body)
+        return 0
+    target = Path(made.path)
+    try:
+        if made.platform == "win32":
+            if _run(["cmd", "/c", made.body]) != 0:
+                warn(f"could not register the task; run as administrator:\n  {made.body}")
+                return 2
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(made.body)
+    except OSError as exc:
+        warn(f"needs root: {exc}\n  {made.install}")
+        return 2
+    if made.platform == "darwin":
+        _run(["launchctl", "unload", str(target)])
+        _run(["launchctl", "load", "-w", str(target)])
+    elif made.platform.startswith("linux"):
+        _run(["systemctl", "daemon-reload"])
+        _run(["systemctl", "enable", "--now", SERVICE])
+    say(f"starts at boot as {made.user}: {made.path}")
+    return 0
+
+
+
+def _windows_owner(request: dict[str, Any]) -> dict[str, object]:
+    mode = request["mode"]
+    subprocess.run(["schtasks", "/Delete", "/F", "/TN", LOGIN_TASK], capture_output=True, check=False)
+    _windows_startup().unlink(missing_ok=True)
+    if mode == "manual":
+        return {"installed": True, "note": "Windows login startup removed; the running launcher remains active."}
+    argv = plan(mode, slots=request["slots"], labels=tuple(request["labels"]), report=request["report"])
+    got = _windows_install(mode, argv, home.home(), start_now=False)
+    return {"installed": got.installed, "note": got.note}
+
+def main(argv: list[str] | None = None) -> int:
+    """What ``packaging/install.sh`` calls rather than writing any of it in shell.
+
+    What an installer has to know and a shell script should not answer for itself:
+    ``system`` (write the boot service, or ``--print`` it), ``cache`` (what to do about the
+    models already on the disk), ``choose`` (which model this machine has room for) and
+    ``done`` (the last screen).
+    """
+    import argparse
+    import json as _json
+
+    if (argv or sys.argv[1:]) == ["windows-owner"]:
+        return wsl_startup.answer(status, _windows_owner)
+
+    ap = argparse.ArgumentParser(prog="python -m poolhouse.fleet.autostart",
+                                 description="what the installer asks about this machine")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sysp = sub.add_parser("system", help="the boot-time service, as the installing user")
+    sysp.add_argument("--user", required=True)
+    sysp.add_argument("--home", required=True)
+    sysp.add_argument("--print", dest="only_print", action="store_true",
+                      help="print the definition instead of installing it (needs no root)")
+
+    cachep = sub.add_parser("cache", help="what happens to the models already here")
+    cachep.add_argument("--user-cache", required=True)
+    cachep.add_argument("--service-cache", default="")
+    cachep.add_argument("--same-user", action="store_true",
+                        help="the service runs as this user, so its cache is read in place")
+    cachep.add_argument("--adopt", action="store_true",
+                        help="move the cache to the shared path and link back to it")
+    cachep.add_argument("--json", action="store_true", help="print the answer as JSON")
+
+    pickp = sub.add_parser("choose", help="which measured model fits in this much room")
+    pickp.add_argument("--room", type=int, default=0, metavar="BYTES")
+    pickp.add_argument("--want", default="auto")
+    pickp.add_argument("--json", action="store_true", help="print the answer as JSON")
+
+    donep = sub.add_parser("done", help="the installer's last screen")
+    donep.add_argument("--name", required=True)
+    donep.add_argument("--track", default="")
+
+    autostart_cli.add_commands(sub)
+    a = ap.parse_args(argv)
+    if a.cmd in autostart_cli.COMMANDS:
+        return autostart_cli.run(a)
+
+    if a.cmd == "done":
+        say("\n".join(last_screen(a.name, track=a.track)))
+        return 0
+
+    if a.cmd == "system":
+        return _install_system(a.user, a.home, only_print=a.only_print)
+
+    if a.cmd == "cache":
+        shared = a.service_cache or str(Path("/opt/poolhouse/cache/huggingface"))
+        got = plan_cache(a.user_cache, shared, same_user=a.same_user, adopt=a.adopt)
+        say(_json.dumps(got.public(), indent=1) if a.json else
+            f"model cache {got.decision}: {got.said or got.error}")
+        return 2 if got.error else 0
+
+    picked = choose_model(a.room, want=a.want)
+    if picked is None:
+        say("{}" if a.json else "no measured model fits this machine; none fetched")
+        return 1
+    say(_json.dumps(picked) if a.json else
+        " ".join(x for x in (picked["model"], picked["draft"]) if x))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

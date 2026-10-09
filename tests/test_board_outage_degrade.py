@@ -2,9 +2,9 @@
 
 import argparse
 
-from ml_stack.http import ServerError
-from ml_stack.workspace import cli
-from ml_stack.workspace.identity import BoardUnavailable, Denied
+from poolhouse.http import ServerError
+from poolhouse.workspace import cli
+from poolhouse.workspace.identity import BoardUnavailable, Denied
 
 
 def _run(cmd, error):

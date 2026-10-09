@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from ml_stack.gym import simulation
-from ml_stack.gym.adapters import make_environment
-from ml_stack.gym.car_definition import build
-from ml_stack.gym.training import evaluate, train
-from ml_stack.gym.values import json_value
+from poolhouse.gym import simulation
+from poolhouse.gym.adapters import make_environment
+from poolhouse.gym.car_definition import build
+from poolhouse.gym.training import evaluate, train
+from poolhouse.gym.values import json_value
 
 
 @pytest.mark.parametrize("road", [True, False, 0, 25, 3., None, [], "", "S" * 25])
@@ -111,7 +111,7 @@ def test_native_manual_map_recreates_generated_lane_geometry(tmp_path, monkeypat
         source.write_text(json.dumps(json_value(metadata)))
     finally:
         env.close()
-    monkeypatch.setenv("ML_STACK_GYM_FILES_ROOT", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_GYM_FILES_ROOT", str(tmp_path))
     imported = make_environment("car", {"simulation_mode": "world", "num_agents": 2,
                                         "traffic_density": 0., "world": {"mode": "manual", "map_file": "country.json"}})
     try:
@@ -186,7 +186,7 @@ def test_manual_episode_geometry_is_independent_of_scenario_reset_seed(tmp_path,
         (tmp_path / "authored.json").write_text(json.dumps(json_value(metadata)))
     finally:
         source.close()
-    monkeypatch.setenv("ML_STACK_GYM_FILES_ROOT", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_GYM_FILES_ROOT", str(tmp_path))
     env = make_environment("car", {"traffic_density": 0., "world": {
         "mode": "manual", "map_file": "authored.json", "seed": 2}})
     try:

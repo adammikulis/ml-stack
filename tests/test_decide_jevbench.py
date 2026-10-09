@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack.decide import jevbench
-from ml_stack.decide.logprob import LogprobDecider
+from poolhouse.decide import jevbench
+from poolhouse.decide.logprob import LogprobDecider
 
 ROWS = [
     {"id": "n1", "family": "policy", "state": "Receipt present.", "labels": ["no", "yes"],

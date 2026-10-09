@@ -1,4 +1,4 @@
-# What ml-stack does
+# What Poolhouse does
 
 `docs/verify_release.py` checks at least one claim from every section here except Entities
 and Known limits; a claim it has no check for is not verified by it. Run it:
@@ -150,7 +150,7 @@ Talk to a model from the interface, whichever machine is running it.
 
 - **A machine with no speech model sends audio to one that has it.** `Peer.transcribe`
   posts a recording to another machine's daemon and gets back the text with the time of
-  every segment, under the credential the fleet already shares. `ml-stack-speech` does the
+  every segment, under the credential the fleet already shares. `poolhouse-speech` does the
   same locally: transcribe a file, say a line into a WAV, or find the seconds somebody is
   speaking in a recording, through whichever engine is installed.
 
@@ -170,7 +170,7 @@ same call works on a Mac and on a CUDA box.
 - A run whose loss goes non-finite is stopped before the update reaches the weights.
 - Learning-rate schedules are plain functions returning floats.
 - Leak-safe splits: contiguous tail, by group, or stratified by label.
-- `ml-stack-train-run parity` compares this machine's two array backends operation
+- `poolhouse-train-run parity` compares this machine's two array backends operation
   by operation and prints the largest difference for each, so "the same call" is
   something a new machine can check rather than take on trust.
 
@@ -204,7 +204,7 @@ Settings lists what can go in it, with what each is for and what it costs to dow
 
 | | |
 |---|---|
-| Training essentials | Arrays, checkpoint files, and ml-stack's own training code |
+| Training essentials | Arrays, checkpoint files, and Poolhouse's own training code |
 | PyTorch | The build that matches the card — NVIDIA, AMD ROCm, or processor-only |
 | MLX | Apple silicon |
 | Images | Reading and resizing pictures |
@@ -243,7 +243,7 @@ screen.
 
 **Made of components.** Every screen is a custom element in a file of its own — the cluster,
 chat, models, settings, what fits, first run, signing in — sharing one model of the daemon's
-routes; a page is the list of them, so a caller leaves one out (`ml-stack-serve fit --ui`
+routes; a page is the list of them, so a caller leaves one out (`poolhouse-serve fit --ui`
 serves what fits and nothing else). Each screen has a route mixin to match.
 
 Setup on a machine that has not joined a cluster is refused from anywhere but that
@@ -258,7 +258,7 @@ deriving the key again and comparing.
 
 Settings has a Remove section listing everything on this machine with what it takes up.
 
-- **Your models and your own files are not ticked.** Everything ml-stack made for
+- **Your models and your own files are not ticked.** Everything Poolhouse made for
   itself is: the settings, the key, the chats, the training environment, the model
   server. A model takes as long to download the second time as it did the first, so it
   is only removed if you say so.
@@ -299,7 +299,7 @@ memory — and says nothing about accelerators rather than guessing.
 
 ## Installing
 
-One package, `ml-stack`, pure Python over `packaging` and `psutil` (process control and
+One package, `poolhouse`, pure Python over `packaging` and `psutil` (process control and
 machine readings): finding the other machines, passing work between them and moving files
 needs nothing else, so the daemon installs on a small board as fast as on a workstation. The extras
 add what a part needs to do its own job — `train`, `serve`, `store`, `graph`, `scrape`,
@@ -448,12 +448,12 @@ The commands are also tools an agent can call.
   asks what the task leaves open, confirms the models it found on this disk, prints a plan,
   asks go, runs the tools, waits for what detached, and reports what was measured and
   where.
-- **`ml-stack-chat` is the agent command**, in a conversation or on a task, under a role
+- **`poolhouse-chat` is the agent command**, in a conversation or on a task, under a role
   (`read-only`, `approve-first`, `plan-and-go`). A call that acts asks: allow this time, always allow or
   never allow, and the saved rules are listed and edited with `/rules`. Releasing quarantine,
   approving a host and changing roles or rules are the person's alone (`docs/agent-roles.md`).
 - **It remembers across sessions** in an encrypted graph of facts, per user and per project
-  (`ml-stack-memory`, `docs/memory.md`).
+  (`poolhouse-memory`, `docs/memory.md`).
 - **Claude Code itself** runs on a model this machine serves, in the settings it scored best with, on a
   lease taken for it and dropped on the way out.
 

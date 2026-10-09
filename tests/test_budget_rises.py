@@ -24,14 +24,14 @@ HOOK = REPO / "scripts" / "hooks" / "budgets-only-fall"
 def scoreboard():
     """scripts/budgets loaded as a module."""
     where = REPO / "scripts" / "budgets"
-    loader = importlib.machinery.SourceFileLoader("_ml_stack_budgets", str(where))
+    loader = importlib.machinery.SourceFileLoader("_poolhouse_budgets", str(where))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
 
 
-def one(path: str = "src/ml_stack/a.py", detail: str = "") -> gates.Finding:
+def one(path: str = "src/poolhouse/a.py", detail: str = "") -> gates.Finding:
     return gates.Finding(path, 1, detail)
 
 
@@ -45,8 +45,8 @@ def tool(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "BUDGETS", held)
     monkeypatch.setattr(module, "ROOT", tmp_path)
     monkeypatch.setattr(module.gates, "run", lambda root: {
-        "broad-excepts": [one("src/ml_stack/a.py"), one("src/ml_stack/b.py"),
-                          one("src/ml_stack/c.py")],
+        "broad-excepts": [one("src/poolhouse/a.py"), one("src/poolhouse/b.py"),
+                          one("src/poolhouse/c.py")],
         "print-calls": [],
     })
     monkeypatch.setattr(module.gates, "hard", set)
@@ -66,7 +66,7 @@ def test_an_agent_cannot_raise_a_budget_even_with_allow_increase(tool, monkeypat
     assert held.read_text(encoding="utf-8") == before
     said = capsys.readouterr().out
     assert "broad-excepts: 2 allowed, 3 found -- up 1." in said
-    assert "src/ml_stack/a.py:1" in said
+    assert "src/poolhouse/a.py:1" in said
     assert "No agent raises a budget" in said
     assert "repository owner, at his own terminal" in said
 
@@ -184,8 +184,8 @@ def test_a_fall_is_committed_without_a_word(checkout):
 
 def test_a_person_raises_it_on_purpose_and_an_agent_still_cannot(checkout):
     raised = {"broad-excepts": 40, "print-calls": 0, "walls": 4}
-    assert commit_with(checkout, raised, ML_STACK_BUDGET_RISE="yes").returncode == 0
-    refused = commit_with(checkout, raised, ML_STACK_BUDGET_RISE="yes", CLAUDECODE="1")
+    assert commit_with(checkout, raised, POOLHOUSE_BUDGET_RISE="yes").returncode == 0
+    refused = commit_with(checkout, raised, POOLHOUSE_BUDGET_RISE="yes", CLAUDECODE="1")
     assert refused.returncode == 1
     assert "No agent raises a budget" in refused.stderr
 

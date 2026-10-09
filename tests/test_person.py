@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import person
-from ml_stack.person import HumanRequired, is_terminal, require_person
+from poolhouse import person
+from poolhouse.person import HumanRequired, is_terminal, require_person
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows NUL device")

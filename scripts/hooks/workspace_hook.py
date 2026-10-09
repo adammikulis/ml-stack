@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
-from ml_stack.guard.secrets import env_secrets, redact
+from poolhouse.guard.secrets import env_secrets, redact
 
 
 def warning(stage: str, reason: object) -> None:
@@ -62,12 +62,12 @@ def primary_checkout(source: Path) -> Path:
 
 def refresh_runtime(stage: str, checkout: Path | None = None, agent: str = '') -> None:
     """Start a detached runtime build when the selected runtime is behind the checkout's HEAD; takes at most 6 seconds."""
-    if os.environ.get('ML_STACK_RUNTIME_ENSURE') == 'off':
+    if os.environ.get('POOLHOUSE_RUNTIME_ENSURE') == 'off':
         return
     source = Path(__file__).resolve().parents[2]
     environment = dict(os.environ, PYTHONPATH=str(source / 'src'))
     try:
-        done = subprocess.run([sys.executable, '-m', 'ml_stack.runtime_cli', 'ensure', '--background',
+        done = subprocess.run([sys.executable, '-m', 'poolhouse.runtime_cli', 'ensure', '--background',
                                '--checkout', str(checkout or primary_checkout(source)),
                                *(['--agent', agent] if agent else [])], capture_output=True,
                               text=True, timeout=6, check=False, env=environment)
@@ -80,7 +80,7 @@ def refresh_runtime(stage: str, checkout: Path | None = None, agent: str = '') -
 
 def session_environment(value: dict, stage: str) -> dict | None:
     environment = dict(os.environ)
-    for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS', 'ML_STACK_WORKSPACE_AGENT'):
+    for name in ('POOLHOUSE_SESSION_ID', 'POOLHOUSE_SESSION_HARNESS', 'POOLHOUSE_WORKSPACE_AGENT'):
         environment.pop(name, None)
     session = value.get('session_id')
     if session is None:
@@ -88,10 +88,10 @@ def session_environment(value: dict, stage: str) -> dict | None:
     if not isinstance(session, str) or not session or len(session) > 256 or any(ord(char) < 33 or ord(char) > 126 for char in session):
         warning(stage, 'invalid native session_id; no session context recorded')
         return None
-    environment.update(ML_STACK_SESSION_ID=session, ML_STACK_SESSION_HARNESS='claude-code')
+    environment.update(POOLHOUSE_SESSION_ID=session, POOLHOUSE_SESSION_HARNESS='claude-code')
     known = agent_name(session, str(value.get('cwd') or ''))
     if known:
-        environment['ML_STACK_WORKSPACE_AGENT'] = known
+        environment['POOLHOUSE_WORKSPACE_AGENT'] = known
     return environment
 
 
@@ -101,7 +101,7 @@ def agent_name(native_id: str, cwd: str = '') -> str:
     if not native_id:
         return ''
     try:
-        from ml_stack.board import session
+        from poolhouse.board import session
         return session.find('claude-code', native_id, cwd=Path(cwd or Path.cwd()))
     except (ImportError, OSError, ValueError, RuntimeError, LookupError, KeyError) as error:
         warning('lookup', error)
@@ -110,25 +110,25 @@ def agent_name(native_id: str, cwd: str = '') -> str:
 
 def name_session(environment: dict, model: str, event: dict | None = None) -> str:
     """Give the session its unique name and put it in `environment`; empty (with a warning) when it has no native session."""
-    session = environment.get('ML_STACK_SESSION_ID', '')
+    session = environment.get('POOLHOUSE_SESSION_ID', '')
     if not session:
         warning('SessionStart', 'no native session id; the session cannot be given its own name')
         return ''
     try:
-        from ml_stack.board import client, place, session as board_session
+        from poolhouse.board import client, place, session as board_session
         node = client.Client()
         board = place.resolve(node, Path(str((event or {}).get('cwd') or Path.cwd())))
         name = board_session.register(node, board, board_session.Native(model, 'claude-code', session)).name
     except (ImportError, OSError, ValueError, RuntimeError, LookupError, client.NodeError) as error:
         warning('SessionStart', error)
         return ''
-    environment['ML_STACK_WORKSPACE_AGENT'] = name
+    environment['POOLHOUSE_WORKSPACE_AGENT'] = name
     return name
 
 
 def persist_session(environment: dict) -> None:
     target = os.environ.get('CLAUDE_ENV_FILE')
-    session = environment.get('ML_STACK_SESSION_ID')
+    session = environment.get('POOLHOUSE_SESSION_ID')
     if not target or not session:
         return
     try:
@@ -149,7 +149,7 @@ def persist_session(environment: dict) -> None:
                 info = os.fstat(output.fileno())
                 if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
                     raise ValueError('native session exports must be a private owned regular file')
-                for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS', 'ML_STACK_WORKSPACE_AGENT'):
+                for name in ('POOLHOUSE_SESSION_ID', 'POOLHOUSE_SESSION_HARNESS', 'POOLHOUSE_WORKSPACE_AGENT'):
                     if name in environment:
                         output.write(f'export {name}={shlex.quote(environment[name])}\n')
         finally:
@@ -161,7 +161,7 @@ def persist_session(environment: dict) -> None:
 def person(value: dict, stage: str) -> int:
     """Hands a hook event to the person-record handlers; never blocks, so every failure is a warning."""
     try:
-        from ml_stack.workspace import person_hook
+        from poolhouse.workspace import person_hook
         output = person_hook.on_event(value)
     except (ImportError, OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError) as error:
         warning(stage, error)
@@ -173,7 +173,7 @@ def person(value: dict, stage: str) -> int:
 
 def hook_notice(environment: dict, source: Path | None = None) -> str:
     """Check that git will run this checkout's hooks; post a changed problem to the board once; return the text for the agent."""
-    from ml_stack import hookcheck
+    from poolhouse import hookcheck
     repo = source or Path(__file__).resolve().parents[2]
     if not (repo / '.git').exists():
         return ''
@@ -182,7 +182,7 @@ def hook_notice(environment: dict, source: Path | None = None) -> str:
         fingerprint = hookcheck.digest(problems)
         if fingerprint != hookcheck.remembered(repo):
             if problems:
-                run(['ml-stack-workspace', 'announce', 'blocked', hookcheck.line(repo, problems)],
+                run(['poolhouse-workspace', 'announce', 'blocked', hookcheck.line(repo, problems)],
                     'SessionStart', environment=environment)
             hookcheck.remember(repo, fingerprint)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -193,8 +193,8 @@ def hook_notice(environment: dict, source: Path | None = None) -> str:
 
 def state_dir() -> Path:
     """Where hooks keep their small per-session memory (attention shown); private to the user."""
-    named = os.environ.get('ML_STACK_HOOK_STATE')
-    path = Path(named) if named else Path(tempfile.gettempdir()) / f'ml-stack-hooks-{os.getuid()}'
+    named = os.environ.get('POOLHOUSE_HOOK_STATE')
+    path = Path(named) if named else Path(tempfile.gettempdir()) / f'poolhouse-hooks-{os.getuid()}'
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
 
@@ -231,7 +231,7 @@ def parent_environment(event: dict, stage: str) -> dict | None:
         return None
     above = agent_name(spawner_id(event), str(event.get('cwd') or ''))
     if above:
-        environment['ML_STACK_WORKSPACE_AGENT'] = above
+        environment['POOLHOUSE_WORKSPACE_AGENT'] = above
     return environment
 
 
@@ -241,5 +241,5 @@ def own_environment(event: dict, stage: str) -> dict | None:
     name = agent_name(str(event.get('agent_id') or ''), str(event.get('cwd') or ''))
     if environment is None or not name:
         return None
-    environment['ML_STACK_WORKSPACE_AGENT'] = name
+    environment['POOLHOUSE_WORKSPACE_AGENT'] = name
     return environment

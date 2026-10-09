@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, mcp
-from ml_stack.fleet import join
+from poolhouse import home, mcp
+from poolhouse.fleet import join
 
 ACTING = ("serve_up", "serve_down", "serve_escalate", "models_fetch", "bench_run",
           "world_make", "speech_say", "conversation_compact", "workspace_send", "workspace_ack",
@@ -164,7 +164,7 @@ class Spoken:
 
 
 def test_speech_say_writes_only_inside_the_state_directory(tmp_path, monkeypatch):
-    monkeypatch.setattr("ml_stack.speech.service.say", lambda *a, **k: Spoken())
+    monkeypatch.setattr("poolhouse.speech.service.say", lambda *a, **k: Spoken())
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (elsewhere / "link").symlink_to(home.home())
@@ -177,7 +177,7 @@ def test_speech_say_writes_only_inside_the_state_directory(tmp_path, monkeypatch
 
 
 def test_speech_say_names_its_own_file_under_the_state_directory(monkeypatch):
-    monkeypatch.setattr("ml_stack.speech.service.say", lambda *a, **k: Spoken())
+    monkeypatch.setattr("poolhouse.speech.service.say", lambda *a, **k: Spoken())
     first = json.loads(mcp.call("speech_say", {"text": "x"})["content"][0]["text"])
     second = json.loads(mcp.call("speech_say", {"text": "x"})["content"][0]["text"])
     assert first["out"] != second["out"]

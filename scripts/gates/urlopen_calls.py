@@ -9,15 +9,15 @@ from ._perfile import finder
 from ._util import calls, exempt, parse
 
 NAME = "urlopen-calls"
-OWNER = "ml_stack.http.request_json"
+OWNER = "poolhouse.http.request_json"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/http.py",)
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/http.py",)
 TARGETS = {"urllib.request.urlopen", "urllib.request.Request"}
 
 
 def describe() -> str:
-    return "A urllib request built by hand; ml_stack.http.request_json already does it."
+    return "A urllib request built by hand; poolhouse.http.request_json already does it."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

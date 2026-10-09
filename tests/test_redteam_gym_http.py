@@ -5,9 +5,9 @@ import json
 import pytest
 import test_fleet_gym_boundaries as boundaries
 
-from ml_stack.fleet import gym_recording_routes
-from ml_stack.gym import car_definition, world_files
-from ml_stack.gym.traffic_world import xml
+from poolhouse.fleet import gym_recording_routes
+from poolhouse.gym import car_definition, world_files
+from poolhouse.gym.traffic_world import xml
 
 daemon = boundaries.daemon
 raw_request = boundaries.raw_request
@@ -30,11 +30,11 @@ def test_planted_world_symlink_and_traversal_cannot_read_private_file(tmp_path, 
     secret = tmp_path / 'secret.json'
     secret.write_text('{"private":"canary"}')
     (root / 'escape.json').symlink_to(secret)
-    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(root))
+    monkeypatch.setenv('POOLHOUSE_GYM_FILES_ROOT', str(root))
     for name in ('escape.json', '../secret.json', str(secret)):
         with pytest.raises(ValueError):
             world_files.imported(name)
-    monkeypatch.delenv('ML_STACK_GYM_FILES_ROOT')
+    monkeypatch.delenv('POOLHOUSE_GYM_FILES_ROOT')
     with pytest.raises(ValueError, match='requires the daemon files root'):
         world_files.imported('escape.json')
     assert secret.read_text() == '{"private":"canary"}'
@@ -42,7 +42,7 @@ def test_planted_world_symlink_and_traversal_cannot_read_private_file(tmp_path, 
 
 @pytest.mark.parametrize('body', ['[]', 'null', '{', '{"block_sequence":[],"map_config":[]}'])
 def test_hand_edited_car_world_rejects_invalid_native_metadata(tmp_path, monkeypatch, body):
-    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(tmp_path))
+    monkeypatch.setenv('POOLHOUSE_GYM_FILES_ROOT', str(tmp_path))
     monkeypatch.setattr(car_definition, 'directory', lambda *args: tmp_path)
     (tmp_path / 'map.json').write_text(body)
     with pytest.raises(ValueError):

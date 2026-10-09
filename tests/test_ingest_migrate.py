@@ -11,11 +11,11 @@ from importlib import import_module
 
 import pytest
 
-from ml_stack import ingest
+from poolhouse import ingest
 
-pytest.importorskip("ladybug", reason="ml-stack[store]")
+pytest.importorskip("ladybug", reason="poolhouse[store]")
 
-migrate_module = import_module("ml_stack.ingest.migrate")
+migrate_module = import_module("poolhouse.ingest.migrate")
 
 SLUG = "velthorne-open-texts"
 TITLE = "Velthorne Open Texts"
@@ -24,7 +24,7 @@ UNITS = (f"{SLUG}:1:1.1", f"{SLUG}:1:1.2")
 
 def an_old_store(tmp_path, *, name="sources.ladybug", slug=SLUG, title=TITLE):
     """A store, a progress file and a reads file as the fold left them before the rename."""
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     where = tmp_path / name
     book_id = f"book:{slug}"
@@ -87,7 +87,7 @@ def quiet(where):
 
 
 def test_the_book_node_becomes_a_source_node_and_the_edges_follow_it(tmp_path):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     where = an_old_store(tmp_path)
     with GraphStore(where, read_only=True) as store:
@@ -110,7 +110,7 @@ def test_the_book_node_becomes_a_source_node_and_the_edges_follow_it(tmp_path):
 
 
 def test_the_unit_documents_say_which_source_they_were_read_from(tmp_path):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     where = an_old_store(tmp_path)
 
@@ -166,7 +166,7 @@ def test_a_fold_after_the_migration_finds_the_source_the_migration_wrote(tmp_pat
 
 
 def test_running_the_migration_twice_changes_nothing_the_second_time(tmp_path):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     where = an_old_store(tmp_path)
     assert quiet(where)[0] == 0
@@ -222,7 +222,7 @@ def test_the_migration_on_a_store_that_is_not_there_says_so(tmp_path):
 def test_a_store_that_does_not_read_back_whole_is_put_back(tmp_path, monkeypatch):
     """The verification is what the copy exists for: a store that fails it is restored,
     with the files beside it, and nothing is left half-renamed."""
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     where = an_old_store(tmp_path)
     before = (ingest._read_json(ingest.reads_path(where, SLUG)),
@@ -242,7 +242,7 @@ def test_a_store_that_does_not_read_back_whole_is_put_back(tmp_path, monkeypatch
 
 def test_a_migration_that_stops_partway_puts_the_files_beside_the_store_back(tmp_path,
                                                                             monkeypatch):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     where = an_old_store(tmp_path)
 
@@ -310,7 +310,7 @@ def test_the_command_needs_a_store(capsys):
 
 def test_fold_refuses_a_store_that_still_names_its_sources_books(tmp_path):
     where = an_old_store(tmp_path)
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     with GraphStore(where, read_only=True) as store:
         before = store.counts()
@@ -319,7 +319,7 @@ def test_fold_refuses_a_store_that_still_names_its_sources_books(tmp_path):
     assert ingest.fold(where, say=said.append) == 1
 
     assert f"{where} still names its sources `book:`" in said[0]
-    assert "ml-stack-ingest migrate" in said[0]
+    assert "poolhouse-ingest migrate" in said[0]
     with GraphStore(where, read_only=True) as store:
         assert store.counts() == before, "refused, and nothing written"
         assert f"source:{SLUG}" not in {n["id"] for n in store.nodes()}

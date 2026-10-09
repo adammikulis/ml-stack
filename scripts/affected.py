@@ -2,7 +2,7 @@
 
 A module's tests are the test files whose imports lead to it, directly or through other
 modules, and the test files that name it in a string (``import_module``, ``-m`` arguments,
-``monkeypatch.setattr("ml_stack.x.y", ...)``). A path nothing here can place is reported as
+``monkeypatch.setattr("poolhouse.x.y", ...)``). A path nothing here can place is reported as
 unmapped and the caller runs everything.
 """
 
@@ -16,9 +16,9 @@ from pathlib import Path
 
 import affected_rules as rules
 
-PACKAGE_ROOTS = (("src", "ml_stack"), ("scripts", "gates"))
+PACKAGE_ROOTS = (("src", "poolhouse"), ("scripts", "gates"))
 SCRIPT_TABLE = re.compile(r'''\[["']project["']\]\[["']scripts["']\]''')
-DOTTED = re.compile(r"\b((?:ml_stack|gates|tests)(?:\.\w+)+|ml_stack|gates)\b")
+DOTTED = re.compile(r"\b((?:poolhouse|gates|tests)(?:\.\w+)+|poolhouse|gates)\b")
 INERT = {"CHANGELOG.md", "HANDOFF.md", "README.md", "LICENSE", "NOTICE", "CLAUDE.md",
          "AGENTS.md", "release-please-config.json", "version.txt", ".gitignore"}
 EVERYTHING = {"pyproject.toml", "budgets.json", "tests/conftest.py", "tests/known-fixtures.txt"}
@@ -251,7 +251,7 @@ def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset()
             for dependant in sorted(hit):
                 if dependant.startswith("tests.") and f"tests/{dependant[6:]}.py" in tests:
                     out.add(f"tests/{dependant[6:]}.py", f"{rel} -> {module}")
-        elif rel.startswith(("src/ml_stack/", "scripts/gates/")):
+        elif rel.startswith(("src/poolhouse/", "scripts/gates/")):
             near = package_dir_modules(rel, known)
             for dependant in sorted(reach(near, reverse, depth)):
                 if dependant.startswith("tests.") and f"tests/{dependant[6:]}.py" in tests:
@@ -262,7 +262,7 @@ def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset()
                 out.add(t, f"{rel} named in the test")
             if not said:
                 out.unmap(rel, "not source, a test or prose, and no test names it")
-    if any(Path(c).parts[:2] == ("src", "ml_stack") for c in changed):
+    if any(Path(c).parts[:2] == ("src", "poolhouse") for c in changed):
         for rel in dynamic_tests(root, tests):
             out.add(rel, "imports a module chosen at run time")
     if out.files:

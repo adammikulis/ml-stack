@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import sandbox, sentinel
-from ml_stack.agent import McpTools
-from ml_stack.agent.sources import FunctionTools
-from ml_stack.sandbox.tools import SandboxedBash
-from ml_stack.sentinel.adapters import sandbox_listener
-from ml_stack.taint.sinks import Capability, ml_stack_tools
+from poolhouse import sandbox, sentinel
+from poolhouse.agent import McpTools
+from poolhouse.agent.sources import FunctionTools
+from poolhouse.sandbox.tools import SandboxedBash
+from poolhouse.sentinel.adapters import sandbox_listener
+from poolhouse.taint.sinks import Capability, poolhouse_tools
 
 pytest_plugins = ["tests.sandbox_kit"]
 
@@ -76,7 +76,7 @@ def test_the_shell_tool_is_a_function_tool_and_the_model_reads_a_refusal_as_an_e
 
 
 def test_denials_become_sentinel_events(tmp_path, seatbelt, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     node = sentinel.Sentinel(tmp_path / "sentinel")
     seen: list[sentinel.Event] = []
     node.bus.subscribe(seen.append)
@@ -107,13 +107,13 @@ def test_a_tainted_run_keeps_the_shell_without_a_network(tmp_path, seatbelt):
 
 
 def test_the_shell_tool_is_classified_as_exec_for_the_taint_rail():
-    assert ml_stack_tools().get("bash").capability == Capability.EXEC
+    assert poolhouse_tools().get("bash").capability == Capability.EXEC
 
 
 def test_an_mcp_server_runs_confined_by_default(tmp_path, seatbelt, listener, monkeypatch):
     pytest.importorskip("mcp")
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
-    monkeypatch.setenv("ML_STACK_PROBE_TOKEN", "leaked-value")
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_PROBE_TOKEN", "leaked-value")
     outside = tmp_path / "home" / "secret.txt"
     outside.parent.mkdir()
     outside.write_text(SECRET)
@@ -129,7 +129,7 @@ def test_an_mcp_server_runs_confined_by_default(tmp_path, seatbelt, listener, mo
                 "outside": await call(tools, "peek", path=str(outside)),
                 "write": await call(tools, "put", path=str(project / "w"), text="x"),
                 "listed": await call(tools, "env", name="LISTED"),
-                "inherited": await call(tools, "env", name="ML_STACK_PROBE_TOKEN"),
+                "inherited": await call(tools, "env", name="POOLHOUSE_PROBE_TOKEN"),
                 "loopback": await call(tools, "dial", port=listener.port),
             }
 
@@ -143,9 +143,9 @@ def test_an_mcp_server_runs_confined_by_default(tmp_path, seatbelt, listener, mo
 
 def test_an_mcp_server_is_not_started_when_no_sandbox_can_hold_it(tmp_path, monkeypatch):
     pytest.importorskip("mcp")
-    from ml_stack.sandbox import seatbelt as module
+    from poolhouse.sandbox import seatbelt as module
 
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(module, "BINARY", "/nonexistent/sandbox-exec")
     monkeypatch.setattr(sys, "platform", "darwin")
     marker = tmp_path / "ran"

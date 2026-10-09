@@ -49,17 +49,17 @@ def main() -> int:
     path = event.get("agent_transcript_path") or ""
     model = transcript_model(str(path)) if path else ""
     if model:
-        workspace_hook.run(["ml-stack-workspace", "whoami", "--model", model, "--harness", "claude-code"],
+        workspace_hook.run(["poolhouse-workspace", "whoami", "--model", model, "--harness", "claude-code"],
                            "SubagentStop", environment=environment)
     place = checkout_note(event)
     tree_watch.stopped("SubagentStop", str(event.get("cwd") or ""), environment)
-    said = workspace_hook.run(["ml-stack-workspace", "announce", "done", f"finished{place}"[:200]],
+    said = workspace_hook.run(["poolhouse-workspace", "announce", "done", f"finished{place}"[:200]],
                               "SubagentStop", environment=environment)
     if said is None:
-        workspace_hook.run(["ml-stack-workspace", "announce", "milestone", f"stopped, done refused{place}"[:200]],
+        workspace_hook.run(["poolhouse-workspace", "announce", "milestone", f"stopped, done refused{place}"[:200]],
                            "SubagentStop", environment=environment)
         return 0
-    workspace_hook.run(["ml-stack-workspace", "retire"], "SubagentStop", environment=environment)
+    workspace_hook.run(["poolhouse-workspace", "retire"], "SubagentStop", environment=environment)
     return 0
 
 

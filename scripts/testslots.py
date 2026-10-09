@@ -20,7 +20,7 @@ import testhours
 import testqueue
 import testslots_policy as policy
 
-from ml_stack.lock import release, take
+from poolhouse.lock import release, take
 
 HEAVY_MODULES = frozenset({
     "test_serve_real_llama", "test_sentinel_real_model", "test_sentinel_wiring_serve",

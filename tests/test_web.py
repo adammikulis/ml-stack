@@ -1,7 +1,7 @@
 """The web as tools: search, read, look — with the network and the browser faked.
 
 Every engine, fetch and browser here is a stand-in, so nothing reaches the network and no
-browser opens. The one test that really searches is skipped unless ``ML_STACK_LIVE_NET=1`` is set,
+browser opens. The one test that really searches is skipped unless ``POOLHOUSE_LIVE_NET=1`` is set,
 so a person can run it on purpose and an agent never does by accident.
 """
 
@@ -12,9 +12,9 @@ import json
 
 import pytest
 
-from ml_stack import http, net, web
-from ml_stack.scrape.browser import BrowserUnavailable
-from ml_stack.web import (
+from poolhouse import http, net, web
+from poolhouse.scrape.browser import BrowserUnavailable
+from poolhouse.web import (
     ENGINES,
     PROMPTS,
     SCHEMAS,
@@ -122,18 +122,18 @@ def test_search_results_are_shaped_as_promised_and_capped():
 def test_the_engine_is_picked_by_env_and_an_unknown_name_is_refused(monkeypatch):
     seen = []
     monkeypatch.setitem(ENGINES, "pretend", lambda q, n: seen.append((q, n)) or [])
-    monkeypatch.setenv("MLSTACK_SEARCH", "pretend")
+    monkeypatch.setenv("POOLHOUSE_SEARCH", "pretend")
     assert search("kilns", limit=3) == []
     assert seen == [("kilns", 3)]
-    monkeypatch.setenv("MLSTACK_SEARCH", "nothing-called-this")
-    with pytest.raises(SearchUnavailable, match="MLSTACK_SEARCH"):
+    monkeypatch.setenv("POOLHOUSE_SEARCH", "nothing-called-this")
+    with pytest.raises(SearchUnavailable, match="POOLHOUSE_SEARCH"):
         search("kilns")
 
 
 def test_ddgs_rows_are_renamed_and_its_rate_limit_becomes_search_unavailable(monkeypatch):
     """ddgs 9 returns ``title/href/body`` and raises ``RatelimitException`` (a
     ``DDGSException``) rather than returning nothing; ``backend`` is still a keyword."""
-    ddgs = pytest.importorskip("ddgs", reason="ml-stack[web]")
+    ddgs = pytest.importorskip("ddgs", reason="poolhouse[web]")
     from ddgs.exceptions import RatelimitException
 
     calls = []
@@ -191,7 +191,7 @@ def test_a_searxng_that_is_down_is_search_unavailable_not_a_traceback(monkeypatc
 
 
 def test_read_returns_title_and_text_and_never_the_scripts(public_dns):
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     fetch = fetching({"https://quenlow.example/about": PAGE})
     got = read("https://quenlow.example/about", fetch=fetch, browse=no_browser)
     assert got["url"] == "https://quenlow.example/about"
@@ -202,7 +202,7 @@ def test_read_returns_title_and_text_and_never_the_scripts(public_dns):
 
 
 def test_read_cuts_on_a_sentence_boundary_and_says_so(public_dns):
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     fetch = fetching({"https://quenlow.example/about": PAGE})
     got = read("https://quenlow.example/about", fetch=fetch, browse=no_browser, limit=150)
     assert got["truncated"] is True
@@ -261,7 +261,7 @@ def test_a_public_url_passes_the_check(public_dns):
 def test_read_falls_through_to_the_browser_when_the_plain_text_is_thin(public_dns):
     """A script-built site serves a shell with a title and nothing else. That is under
     ``THIN`` characters, and it is the browser's page, not the shell, that gets read."""
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     page = StubPage(PAGE)
     fetch = fetching({"https://quenlow.example/": SHELL})
     got = read("https://quenlow.example/", fetch=fetch, browse=browsing(page))
@@ -278,7 +278,7 @@ def test_read_does_not_open_a_browser_for_a_page_that_read_fine(public_dns):
 
 
 def test_rendered_true_skips_the_plain_fetch(public_dns):
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     page = StubPage(PAGE)
     fetch = fetching({})
     got = read("https://quenlow.example/", fetch=fetch, browse=browsing(page), rendered=True)
@@ -302,7 +302,7 @@ def test_a_failed_plain_fetch_is_raised_when_the_browser_cannot_help(public_dns)
 
 
 def test_look_returns_the_screenshot_first_then_the_largest_pictures(public_dns):
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     page = StubPage(PAGE, images=[
         {"src": "https://quenlow.example/img/small.png", "width": 199, "height": 800},
         {"src": "data:image/png;base64,AAAA", "width": 900, "height": 900},
@@ -415,7 +415,7 @@ def test_the_search_tool_says_nothing_matched_rather_than_returning_a_list():
 
 
 def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns, origins):
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     fetch = fetching({"https://quenlow.example/about": PAGE})
     origins.typed("http://127.0.0.1/ https://quenlow.example/missing https://quenlow.example/about")
     (_, _), (_, reading), _ = tools(fetch=fetch, browse=no_browser)
@@ -442,7 +442,7 @@ def test_the_look_tool_says_no_browser_without_one(public_dns, origins):
 
 
 def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns, origins):
-    pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
+    pytest.importorskip("trafilatura", reason="poolhouse[web] reads this")
     page = StubPage(PAGE, images=[])
     origins.typed("https://quenlow.example/")
     (_, _), (_, _), (_, looking), _ = tools(browse=browsing(page), vision=True)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.workspace.person_ancestry import under_harness
+from poolhouse.workspace.person_ancestry import under_harness
 
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "pre-push"
 ZERO = "0" * 40
@@ -74,23 +74,23 @@ def test_main_rides_along_with_the_development_branch_and_is_still_refused(check
 
 
 def test_the_opener_variable_does_not_open_main_for_an_agent(checkout):
-    done = push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="yes")
+    done = push(checkout, "main", CLAUDECODE="1", POOLHOUSE_PUSH_MAIN="yes")
     assert done.returncode != 0
 
 
 def test_the_opener_opens_main_and_nothing_else(checkout):
     assert push(checkout, "split-something", CLAUDECODE="1",
-                ML_STACK_PUSH_MAIN="yes").returncode != 0
+                POOLHOUSE_PUSH_MAIN="yes").returncode != 0
 
 
 def test_the_opener_does_not_open_a_deletion(checkout):
-    done = push(checkout, "main", sha=ZERO, CLAUDECODE="1", ML_STACK_PUSH_MAIN="yes")
+    done = push(checkout, "main", sha=ZERO, CLAUDECODE="1", POOLHOUSE_PUSH_MAIN="yes")
     assert done.returncode != 0
     assert "refs/heads/main" in done.stderr
 
 
 def test_any_other_value_of_the_opener_is_not_one(checkout):
-    assert push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="1").returncode != 0
+    assert push(checkout, "main", CLAUDECODE="1", POOLHOUSE_PUSH_MAIN="1").returncode != 0
 
 
 def test_a_new_promote_snapshot_branch_goes_through(checkout):

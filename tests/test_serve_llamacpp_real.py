@@ -9,10 +9,16 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import net
-from ml_stack.serve import binary, llamacpp_compile, llamacpp_smoke, llamacpp_state, llamacpp_update
-from ml_stack.serve.build_paths import BuildFailed, builds_dir
-from ml_stack.serve.process import every_server
+from poolhouse import net
+from poolhouse.serve import (
+    binary,
+    llamacpp_compile,
+    llamacpp_smoke,
+    llamacpp_state,
+    llamacpp_update,
+)
+from poolhouse.serve.build_paths import BuildFailed, builds_dir
+from poolhouse.serve.process import every_server
 from tests.test_serve_real_llama import small_gguf
 
 pytestmark = pytest.mark.slow
@@ -24,7 +30,7 @@ PINNED_TAG = "b11379"
 def _model(account: Path) -> Path:
     found = small_gguf(account)
     if found is None:
-        pytest.skip("no small local GGUF; set ML_STACK_SMOKE_GGUF")
+        pytest.skip("no small local GGUF; set POOLHOUSE_SMOKE_GGUF")
     if every_server():
         pytest.skip("another llama-server is running; a test does not load a model beside it")
     return found

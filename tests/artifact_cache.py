@@ -57,7 +57,7 @@ def cached(name: str, inputs: Iterable[Path], build: Callable[[Path], None]) -> 
     afterwards. Two workers that build at once each fill their own staging directory; the first
     to finish publishes it and the other discards its copy."""
     owner = os.getuid() if hasattr(os, "getuid") else 0
-    base = Path(tempfile.gettempdir()) / f"ml-stack-test-cache-{owner}" / name
+    base = Path(tempfile.gettempdir()) / f"poolhouse-test-cache-{owner}" / name
     base.mkdir(parents=True, exist_ok=True)
     final = base / fingerprint(inputs)
     if not final.is_dir():

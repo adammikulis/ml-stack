@@ -11,12 +11,12 @@ import pathlib
 
 import pytest
 
-from ml_stack import bench
-from ml_stack.bench import animate as a
+from poolhouse import bench
+from poolhouse.bench import animate as a
 
 
 def animate_cmd(argv):
-    """``ml-stack-bench animate ARGS``, parsed and dispatched as the command is."""
+    """``poolhouse-bench animate ARGS``, parsed and dispatched as the command is."""
     return bench._main(["animate", *argv])
 
 
@@ -299,7 +299,7 @@ def test_a_document_without_configs_is_refused(tmp_path, capsys):
 
 @pytest.mark.slow
 def test_the_title_card_renders_to_a_video_and_a_last_frame(tmp_path):
-    pytest.importorskip("manim", reason="ml-stack[viz]")
+    pytest.importorskip("manim", reason="poolhouse[viz]")
     out = tmp_path / "title.mp4"
     png = tmp_path / "title.png"
     a.render(a_document(), out=out, png=png, quality="l", seconds=3, only=["title"],

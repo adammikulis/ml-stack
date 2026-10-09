@@ -29,7 +29,7 @@ tests = ["tests/test_testfarm.py::test_a_job_that_breaks_a_rule_is_refused_and_n
          "tests/test_testfarm_nodes.py::test_cancel_ends_the_runner_and_the_child_it_started",
          "tests/test_testfarm_nodes.py::test_at_most_two_run_at_once_and_a_third_is_told_to_wait",
          "tests/test_shard_limits.py::test_a_runner_that_floods_its_output_is_cancelled"]
-note = "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolside-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
+note = "the argv is built by the receiving executor from the test runner, the tier and validated file names; the sender supplies no argv, environment or working directory, a refused job starts nothing, and the node (app/poolhouse-node/tests/shard.rs) refuses a sender that is not a pool member, a device with shards off, and every malformed request before the executor exists"
 
 [[group]]
 match = ["spawn:fleet/shard_tree.py:tracked_paths"]
@@ -783,7 +783,7 @@ match = ["spawn:pi.py:launch"]
 status = "covered"
 count = 1
 tests = ["tests/test_pi_harness.py::test_pi_launch_is_offline_and_uses_the_policy_extension"]
-note = "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
+note = "Pi runs offline with poolhouse's tool-policy extension and an explicit local model endpoint"
 
 [[group]]
 match = ["route:fleet/routes.py:/ui/credentials"]
@@ -937,7 +937,7 @@ tests = [
 
 # -- command line --------------------------------------------------------------------------
 [[group]]
-match = ["cli:ml-stack-security", "cli:ml-stack-memory", "cli:ml-stack-workspace"]
+match = ["cli:poolhouse-security", "cli:poolhouse-memory", "cli:poolhouse-workspace"]
 status = "covered"
 tests = [
   "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
@@ -956,35 +956,35 @@ tests = [
 ]
 
 [[group]]
-match = ["cli:ml-stack-mcp"]
+match = ["cli:poolhouse-mcp"]
 status = "covered"
 tests = ["tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing"]
 
 [[group]]
-match = ["cli:ml-stack-graph"]
+match = ["cli:poolhouse-graph"]
 status = "covered"
 tests = ["tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking"]
 
 [[group]]
-match = ["cli:ml-stack-chat", "cli:ml-stack-agent"]
+match = ["cli:poolhouse-chat", "cli:poolhouse-agent"]
 status = "partial"
 tests = ["tests/test_roles.py", "tests/test_redteam_chat.py"]
 note = "roles, rules and the taint rail are attacked; hostile --resume session files are tested only for shape in tests/test_chat.py"
 
 [[group]]
-match = ["cli:ml-stack-traind", "cli:ml-stack-cluster", "cli:ml-stack-peers"]
+match = ["cli:poolhouse-traind", "cli:poolhouse-cluster", "cli:poolhouse-peers"]
 status = "partial"
 tests = ["tests/test_redteam_fleet.py", "tests/test_peer_pairing.py"]
 note = "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
 
 [[group]]
-match = ["cli:ml-stack-credentials"]
+match = ["cli:poolhouse-credentials"]
 status = "covered"
 tests = ["tests/test_credentials.py::test_a_name_that_is_not_a_name_is_refused",
          "tests/test_credentials.py::test_a_symlink_out_of_the_config_directory_is_refused"]
 
 [[group]]
-match = ["cli:ml-stack-log"]
+match = ["cli:poolhouse-log"]
 status = "covered"
 tests = ["tests/test_redteam_activity.py::test_text_recorded_in_the_log_reaches_an_agent_only_fenced_and_inert",
          "tests/test_redteam_activity.py::test_a_model_that_obeys_everything_cannot_read_edit_truncate_or_disable_the_log",

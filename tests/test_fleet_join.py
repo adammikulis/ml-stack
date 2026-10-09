@@ -1,4 +1,4 @@
-"""``ml-stack-cluster``: one command makes a machine a peer, and the page's Join runs it too.
+"""``poolhouse-cluster``: one command makes a machine a peer, and the page's Join runs it too.
 
 The daemon it starts, the llama-server it fetches and the logon service it installs are the
 three things faked here -- each behind a parameter of `join_machine` -- and everything else
@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.checks import Finding
-from ml_stack.fleet import join as joining, ui as fleet_ui
-from ml_stack.fleet.discovery import (
+from poolhouse.checks import Finding
+from poolhouse.fleet import join as joining, ui as fleet_ui
+from poolhouse.fleet.discovery import (
     Advertiser,
     Beacon,
     derive_token,
@@ -31,7 +31,7 @@ from ml_stack.fleet.discovery import (
     load_cluster_key,
     memberships,
 )
-from ml_stack.fleet.join import (
+from poolhouse.fleet.join import (
     JoinError,
     checks,
     describe,
@@ -42,8 +42,8 @@ from ml_stack.fleet.join import (
     sweep_argv,
     table,
 )
-from ml_stack.http import Server
-from ml_stack.platform import process_group_kwargs
+from poolhouse.http import Server
+from poolhouse.platform import process_group_kwargs
 from tests.cluster_support import join as join_cluster, key_for
 
 WORDS = "quince larch marlow"
@@ -213,7 +213,7 @@ class TestJoin:
 
     def test_persist_installs_at_logon_and_says_when_it_could_not(self, tmp_path, key, udp,
                                                                  daemons):
-        from ml_stack.fleet.autostart import Autostart
+        from poolhouse.fleet.autostart import Autostart
 
         tcp = _free_tcp()
         asked: list[str] = []
@@ -233,7 +233,7 @@ class TestJoin:
         join_cluster(WORDS, path=key)
         joined = join_machine(persist=True, port=tcp, root=tmp_path,
                               cluster_key_path=key, start=start, persist_with=installs,
-                              discovery_port=udp, say=lambda s: None, wait_s=3.0, group="ml-stack")
+                              discovery_port=udp, say=lambda s: None, wait_s=3.0, group="poolhouse")
         assert asked == ["login"] and joined.persisted and joined.persist_note == ""
 
         def refuses(mode: str, **kw) -> Autostart:
@@ -252,7 +252,7 @@ class TestJoin:
         with pytest.raises(JoinError) as left:
             join_machine(port=_free_tcp(), root=tmp_path / "r",
                          cluster_key_path=key, start=lambda *a: 99, wait_s=0.6,
-                         discovery_port=udp, say=lambda s: None, group="ml-stack")
+                         discovery_port=udp, say=lambda s: None, group="poolhouse")
         assert "traind.log" in str(left.value)
 
 
@@ -281,7 +281,7 @@ class TestChecks:
 
         server = next(c for c in checks(tmp_path, ensure=cannot, say=lambda s: None)
                       if c.name == "llama-server")
-        assert not server.good and server.fix == "ml-stack-serve build"
+        assert not server.good and server.fix == "poolhouse-serve build"
 
     def test_only_the_facts_serving_depends_on_are_kept(self, tmp_path):
         names = {c.name for c in checks(tmp_path, say=lambda s: None)}
@@ -326,7 +326,7 @@ class TestStatus:
         assert "asr,vad" in first and "asr,vad" not in second
 
     def test_no_peers_says_what_to_run(self):
-        assert "ml-stack-cluster join" in table([])
+        assert "poolhouse-cluster join" in table([])
 
     def test_a_tracking_peer_shows_its_commit_and_the_branch_it_follows(self):
         """A fleet half on one commit and half on another is what this column exists to
@@ -360,7 +360,7 @@ class TestStatus:
     def test_a_branch_to_follow_is_written_where_the_daemon_will_read_it(self, tmp_path):
         """Written into the settings rather than passed as a flag: the logon service that
         brings the daemon back after a reboot carries no flags of ours."""
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         assert joining.remember_track(tmp_path, "main") == "main"
         assert Settings.load(tmp_path / "settings.json").track_branch == "main"
@@ -392,7 +392,7 @@ class TestStatus:
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
         daemons.append(FakeDaemon(tcp, load_cluster_key(key), udp, name="larch"))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         code = main(["--cluster-key", str(key), "--port", str(tcp), "status", "--json",
                      "--timeout", "1"])
         rows = json.loads(capsys.readouterr().out)
@@ -408,7 +408,7 @@ class TestStatus:
                                   machine="a1b2c3d4e5f60708"))
         daemons.append(FakeDaemon(_free_tcp(), load_cluster_key(key), udp, name="Mac",
                                   machine="a1b2f00000000000"))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         code = main(["--cluster-key", str(key), "--port", str(tcp), "status", "--json",
                      "--timeout", "1"])
         rows = json.loads(capsys.readouterr().out)
@@ -422,15 +422,15 @@ class TestStatus:
 
     def test_status_in_no_cluster_says_join(self, key, capsys):
         assert main(["--cluster-key", str(key), "status"]) == 1
-        assert "ml-stack-cluster join" in capsys.readouterr().err
+        assert "poolhouse-cluster join" in capsys.readouterr().err
 
     def test_join_takes_the_passphrase_name_and_cluster_from_the_environment(
             self, key, tmp_path, monkeypatch):
         """An install script has no terminal to type a passphrase at, and prompting one
         that cannot answer hangs the install rather than failing it."""
-        monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
-        monkeypatch.setenv("ML_STACK_NAME", "harrowgate")
-        monkeypatch.setenv("ML_STACK_CLUSTER", "attic")
+        monkeypatch.setenv("POOLHOUSE_PASSPHRASE", WORDS)
+        monkeypatch.setenv("POOLHOUSE_NAME", "harrowgate")
+        monkeypatch.setenv("POOLHOUSE_CLUSTER", "attic")
         asked: dict = {}
 
         def fake_join(**kw):
@@ -449,8 +449,8 @@ class TestStatus:
         assert asked["track"] == "main"
 
     def test_a_flag_beats_the_environment(self, key, tmp_path, monkeypatch):
-        monkeypatch.setenv("ML_STACK_PASSPHRASE", "the wrong words entirely")
-        monkeypatch.setenv("ML_STACK_NAME", "harrowgate")
+        monkeypatch.setenv("POOLHOUSE_PASSPHRASE", "the wrong words entirely")
+        monkeypatch.setenv("POOLHOUSE_NAME", "harrowgate")
         asked: dict = {}
         monkeypatch.setattr(joining, "join_machine",
                             lambda **kw: (asked.update(kw),
@@ -513,9 +513,9 @@ class TestSweepLine:
             sweep_argv([])
 
     def test_the_line_parses_as_the_bench_would(self, tmp_path, monkeypatch):
-        from ml_stack.bench.run import _parser
+        from poolhouse.bench.run import _parser
 
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
         args = _parser().parse_args(sweep_argv(["quince-2b.gguf"], peers=["larch"], sample=4))
         assert args.fleet and args.serve == ["quince-2b.gguf"] and args.peers == "larch"
 
@@ -529,9 +529,9 @@ class TestThePage:
     def page(self, tmp_path, udp, monkeypatch, daemons):
         from test_fleet_ui import Serving
 
-        from ml_stack.fleet.availability import Availability
+        from poolhouse.fleet.availability import Availability
 
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
         s = Serving(tmp_path, name="studio", schedule=Availability())
         s.ui.peer_port = s.port
         s.ui.discovery_port = udp
@@ -580,7 +580,7 @@ class TestThePage:
         assert "larch" in [p["name"] for p in body["peers"]]
 
     def test_run_across_fleet_builds_the_line_and_detaches_it(self, page, tmp_path):
-        from ml_stack.bench.underway import measuring_file
+        from poolhouse.bench.underway import measuring_file
 
         s, cookie = page
         status, body, _ = s.call("/ui/bench/sweep", method="POST", body={}, cookie=cookie)
@@ -590,7 +590,7 @@ class TestThePage:
                  "label": "tuesday", "dry_run": True}
         status, body, _ = s.call("/ui/bench/sweep", method="POST", body=asked, cookie=cookie)
         assert status == 200
-        assert body["command"] == ("ml-stack-bench sweep --fleet --serve quince-2b.gguf "
+        assert body["command"] == ("poolhouse-bench sweep --fleet --serve quince-2b.gguf "
                                    "--peers larch --sample 4 --label tuesday")
 
         detached: list[list[str]] = []
@@ -632,7 +632,7 @@ class TestThePage:
 
     @pytest.mark.slow
     def test_pause_all_names_every_machine_and_the_one_that_did_not_answer(self, page):
-        from ml_stack.fleet.pausing import UNHEARD
+        from poolhouse.fleet.pausing import UNHEARD
 
         s, cookie = page
         status, body, _ = s.call("/ui/fleet/pause", method="POST", cookie=cookie,
@@ -664,9 +664,9 @@ class PausableDaemon:
     """A peer with a real `Availability` behind ``/availability``, and a beacon."""
 
     def __init__(self, port: int, key: bytes, udp: int, name: str, root: Path) -> None:
-        from ml_stack.fleet.api import Daemon, make_handler
-        from ml_stack.fleet.availability import Availability
-        from ml_stack.fleet.jobs import JobRunner
+        from poolhouse.fleet.api import Daemon, make_handler
+        from poolhouse.fleet.availability import Availability
+        from poolhouse.fleet.jobs import JobRunner
 
         self.name = name
         self.schedule = Availability()
@@ -718,7 +718,7 @@ def _rows(key: Path, udp: int, made: list, self_name: str = "") -> list[dict]:
 class TestPauseTheFleet:
     @pytest.mark.slow
     def test_pause_reaches_every_machine_and_resume_puts_them_back(self, cluster):
-        from ml_stack.fleet.pausing import Fanout, pause_fleet, pause_table
+        from poolhouse.fleet.pausing import Fanout, pause_fleet, pause_table
 
         made, key, udp, root = cluster
         rows = _rows(key, udp, made, self_name="studio")
@@ -740,7 +740,7 @@ class TestPauseTheFleet:
 
     @pytest.mark.slow
     def test_a_machine_that_is_off_is_named_as_still_taking_work(self, cluster):
-        from ml_stack.fleet.pausing import UNHEARD, Fanout, pause_fleet, pause_table
+        from poolhouse.fleet.pausing import UNHEARD, Fanout, pause_fleet, pause_table
 
         made, key, udp, root = cluster
         rows = _rows(key, udp, made)
@@ -786,7 +786,7 @@ def _paused(name: str, until: float | None, reason: str = "",
 
 class TestWhichPauseIsAdopted:
     def test_the_longest_pause_wins(self):
-        from ml_stack.fleet.pausing import pause_among
+        from poolhouse.fleet.pausing import pause_among
 
         now = time.time()
         found = pause_among([_paused("harrowgate", now + 600, "a call"),
@@ -795,7 +795,7 @@ class TestWhichPauseIsAdopted:
         assert (found.name, found.reason) == ("larch", "rendering")
 
     def test_a_pause_with_no_end_beats_a_timed_one(self):
-        from ml_stack.fleet.pausing import pause_among
+        from poolhouse.fleet.pausing import pause_among
 
         found = pause_among([_paused("larch", time.time() + 86400, "rendering"),
                              _paused("studio", None, "somebody is here")])
@@ -804,18 +804,18 @@ class TestWhichPauseIsAdopted:
         assert "until it is resumed" in found.said()
 
     def test_a_pause_that_has_run_out_is_not_adopted(self):
-        from ml_stack.fleet.pausing import pause_among
+        from poolhouse.fleet.pausing import pause_among
 
         assert pause_among([_paused("larch", time.time() - 60, "rendering")]) is None
 
     def test_a_machine_taking_work_carries_no_pause(self):
-        from ml_stack.fleet.pausing import pause_among
+        from poolhouse.fleet.pausing import pause_among
 
         assert pause_among([_paused("larch", None, "", paused=False)]) is None
 
     def test_a_machine_keeps_its_own_longer_pause(self):
-        from ml_stack.fleet.availability import Availability
-        from ml_stack.fleet.pausing import adopt_pause, pause_among
+        from poolhouse.fleet.availability import Availability
+        from poolhouse.fleet.pausing import adopt_pause, pause_among
 
         mine = Availability()
         mine.pause(minutes=600, reason="rendering here")
@@ -824,8 +824,8 @@ class TestWhichPauseIsAdopted:
         assert mine.paused_reason == "rendering here"
 
     def test_a_pause_with_no_reason_still_says_why(self):
-        from ml_stack.fleet.availability import Availability
-        from ml_stack.fleet.pausing import CLUSTER_PAUSE, adopt_pause, pause_among
+        from poolhouse.fleet.availability import Availability
+        from poolhouse.fleet.pausing import CLUSTER_PAUSE, adopt_pause, pause_among
 
         mine = Availability()
         adopt_pause(mine, pause_among([_paused("larch", None)]))
@@ -835,8 +835,8 @@ class TestWhichPauseIsAdopted:
 class TestAdoptingThePauseOnStartup:
     @pytest.mark.slow
     def test_a_machine_that_starts_into_a_paused_cluster_comes_up_paused(self, cluster):
-        from ml_stack.fleet.availability import Availability
-        from ml_stack.fleet.pausing import adopt_pause, peer_pause
+        from poolhouse.fleet.availability import Availability
+        from poolhouse.fleet.pausing import adopt_pause, peer_pause
 
         made, key, udp, _ = cluster
         for one in made:
@@ -850,8 +850,8 @@ class TestAdoptingThePauseOnStartup:
 
     @pytest.mark.slow
     def test_a_machine_that_starts_into_a_running_cluster_takes_work(self, cluster):
-        from ml_stack.fleet.availability import Availability
-        from ml_stack.fleet.pausing import adopt_pause, peer_pause
+        from poolhouse.fleet.availability import Availability
+        from poolhouse.fleet.pausing import adopt_pause, peer_pause
 
         made, key, udp, _ = cluster
         for one in made:
@@ -863,7 +863,7 @@ class TestAdoptingThePauseOnStartup:
         assert mine.may_start()[0]
 
     def test_a_machine_with_no_cluster_does_not_wait(self, tmp_path):
-        from ml_stack.fleet.pausing import peer_pause
+        from poolhouse.fleet.pausing import peer_pause
 
         started = time.time()
         assert peer_pause(tmp_path / "nothing.key", timeout_s=30.0) is None
@@ -872,7 +872,7 @@ class TestAdoptingThePauseOnStartup:
 
 class TestStatusSaysWhoIsPaused:
     def test_a_paused_peer_is_named_with_its_reason(self):
-        from ml_stack.fleet.availability import Availability
+        from poolhouse.fleet.availability import Availability
 
         schedule = Availability()
         schedule.pause(minutes=120, reason="somebody is here")
@@ -889,15 +889,15 @@ class TestStatusSaysWhoIsPaused:
         down the pause before it takes work."""
         import os
 
-        from ml_stack.fleet.availability import Availability
+        from poolhouse.fleet.availability import Availability
 
         made, key, udp, _ = cluster
         made[1].schedule.pause(minutes=120, reason="somebody is at the desk")
         root = tmp_path / "windermere"
-        env = {**os.environ, "ML_STACK_CLUSTER_KEY": str(key),
-               "ML_STACK_DISCOVERY_PORT": str(udp),
+        env = {**os.environ, "POOLHOUSE_CLUSTER_KEY": str(key),
+               "POOLHOUSE_DISCOVERY_PORT": str(udp),
                "PYTHONPATH": str(Path(joining.__file__).parents[2])}
-        code = ("from ml_stack.fleet.daemon import serve, DaemonOptions;"
+        code = ("from poolhouse.fleet.daemon import serve, DaemonOptions;"
                 f"serve(DaemonOptions(root={str(root)!r}, host='127.0.0.1',"
                 f" port={_free_tcp()}, name='windermere', web=False, announce=False))")
         proc = subprocess.Popen([sys.executable, "-c", code], env=env,
@@ -920,7 +920,7 @@ class TestTheStartedRecord:
     tell which shape it is reading."""
 
     def test_what_start_daemon_writes_says_which_shape_it_is(self, tmp_path, monkeypatch):
-        from ml_stack.files import version_of
+        from poolhouse.files import version_of
 
         class Ran:
             pid, command, log, started = 4242, ["a", "b"], tmp_path / "traind.log", "now"
@@ -935,7 +935,7 @@ class TestTheStartedRecord:
         joining.started_file(tmp_path).write_text(json.dumps({"pid": 4242, "argv": []}))
         assert joining._started_pid(tmp_path) == 4242
 
-    def test_a_record_from_a_newer_ml_stack_is_left_alone(self, tmp_path):
+    def test_a_record_from_a_newer_poolhouse_is_left_alone(self, tmp_path):
         joining.started_file(tmp_path).write_text(
             json.dumps({"version": joining.STARTED_VERSION + 1, "pid": 4242}))
         assert joining._started_pid(tmp_path) is None
@@ -950,8 +950,8 @@ class TestWhoAPauseIsSentTo:
     """`pausing.peer_clients` builds the clients `pause_fleet` posts to."""
 
     def test_a_row_gets_a_client_holding_the_token_its_cluster_derives(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token
-        from ml_stack.fleet.pausing import peer_clients
+        from poolhouse.fleet.discovery import derive_token
+        from poolhouse.fleet.pausing import peer_clients
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)
@@ -971,7 +971,7 @@ class TestWhoAPauseIsSentTo:
         assert clients["workshop"].timeout == 12.5
 
     def test_a_row_no_key_of_this_machine_reaches_gets_no_client(self, tmp_path):
-        from ml_stack.fleet.pausing import peer_clients
+        from poolhouse.fleet.pausing import peer_clients
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)

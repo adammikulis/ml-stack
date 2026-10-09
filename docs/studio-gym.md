@@ -16,7 +16,7 @@ For a source checkout:
 ```sh
 python -m pip install -e '.[gym]'
 python -m pip install 'metadrive-simulator @ git+https://github.com/metadriverse/metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db'
-ml-stack-gym catalogue
+poolhouse-gym catalogue
 ```
 
 Install individual extras to select workloads:
@@ -37,27 +37,27 @@ use PyPI packages only. MetaDrive's native renderer downloads official assets on
 package; the adapter resolves `SUMO_HOME` and the packaged SUMO-RL intersection scenario.
 An existing SUMO installation can also supply `SUMO_HOME`.
 
-Set `ML_STACK_GYM_PYTHON` to an installed Python interpreter to run simulator workers
-outside the current process. `ML_STACK_CACHE` moves recordings and checkpoints together
-with the other ml-stack caches. Their default location is `~/.cache/ml_stack/gym`.
+Set `POOLHOUSE_GYM_PYTHON` to an installed Python interpreter to run simulator workers
+outside the current process. `POOLHOUSE_CACHE` moves recordings and checkpoints together
+with the other Poolhouse caches. Their default location is `~/.cache/poolhouse/gym`.
 
 Reuse an existing simulator installation without installing it again:
 
 ```sh
-ml-stack-traind --root ~/.local/share/ml-stack-studio --gym-python /path/to/venv/bin/python
+poolhouse-traind --root ~/.local/share/poolhouse-studio --gym-python /path/to/venv/bin/python
 ```
 
 The launcher remembers that interpreter and keeps completed setup under the selected
 root. On later launches, use the same `--root` and omit `--gym-python`:
 
 ```sh
-ml-stack-traind --root ~/.local/share/ml-stack-studio
+poolhouse-traind --root ~/.local/share/poolhouse-studio
 ```
 
 Changing the root selects a different workspace, with its own settings, setup state, files
 and conversations. Reusing the root preserves completed setup and the interpreter selection.
 An explicit
-`ML_STACK_GYM_PYTHON` overrides the saved selection; otherwise the saved interpreter
+`POOLHOUSE_GYM_PYTHON` overrides the saved selection; otherwise the saved interpreter
 takes precedence over the app's managed environment. A missing saved interpreter
 reports an error and asks you to select its new location.
 
@@ -180,7 +180,7 @@ rectangular ASCII layout: `x` denotes shelves, `.` aisles and `g` delivery goals
 {"world":{"mode":"manual","seed":4,"n_agents":2,"layout":".......\n.xx.xx.\n.......\n.g...g."}}
 ```
 
-World artifacts live under `gym/worlds` in the ml-stack cache. `world.json` records the
+World artifacts live under `gym/worlds` in the Poolhouse cache. `world.json` records the
 backend, resolved definition, seed, native package version and SHA256 hashes of the
 network/routes or warehouse layout. Generated warehouse layouts are persisted as ASCII
 from RWARE's native grid. Matching definitions reuse their generated files; the same
@@ -259,10 +259,10 @@ Camera previews remain in the live stream and are omitted from saved trajectorie
 default. Set `record_frames` to `true` to save separate PNG files with frame references.
 
 ```sh
-ml-stack-gym run car --controller manual --action 5 --steps 100 \
+poolhouse-gym run car --controller manual --action 5 --steps 100 \
   --config '{"map":"S","traffic_density":0.1}'
-ml-stack-gym run warehouse --controller random --steps 100
-ml-stack-gym replay /path/to/session/trajectory.jsonl
+poolhouse-gym run warehouse --controller random --steps 100
+poolhouse-gym replay /path/to/session/trajectory.jsonl
 ```
 
 Sessions write `manifest.json`, `worker.log`, and `trajectory.jsonl` in their artifact
@@ -277,11 +277,11 @@ default. Car actions are discrete; warehouse policies use joint `MultiDiscrete` 
 and the sum of native individual rewards. Traffic policies use native SUMO-RL spaces.
 
 ```sh
-ml-stack-gym train car --timesteps 2048 --seed 0 \
+poolhouse-gym train car --timesteps 2048 --seed 0 \
   --config '{"map":"S","traffic_density":0.1,"horizon":500}'
-ml-stack-gym train warehouse --timesteps 2048 --seed 0
-ml-stack-gym train traffic --timesteps 2048 --seed 0
-ml-stack-gym evaluate car /path/to/gym/training-run/policy.zip \
+poolhouse-gym train warehouse --timesteps 2048 --seed 0
+poolhouse-gym train traffic --timesteps 2048 --seed 0
+poolhouse-gym evaluate car /path/to/gym/training-run/policy.zip \
   --episodes 5 --seed 10000 \
   --config '{"map":"S","traffic_density":0.1,"horizon":500}'
 ```
@@ -305,7 +305,7 @@ as JSONL using episode ID, sequence, and an action name from that session:
 ```
 
 ```sh
-ml-stack-gym export /path/to/session/trajectory.jsonl reviews.jsonl cases.jsonl
+poolhouse-gym export /path/to/session/trajectory.jsonl reviews.jsonl cases.jsonl
 ```
 
 Export includes only explicitly reviewed transitions and uses the observation before the
@@ -334,12 +334,12 @@ Upstream references: [MetaDrive](https://metadrive-simulator.readthedocs.io/),
 [Stable-Baselines3](https://stable-baselines3.readthedocs.io/).
 
 Installed-model acceptance is opt-in and reuses verified cached weights without downloads.
-Set `ML_STACK_ACCEPTANCE_DECIDE_CACHE` to the existing `decide` cache and
-`ML_STACK_ACCEPTANCE_DECISION_DEVICE=auto` when the accelerator is free, then run
+Set `POOLHOUSE_ACCEPTANCE_DECIDE_CACHE` to the existing `decide` cache and
+`POOLHOUSE_ACCEPTANCE_DECISION_DEVICE=auto` when the accelerator is free, then run
 `tests/test_gym_native_acceptance.py::test_cached_strands_reports_native_world_decisions_without_blocking`
 through `scripts/test`. The test requires an actual applied decision within the default
 one-second freshness limit and checks pause releases its claim. The native vision case
-requires `ML_STACK_ACCEPTANCE_VISION=1`, an installed SmolVLM GGUF/projector visible through
-`ML_STACK_MODEL_PATHS`, and the existing `LLAMA_CPP_SERVER` binary. Run actual inference
+requires `POOLHOUSE_ACCEPTANCE_VISION=1`, an installed SmolVLM GGUF/projector visible through
+`POOLHOUSE_MODEL_PATHS`, and the existing `LLAMA_CPP_SERVER` binary. Run actual inference
 cases serially after checking owner workloads; mock HTTP and process boundary tests do not
 need an accelerator.

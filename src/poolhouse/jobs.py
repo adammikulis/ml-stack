@@ -1,0 +1,295 @@
+"""Starting a command that outlives the terminal, and the record it leaves.
+
+`detach` re-runs a module in a session of its own with its output in a log and writes the
+record; `status`, `wait` and `stop` read it back. One JSON file per *kind* of long command -- ``bench``, ``ingest``, ``train`` -- holding the
+pid, the argv, the log and when it started, so ``wait`` and ``stop`` never need a
+hand-written ``pgrep`` loop and a command that chains after another is always
+``wait && next``. ``poolhouse-jobs status`` prints every kind under one home at once.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from poolhouse import runtime, sentinel
+from poolhouse.command import Group, flag
+from poolhouse.home import expand, state
+from poolhouse.lock import Busy
+from poolhouse.log import say, warn
+
+
+def home_dir() -> Path:
+    """Where a record lives when a caller names no ``home`` of its own: ``<kind>.json``."""
+    return state("jobs")
+
+STOP_WAIT = 60.0
+"""How long `stop` waits for the pid to end before saying it is still going."""
+
+__all__ = [
+    "STOP_WAIT",
+    "Detached",
+    "Job",
+    "alive",
+    "detach",
+    "home_dir",
+    "main",
+    "record",
+    "recorded",
+    "status",
+    "stop",
+    "wait",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Job:
+    """One long command's record: what it was, its pid, argv, log, when it started."""
+
+    kind: str
+    pid: int
+    argv: tuple[str, ...] = field(default_factory=tuple)
+    log: str = ""
+    started: str = ""
+    home: Path = field(default_factory=home_dir)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"pid": self.pid, "argv": list(self.argv), "log": self.log,
+                "started": self.started}
+
+
+def _path(kind: str, home: Path | None) -> Path:
+    return (home or home_dir()) / f"{kind}.json"
+
+
+def _read(path: Path) -> dict[str, Any]:
+    try:
+        found = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def _ended(pid: int) -> bool:
+    """Whether ``pid`` is gone. A process this one started is reaped on the way: a child
+    that has exited answers ``kill(pid, 0)`` until somebody collects it."""
+    try:
+        collected, _ = os.waitpid(pid, os.WNOHANG)
+    except (OSError, AttributeError, ValueError):
+        collected = 0
+    if collected:
+        return True
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return True
+    return False
+
+
+def _wait_for(pid: int, seconds: float) -> bool:
+    deadline = time.time() + max(seconds, 0.0)
+    while not _ended(pid):
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def recorded(kind: str, *, home: Path | None = None) -> dict[str, Any]:
+    """The record ``kind`` last wrote -- pid, argv, log, started -- or ``{}`` when there is
+    none. Says nothing about whether the pid is still running; `alive` does that."""
+    return _read(_path(kind, home))
+
+
+def alive(kind: str, *, home: Path | None = None) -> int:
+    """The pid recorded for ``kind`` while it is still running; 0 when there is none, or the
+    recorded pid has ended."""
+    record = _read(_path(kind, home))
+    pid = int(record.get("pid") or 0)
+    if not pid:
+        return 0
+    return 0 if _ended(pid) else pid
+
+
+def record(kind: str, *, pid: int, argv: Sequence[str] = (), log: str = "", started: str = "",
+          home: Path | None = None, refuse_if_alive: bool = True) -> Job:
+    """Write ``kind``'s record for a command already started (``pid``): what it was called
+    with and where its log is.
+
+    Refuses with `Busy` when a previous ``kind`` is still alive -- so a caller checks
+    `alive` before spawning a second one and never overwrites a run still running. A caller
+    whose own concurrency is handled elsewhere (the bench queues a second `--detach` behind
+    a file lock rather than refusing it) passes ``refuse_if_alive=False``.
+    """
+    home = home or home_dir()
+    if refuse_if_alive:
+        running = alive(kind, home=home)
+        if running:
+            raise Busy(f"a {kind} job (pid {running}) is already running")
+    home.mkdir(parents=True, exist_ok=True)
+    job = Job(kind=kind, pid=int(pid), argv=tuple(str(a) for a in argv), log=str(log),
+              started=started or time.strftime("%FT%T"), home=home)
+    _path(kind, home).write_text(json.dumps(job.as_dict(), indent=1), encoding="utf-8")
+    return job
+
+
+@dataclass(frozen=True, slots=True)
+class Detached:
+    """A command now running on its own: its pid, log, full command and start time."""
+
+    pid: int
+    log: Path
+    command: tuple[str, ...]
+    started: str
+
+
+def detach(module: str, argv: Sequence[str], *, log: Path, lines: Sequence[str] = (),
+           kind: str = "", home: Path | None = None) -> Detached:
+    """Run ``python -m module argv`` owned by no terminal, its output appended to ``log``,
+    whose header is its ``argv:`` and ``started:`` lines and then ``lines``.
+
+    With a ``kind`` the run is recorded under ``home``, so `status`, `wait` and `stop`
+    find it; without one the caller keeps whatever record it keeps.
+    """
+    from poolhouse.platform import detached_kwargs
+
+    started = time.strftime("%FT%T")
+    rest = [str(a) for a in argv]
+    chosen = runtime.available()
+    python = chosen.python if chosen is not None else runtime.python()
+    command = [str(python), *(["-I"] if chosen is not None else []), "-m", module, *rest]
+    environment = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    if chosen is not None:
+        environment = runtime.environment(environment)
+    log = Path(log)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    head = [f"argv: {' '.join(rest)}", f"started: {started}", *lines]
+    with log.open("ab") as out:
+        out.write(("\n".join(head) + "\n").encode("utf-8"))
+        out.flush()
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
+                                 stderr=subprocess.STDOUT,
+                                 env=sentinel.default().scrub_env(environment),
+                                 **detached_kwargs())
+    if kind:
+        record(kind, pid=child.pid, argv=rest, log=str(log), started=started, home=home)
+    return Detached(pid=child.pid, log=log, command=tuple(command), started=started)
+
+
+def wait(kind: str, *, say: Callable[[str], None] = say, every: float = 60.0,
+         home: Path | None = None) -> int:
+    """Block until the ``kind`` job this machine records has ended, saying so every
+    ``every`` seconds -- so the next command can follow it without a loop written by hand
+    (``poolhouse-bench wait && poolhouse-bench report --profile``)."""
+    pid = alive(kind, home=home)
+    if not pid:
+        say(f"no {kind} job is running")
+        return 0
+    waited = 0.0
+    step = min(every, 5.0) or 5.0
+    while alive(kind, home=home):
+        time.sleep(step)
+        waited += step
+        if waited % every < step:
+            say(f"  still running (pid {pid}) after {waited / 60:.0f} min")
+    say(f"the {kind} job (pid {pid}) has ended")
+    return 0
+
+
+def stop(kind: str, *, say: Callable[[str], None] = say, wait: float = STOP_WAIT,
+         home: Path | None = None) -> int:
+    """``SIGTERM`` to the recorded ``kind`` pid, and wait up to ``wait`` seconds for it to
+    end, saying so every 30s while it has not. The record is kept while it is still ending
+    -- so a caller checking `alive` first never starts a second one beside it -- and removed
+    once it has, or once the pid was already gone."""
+    home = home or home_dir()
+    path = _path(kind, home)
+    record = _read(path)
+    pid = int(record.get("pid") or 0)
+    if not pid:
+        say(f"no {kind} job is recorded")
+        return 1
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        say(f"the recorded {kind} job (pid {pid}) had already ended")
+        path.unlink(missing_ok=True)
+        return 1
+    waited = 0.0
+    ended = _wait_for(pid, min(wait, 30.0))
+    waited += min(wait, 30.0)
+    while not ended and waited < wait:
+        say(f"  still ending after {waited:.0f}s (pid {pid})")
+        ended = _wait_for(pid, min(30.0, wait - waited))
+        waited += 30.0
+    if not ended:
+        say(f"asked the {kind} job (pid {pid}) to stop; it had not ended after {wait:.0f}s -- "
+            f"its record stays, and `alive` still says it is running")
+        return 1
+    path.unlink(missing_ok=True)
+    say(f"stopped the {kind} job (pid {pid})")
+    return 0
+
+
+def status(*, say: Callable[[str], None] = say, home: Path | None = None) -> int:
+    """Every kind's record under ``home``: running or ended, since when, its log."""
+    home = home or home_dir()
+    records = sorted(home.glob("*.json")) if home.exists() else []
+    if not records:
+        say("no job is recorded")
+        return 0
+    for path in records:
+        kind = path.stem
+        record = _read(path)
+        pid = int(record.get("pid") or 0)
+        running = bool(pid) and not _ended(pid)
+        said = f"running (pid {pid})" if running else (f"ended (pid {pid})" if pid else "unknown")
+        say(f"{kind}: {said} since {record.get('started', '?')}")
+        argv = " ".join(str(a) for a in (record.get("argv") or ()))
+        if argv:
+            say(f"  argv: {argv}")
+        if record.get("log"):
+            say(f"  log: {record['log']}")
+    return 0
+
+
+def _run(args: Any) -> int:
+    """``poolhouse-jobs``: what is recorded, waiting on one, stopping one."""
+    home = expand(args.home) if args.home else None
+    if args.word == "status":
+        return status(home=home)
+    if not args.kind:
+        warn(f"error: {args.word} needs a KIND -- `poolhouse-jobs status` names them")
+        return 2
+    if args.word == "wait":
+        return wait(args.kind, home=home)
+    return stop(args.kind, home=home)
+
+
+COMMANDS = Group(
+    "poolhouse-jobs",
+    "The long commands this machine records -- a bench sweep, an ingest reading documents "
+    "-- with the pid, the argv and the log of each. `status` lists them; `wait KIND` "
+    "blocks until one has ended, so the next command is `wait && next`; `stop KIND` ends "
+    "it.",
+    allow_abbrev=False, run=_run,
+    options=[
+        flag("word", choices=("status", "wait", "stop")),
+        flag("kind", nargs="?", default="", metavar="KIND",
+             help="which job -- `bench`, `ingest`, whatever wrote the record; `status` "
+                  "names them all"),
+        flag("--home", default="", metavar="DIR",
+             help=f"where the records are (default: {home_dir()})"),
+    ])
+main = COMMANDS.run
+
+
+if __name__ == "__main__":  # pragma: no cover - the entry point is `poolhouse-jobs`
+    raise SystemExit(main())

@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import node_binary, node_launch, node_supervise, runtime
-from ml_stack.node_health import call, node_health
+from poolhouse import node_binary, node_launch, node_supervise, runtime
+from poolhouse.node_health import call, node_health
 
 ROOT = Path(__file__).resolve().parent.parent
 pytestmark = pytest.mark.slow
@@ -43,7 +43,7 @@ def built() -> Path:
 def home(monkeypatch):
     """A short state root (a unix socket path is limited to about 100 bytes), with every node in it stopped afterwards."""
     root = Path(tempfile.mkdtemp(prefix="mln"))
-    monkeypatch.setenv("ML_STACK_HOME", str(root))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(root))
     monkeypatch.setenv("PYTHONPATH", str(ROOT / "src"))
     yield root
     node_launch.stop_node(root / "node", wait_s=5)
@@ -62,14 +62,14 @@ def install_runtime(binary: Path, name: str, *, select: bool = True) -> Path:
 
 def clients(state: Path, count: int) -> list[subprocess.Popen]:
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
-    return [subprocess.Popen([sys.executable, "-m", "ml_stack.node_launch", "ensure", "--state", str(state)], env=env,
+    return [subprocess.Popen([sys.executable, "-m", "poolhouse.node_launch", "ensure", "--state", str(state)], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(count)]
 
 
 def processes(state: Path) -> list[str]:
     """The command lines of every process running a node or supervisor for this state directory."""
     out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
-    return [line for line in out.splitlines() if str(state) in line and ("poolside-node" in line or "node_launch" in line)
+    return [line for line in out.splitlines() if str(state) in line and ("poolhouse-node" in line or "node_launch" in line)
             and "ps -axo" not in line]
 
 
@@ -106,7 +106,7 @@ def test_eight_clients_start_exactly_one_node(home, built):
     pids = {json.loads(out)["pid"] for out, _ in results}
     assert len(pids) == 1
     lines = processes(state)
-    assert len([line for line in lines if "poolside-node run" in line]) == 1, lines
+    assert len([line for line in lines if "poolhouse-node run" in line]) == 1, lines
     assert len([line for line in lines if "node_launch supervise" in line]) == 1, lines
     health = node_launch.status(state)
     assert health["healthy"] and health["supervised"] and health["pid"] in pids and health["version"]
@@ -128,7 +128,7 @@ def test_kill_9_restarts_the_node_with_the_board_intact(home, built):
     assert again["name"] and sorted(posts(state, again["token"])) == [f"row {i}" for i in range(5)]
     # ensure_node finds the restarted node and starts nothing more
     assert node_launch.ensure_node(state)["pid"] == after["pid"]
-    assert len([line for line in processes(state) if "poolside-node run" in line]) == 1
+    assert len([line for line in processes(state) if "poolhouse-node run" in line]) == 1
 
 
 def test_a_binary_that_does_not_match_its_checksum_is_refused(home, built):
@@ -162,7 +162,7 @@ def test_swap_to_a_new_binary_keeps_the_board_and_the_socket(home, built):
     assert now["pid"] != old["pid"] and now["sha256"] != old["sha256"] and now["socket"] == old["socket"]
     assert "row before" in posts(state, board(state)[1])
     assert first.is_dir()
-    assert len([line for line in processes(state) if "poolside-node run" in line]) == 1
+    assert len([line for line in processes(state) if "poolhouse-node run" in line]) == 1
     assert node_launch.swap(state)["action"] == "current"
 
 
@@ -204,7 +204,7 @@ def variant(home: Path, built: Path, name: str, tail: bytes) -> Path:
 
 
 def test_runtime_status_line_and_ensure_move_the_node(home, built):
-    from ml_stack import runtime_cli, runtime_deploy
+    from poolhouse import runtime_cli, runtime_deploy
 
     state = home / "node"
     assert "NOT RUNNING" in runtime_cli.node_line()

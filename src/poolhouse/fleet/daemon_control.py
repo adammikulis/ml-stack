@@ -1,0 +1,330 @@
+"""Owned daemon replacement admission and launcher handoff."""
+
+from __future__ import annotations
+
+import contextlib
+import ipaddress
+import json
+import os
+import secrets
+import stat
+import threading
+import time
+from functools import wraps
+from pathlib import Path
+
+from poolhouse import macauth, sealing
+from poolhouse.files import writing
+from poolhouse.fleet import updates
+from poolhouse.http import Sealed, ServerError, open_stream
+from poolhouse.lock import Busy
+from poolhouse.serve.reclaim import busy_now
+from poolhouse.windows_private import restrict, validate
+
+ROUTE = '/launcher/replace'
+MAX_RECORD = 4096
+DRAIN_S = 20.0
+"""How long a job-preserving replacement lets requests in flight finish, with new ones refused, before it stops anyway."""
+
+
+class ControlError(RuntimeError):
+    """The installed launcher cannot replace the running daemon."""
+
+
+class Retryable(ControlError):
+    """The replacement was refused only because requests are in progress; asking again later can succeed."""
+
+
+def _directory(root: Path) -> Path:
+    root = root.absolute()
+    path = root / 'launcher-control'
+    if os.name == 'nt':
+        validate(path)
+    for candidate in (path, root, *root.parents):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise ControlError('Daemon launcher storage must be an owned plain directory.')
+        if os.name != 'nt' and candidate in (path, root) and info.st_uid != os.getuid():
+            raise ControlError('Daemon launcher storage belongs to another account.')
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name == 'nt':
+        restrict(path)
+    elif path.stat().st_mode & 0o077:
+        raise ControlError('Daemon launcher storage must have owner-only permissions.')
+    return path
+
+
+def _record(root: Path, port: int) -> dict:
+    path = _directory(root) / f'{port}.json'
+    if os.name == 'nt':
+        validate(path)
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ControlError('This daemon has no owned launcher control; it must exit before replacement.') from exc
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RECORD:
+            raise ControlError('Daemon launcher control record is invalid.')
+        if os.name != 'nt' and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+            raise ControlError('Daemon launcher control record must be account-private.')
+        try:
+            value = json.loads(stream.read(MAX_RECORD + 1))
+        except (ValueError, UnicodeError) as exc:
+            raise ControlError('Daemon launcher control record is invalid.') from exc
+    if not isinstance(value, dict) or value.get('port') != port or value.get('version') != 1:
+        raise ControlError('Daemon launcher control record is invalid.')
+    return value
+
+
+def request_replacement(root: Path, port: int, running: dict, expected: str, *, restart: str = 'idle') -> dict:
+    """Ask the owned older daemon to stop at its maintained idle boundary."""
+    record = _record(root, port)
+    instance = running.get('launcher_control')
+    capability = record.get('capability', '')
+    if not isinstance(instance, str) or len(instance) != 32 or record.get('instance') != instance:
+        raise ControlError('The running daemon does not match this launcher control record.')
+    if not isinstance(capability, str) or not capability.startswith(macauth.PREFIX) or len(capability) > 128:
+        raise ControlError('Daemon launcher control record is invalid.')
+    endpoint = f'http://127.0.0.1:{port}{ROUTE}'
+
+    def guard(url):
+        if url != endpoint:
+            raise ControlError('Daemon replacement cannot leave its owned loopback endpoint.')
+        return url
+
+    if restart not in {'idle', 'preserve'}:
+        raise ControlError('Unknown daemon restart mode.')
+    request = {'version': 1, 'instance': instance, 'expected': expected, 'restart': restart}
+    deadline = time.monotonic() + 10
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ControlError('Daemon replacement did not reach its idle boundary.')
+        try:
+            return _acknowledge(endpoint, request, capability, guard, remaining)
+        except ServerError as exc:
+            if exc.status != 409:
+                raise
+            try:
+                refusal = json.loads(exc.body)
+            except (ValueError, UnicodeError):
+                raise exc from None
+            if not isinstance(refusal, dict) or refusal.get('retryable') is not True:
+                raise
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+
+
+def _acknowledge(endpoint, request, capability, guard, timeout):
+    body = json.dumps(request).encode()
+    instance = request['instance']
+    with open_stream(endpoint, method='POST', data=body, token=capability, timeout=timeout,
+                     headers={'Content-Type': 'application/json', sealing.HEADER: '2'}, guard=guard) as response:
+        if response.headers.get(sealing.HEADER) != '1':
+            raise ControlError('Daemon replacement acknowledgment must authenticate with sealing.')
+        if response.headers.get('Content-Type', '').split(';', 1)[0].strip().lower() != 'application/json':
+            raise ControlError('Daemon replacement acknowledgment must be JSON.')
+        limit = MAX_RECORD + sealing.NONCE_BYTES + 16
+        wire = response.read(limit + 1)
+        if len(wire) > limit:
+            raise ControlError('Daemon replacement acknowledgment exceeds its size limit.')
+        opened = getattr(response, 'sealed', Sealed()).open(response.status, response.headers, wire)
+        if len(opened) > MAX_RECORD:
+            raise ControlError('Daemon replacement acknowledgment exceeds its size limit.')
+        try:
+            answer = json.loads(opened)
+        except (ValueError, UnicodeError) as exc:
+            raise ControlError('Daemon replacement acknowledgment is not valid JSON.') from exc
+    if not isinstance(answer, dict) or answer.get('instance') != instance or answer.get('stopping') is not True:
+        raise ControlError('Daemon replacement was not acknowledged.')
+    return answer
+
+
+def _restart_mode(request):
+    if set(request) - {'version', 'instance', 'expected', 'restart'}:
+        raise ControlError('Unknown daemon replacement fields.')
+    if 'version' in request and (type(request['version']) is not int or request['version'] != 1):
+        raise ControlError('Unknown daemon replacement version.')
+    restart = request.get('restart', 'idle')
+    if type(restart) is not str or restart not in {'idle', 'preserve'}:
+        raise ControlError('Unknown daemon restart mode.')
+    if restart != 'idle' and request.get('version') != 1:
+        raise ControlError('Job-preserving restart requires version 1.')
+    if 'expected' in request and (type(request['expected']) is not str or len(request['expected']) > 128):
+        raise ControlError('Invalid expected daemon commit.')
+    return restart
+
+
+class Control:
+    def __init__(self, root: Path, port: int, idle, admission, shutdown):
+        self.path = _directory(root) / f'{port}.json'
+        self.instance = secrets.token_hex(16)
+        self.capability = macauth.PREFIX + secrets.token_urlsafe(32)
+        self.auth = macauth.Authenticator(lambda: [self.capability])
+        self.idle, self.admission, self.shutdown = idle, admission, shutdown
+        self.restart_safe = None
+        self.lock = threading.Lock()
+        self.held = contextlib.ExitStack()
+        self.stopping = False
+        self.active = 0
+        with writing(self.path) as temporary:
+            if os.name == 'nt':
+                restrict(temporary)
+            temporary.write_text(json.dumps({'version': 1, 'port': port, 'instance': self.instance,
+                                             'capability': self.capability}), encoding='utf-8')
+
+    def route(self, handler) -> bool:
+        if handler.path != ROUTE:
+            return False
+        if not ipaddress.ip_address(handler.client_address[0]).is_loopback:
+            handler._send(403, {'error': 'Daemon replacement requires this machine.'})
+            return True
+        body = handler._body(1024)
+        if body is None:
+            return True
+        verdict = self.auth.check('POST', handler.path, handler.headers, body)
+        if not verdict.ok:
+            handler._send(403, {'error': 'Daemon replacement requires its owned launcher.'})
+            return True
+        try:
+            mode = handler.headers.get(sealing.HEADER, '')
+            if mode in ('1', '2'):
+                key = sealing.box_key(verdict.secret)
+                host, target = macauth.parts(f"//{handler.headers.get('Host', '')}{handler.path}")
+                handler._opening = (key, verdict, mode == '2', handler.headers)
+                body = sealing.open_(key, body, sealing.request_data(
+                    'POST', target, host, verdict.at, verdict.nonce))
+            request = json.loads(body)
+            if not isinstance(request, dict) or request.get('instance') != self.instance:
+                raise ControlError('Daemon replacement instance does not match.')
+            restart = _restart_mode(request)
+            preserved = self._stop(restart)
+        except (ControlError, Busy, ValueError, OSError, sealing.SealError) as exc:
+            handler._send(409, {'error': str(exc), 'retryable': isinstance(exc, Retryable)})
+            return True
+        try:
+            handler._send(202, {'instance': self.instance, 'stopping': True, 'preserved': preserved})
+            handler.wfile.flush()
+        finally:
+            threading.Thread(target=self.shutdown, name='launcher-daemon-stop', daemon=True).start()
+        return True
+
+    def _stop(self, restart: str) -> dict:
+        """Admit the replacement: an idle one only when nothing runs, a job-preserving one after draining requests."""
+        if restart == 'idle':
+            with self.lock:
+                if self.stopping or self.active:
+                    raise Retryable('Daemon has requests in progress; retry when it is idle.')
+                return self._admit(restart)
+        with self.lock:
+            if self.stopping:
+                raise ControlError('Daemon is already being replaced.')
+            self.stopping = True
+        admitted = False
+        try:
+            deadline = time.monotonic() + DRAIN_S
+            while time.monotonic() < deadline:
+                with self.lock:
+                    if not self.active:
+                        break
+                time.sleep(0.05)
+            with self.lock:
+                preserved = self._admit(restart)
+            admitted = True
+            return preserved
+        finally:
+            if not admitted:
+                with self.lock:
+                    self.stopping = False
+
+    def _admit(self, restart: str) -> dict:
+        preserved: dict = {}
+        with contextlib.ExitStack() as admitted:
+            admitted.enter_context(self.admission())
+            if restart == 'idle':
+                if not self.idle():
+                    raise ControlError('Daemon has active work, downloads or setup; retry when it is idle.')
+            else:
+                if self.restart_safe is None:
+                    raise ControlError('Daemon cannot preserve jobs across restart.')
+                preserved = self.restart_safe()
+            self.held = admitted.pop_all()
+            self.stopping = True
+        return preserved
+
+    def close(self) -> None:
+        with self.lock:
+            self.held.close()
+            try:
+                row = _record(self.path.parent.parent, int(self.path.stem))
+            except ControlError:
+                return
+            if row.get('instance') == self.instance:
+                self.path.unlink(missing_ok=True)
+
+
+def protected(method, control):
+    """Admit a complete HTTP operation before daemon replacement drains requests."""
+    @wraps(method)
+    def handle(handler):
+        owner = control() if control else None
+        if owner is None or (handler.command == 'POST' and handler.path == ROUTE):
+            return method(handler)
+        with owner.lock:
+            if owner.stopping:
+                handler.close_connection = True
+                handler._send(503, {'error': 'Daemon replacement is in progress; retry shortly.'})
+                return None
+            owner.active += 1
+        try:
+            return method(handler)
+        finally:
+            with owner.lock:
+                owner.active -= 1
+    return handle
+
+
+def create(runtime):
+    """Publish launcher control for a configured daemon runtime."""
+    def models_busy():
+        try:
+            with runtime.serving.path.open('rb') as stream:
+                raw = stream.read(1024 * 1024 + 1)
+        except FileNotFoundError:
+            return False
+        if len(raw) > 1024 * 1024:
+            return True
+        rows = json.loads(raw)
+        if not isinstance(rows, list):
+            return True
+        served = runtime.serving.all()
+        if len(rows) != len(served):
+            return True
+        for row, server in zip(rows, served, strict=True):
+            if (not isinstance(row, dict) or type(row.get('port')) is not int
+                    or not 1 <= row['port'] <= 65535 or row['port'] != server.port):
+                return True
+        return any(busy_now(f'http://127.0.0.1:{server.port}') is not False for server in served)
+
+    idle = updates.quiet(
+        jobs=lambda: runtime.background_busy() or bool(runtime.runner.status()['queued']),
+        measuring=lambda: bool(runtime.bench_host.measuring()),
+        leases=models_busy,
+    )
+    control = Control(runtime.root, runtime.port, idle,
+                      runtime.update_admission, lambda: runtime.httpd.shutdown())
+    control.restart_safe = lambda: _preserve(runtime)
+    return control
+
+
+def _preserve(runtime):
+    if (bool(runtime.web and runtime.initial_setup and not runtime.settings.setup_done)
+            or any(row.state == 'getting' for row in runtime.downloads.active())
+            or bool(runtime.interface and runtime.interface.setup_jobs and runtime.interface.setup_jobs.active())
+            or bool(runtime.bench_host and runtime.bench_host.measuring())):
+        raise ControlError('Restart waits for setup, downloads or benchmark measurement; jobs and independent models are preserved.')
+    return runtime.runner.checkpoint_restart()

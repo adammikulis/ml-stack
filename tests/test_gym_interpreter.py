@@ -2,12 +2,12 @@
 
 from types import SimpleNamespace
 
-from ml_stack.fleet import daemon, gym_routes
-from ml_stack.fleet.settings import Settings
+from poolhouse.fleet import daemon, gym_routes
+from poolhouse.fleet.settings import Settings
 
 
 def test_explicit_worker_python_precedes_managed_environment(monkeypatch):
-    monkeypatch.setenv("ML_STACK_GYM_PYTHON", "/explicit/python")
+    monkeypatch.setenv("POOLHOUSE_GYM_PYTHON", "/explicit/python")
     chosen = []
     monkeypatch.setattr(gym_routes.manager, "configure", chosen.append)
     monkeypatch.setattr(gym_routes, "catalogue", lambda: [])
@@ -19,7 +19,7 @@ def test_explicit_worker_python_precedes_managed_environment(monkeypatch):
 
 
 def test_managed_worker_python_is_default(monkeypatch):
-    monkeypatch.delenv("ML_STACK_GYM_PYTHON", raising=False)
+    monkeypatch.delenv("POOLHOUSE_GYM_PYTHON", raising=False)
     chosen = []
     monkeypatch.setattr(gym_routes.manager, "configure", chosen.append)
     monkeypatch.setattr(gym_routes, "catalogue", lambda: [])
@@ -31,7 +31,7 @@ def test_managed_worker_python_is_default(monkeypatch):
 
 
 def test_saved_worker_python_is_reused_after_restart(monkeypatch, tmp_path):
-    monkeypatch.delenv("ML_STACK_GYM_PYTHON", raising=False)
+    monkeypatch.delenv("POOLHOUSE_GYM_PYTHON", raising=False)
     python = tmp_path / "python"
     python.write_text("selected interpreter")
     path = tmp_path / "settings.json"
@@ -50,7 +50,7 @@ def test_saved_worker_python_is_reused_after_restart(monkeypatch, tmp_path):
 
 
 def test_missing_saved_interpreter_reports_reselection(monkeypatch, tmp_path):
-    monkeypatch.delenv("ML_STACK_GYM_PYTHON", raising=False)
+    monkeypatch.delenv("POOLHOUSE_GYM_PYTHON", raising=False)
     responses = []
     request = SimpleNamespace(path="/ui/gym/catalogue", method="GET",
                               ui=SimpleNamespace(settings=Settings(gym_python=str(tmp_path / "missing")),

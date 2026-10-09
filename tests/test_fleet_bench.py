@@ -1,10 +1,10 @@
-"""The fleet side of ``ml-stack-bench sweep --fleet``: real daemons on loopback, a bench
+"""The fleet side of ``poolhouse-bench sweep --fleet``: real daemons on loopback, a bench
 that is a small script rather than a model, and stores in ``tmp_path``.
 
 Two fake daemons are two real ``Server``s running the real handler over a
 real `JobRunner`; only three things are stood in for -- the memory a peer may use, the
-commit it runs, and the launch of ``ml-stack-bench --detach``, which would load a model
-and write under ``~/.ml-stack``. Nothing here reads that directory. Every name is invented.
+commit it runs, and the launch of ``poolhouse-bench --detach``, which would load a model
+and write under ``~/.poolhouse``. Nothing here reads that directory. Every name is invented.
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.bench.peer_runs import gather, import_runs
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.measuring import (
+from poolhouse.bench.peer_runs import gather, import_runs
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.measuring import (
     BenchHost,
     Job,
     Local,
@@ -36,9 +36,9 @@ from ml_stack.fleet.measuring import (
     jobs_from,
     same_commit,
 )
-from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.fleet.sizing import estimate
-from ml_stack.fleet.sweeps import (
+from poolhouse.fleet.remote import Peer, PeerError
+from poolhouse.fleet.sizing import estimate
+from poolhouse.fleet.sweeps import (
     Handle,
     bench_export,
     dispatch,
@@ -46,7 +46,7 @@ from ml_stack.fleet.sweeps import (
     submit_bench,
     wait,
 )
-from ml_stack.http import Server
+from poolhouse.http import Server
 from tests.cluster_support import any_command
 
 G = 2**30
@@ -260,8 +260,8 @@ def test_a_job_may_not_carry_what_the_peer_owns(flag):
 
 # -- estimate ------------------------------------------------------------------------
 def test_estimate_is_the_preflights_weights_and_kv_plus_the_head_and_the_allowance(tmp_path):
-    from ml_stack.serve.preflight import RUNTIME_ALLOWANCE_BYTES
-    from ml_stack.testing.fakes import FakePreflight
+    from poolhouse.serve.preflight import RUNTIME_ALLOWANCE_BYTES
+    from poolhouse.testing.fakes import FakePreflight
 
     weights = tmp_path / "invented-4B.gguf"
     weights.write_bytes(b"w" * 4096)
@@ -285,7 +285,7 @@ def test_a_daemon_refuses_a_mismatched_commit(boxes):
     with pytest.raises(Refused) as caught:
         submit_bench(roomy.peer, _job("m.gguf", commit="ff00ee1"))
     assert caught.value.kind == "commit"
-    assert "roomy runs ml-stack ab12cd3, the dispatcher ff00ee1" in str(caught.value)
+    assert "roomy runs poolhouse ab12cd3, the dispatcher ff00ee1" in str(caught.value)
     # what the wire says: 409 with the reason and which refusal it was
     with pytest.raises(PeerError) as raw:
         roomy.peer._json("POST", "/bench", _job("m.gguf", commit="ff00ee1").public())
@@ -299,7 +299,7 @@ def test_a_dirty_tree_on_one_side_is_still_the_same_commit(boxes):
 
 
 def test_a_daemon_refuses_while_its_measuring_lock_is_held(boxes):
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
 
     roomy, _ = boxes
     with only_one(roomy.home / "measuring.lock"):
@@ -350,7 +350,7 @@ def test_dispatch_and_wait_see_done_and_the_job_is_listed_like_any_other(boxes):
     assert roomy.peer.health()["busy"] is True, "a measurement holds the GPU"
     listed = {j["id"]: j for j in roomy.peer.jobs()}
     assert listed[handles[0].id]["name"] == "bench:sweep"
-    assert listed[handles[0].id]["argv"][:2] == ["ml-stack-bench", "sweep"]
+    assert listed[handles[0].id]["argv"][:2] == ["poolhouse-bench", "sweep"]
 
     done = wait(handles, poll_s=0.1, timeout_s=20, log=said.append)
 
@@ -406,7 +406,7 @@ def test_a_peer_nobody_answers_for_is_said_and_the_rest_go_on(boxes, tmp_path):
 
 
 def test_a_bundle_answers_the_commit_it_was_built_from(tmp_path, monkeypatch):
-    from ml_stack.fleet import measuring
+    from poolhouse.fleet import measuring
 
     monkeypatch.setattr(measuring, "__file__", str(tmp_path / "measuring.py"))
     (tmp_path / measuring.BUILT_FROM).write_text("ab12cd3 (dirty)\n")
@@ -418,13 +418,13 @@ class _VcsInstalled:
     """A distribution pip installed from a VCS URL, as PEP 610's direct_url.json records it."""
 
     def read_text(self, name):
-        return json.dumps({"url": "https://example.invalid/ml-stack.git",
+        return json.dumps({"url": "https://example.invalid/poolhouse.git",
                            "vcs_info": {"vcs": "git", "commit_id": "9f2c1ab" + "0" * 33}}
                           ) if name == "direct_url.json" else None
 
 
 def test_a_vcs_install_answers_the_commit_pip_recorded(tmp_path, monkeypatch):
-    from ml_stack.fleet import measuring
+    from poolhouse.fleet import measuring
 
     monkeypatch.setattr(measuring, "__file__", str(tmp_path / "measuring.py"))
     monkeypatch.setattr(measuring, "repo_root", lambda where: None)
@@ -433,7 +433,7 @@ def test_a_vcs_install_answers_the_commit_pip_recorded(tmp_path, monkeypatch):
 
 
 def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkeypatch):
-    from ml_stack.fleet.measuring import bench_python
+    from poolhouse.fleet.measuring import bench_python
 
     roomy, _ = boxes
     (handle,) = dispatch({roomy.peer: _job("big.gguf")}, log=lambda _l: None)
@@ -450,7 +450,7 @@ def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkey
     (failed,) = wait(dispatch({roomy.peer: _job("big.gguf")}, log=said.append),
                      poll_s=0.1, timeout_s=20, log=said.append)
     assert failed.state == "failed"
-    assert "error: roomy could not start ml-stack-bench" in "\n".join(said)
+    assert "error: roomy could not start poolhouse-bench" in "\n".join(said)
     assert "Measuring" in "\n".join(said)
 
 
@@ -483,7 +483,7 @@ def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...],
 def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_path, monkeypatch):
     """The install runs after ``POST /bench`` has answered, so an install slower than the
     dispatcher's peer timeout is ``preparing``, not an unreachable peer."""
-    from ml_stack.fleet.environment import Environment
+    from poolhouse.fleet.environment import Environment
 
     roomy, _ = boxes
     environment = Environment(tmp_path / "managed")
@@ -491,8 +491,8 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     # what `_measures` imports: the bench's store reader, and the store itself
     bundled = tmp_path / "bundle" / "wheels"
     bundled.mkdir(parents=True)
-    _wheel(bundled, "ml-stack", "0.0.1", ("graph", "store", "serve", "hub"),
-           ("ml_stack/bench/__init__.py", "ml_stack/bench/peer_runs.py", "ladybug.py"))
+    _wheel(bundled, "poolhouse", "0.0.1", ("graph", "store", "serve", "hub"),
+           ("poolhouse/bench/__init__.py", "poolhouse/bench/peer_runs.py", "ladybug.py"))
     real_pip = Environment.pip
 
     def slow_pip(self, args, **kw):
@@ -515,13 +515,13 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     assert done.state == "done", "\n".join(said)
     assert time.monotonic() - began > 4.0, "the install was slower than the peer timeout"
     assert roomy.host.launch.pythons == [environment.python]
-    assert environment.installed().get("ml-stack") == "0.0.1"
+    assert environment.installed().get("poolhouse") == "0.0.1"
     assert "unreachable" not in "\n".join(said)
     assert [ln.split()[-1] for ln in said if "bench:sweep" in ln][-2:] == ["running", "done"]
 
 
 def test_an_export_reads_the_store_through_peer_runs(tmp_path):
-    from ml_stack.bench.peer_runs import exported
+    from poolhouse.bench.peer_runs import exported
 
     store = tmp_path / "runs.ladybug"
     _kept(store, "kept-before", "2020-01-01T00:00:00")
@@ -534,7 +534,7 @@ def test_an_export_reads_the_store_through_peer_runs(tmp_path):
     whole = exported(store, since=since, full=True, anyway=True)
     assert sorted(r["label"] for r in whole["runs"]) == ["kept-after", "kept-over-another"]
     assert all(r["rows"] for r in whole["runs"])
-    said = subprocess.run([sys.executable, "-m", "ml_stack.bench.peer_runs"],
+    said = subprocess.run([sys.executable, "-m", "poolhouse.bench.peer_runs"],
                           input=json.dumps({"store": str(store), "since": since}),
                           capture_output=True, text=True, check=True).stdout
     assert json.loads(said) == flat
@@ -542,7 +542,7 @@ def test_an_export_reads_the_store_through_peer_runs(tmp_path):
 
 @pytest.mark.slow
 def test_a_real_bench_that_refuses_its_only_model_is_failed_with_the_refusal(tmp_path):
-    from ml_stack.testing.fakes import fake_llama_binary
+    from poolhouse.testing.fakes import fake_llama_binary
 
     runner = JobRunner(tmp_path / "traind", tmp_path / "files")
     host = BenchHost(runner, home=tmp_path / "bench", name="lone")
@@ -596,7 +596,7 @@ def test_stopping_a_bench_job_terminates_the_detached_pid(tmp_path):
         pid = box.peer.job(handle.id)["pid"]
         box.peer.stop(handle.id)
         assert box.peer.job(handle.id)["state"] == "stopped"
-        from ml_stack.fleet.measuring import _alive
+        from poolhouse.fleet.measuring import _alive
 
         assert _await(lambda: not _alive(pid), timeout=10), "the pid should be gone"
         time.sleep(0.3)
@@ -608,11 +608,11 @@ def test_stopping_a_bench_job_terminates_the_detached_pid(tmp_path):
 
 
 def test_a_job_stopped_while_preparing_stays_stopped_when_its_pid_arrives(tmp_path):
-    from ml_stack.fleet.jobs import Job as DaemonJob
-    from ml_stack.fleet.measuring import _alive
+    from poolhouse.fleet.jobs import Job as DaemonJob
+    from poolhouse.fleet.measuring import _alive
 
     runner = JobRunner(tmp_path / "runner", slots=1)
-    job = runner.hold(DaemonJob(id="j1", name="bench", argv=["ml-stack-bench"],
+    job = runner.hold(DaemonJob(id="j1", name="bench", argv=["poolhouse-bench"],
                                 cwd=str(tmp_path)))
     runner.stop(job.id)
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -629,7 +629,7 @@ def test_a_job_stopped_while_preparing_stays_stopped_when_its_pid_arrives(tmp_pa
 
 
 def test_the_log_tail_names_what_failed():
-    from ml_stack.fleet.measuring import FAILED_MARKS
+    from poolhouse.fleet.measuring import FAILED_MARKS
 
     assert ended_badly(Path("/nonexistent/log")) == "no log was written"
     assert all(isinstance(m, str) for m in FAILED_MARKS)
@@ -638,8 +638,8 @@ def test_the_log_tail_names_what_failed():
 # -- gather --------------------------------------------------------------------------
 def _kept(store: Path, label: str, at: str, *, invented: bool = True, hits: int = 2) -> str:
     """A run in ``store`` as `save` would keep it: rows over the invented community."""
-    from ml_stack.bench import invented_digest
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.bench import invented_digest
+    from poolhouse.graph.store import GraphStore
 
     rows = [{"label": label, "question": f"q{n}?", "expected": ["person:iris"],
              "shown": ["person:iris"] if n < hits else [], "seconds": 3.0, "calls": 2,
@@ -659,7 +659,7 @@ def _later(seconds: float) -> str:
 
 
 def test_gather_imports_each_peers_runs_with_host_set_and_skips_duplicates(boxes, tmp_path):
-    from ml_stack.bench import runs
+    from poolhouse.bench import runs
 
     roomy, small = boxes
     into = tmp_path / "home.ladybug"
@@ -696,8 +696,8 @@ def test_gather_imports_each_peers_runs_with_host_set_and_skips_duplicates(boxes
 
 def test_gather_brings_home_a_run_over_another_graph_and_export_here_still_holds_it(
         boxes, tmp_path):
-    from ml_stack.bench import runs
-    from ml_stack.bench.score import _exportable
+    from poolhouse.bench import runs
+    from poolhouse.bench.score import _exportable
 
     roomy, _ = boxes
     into = tmp_path / "home.ladybug"
@@ -726,8 +726,8 @@ def test_a_peer_that_kept_nothing_is_said_not_skipped_silently(boxes, tmp_path):
 
 
 def test_two_machines_of_one_name_gather_as_two_machines(tmp_path):
-    from ml_stack.bench import runs
-    from ml_stack.bench.score import machine_of
+    from poolhouse.bench import runs
+    from poolhouse.bench.score import machine_of
 
     made = [_box(tmp_path / where, "Mac", room=24 * G) for where in ("one", "two")]
     made[1].host.machine = "id-Mac-other"
@@ -769,8 +769,8 @@ def test_the_export_route_answers_the_flat_shape_show_export_writes(boxes):
 
 
 def test_import_runs_by_hand_from_a_flat_export_file(tmp_path):
-    """A peer with no daemon: `ml-stack-bench show --export` there, copy, import here."""
-    from ml_stack.bench import derived, runs
+    """A peer with no daemon: `poolhouse-bench show --export` there, copy, import here."""
+    from poolhouse.bench import derived, runs
 
     exported = tmp_path / "attic.json"
     exported.write_text(json.dumps([
@@ -805,7 +805,7 @@ def test_import_runs_by_hand_from_a_flat_export_file(tmp_path):
 
 
 def test_import_runs_takes_the_json_text_and_the_answer_shape_too(tmp_path):
-    from ml_stack.bench import runs
+    from poolhouse.bench import runs
 
     into = tmp_path / "home.ladybug"
     text = json.dumps({"runs": [{"at": "2026-09-02T09:00:00", "label": "x", "questions": 2,
@@ -841,15 +841,15 @@ def test_a_handle_with_no_job_has_nothing_to_gather(tmp_path):
 
 
 def test_a_detached_bench_is_told_the_home_whose_lock_the_daemon_watches(tmp_path, monkeypatch):
-    """A daemon rooted away from ``~/.ml-stack`` watches ``<root.parent>/bench``; the bench it
+    """A daemon rooted away from ``~/.poolhouse`` watches ``<root.parent>/bench``; the bench it
     launches must record there too, or the daemon holds a lock nobody takes."""
-    from ml_stack.fleet import measuring as fb
+    from poolhouse.fleet import measuring as fb
 
     seen = {}
 
     def run(argv, **kw):
         seen["argv"], seen["env"] = argv, kw.get("env") or {}
-        home = Path(seen["env"]["MLSTACK_BENCH_HOME"])
+        home = Path(seen["env"]["POOLHOUSE_BENCH_HOME"])
         home.mkdir(parents=True, exist_ok=True)
         (home / "measuring.json").write_text(json.dumps({"pid": 4242, "log": str(home / "x.log")}))
         return subprocess.CompletedProcess(argv, 0, "log: " + str(home / "x.log"), "")
@@ -857,8 +857,8 @@ def test_a_detached_bench_is_told_the_home_whose_lock_the_daemon_watches(tmp_pat
     monkeypatch.setattr(fb.subprocess, "run", run)
     pid, log = fb.detach_bench(["run", "m.gguf"], tmp_path / "bench", Path("/env/bin/python"))
     assert pid == 4242 and log == tmp_path / "bench" / "x.log"
-    assert seen["argv"][:3] == ["/env/bin/python", "-m", "ml_stack.bench"]
-    assert seen["env"]["MLSTACK_BENCH_HOME"] == str(tmp_path / "bench")
+    assert seen["argv"][:3] == ["/env/bin/python", "-m", "poolhouse.bench"]
+    assert seen["env"]["POOLHOUSE_BENCH_HOME"] == str(tmp_path / "bench")
     assert "PATH" in seen["env"]                     # the rest of the environment came along
 
 
@@ -867,28 +867,28 @@ def test_the_bench_home_moves_with_the_environment(tmp_path):
     `RunNotKept` class and break every later `pytest.raises` on the first (CI, 2026-09-02)."""
     import os
 
-    env = {**os.environ, "MLSTACK_BENCH_HOME": str(tmp_path / "elsewhere")}
+    env = {**os.environ, "POOLHOUSE_BENCH_HOME": str(tmp_path / "elsewhere")}
     said = subprocess.run([sys.executable, "-c",
-                           "from ml_stack.bench import keep; print(keep.home_dir())"],
+                           "from poolhouse.bench import keep; print(keep.home_dir())"],
                           capture_output=True, text=True, env=env, check=True).stdout.strip()
     assert Path(said) == tmp_path / "elsewhere"
 
 
-# -- ops.fleet_planned / fleet_measure: the ml-stack-bench sweep --fleet side -----------
+# -- ops.fleet_planned / fleet_measure: the poolhouse-bench sweep --fleet side -----------
 #
-# `bench/ops.py` is the glue between `ml-stack-bench sweep --fleet` and the fleet
+# `bench/ops.py` is the glue between `poolhouse-bench sweep --fleet` and the fleet
 # functions above: it has to turn `--peers` names (or none) into the real peers `plan`
 # needs, and the placement `plan` returns into the ``{peer: Job}`` mapping `dispatch`
 # needs. Discovery itself (real UDP, a real cluster key) is `tests/test_fleet_discovery.py`'s
-# job; here `ml_stack.fleet.join.peers` and `ml_stack.fleet.pausing.peer_clients` are stood
+# job; here `poolhouse.fleet.join.peers` and `poolhouse.fleet.pausing.peer_clients` are stood
 # in for, so what is real is exactly what was broken: `plan`, `jobs_from`, `dispatch`,
 # `wait` and `gather`, over the same two daemons as the rest of this module.
 
 def _discovery_stub(monkeypatch, clients):
-    """`ml_stack.fleet.join.peers` and `ml_stack.fleet.pausing.peer_clients` answering with
+    """`poolhouse.fleet.join.peers` and `poolhouse.fleet.pausing.peer_clients` answering with
     ``clients`` (``{name: Peer}``), so `ops._discovered` runs for real over them."""
-    import ml_stack.fleet.join as join_module
-    import ml_stack.fleet.pausing as pausing_module
+    import poolhouse.fleet.join as join_module
+    import poolhouse.fleet.pausing as pausing_module
 
     monkeypatch.setattr(join_module, "peers", lambda **kw: [{"name": n} for n in clients])
     monkeypatch.setattr(pausing_module, "peer_clients", lambda rows, **kw: dict(clients))
@@ -899,8 +899,8 @@ def test_fleet_planned_and_measure_spread_real_jobs_over_discovered_peers(boxes,
     """The bug: `fleet_planned` handed `sweeps.plan` the ``--peers`` names as strings (or
     None), and `fleet_measure` handed `sweeps.dispatch` a list where it takes
     ``{peer: Job}``. Both are real peers and a real mapping here."""
-    import ml_stack.fleet.sweeps as sweeps_module
-    from ml_stack.bench import ops, runs
+    import poolhouse.fleet.sweeps as sweeps_module
+    from poolhouse.bench import ops, runs
 
     roomy, small = boxes
     monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
@@ -934,8 +934,8 @@ def test_fleet_planned_and_measure_spread_real_jobs_over_discovered_peers(boxes,
 
 def test_fleet_planned_refuses_before_dispatch_when_the_assigned_peer_is_on_another_commit(
         boxes, monkeypatch):
-    from ml_stack.bench import ops
-    from ml_stack.bench.ops import Refused as OpsRefused
+    from poolhouse.bench import ops
+    from poolhouse.bench.ops import Refused as OpsRefused
 
     roomy, small = boxes
     monkeypatch.setattr(ops, "_commit", lambda root=None: "ffffff (dirty)")
@@ -948,8 +948,8 @@ def test_fleet_planned_refuses_before_dispatch_when_the_assigned_peer_is_on_anot
 
 
 def test_fleet_planned_refuses_a_named_peer_discovery_did_not_find(boxes, monkeypatch):
-    from ml_stack.bench import ops
-    from ml_stack.bench.ops import Refused as OpsRefused
+    from poolhouse.bench import ops
+    from poolhouse.bench.ops import Refused as OpsRefused
 
     roomy, small = boxes
     monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
@@ -962,8 +962,8 @@ def test_fleet_planned_refuses_a_named_peer_discovery_did_not_find(boxes, monkey
 
 def test_fleet_planned_refuses_a_store_on_this_machine_and_passes_an_empty_one(boxes,
                                                                                  monkeypatch):
-    from ml_stack.bench import ops
-    from ml_stack.bench.ops import Refused as OpsRefused
+    from poolhouse.bench import ops
+    from poolhouse.bench.ops import Refused as OpsRefused
 
     roomy, _ = boxes
     monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
@@ -978,8 +978,8 @@ def test_fleet_planned_refuses_a_store_on_this_machine_and_passes_an_empty_one(b
 
 
 def test_fleet_planned_refuses_when_discovery_finds_nobody(monkeypatch):
-    from ml_stack.bench import ops
-    from ml_stack.bench.ops import Refused as OpsRefused
+    from poolhouse.bench import ops
+    from poolhouse.bench.ops import Refused as OpsRefused
 
     monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
     _discovery_stub(monkeypatch, {})
@@ -1017,20 +1017,20 @@ def _free_port(kind: int = socket.SOCK_STREAM) -> int:
 
 
 def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
-    """A real ``ml-stack-cluster`` daemon in a subprocess, once it answers /health: (proc,
+    """A real ``poolhouse-cluster`` daemon in a subprocess, once it answers /health: (proc,
     log, open log handle)."""
-    from ml_stack.fleet.discovery import derive_token, load_cluster_key
+    from poolhouse.fleet.discovery import derive_token, load_cluster_key
 
     root = tmp_path / name
     root.mkdir(parents=True, exist_ok=True)
     http_port = _free_port()
     log = tmp_path / f"{name}.out"
     fh = log.open("wb")
-    env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
+    env = {**os.environ, "POOLHOUSE_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
            "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen(
-        [sys.executable, "-m", "ml_stack.fleet.daemon", "--root", str(root / "traind"),
+        [sys.executable, "-m", "poolhouse.fleet.daemon", "--root", str(root / "traind"),
          "--bench-home", str(root / "bench"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", name, "--cluster-key", str(keyfile)],
         env=env, stdout=fh, stderr=subprocess.STDOUT, cwd=root)
@@ -1060,8 +1060,8 @@ def _own_graph(where: Path) -> list[str]:
 
 @pytest.mark.slow
 def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_path, monkeypatch):
-    """Nothing here is mocked: a real ``ml-stack-cluster`` daemon booted as a subprocess, found
-    by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench`` over a
+    """Nothing here is mocked: a real ``poolhouse-cluster`` daemon booted as a subprocess, found
+    by real UDP discovery, given a real HTTP job that runs the real ``poolhouse-bench`` over a
     graph that is not the shipped community, on a llama-server-shaped process instead of a
     GPU; the run it keeps comes home. The graph and questions are gone from the
     dispatcher's disk before the job is sent, so the peer reads only what the job carried."""
@@ -1069,22 +1069,22 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
 
     from conftest import write_gguf
 
-    import ml_stack.bench as bench
-    import ml_stack.fleet.sweeps as sweeps_module
-    from ml_stack.bench import runs
-    from ml_stack.fleet.discovery import create_cluster_key
-    from ml_stack.graph.cache import digest
-    from ml_stack.testing.fakes import fake_llama_binary
+    import poolhouse.bench as bench
+    import poolhouse.fleet.sweeps as sweeps_module
+    from poolhouse.bench import runs
+    from poolhouse.fleet.discovery import create_cluster_key
+    from poolhouse.graph.cache import digest
+    from poolhouse.testing.fakes import fake_llama_binary
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile, group="ml-stack")
+    create_cluster_key(keyfile, group="poolhouse")
     disco_port = _free_port(socket.SOCK_DGRAM)
     booted = [_boot_daemon(tmp_path, name, keyfile=keyfile, disco_port=disco_port)
               for name in ("quill", "lantern")]
     try:
-        monkeypatch.setenv("ML_STACK_CLUSTER_KEY", str(keyfile))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(disco_port))
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "dispatcher-home"))
+        monkeypatch.setenv("POOLHOUSE_CLUSTER_KEY", str(keyfile))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(disco_port))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "dispatcher-home"))
 
         gguf = write_gguf(tmp_path / "tiny.gguf", _FLEET_LLAMA_META)
         binary = fake_llama_binary(tmp_path)
@@ -1125,9 +1125,9 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
 
 def _one_machine(boxes, tmp_path, monkeypatch, *, models):
     """A dispatcher whose own daemon is the only peer and shares its bench home."""
-    import ml_stack.bench as bench
-    import ml_stack.fleet.sweeps as sweeps_module
-    from ml_stack.bench import ops
+    import poolhouse.bench as bench
+    import poolhouse.fleet.sweeps as sweeps_module
+    from poolhouse.bench import ops
 
     roomy, _ = boxes
     monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
@@ -1146,7 +1146,7 @@ def _one_machine(boxes, tmp_path, monkeypatch, *, models):
 
 def test_sweep_fleet_places_a_job_on_the_dispatchers_own_daemon(boxes, tmp_path, monkeypatch,
                                                                capsys):
-    from ml_stack.bench import run, runs
+    from poolhouse.bench import run, runs
 
     roomy, kept, line = _one_machine(boxes, tmp_path, monkeypatch, models=["big.gguf"])
     _kept(roomy.store, "big-plain", _later(30))
@@ -1161,10 +1161,10 @@ def test_sweep_fleet_places_a_job_on_the_dispatchers_own_daemon(boxes, tmp_path,
 
 def test_sweep_fleet_exits_non_zero_when_nothing_is_placed(boxes, tmp_path, monkeypatch,
                                                          capsys):
-    from ml_stack.bench import run
+    from poolhouse.bench import run
 
     roomy, _, line = _one_machine(boxes, tmp_path, monkeypatch, models=["huge.gguf"])
-    monkeypatch.setattr("ml_stack.fleet.sweeps.estimate", lambda *a, **k: 500 * G)
+    monkeypatch.setattr("poolhouse.fleet.sweeps.estimate", lambda *a, **k: 500 * G)
     _kept(roomy.store, "old-plain", _later(30))
 
     code = run.main(line)

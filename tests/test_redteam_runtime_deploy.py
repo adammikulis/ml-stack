@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from test_runtime_deploy import builder, commit, plan_for, world  # noqa: F401
 
-from ml_stack import runtime, runtime_deploy, runtime_launchers
-from ml_stack.fleet import runtime_wheel, updates
+from poolhouse import runtime, runtime_deploy, runtime_launchers
+from poolhouse.fleet import runtime_wheel, updates
 
 pytestmark = pytest.mark.slow
 
@@ -46,9 +46,9 @@ def test_forward_hands_hostile_arguments_to_the_selected_interpreter_unchanged(t
     seen = []
     monkeypatch.setattr(runtime, "available", lambda: chosen)
     monkeypatch.setattr(os, "execve", lambda path, argv, env: seen.append((path, argv, env)))
-    runtime.forward("ml_stack.fleet.launch", ["--x; touch PWNED", "$(id)", "`id`"])
+    runtime.forward("poolhouse.fleet.launch", ["--x; touch PWNED", "$(id)", "`id`"])
     _, argv, env = seen[0]
-    assert argv == [str(chosen.python), "-I", "-m", "ml_stack.fleet.launch", "--x; touch PWNED", "$(id)", "`id`"]
+    assert argv == [str(chosen.python), "-I", "-m", "poolhouse.fleet.launch", "--x; touch PWNED", "$(id)", "`id`"]
     assert "PYTHONPATH" not in env
 
 
@@ -56,7 +56,7 @@ def test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_
     repo, _, _ = world
     odd = tmp_path / HOSTILE
     odd.mkdir()
-    monkeypatch.setenv("ML_STACK_HOME", str(odd / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(odd / "state"))
     launchers = odd / "bin"
     launchers.mkdir(mode=0o700)
     head = commit(repo, "a")
@@ -65,7 +65,7 @@ def test_a_state_root_with_shell_punctuation_still_builds_verifies_and_installs_
     chosen = runtime.selected()
     assert runtime.verify(chosen) == chosen
     assert runtime_launchers.install(launchers, chosen)
-    done = subprocess.run([str(launchers / "ml-stack-workspace")], capture_output=True, text=True, timeout=60)
+    done = subprocess.run([str(launchers / "poolhouse-workspace")], capture_output=True, text=True, timeout=60)
     assert done.stdout.strip() == f"help {head[:7]}"
     assert untouched(tmp_path)
 

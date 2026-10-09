@@ -4,35 +4,35 @@ The owner asked for every use of the user's encrypted key store to be reviewed a
 every platform. This is the inventory, the platform matrix, what was fixed, what is verified and
 how, what is not, and what only the owner can decide. Method: code reading of `src`, `scripts`,
 `packaging`, `tests` and `docs`, plus tests against fake keyring backends. No real OS keystore was
-read, written, listed or prompted at any point; the owner's `~/.ml-stack/keystore` content was not
+read, written, listed or prompted at any point; the owner's `~/.poolhouse/keystore` content was not
 read (file names and sizes only).
 
 ## 1. Inventory
 
-`src/ml_stack/keystore.py` is the only module that imports `keyring`
+`src/poolhouse/keystore.py` is the only module that imports `keyring`
 (`tests/test_keystore_gate.py` fails on any other). It holds one secret in the OS keystore:
-service `ml-stack`, account `master/<uid>:<login>`, value `v1:<base64 of 32 random bytes>`. Every
+service `poolhouse`, account `master/<uid>:<login>`, value `v1:<base64 of 32 random bytes>`. Every
 other secret is wrapped (AES-256-GCM, HKDF subkey per purpose and owner) and kept in a file.
 
 | Caller | What it protects | Where the wrapped value lives | Who may call it | May prompt | Failure |
 |---|---|---|---|---|---|
-| `keystore.Keystore` (master create, read) | the master | OS keystore | any ml-stack process; creating needs a person (`interactive()`), reading an existing one needs a person or a prior `ml-stack-security unlock` | yes: first create, and a read by a binary the item does not trust yet (macOS) | closed: `KeystoreLocked`, `KeystoreDenied` (10 minute latch), `KeystoreUnavailable`, `KeystoreMissing`, `KeystoreBusy`; never a plaintext fallback |
-| `ml-stack-security unlock`, `keystore`, `keystore-reset` (`net/cli.py`) | create, status (no backend call), delete the master | OS keystore | a person at a terminal with no agent marker (`require_person`, `human.mint`) | yes (create) | closed |
-| memory store (`memory/vault.py`, `store.py`) | fact store files | beside the store | the user's processes, hooks and daemons | via the master only | closed; `ML_STACK_MEMORY_KEYS=passphrase` is a person's explicit choice |
-| fleet signing key (`fleet/onboard/signing.py`) | Ed25519 seed | `signing.key.wrapped` | controller processes | via the master only | no keystore: scrypt passphrase file `signing.key.enc` (encrypted, not plaintext; passphrase from a terminal or `ML_STACK_SIGNING_PASSPHRASE`) |
-| credentials `--keychain` (`credentials/__init__.py`) | named tokens | `keystore/credentials.json` | a person's `ml-stack credentials` command; library lookups only unwrap | via the master only | closed (`CredentialError`) |
+| `keystore.Keystore` (master create, read) | the master | OS keystore | any Poolhouse process; creating needs a person (`interactive()`), reading an existing one needs a person or a prior `poolhouse-security unlock` | yes: first create, and a read by a binary the item does not trust yet (macOS) | closed: `KeystoreLocked`, `KeystoreDenied` (10 minute latch), `KeystoreUnavailable`, `KeystoreMissing`, `KeystoreBusy`; never a plaintext fallback |
+| `poolhouse-security unlock`, `keystore`, `keystore-reset` (`net/cli.py`) | create, status (no backend call), delete the master | OS keystore | a person at a terminal with no agent marker (`require_person`, `human.mint`) | yes (create) | closed |
+| memory store (`memory/vault.py`, `store.py`) | fact store files | beside the store | the user's processes, hooks and daemons | via the master only | closed; `POOLHOUSE_MEMORY_KEYS=passphrase` is a person's explicit choice |
+| fleet signing key (`fleet/onboard/signing.py`) | Ed25519 seed | `signing.key.wrapped` | controller processes | via the master only | no keystore: scrypt passphrase file `signing.key.enc` (encrypted, not plaintext; passphrase from a terminal or `POOLHOUSE_SIGNING_PASSPHRASE`) |
+| credentials `--keychain` (`credentials/__init__.py`) | named tokens | `keystore/credentials.json` | a person's `poolhouse credentials` command; library lookups only unwrap | via the master only | closed (`CredentialError`) |
 | cluster passphrase (`fleet/recovery.py`) | cluster passphrase | `<memberships>.passphrases` | join (CLI, web button) | via the master only | the join continues and says the passphrase was not saved |
 | activity log, request inbox, workspace file store, reputation ledger (`activity/log.py`, `requests/store.py`, `workspace/filestore.py`, `reputation/sealed.py`) | sealed stores | beside the store | hooks, daemons, agents | via the master only | closed (the caller reports a locked store) |
 | `scripts/release-key` | release signing key | `credentials --keychain` | the owner | via the master only | closed |
 | `scripts/encrypted-volume.sh` | disk image passphrase | macOS login keychain, service `NAME-data`, through the `security` CLI | the owner, macOS only | yes | `set -eu`; see finding F-9 |
-| legacy items (`ml-stack-memory`, `onboard-signing-<hash>`, `<NAME>`) | pre-master items | OS keystore | migrated and deleted on first use by a person's command | yes | kept when verification fails |
+| legacy items (`poolhouse-memory`, `onboard-signing-<hash>`, `<NAME>`) | pre-master items | OS keystore | migrated and deleted on first use by a person's command | yes | kept when verification fails |
 | Android `DeviceVault.java` | device grant | Android Keystore, user-authentication required | the companion app | biometric/PIN by design | closed |
 
-Test isolation: `tests/conftest.py` sets `ML_STACK_NO_REAL_KEYSTORE=1` and
+Test isolation: `tests/conftest.py` sets `POOLHOUSE_NO_REAL_KEYSTORE=1` and
 `PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring` for the run and every child, refuses the
 real backends' `get/set/delete_password` in process, installs an in-memory ring and patches
 `keystore.interactive` to true. `runtime_deploy._clean_environment` (the smoke run of a new
-runtime) sets `ML_STACK_NO_REAL_KEYSTORE=1` and `ML_STACK_NONINTERACTIVE=1`.
+runtime) sets `POOLHOUSE_NO_REAL_KEYSTORE=1` and `POOLHOUSE_NONINTERACTIVE=1`.
 
 ## 2. Platform matrix
 
@@ -46,7 +46,7 @@ runtime) sets `ML_STACK_NO_REAL_KEYSTORE=1` and `ML_STACK_NONINTERACTIVE=1`.
 | Windows desktop | `keyring.backends.Windows` (Credential Manager, DPAPI of the user profile) | silent (no dialog exists) | silent | closed | code read; NOT verified |
 | Windows boot task / service (`schtasks /SC ONSTART /RU user`, session 0) | same | background since this audit (before it `_desktop()` was always true on Windows: a service could mint its own master under the service account) | the task's account has its own vault; a master made by the person at logon is only read if the task runs as that same user with a loaded profile | closed | session test with a fake `_session_id`; real session 0 NOT verified |
 | Linux desktop (gnome-keyring, KWallet) | `SecretService` (jeepney), `kwallet`, `libsecret` | collection unlock dialog if locked; item created silently if unlocked | silent when unlocked | closed; a locked collection with no one to answer is bounded (300 s person, 20 s background) and latches | bounded call verified by test with a stuck fake; real D-Bus NOT verified |
-| Linux headless, SSH, container, CI | no session bus: `SecretService.priority` raises, keyring falls to `fail.Keyring` (priority 0) | `KeystoreUnavailable`; signing key uses the scrypt passphrase file; memory needs `ML_STACK_MEMORY_KEYS=passphrase`; credentials `--keychain` refuses | n/a | closed, no plaintext | verified by test (unusable backend) |
+| Linux headless, SSH, container, CI | no session bus: `SecretService.priority` raises, keyring falls to `fail.Keyring` (priority 0) | `KeystoreUnavailable`; signing key uses the scrypt passphrase file; memory needs `POOLHOUSE_MEMORY_KEYS=passphrase`; credentials `--keychain` refuses | n/a | closed, no plaintext | verified by test (unusable backend) |
 | Linux with `keyrings.alt` installed | `PlaintextKeyring` or `EncryptedKeyring` would win | refused since this audit | n/a | closed | verified by test with a fake in the `keyrings.alt` namespace |
 | Linux system unit (`User=`, `After=network-online`) | no session bus | background, `KeystoreUnavailable` or `KeystoreLocked` | n/a | closed | code read |
 | WSL | like Linux headless unless `dbus` + `gnome-keyring` run inside the distro; `DISPLAY`/`WAYLAND_DISPLAY` are set by WSLg so `_desktop()` is true | per the backend present | the Windows Credential Manager is NOT used from WSL: a WSL master and a Windows master are different items, never shared | closed | code read; NOT verified |
@@ -58,7 +58,7 @@ runtime) sets `ML_STACK_NO_REAL_KEYSTORE=1` and `ML_STACK_NONINTERACTIVE=1`.
 runtime tree is `python -m venv` (`fleet/runtime_wheel.py:130`); on macOS `bin/python` is a symlink to
 `python3.13` and that to the host interpreter (here `~/.pyenv/versions/3.13.5/bin/python3.13`,
 `pyvenv.cfg` `home =`). The kernel runs the resolved file and the Keychain access list names the code
-identity of that file, not the venv path, so a new `~/.ml-stack/runtimes/<platform>/<commit>/<hash>`
+identity of that file, not the venv path, so a new `~/.poolhouse/runtimes/<platform>/<commit>/<hash>`
 tree reuses the host binary and its identity (read-only `codesign -d -r-` shows
 `cdhash H"57855c9b..."`, ad-hoc linker-signed). Consequences: (1) nothing in the per-commit swap
 causes a prompt; (2) the identity is a cdhash, so a host Python upgrade (pyenv, Homebrew) or a switch
@@ -67,7 +67,7 @@ but this binary is not on its access list, so macOS asks once (the dialog's allo
 password) and a background process now fails closed instead of hanging; (3) an item is created through
 `SecItemAdd`-style calls in `keyring.backends.macOS.api` with no access list argument, so the
 creator binary alone is trusted; the user sees "python3.13 wants to use your confidential
-information stored in 'ml-stack' in your keychain". Not verified: the exact dialog and whether the
+information stored in 'Poolhouse' in your keychain". Not verified: the exact dialog and whether the
 error code under `SecKeychainSetUserInteractionAllowed(false)` is mapped by keyring to
 `KeychainDenied`. Owner decision D-1 below.
 
@@ -80,16 +80,16 @@ refused (latched ten minutes) or times out after 20 s, never a hang. Gap that re
 a `--system` install print that the keystore is unavailable at boot; D-2.
 
 **(c) Non-interactive callers.** Defect F-1 (fixed): `interactive()` ignored `CLAUDECODE` and
-`ML_STACK_AGENT`. An agent's tool call has no stdin terminal, but on macOS and Windows `_desktop()` was
+`POOLHOUSE_AGENT`. An agent's tool call has no stdin terminal, but on macOS and Windows `_desktop()` was
 true, so it counted as a person and could create the master behind a Keychain prompt. Hooks set
-`ML_STACK_NONINTERACTIVE` (`harnesshook.run`) so they were already safe. About the baseline plugin
+`POOLHOUSE_NONINTERACTIVE` (`harnesshook.run`) so they were already safe. About the baseline plugin
 on `test-agent-shell-baseline` (`scripts/testagentenv_pytest.py`): clearing the markers per test cannot
 make an in-process test reach a real keychain, because `_keystore_has_a_person` already forces
 `interactive()` true, the `MemoryRing` is installed, the real backends' methods raise, and
-`ML_STACK_NO_REAL_KEYSTORE=1` and `PYTHON_KEYRING_BACKEND=...fail.Keyring` are in the environment every
+`POOLHOUSE_NO_REAL_KEYSTORE=1` and `PYTHON_KEYRING_BACKEND=...fail.Keyring` are in the environment every
 child inherits. A test that builds a child environment from scratch without those two variables would
 reach the keychain on a macOS desktop; I found no such test (`test_compare_harnesses`,
-`test_embedding` build scratch environments but never touch the keystore). The sentence "ml-stack will
+`test_embedding` build scratch environments but never touch the keystore). The sentence "Poolhouse will
 ask your computer to store one encryption key ... Keychain prompt" is `keystore.NOTICE`, printed by
 `Keystore._tell` before the first backend call; in `test_the_join_button_runs_the_same_join` the call
 is `fleet/recovery.remember` on the autouse fake ring with a fresh temporary state root (no
@@ -104,27 +104,27 @@ holder dies, so a stale file is harmless and needs no recovery. A waiter polls w
 after 180 s (`flight`) or 10 s (`state`) with `KeystoreBusy`. Verified by the existing
 multi-process tests (six and forty processes). Not verified: `msvcrt` on Windows, and `flock` on
 WSL2 drvfs (`/mnt/c`), where an `ENOSYS` would surface as a raw `OSError` (not `Busy`); the default
-`~/.ml-stack` is on ext4 so only `ML_STACK_HOME` on `/mnt/c` is affected; D-4. Lock files are created
+`~/.poolhouse` is on ext4 so only `POOLHOUSE_HOME` on `/mnt/c` is affected; D-4. Lock files are created
 0644 inside the 0700 directory (now enforced).
 
 **(e) Rotation and migration.** There is no master rotation; reset loses all wrapped data (documented
 in `docs/keystore.md`). Defect F-4 (fixed): a master that vanished after `provisioned.json` was
-written was silently replaced by a new random one (restored backup of `~/.ml-stack` without the
+written was silently replaced by a new random one (restored backup of `~/.poolhouse` without the
 Keychain, a WSL shell with a different backend, an item deleted by hand), orphaning every wrapped file.
-Now only `ml-stack-security unlock` by a person may start over. Runtime path changes do not matter
+Now only `poolhouse-security unlock` by a person may start over. Runtime path changes do not matter
 (master is keyed by service and account, not by interpreter path) except for (a).
 
 **(f) Modes.** POSIX: state files are written through `files.writing` (`mkstemp`, 0600), the keystore
 directory is created 0700 and now chmod 0700 if it existed with another mode (F-5); the salt file is
 0600 `O_EXCL`; `credentials.json`, `signing.key.wrapped` chmod 0600; lock files 0644 inside the
 private directory. Windows: `chmod` and `mkdir(mode)` are no-ops; files inherit the ACL of
-`%USERPROFILE%\.ml-stack`, normally the user, SYSTEM and Administrators. Not verified; D-3 and the
+`%USERPROFILE%\.poolhouse`, normally the user, SYSTEM and Administrators. Not verified; D-3 and the
 `icacls` command in section 5.
 
 **(g) Secrets in env, argv, logs.** Logs and events carry purpose and outcome only
 (`tests/test_keystore.py::test_no_file_or_log_holds_the_master_a_subkey_or_a_wrapped_secret`).
-`ml-stack credentials set` reads stdin or a prompt, never argv. The master is never in an env
-variable. Env passphrases exist as an explicit choice: `ML_STACK_SIGNING_PASSPHRASE` and the memory
+`poolhouse credentials set` reads stdin or a prompt, never argv. The master is never in an env
+variable. Env passphrases exist as an explicit choice: `POOLHOUSE_SIGNING_PASSPHRASE` and the memory
 passphrase variable; an env var is readable by the same user (`/proc/<pid>/environ`, process
 inspection on Windows) and inherited by every child, which `docs/keystore.md` should say (D-5).
 `scripts/encrypted-volume.sh` passes the generated passphrase on argv (`security add-generic-password
@@ -135,7 +135,7 @@ uses `security -i`).
 
 | ID | Defect | Evidence | Status |
 |---|---|---|---|
-| F-1 | An agent marker other than `ML_STACK_NONINTERACTIVE` still counted as a person on macOS/Windows desktops | `keystore.interactive` read one variable; test `test_every_agent_marker_makes_a_process_background_...` failed against the old code | fixed |
+| F-1 | An agent marker other than `POOLHOUSE_NONINTERACTIVE` still counted as a person on macOS/Windows desktops | `keystore.interactive` read one variable; test `test_every_agent_marker_makes_a_process_background_...` failed against the old code | fixed |
 | F-2 | Windows: `_desktop()` was always true, so a boot task or service in session 0 could create its own master | code; test with a fake session id | fixed |
 | F-3 | A usable `keyrings.alt` plaintext backend would hold the master in a file in the clear | code (`_ring` accepted any priority above zero); test with a fake in that namespace failed before the fix | fixed |
 | F-3b | `keyring.backends.libsecret` was not treated as the machine's own keystore by the test isolation | code | fixed |
@@ -160,21 +160,21 @@ None of these touches a secret value. Run them as yourself in a terminal, not th
 
 ```
 python -c "import keyring; print(keyring.get_keyring())"               # expect WinVaultKeyring, no prompt
-ml-stack-security keystore                                              # state files only
-ml-stack-security unlock                                                # creates the master; no dialog expected
-cmdkey /list:ml-stack*                                                  # one entry named ml-stack:master/0:<login>
-icacls "$env:USERPROFILE\.ml-stack\keystore"                            # expect only you, SYSTEM, Administrators
+poolhouse-security keystore                                              # state files only
+poolhouse-security unlock                                                # creates the master; no dialog expected
+cmdkey /list:poolhouse*                                                  # one entry named poolhouse:master/0:<login>
+icacls "$env:USERPROFILE\.poolhouse\keystore"                            # expect only you, SYSTEM, Administrators
 python -c "import ctypes;s=ctypes.c_ulong();k=ctypes.windll.kernel32;k.ProcessIdToSessionId(k.GetCurrentProcessId(),ctypes.byref(s));print(s.value)"   # a desktop shell: not 0
-schtasks /Create /TN mlstack-keystore-probe /SC ONSTART /RU <you> /TR "cmd /c ml-stack-security keystore > %TEMP%\probe.txt" ; schtasks /Run /TN mlstack-keystore-probe   # then read probe.txt: interactive false, no hang
-schtasks /Delete /F /TN mlstack-keystore-probe
+schtasks /Create /TN poolhouse-keystore-probe /SC ONSTART /RU <you> /TR "cmd /c poolhouse-security keystore > %TEMP%\probe.txt" ; schtasks /Run /TN poolhouse-keystore-probe   # then read probe.txt: interactive false, no hang
+schtasks /Delete /F /TN poolhouse-keystore-probe
 ```
 
 **WSL device:**
 
 ```
 python3 -c "import keyring; print(keyring.get_keyring())"               # fail.Keyring without dbus + gnome-keyring
-ml-stack-security keystore
-ML_STACK_MEMORY_KEYS=passphrase ml-stack-memory status                  # the passphrase path works without a keystore
+poolhouse-security keystore
+POOLHOUSE_MEMORY_KEYS=passphrase poolhouse-memory status                  # the passphrase path works without a keystore
 echo "$DISPLAY $WAYLAND_DISPLAY $DBUS_SESSION_BUS_ADDRESS"              # WSLg sets display variables; dbus normally empty
 python3 -c "import fcntl,os,tempfile;f=open('/mnt/c/Users/Public/lockprobe','w');fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB);print('flock ok on drvfs')"
 ```
@@ -183,21 +183,21 @@ python3 -c "import fcntl,os,tempfile;f=open('/mnt/c/Users/Public/lockprobe','w')
 
 ```
 python3 -c "import keyring; print(keyring.get_keyring())"               # SecretService / fail.Keyring
-ml-stack-security keystore
-ml-stack-security unlock                                                # desktop: one unlock dialog at most
-stat -c '%a %n' ~/.ml-stack/keystore ~/.ml-stack/keystore/*             # 700 for the directory, 600 for json and wrapped files
-sudo systemd-run --uid=$USER --wait --pipe ml-stack-security keystore   # a system-unit context: no hang, interactive false
-pip list 2>/dev/null | grep -i keyrings.alt                             # must be absent or ml-stack refuses it
+poolhouse-security keystore
+poolhouse-security unlock                                                # desktop: one unlock dialog at most
+stat -c '%a %n' ~/.poolhouse/keystore ~/.poolhouse/keystore/*             # 700 for the directory, 600 for json and wrapped files
+sudo systemd-run --uid=$USER --wait --pipe poolhouse-security keystore   # a system-unit context: no hang, interactive false
+pip list 2>/dev/null | grep -i keyrings.alt                             # must be absent or poolhouse refuses it
 ```
 
 **macOS** (owner, one machine):
 
 ```
 codesign -d -r- ~/.pyenv/versions/3.13.5/bin/python3.13                 # the identity the item trusts (cdhash)
-ls -l ~/.ml-stack/runtimes/*/*/*/bin/python                             # symlink to the host binary
+ls -l ~/.poolhouse/runtimes/*/*/*/bin/python                             # symlink to the host binary
 ```
 
-After a deliberate host Python change, run `ml-stack-security keystore` then any memory command in a
+After a deliberate host Python change, run `poolhouse-security keystore` then any memory command in a
 terminal and note whether a prompt appears; from an agent shell the same command must fail within 20 s
 with a refusal, not hang.
 
@@ -211,8 +211,8 @@ with a refusal, not hang.
   (`fleet/autostart_keystore.py`).
 - D-3 Windows: `icacls` tightening of `keystore/` at creation (`platform.private_dir`); tested with a
   mocked subprocess, a real ACL not read back.
-- D-4 WSL: a state root on a Windows drive is refused (`KeystoreUnavailable`, names `ML_STACK_HOME`).
-- D-5 Env passphrases documented; `ML_STACK_SIGNING_PASSPHRASE` kept.
+- D-4 WSL: a state root on a Windows drive is refused (`KeystoreUnavailable`, names `POOLHOUSE_HOME`).
+- D-5 Env passphrases documented; `POOLHOUSE_SIGNING_PASSPHRASE` kept.
 - D-6 `credentials.json` and the passphrase file are changed under a lock (F-8 fixed).
 - D-7 `scripts/encrypted-volume.sh` gives `security` the passphrase on stdin (F-9 fixed); tested
   against a throwaway keychain file on a Mac.

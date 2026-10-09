@@ -121,4 +121,4 @@ def test_the_report_and_the_refusals(cmp):
     done = subprocess.run([sys.executable, str(SCRIPT), "--on", "http://127.0.0.1:1", "--dry-run"],
                           capture_output=True, text=True, check=False,
                           env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SCRIPT.parent.parent / "src")})
-    assert done.returncode == 0 and "ml_stack.claude" in done.stdout and "ml_stack.codex" in done.stdout
+    assert done.returncode == 0 and "poolhouse.claude" in done.stdout and "poolhouse.codex" in done.stdout

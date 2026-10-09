@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harness, harnessing
-from ml_stack.serve.serving import Config, Serving
+from poolhouse import harness, harnessing
+from poolhouse.serve.serving import Config, Serving
 
 pytestmark = pytest.mark.redteam
 
@@ -44,7 +44,7 @@ def test_partial_offload_fit_is_refused(monkeypatch, configured):
 
 def test_sdk_checks_admission_before_serving(monkeypatch):
     monkeypatch.setattr(harness.hub, "located", lambda *a, **k: "fixture.gguf")
-    monkeypatch.setattr("ml_stack.serve.recent.note", lambda *a, **k: None)
+    monkeypatch.setattr("poolhouse.serve.recent.note", lambda *a, **k: None)
     monkeypatch.setattr(harnessing.leases, "already_up", lambda *a: None)
     config = Config(serving=Serving(model="fixture.gguf", cache_type="q4_0"))
     monkeypatch.setattr(harnessing, "config_for", lambda *a: config)

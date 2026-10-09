@@ -17,7 +17,7 @@ try {
     $python = if ($env:PYTHON) { $env:PYTHON } else { 'python' }
     & $python (Join-Path $PSScriptRoot 'build.py') $Gradle $AndroidPlugin $AndroidApi
     if ($LASTEXITCODE -ne 0) { throw 'Android build failed.' }
-    Get-Item -LiteralPath (Join-Path $PSScriptRoot 'build/outputs/apk/release/ml-stack-android-release.apk')
+    Get-Item -LiteralPath (Join-Path $PSScriptRoot 'build/outputs/apk/release/poolhouse-android-release.apk')
 } finally {
     Remove-Item Env:ANDROID_SIGNING_PASSWORD -ErrorAction SilentlyContinue
     Pop-Location

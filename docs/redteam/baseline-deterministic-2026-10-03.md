@@ -1,6 +1,6 @@
 # Deterministic red-team baseline, 2026-10-03
 
-The baseline the weekly workflow (`.github/workflows/redteam.yml`) is gated on: `python -m ml_stack.redteam run
+The baseline the weekly workflow (`.github/workflows/redteam.yml`) is gated on: `python -m poolhouse.redteam run
 --model stub --scenarios extraction,fleet,sentinel --against docs/redteam/baseline-deterministic-2026-10-03.json
 --success-tolerance 0 --ttd-tolerance 1`. It needs no model: `extraction` and `fleet` attack code paths, and
 `sentinel` runs the default `Agent` against a scripted model that does whatever the attack asks (the judge model is
@@ -15,9 +15,9 @@ sentinel's first finding; 0 means it was noticed while that input was being hand
 `unwatched` is the attack against an agent with the rails and sentinel off (the logged opt-out); `default` is an
 `Agent` given nothing. The 2 oversized-body successes are known findings (`findings.md`), held at 2.
 
-- command: python -m ml_stack.redteam run --model stub --scenarios extraction,fleet,sentinel --out redteam-stub
+- command: python -m poolhouse.redteam run --model stub --scenarios extraction,fleet,sentinel --out redteam-stub
 - date: 2026-10-03
-- ml_stack: 0.1.7 @ fafd034+dirty
+- poolhouse: 0.1.7 @ fafd034+dirty
 - model: stub-gullible
 - platform: macOS-26.6
 - pyrit: 1.1.0

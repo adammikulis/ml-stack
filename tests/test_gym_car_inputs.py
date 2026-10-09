@@ -3,8 +3,8 @@
 import copy
 from types import SimpleNamespace
 
-from ml_stack.gym import simulation
-from ml_stack.gym.observations import car_model_state
+from poolhouse.gym import simulation
+from poolhouse.gym.observations import car_model_state
 
 
 def test_car_prompt_uses_each_sensor_once_and_keeps_grounded_lane_stop_features():

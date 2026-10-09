@@ -11,7 +11,7 @@ from ._util import read
 NAME = "deep-files"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 LIMIT = 900
 HARD = True
 

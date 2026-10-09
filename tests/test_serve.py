@@ -17,8 +17,8 @@ import time
 import pytest
 from conftest import json_reply
 
-from ml_stack.client.health import ServingParams
-from ml_stack.serve import (
+from poolhouse.client.health import ServingParams
+from poolhouse.serve import (
     LlamaServerBackend,
     ServerBackend,
     ServerFailed,
@@ -35,14 +35,14 @@ from ml_stack.serve import (
     tail,
     wait_until_free,
 )
-from ml_stack.serve.leases import lease_file, orphaned
-from ml_stack.testing.fakes import (
+from poolhouse.serve.leases import lease_file, orphaned
+from poolhouse.testing.fakes import (
     FakeLlamaServer,
     Served,
     fake_binary,
     fake_llama_binary,
 )
-from ml_stack.testing.registry import record_server
+from poolhouse.testing.registry import record_server
 from tests.conftest import leased
 
 
@@ -419,7 +419,7 @@ class TestAdoption:
         manager.release(info)
 
         assert instance.base_url  # still answering; nothing was killed
-        from ml_stack.client import is_healthy
+        from poolhouse.client import is_healthy
 
         assert is_healthy(instance.base_url)
 
@@ -453,7 +453,7 @@ class TestScaledTimeout:
     it, and gets exactly that."""
 
     def test_it_grows_with_the_weights_and_never_drops_below_the_floor(self):
-        from ml_stack.serve.weights import DEFAULT_TIMEOUT_S, scaled_timeout
+        from poolhouse.serve.weights import DEFAULT_TIMEOUT_S, scaled_timeout
 
         assert scaled_timeout(0) == DEFAULT_TIMEOUT_S
         # 10 GiB -> 60 + 15 = 75s, still under the 300s floor
@@ -482,8 +482,8 @@ class TestScaledTimeout:
         assert started == [12.5]
 
     def test_none_scales_from_the_weights_already_on_disk(self, tmp_path, monkeypatch):
-        from ml_stack.serve import manager as manager_module
-        from ml_stack.serve.weights import scaled_timeout
+        from poolhouse.serve import manager as manager_module
+        from poolhouse.serve.weights import scaled_timeout
 
         monkeypatch.setattr(manager_module, "weight_of", lambda model: 200 * 1024**3)
         started: list[float] = []
@@ -518,7 +518,7 @@ class TestStateFile:
         assert recorded_servers(tmp_path / "absent.json") == {}
 
     def test_load_s_and_warmup_s_are_kept_in_the_record(self, tmp_path, binary):
-        """`ml-stack-serve status --json` reads these back -- a fact worth keeping, not a
+        """`poolhouse-serve status --json` reads these back -- a fact worth keeping, not a
         log line to be grepped for later."""
         state = tmp_path / "servers.json"
         manager = ServerManager(LlamaServerBackend(binary=binary), state_file=state)
@@ -573,7 +573,7 @@ class TestDetach:
 
 class TestRecord:
     def test_a_new_server_on_a_port_is_asked_about_again(self, tmp_path, binary):
-        from ml_stack.client import chat
+        from poolhouse.client import chat
 
         url = "http://127.0.0.1:9105"
         chat._FAMILY_BY_URL[url] = "stale"
@@ -656,7 +656,7 @@ class TestShapeMismatch:
         assert serving_mismatch(spec, [], None) == []
 
     def test_a_server_on_a_refusing_template_is_not_the_shape_a_patched_one_asks_for(self):
-        """Driven 2026-09-05: ml-stack-claude adopted a server up on the model's own
+        """Driven 2026-09-05: poolhouse-claude adopted a server up on the model's own
         template and every Claude Code turn after the first was a 500. Mutation: drop
         the template check."""
         refusing = "{%- if x %}{{- raise_exception('System message must be at the beginning') }}{%- endif %}"
@@ -726,8 +726,8 @@ class TestAdoptingTheWrongShape:
         assert info is not None and info.adopted
 
     def test_a_server_that_will_not_say_is_adopted_anyway(self, monkeypatch):
-        from ml_stack.serve import manager as mod
-        from ml_stack.serve.manager import ServerManager, ServerSpec
+        from poolhouse.serve import manager as mod
+        from poolhouse.serve.manager import ServerManager, ServerSpec
 
         monkeypatch.setattr(mod, "is_healthy", lambda *a, **k: True)
         monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
@@ -810,14 +810,14 @@ class TestServingBeside:
         info = held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port))
         assert info.port != instance.port, "it should have moved rather than refused"
         assert started and started[0].port == info.port
-        from ml_stack.client import is_healthy
+        from poolhouse.client import is_healthy
 
         assert is_healthy(instance.base_url), "the other server is untouched"
 
     def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, serving, tmp_path):
         instance = serving("somethingelse.gguf")
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="ml-stack did not start"):
+        with pytest.raises(ServerFailed, match="Poolhouse did not start"):
             held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
 
     def test_it_refuses_when_the_machine_has_no_room(self, serving, tmp_path, monkeypatch):
@@ -825,9 +825,9 @@ class TestServingBeside:
         big = tmp_path / "big.gguf"
         big.write_bytes(b"0" * 4096)
         instance = serving("somethingelse.gguf")
-        monkeypatch.setattr("ml_stack.serve.manager.free_memory", lambda: 1024)
+        monkeypatch.setattr("poolhouse.serve.manager.free_memory", lambda: 1024)
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="ml-stack did not start"):
+        with pytest.raises(ServerFailed, match="Poolhouse did not start"):
             held.lease(ServerSpec(model=big, port=instance.port))
 
 
@@ -835,7 +835,7 @@ def test_a_projector_reference_becomes_a_url_and_a_path_stays_a_path(binary):
     """`--mmproj` takes a file on disk. Handing it an `hf:` reference is a path that does
     not exist, and the server's complaint reads like a corrupt projector rather than a
     misspelled one."""
-    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+    from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
 
     backend = LlamaServerBackend(binary=binary)
 
@@ -858,7 +858,7 @@ def test_the_most_precise_projector_is_taken_not_the_first_alphabetically():
     import tempfile
     from pathlib import Path
 
-    from ml_stack.serve.ops import alongside
+    from poolhouse.serve.ops import alongside
 
     with tempfile.TemporaryDirectory() as d:
         where = Path(d)
@@ -878,7 +878,7 @@ def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked(b
     """`--spec-type` defaults to `none` on the server. An n-gram kind needs no second model,
     proposing tokens already seen in the prompt -- which is what suits work that copies from
     its context, and costs no weights and no memory where a draft head costs both."""
-    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+    from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
 
     backend = LlamaServerBackend(binary=binary)
 
@@ -905,7 +905,7 @@ def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked(b
 def test_the_lookup_cache_reaches_the_command_line(binary):
     """Only the ngram-cache kind keeps a table on disk. The other n-gram kinds look up the
     prompt they already hold and store nothing, which is why none of this is set by default."""
-    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+    from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
 
     backend = LlamaServerBackend(binary=binary)
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1, spec_type="ngram-simple"))
@@ -924,7 +924,7 @@ def test_tensors_can_be_kept_off_the_gpu_by_pattern(binary):
     in advance, meant to sit in host memory and be prefetched rather than hold GPU. Naming
     its tensors is how that is arranged -- and it is a different thing from n-gram
     *speculation*, which is a decoding trick and touches no weights at all."""
-    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+    from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
 
     backend = LlamaServerBackend(binary=binary)
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
@@ -950,7 +950,7 @@ def test_the_serving_knobs_that_shorten_a_run(binary):
     divided by the slot count, done at the call site, which was got wrong here once: a model
     served at 8k per slot against everything else at 32k, and the only thing that said so
     was the table printing the context on every line."""
-    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+    from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
 
     backend = LlamaServerBackend(binary=binary)
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
@@ -975,16 +975,16 @@ def test_the_serving_knobs_that_shorten_a_run(binary):
 def test_already_up_names_the_recorded_server_that_holds_the_same_weights(tmp_path, monkeypatch):
     import json
 
-    from ml_stack.serve.leases import already_up
+    from poolhouse.serve.leases import already_up
 
     state = tmp_path / "servers.json"
     state.write_text(json.dumps({"8080": {"port": 8080, "pid": 4242, "model": "/models/quince-2b.gguf",
                                           "base_url": "http://127.0.0.1:8080", "slots": 2}}))
-    monkeypatch.setattr("ml_stack.serve.leases.pid_exists", lambda pid: pid == 4242)
+    monkeypatch.setattr("poolhouse.serve.leases.pid_exists", lambda pid: pid == 4242)
     assert already_up("quince-2b.gguf", 8080, state_file=state)["base_url"] == "http://127.0.0.1:8080"
     assert already_up("ember-1b.gguf", 8080, state_file=state) is None
     assert already_up("quince-2b.gguf", 8081, state_file=state) is None
-    monkeypatch.setattr("ml_stack.serve.leases.pid_exists", lambda pid: False)
+    monkeypatch.setattr("poolhouse.serve.leases.pid_exists", lambda pid: False)
     assert already_up("quince-2b.gguf", 8080, state_file=state) is None
 
 
@@ -994,7 +994,7 @@ def test_no_test_finds_the_llama_server_this_machine_happens_to_have(binary):
     Two tests passed here and failed on CI because `find_binary` reads a login shell's
     directories and PATH, neither of which the temporary home moves. Mutation: take the
     `_no_machine_binary` fixture out of tests/conftest.py."""
-    from ml_stack.serve.binary import find_binary, machine_binary
+    from poolhouse.serve.binary import find_binary, machine_binary
 
     assert machine_binary("llama-server", ("llama-server",)) is None
     assert find_binary("llama-server") is None
@@ -1003,7 +1003,7 @@ def test_no_test_finds_the_llama_server_this_machine_happens_to_have(binary):
 
 def test_one_slot_says_so_rather_than_leaving_it_to_the_server(binary):
     """llama-server's own --parallel default is -1, auto, which picked 4 on a 128 GB Mac."""
-    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+    from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
 
     argv = LlamaServerBackend(binary=binary).command(
         ServerSpec(model="model.gguf", port=8080, context=32768))
@@ -1042,7 +1042,7 @@ class TestTheStartedProcess:
     def test_the_log_is_not_held_open_while_the_load_is_waited_on(self, tmp_path, monkeypatch):
         import psutil
 
-        from ml_stack.serve import backend as backend_module
+        from poolhouse.serve import backend as backend_module
 
         real = backend_module.wait_for_health
         open_during: list[list[str]] = []
@@ -1088,9 +1088,9 @@ import sys
 import time
 from pathlib import Path
 
-from ml_stack.serve import grant
-from ml_stack.serve.backend import ServerSpec
-from ml_stack.serve.manager import ServerManager
+from poolhouse.serve import grant
+from poolhouse.serve.backend import ServerSpec
+from poolhouse.serve.manager import ServerManager
 
 state, port, start_at = Path(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
 
@@ -1115,7 +1115,7 @@ time.sleep(2.0)
 
 @pytest.mark.slow
 def test_two_processes_recording_at_once_keep_both_records(tmp_path):
-    """Two `ml-stack-serve up` at once merge into the same file, not over each other."""
+    """Two `poolhouse-serve up` at once merge into the same file, not over each other."""
     script = tmp_path / "record.py"
     script.write_text(TWO_MANAGERS)
     state = tmp_path / "servers.json"
@@ -1137,8 +1137,8 @@ def test_two_processes_recording_at_once_keep_both_records(tmp_path):
 
 
 def test_every_start_writes_its_own_log_under_the_home_and_the_oldest_go(tmp_path):
-    from ml_stack import home
-    from ml_stack.serve.backend import LOGS_KEPT, logs_of, server_log
+    from poolhouse import home
+    from poolhouse.serve.backend import LOGS_KEPT, logs_of, server_log
 
     older = []
     for n in range(LOGS_KEPT + 2):
@@ -1159,7 +1159,7 @@ def test_every_start_writes_its_own_log_under_the_home_and_the_oldest_go(tmp_pat
 
 
 def test_a_model_served_on_two_ports_is_reported_with_both(server):
-    from ml_stack.serve.process import loaded_twice
+    from poolhouse.serve.process import loaded_twice
 
     def serving(name):
         return lambda m, p, b: json_reply({"data": [{"id": name}]})
@@ -1179,7 +1179,7 @@ def test_one_port_named_twice_is_one_copy(server):
     Who is hurt when this goes red: every run behind `preflight`, which refuses to
     start while a model looks resident twice.
     """
-    from ml_stack.serve.process import loaded_twice
+    from poolhouse.serve.process import loaded_twice
 
     one = server(lambda m, p, b: json_reply({"data": [{"id": "qwen3-8b"}]}))
 

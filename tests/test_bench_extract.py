@@ -1,6 +1,6 @@
 """An extraction scored against the gold the simulation wrote.
 
-Every person, place and organisation here is invented by `ml_stack.world` from a seed or
+Every person, place and organisation here is invented by `poolhouse.world` from a seed or
 made up on the spot; the model is a fake that returns scripted extractions. Nothing reads
 a real graph, a real store outside `tmp_path`, or a server.
 """
@@ -16,11 +16,11 @@ from typing import ClassVar
 
 import pytest
 
-from ml_stack import hub
-from ml_stack.bench import MEASURING, RunNotKept, _parser, extract as bx, runs, truth as bt
-from ml_stack.client.families import GENERIC
-from ml_stack.world.organisation import make
-from ml_stack.world.simulate import simulate
+from poolhouse import hub
+from poolhouse.bench import MEASURING, RunNotKept, _parser, extract as bx, runs, truth as bt
+from poolhouse.client.families import GENERIC
+from poolhouse.world.organisation import make
+from poolhouse.world.simulate import simulate
 
 # -- a tiny world with messages -----------------------------------------------------------------
 
@@ -280,7 +280,7 @@ def test_measure_scores_the_sender_only_reader_at_full_people_precision(tmp_path
 
 
 def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     graph, messages = talked()
     picked = bx.sample_messages(messages, 5, seed=0)
     rows, scores = bx.measure(Reader(), picked, graph)
@@ -306,7 +306,7 @@ def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
 
 
 def test_the_estimate_comes_from_earlier_runs_of_the_same_model_else_a_guess(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     graph, messages = talked()
     rows, scores = bx.measure(Reader(), bx.sample_messages(messages, 4, seed=0), graph)
     for r in rows:
@@ -336,14 +336,14 @@ def test_a_world_without_messages_is_simulated_and_said_so(tmp_path):
 
 
 def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    import ml_stack.client
-    from ml_stack import bench
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    import poolhouse.client
+    from poolhouse import bench
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url, "model": "fake.gguf"})
     monkeypatch.setattr(bench, "busy", lambda url: 0)   # _idle asks bench.busy
-    monkeypatch.setattr(ml_stack.client, "Client", Reader)
+    monkeypatch.setattr(poolhouse.client, "Client", Reader)
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["extract", "smoke", "--world", str(_world_dir(tmp_path)), "--smoke",
                         "--kept", str(kept), "--base-url", "http://127.0.0.1:1"]) == 0
@@ -359,14 +359,14 @@ def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, mon
 
 
 def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    import ml_stack.client
-    from ml_stack import bench
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    import poolhouse.client
+    from poolhouse import bench
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "busy", lambda url: 0)   # _idle asks bench.busy
-    monkeypatch.setattr(ml_stack.client, "Client", Reader)
+    monkeypatch.setattr(poolhouse.client, "Client", Reader)
     real = bx.runs
     calls = {"n": 0}
 
@@ -381,14 +381,14 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
 
 
 def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    import ml_stack.client
-    from ml_stack import bench
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    import poolhouse.client
+    from poolhouse import bench
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "busy", lambda url: 0)   # _idle asks bench.busy
-    monkeypatch.setattr(ml_stack.client, "Client", Reader)
+    monkeypatch.setattr(poolhouse.client, "Client", Reader)
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["extract", "again", "--world", str(_world_dir(tmp_path)), "--smoke",
                         "--twice", "--kept", str(kept), "--base-url", "http://127.0.0.1:1"]) == 0
@@ -401,8 +401,8 @@ def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_pat
 
 
 def test_show_prints_extraction_runs_under_the_answering_table_or_alone(tmp_path, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack import bench
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse import bench
 
     graph, messages = talked()
     rows, scores = bx.measure(Reader(), bx.sample_messages(messages, 3, seed=0), graph)
@@ -436,7 +436,7 @@ def test_the_instructions_say_what_a_topic_is_and_name_the_relation_vocabulary()
     topics at under 20% precision and named relations outside the world's vocabulary: the
     instructions had defined neither. They do now, and the words are held here so a
     rewording that drops them is noticed."""
-    from ml_stack.bench.extract import INSTRUCTIONS
+    from poolhouse.bench.extract import INSTRUCTIONS
 
     assert "at most three" in INSTRUCTIONS and "is not a topic" in INSTRUCTIONS
     for rel in ("works_with", "reports_to", "part_of", "works_on", "advises", "attended"):
@@ -448,8 +448,8 @@ def test_extract_serves_the_model_with_the_best_settings_unless_told_bare(monkey
     """The first extraction run of Flash-Next (2026-09-02) went up on mainline without its
     head: a different program from the one that answers. --profile (the default) takes the
     settings the model scored best with; --no-profile serves it bare."""
-    from ml_stack.bench import extract as ex
-    from ml_stack.serve import Serving
+    from poolhouse.bench import extract as ex
+    from poolhouse.serve import Serving
 
     seen = {}
 
@@ -462,7 +462,7 @@ def test_extract_serves_the_model_with_the_best_settings_unless_told_bare(monkey
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     class Server:
@@ -480,7 +480,7 @@ def test_extract_serves_the_model_with_the_best_settings_unless_told_bare(monkey
         seen["manager"] = manager
         raise SystemExit(0)
 
-    monkeypatch.setattr("ml_stack.serve.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.serve", fake_serve)
     args = type("A", (), {"serve": ["x.gguf"], "serve_port": 1, "context": 8192, "parallel": 2,
                           "profile": True, "smoke": True, "world": str(_world_dir(tmp_path)),
                           "per_message": 1,

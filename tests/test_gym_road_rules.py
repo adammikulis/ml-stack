@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.gym import training
-from ml_stack.gym.road_rules import StopCheckpoint, front_progress
+from poolhouse.gym import training
+from poolhouse.gym.road_rules import StopCheckpoint, front_progress
 
 
 def test_required_stop_hold_resets_on_motion_and_rewards_once():

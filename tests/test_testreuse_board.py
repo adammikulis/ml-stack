@@ -18,9 +18,9 @@ sys.path.insert(0, str(SCRIPTS))
 
 import testreuse_store as storage  # noqa: E402
 
-from ml_stack.activity import reuse  # noqa: E402
-from ml_stack.workspace import onboard, slots, testboard, testruns, tokens  # noqa: E402
-from ml_stack.workspace.taskboard import TaskBoard  # noqa: E402
+from poolhouse.activity import reuse  # noqa: E402
+from poolhouse.workspace import onboard, slots, testboard, testruns, tokens  # noqa: E402
+from poolhouse.workspace.taskboard import TaskBoard  # noqa: E402
 
 PROJECT = {"key": "git@example.org:me/widgets.git", "name": "Widgets"}
 FILE = "tests/test_a.py"

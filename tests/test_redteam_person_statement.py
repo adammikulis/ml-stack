@@ -91,7 +91,7 @@ def test_a_subagent_turn_and_an_unattended_session_record_nothing(world):
     path = transcript(project_dir(state) / f"{SESSION}.jsonl", PROPOSAL, human("yes", "p-1"))
     event = prompt_event("yes", "p-1", path, repo)
     assert run_hook({**event, "agent_id": "sub-1"}, state).returncode == 0
-    assert run_hook(event, state, ML_STACK_NONINTERACTIVE="1").returncode == 0
+    assert run_hook(event, state, POOLHOUSE_NONINTERACTIVE="1").returncode == 0
     assert run_hook({**event, "hook_event_name": "PostToolUse", "tool_name": "Bash"}, state).returncode == 0
     assert rows(state) == []
 

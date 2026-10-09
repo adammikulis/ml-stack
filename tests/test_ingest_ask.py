@@ -1,6 +1,6 @@
 """Asking a sources a question, and scoring a set of them.
 
-The model is `ml_stack.testing.ScriptedModel` -- the tool loop's own fake, which answers
+The model is `poolhouse.testing.ScriptedModel` -- the tool loop's own fake, which answers
 with the calls it was told to and then with words. No port is opened and no model is served.
 Every concept and question here is invented.
 """
@@ -12,10 +12,10 @@ import json
 import pytest
 from test_ingest import a_part_read_source, a_read, said
 
-from ml_stack import ingest
-from ml_stack.testing import ScriptedModel
+from poolhouse import ingest
+from poolhouse.testing import ScriptedModel
 
-pytest.importorskip("ladybug", reason="ml-stack[store]")
+pytest.importorskip("ladybug", reason="poolhouse[store]")
 
 OPEN_TEXTS = "velthorne-open-texts"
 
@@ -81,7 +81,7 @@ def test_the_store_reads_out_as_nodes_and_edges_with_the_run_left_out(tmp_path):
 def test_a_concept_is_read_out_with_the_definition_the_source_gave_it(tmp_path):
     """`look_at` is where a model gets the facts it answers from, and a concept's facts are
     its definition."""
-    from ml_stack.graph.looking import look_at
+    from poolhouse.graph.looking import look_at
 
     graph = ingest.graph_of(a_store(tmp_path))
 
@@ -118,7 +118,7 @@ def test_the_model_is_told_what_the_source_said_rather_than_being_asked_from_not
 
 
 def test_an_empty_store_is_not_asked_about(tmp_path, capsys):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     store = tmp_path / "empty.ladybug"
     with GraphStore(store) as held:
@@ -176,7 +176,7 @@ def test_a_perfect_answer_scores_one_and_a_wrong_one_is_named(tmp_path, capsys):
 
 def test_the_score_is_the_benchs_own_and_not_a_second_one(tmp_path):
     """A number measured two ways is two numbers: `bench.score.Row` scores both."""
-    from ml_stack.bench.score import Row
+    from poolhouse.bench.score import Row
 
     graph = ingest.graph_of(a_store(tmp_path))
     asked = [{"question": "what is in the vault?",

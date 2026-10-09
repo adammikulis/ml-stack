@@ -1,5 +1,5 @@
-"""``ml-stack-bench standard`` and ``animate`` reach their own modules' `run`; the
-``compare`` and ``speed`` lines take the shapes ``ml-stack-chat`` writes.
+"""``poolhouse-bench standard`` and ``animate`` reach their own modules' `run`; the
+``compare`` and ``speed`` lines take the shapes ``poolhouse-chat`` writes.
 
 Every fixture here is invented. Nothing reads a real store, a real graph, or a real server.
 """
@@ -10,12 +10,12 @@ import json
 
 import pytest
 
-from ml_stack.bench import _parser
+from poolhouse.bench import _parser
 
 
 def test_standard_and_animate_reach_their_own_run(monkeypatch):
-    import ml_stack.bench as bench
-    from ml_stack.bench import animate, standard
+    import poolhouse.bench as bench
+    from poolhouse.bench import animate, standard
 
     seen = {}
     monkeypatch.setattr(standard, "run", lambda args: seen.setdefault("standard", args) and 0)
@@ -33,7 +33,7 @@ def test_standard_and_animate_reach_their_own_run(monkeypatch):
 def test_standard_and_animate_are_not_measuring_commands_here():
     """`standard` takes the measuring lock itself and `animate` needs none; neither is sent
     through this parser's lock, its self-check or its estimate."""
-    from ml_stack.bench import MEASURING
+    from poolhouse.bench import MEASURING
 
     assert not {"standard", "animate"} & set(MEASURING)
 
@@ -53,9 +53,9 @@ def test_the_bench_parser_knows_the_flags_standard_and_animate_take():
 def test_compare_takes_positional_labels_and_last(tmp_path, monkeypatch):
     from conftest import scored_rows
 
-    import ml_stack.bench as bench
-    from ml_stack.bench import invented_digest, save
-    from ml_stack.bench.comparison import newest_labels
+    import poolhouse.bench as bench
+    from poolhouse.bench import invented_digest, save
+    from poolhouse.bench.comparison import newest_labels
 
     kept = tmp_path / "runs.ladybug"
     mine = invented_digest()

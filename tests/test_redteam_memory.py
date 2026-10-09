@@ -8,11 +8,11 @@ import io
 
 import pytest
 
-from ml_stack import chat, do, memory, roles
-from ml_stack.client import Reply
-from ml_stack.memory import recall as recalling
-from ml_stack.testing import injection_corpus as corpus
-from ml_stack.testing.fakes import reply_from
+from poolhouse import chat, do, memory, roles
+from poolhouse.client import Reply
+from poolhouse.memory import recall as recalling
+from poolhouse.testing import injection_corpus as corpus
+from poolhouse.testing.fakes import reply_from
 from tests import memory_keys
 from tests.test_chat import registry
 from tests.test_memory import inject
@@ -141,7 +141,7 @@ def test_a_poisoned_project_fact_reaches_the_model_as_one_labelled_fenced_line(p
 
 @pytest.mark.parametrize("text", TEXTS)
 def test_a_poisoned_project_memory_changes_no_role_permission_or_tool(project_memory, text):
-    from ml_stack import rules as saved
+    from poolhouse import rules as saved
 
     mem = project_memory("w", text)
     before = {p: p.read_bytes() for p in (mem.user.path, mem.project.path)}

@@ -87,12 +87,12 @@ def test_interactive_chat_command_is_given_to_the_person_without_a_job(joined, o
     page.get_by_role('tab', name='Command library', exact=True).click()
     runner = page.locator('tools-view #runner')
     command = runner.get_by_label('Installed command',exact=True)
-    command.select_option('ml-stack-chat')
+    command.select_option('poolhouse-chat')
     runner.locator('details summary').click()
     runner.get_by_label('Arguments as JSON array',exact=True).fill('[]')
     runner.get_by_role('button',name='Run command',exact=True).click()
     page.wait_for_function("() => document.querySelector('tools-view #runner pre').textContent.includes('Run this command in your own terminal')")
-    assert 'ml-stack-chat' in runner.locator('pre').inner_text()
+    assert 'poolhouse-chat' in runner.locator('pre').inner_text()
     assert runner.locator('#runner-status').is_visible()
     assert 'human-only' in runner.locator('#runner-status').inner_text()
     assert joined.runner.snapshot() == []
@@ -244,7 +244,7 @@ def test_settings_switch_sections_without_losing_unsaved_values(joined, open_pag
     page.get_by_role('tab', name='Maintenance', exact=True).click()
     expect(page.locator('#settings-removal button.danger')).to_be_visible()
     expect(page.locator('#settings-chatting')).not_to_be_visible()
-    page.screenshot(path='/private/tmp/poolside-rebuild-settings-maintenance.png', full_page=True)
+    page.screenshot(path='/private/tmp/poolhouse-rebuild-settings-maintenance.png', full_page=True)
     assert not errors
 
 
@@ -261,7 +261,7 @@ def test_tool_library_keyboard_tabs_and_errors_stay_with_the_runner(joined, open
     expect(page.get_by_role('tabpanel', name='Command library', exact=True)).to_be_visible()
     expect(page.get_by_role('tabpanel', name='Decision lab', exact=True)).not_to_be_visible()
     runner = page.locator('tools-view #runner')
-    runner.get_by_label('Installed command', exact=True).select_option('ml-stack-doctor')
+    runner.get_by_label('Installed command', exact=True).select_option('poolhouse-doctor')
     runner.locator('details summary').click()
     args = runner.get_by_label('Arguments as JSON array', exact=True)
     args.fill('["--help", 42]')

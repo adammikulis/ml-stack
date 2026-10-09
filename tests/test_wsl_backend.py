@@ -13,14 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import wsl
-from ml_stack.platform import launch
-from ml_stack.sandbox import run
-from ml_stack.sandbox.backend import SandboxUnavailable
-from ml_stack.sandbox.bubblewrap import Bubblewrap
-from ml_stack.sandbox.policies import runtime_reads, system_env
-from ml_stack.sandbox.policy import Limits, Net, Policy
-from ml_stack.serve import socket_relay
+from poolhouse.fleet import wsl
+from poolhouse.platform import launch
+from poolhouse.sandbox import run
+from poolhouse.sandbox.backend import SandboxUnavailable
+from poolhouse.sandbox.bubblewrap import Bubblewrap
+from poolhouse.sandbox.policies import runtime_reads, system_env
+from poolhouse.sandbox.policy import Limits, Net, Policy
+from poolhouse.serve import socket_relay
 
 
 def test_wsl_refuses_a_first_generation_distribution(monkeypatch):
@@ -59,7 +59,7 @@ def test_wsl_read_preserves_hostile_text_and_unicode(monkeypatch, tmp_path):
 
 
 def _prepare_runtime(monkeypatch, tmp_path, *, installed="", returncode=0):
-    wheel = tmp_path / "ml_stack-0.2-py3-none-any.whl"
+    wheel = tmp_path / "poolhouse-0.2-py3-none-any.whl"
     wheel.write_bytes(b"committed runtime one")
     calls, reads = [], []
 
@@ -75,7 +75,7 @@ def _prepare_runtime(monkeypatch, tmp_path, *, installed="", returncode=0):
         if args[0] == "wslpath":
             return "/tmp/wheel path; $(touch injected) `touch injected`.whl"
         if len(args) > 2 and args[2] == wsl._CACHE_RUNTIME:
-            return "/home/test/.local/share/ml-stack/runtime/ml-stack-wheels/" + "a" * 40 + "/" + wheel.name
+            return "/home/test/.local/share/poolhouse/runtime/poolhouse-wheels/" + "a" * 40 + "/" + wheel.name
         if args[0].endswith("/bin/python") and "p.read_text" in args[2]:
             return installed
         return ""
@@ -86,7 +86,7 @@ def _prepare_runtime(monkeypatch, tmp_path, *, installed="", returncode=0):
 
     monkeypatch.setattr(wsl.runtime_wheel, "source_checkout", lambda: None)
     monkeypatch.setattr(wsl.runtime_wheel, "current_wheel", lambda: wheel)
-    monkeypatch.setattr(wsl, "__file__", str(tmp_path / "site-packages/ml_stack/fleet/wsl.py"))
+    monkeypatch.setattr(wsl, "__file__", str(tmp_path / "site-packages/poolhouse/fleet/wsl.py"))
     monkeypatch.setattr(wsl, "_read", read)
     monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
     monkeypatch.setattr(wsl.subprocess, "run", install)
@@ -110,11 +110,11 @@ def test_wsl_installer_uses_cached_wheel_without_source_checkout(monkeypatch, tm
     assert "--force-reinstall" in calls[2][0]
     assert "--no-deps" in calls[2][0]
     assert "--no-index" in calls[2][0]
-    assert "/ml-stack-wheels/" in calls[2][0][-1]
+    assert "/poolhouse-wheels/" in calls[2][0][-1]
     npm_argv, npm_kwargs = calls[3]
-    assert "PATH=/home/test/.local/share/ml-stack/runtime/bin:/usr/bin:/bin" in npm_argv
-    assert npm_argv[-6:] == ["/home/test/.local/share/ml-stack/runtime/bin/npm", "install", "--global",
-                             "--prefix", "/home/test/.local/share/ml-stack/runtime",
+    assert "PATH=/home/test/.local/share/poolhouse/runtime/bin:/usr/bin:/bin" in npm_argv
+    assert npm_argv[-6:] == ["/home/test/.local/share/poolhouse/runtime/bin/npm", "install", "--global",
+                             "--prefix", "/home/test/.local/share/poolhouse/runtime",
                              "@earendil-works/pi-coding-agent"]
     assert npm_kwargs["capture_output"]
 
@@ -150,11 +150,11 @@ def test_wsl_failed_install_does_not_record_marker(monkeypatch, tmp_path, failur
 def test_wsl_runtime_cache_preserves_revision_and_translates_source(tmp_path, has_source):
     import zipfile
 
-    from ml_stack.fleet import runtime_wheel
+    from poolhouse.fleet import runtime_wheel
 
-    wheel = tmp_path / "ml_stack-0.2-py3-none-any.whl"
+    wheel = tmp_path / "poolhouse-0.2-py3-none-any.whl"
     with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("ml_stack-0.2.dist-info/RECORD", "")
+        archive.writestr("poolhouse-0.2.dist-info/RECORD", "")
     original_source = tmp_path / "windows-source"
     translated_source = tmp_path / "linux-source"
     translated_source.mkdir()
@@ -169,10 +169,10 @@ def test_wsl_runtime_cache_preserves_revision_and_translates_source(tmp_path, ha
                            capture_output=True, text=True, env=environment, timeout=30)
     assert child.returncode == 0, child.stderr
     cached = Path(child.stdout.strip())
-    assert cached == prefix / "ml-stack-wheels" / commit / wheel.name
+    assert cached == prefix / "poolhouse-wheels" / commit / wheel.name
     assert runtime_wheel.wheel_commit(cached) == commit
     with zipfile.ZipFile(cached) as archive:
-        assert archive.read("ml_stack/fleet/source-checkout").decode().strip() == str((translated_source if has_source else original_source).resolve())
+        assert archive.read("poolhouse/fleet/source-checkout").decode().strip() == str((translated_source if has_source else original_source).resolve())
     assert wheel.read_bytes() == original
 
 
@@ -244,7 +244,7 @@ def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatc
                         else "/mnt/c/runtime/python.exe")
     class LocalUI:
         def __init__(self, argv, port):
-            assert argv[-3:] == ["-m", "ml_stack.fleet.wsl_ui", "8771"]
+            assert argv[-3:] == ["-m", "poolhouse.fleet.wsl_ui", "8771"]
             assert port == 8771
 
         def start(self):
@@ -258,8 +258,8 @@ def test_wsl_start_preserves_service_setup_and_closes_owned_resources(monkeypatc
     monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
     monkeypatch.setattr(wsl, "launch", owned_launch)
     monkeypatch.setattr(wsl.subprocess, "run", unexpected_process)
-    monkeypatch.delenv("ML_STACK_HOME", raising=False)
-    monkeypatch.delenv("ML_STACK_CACHE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_HOME", raising=False)
+    monkeypatch.delenv("POOLHOUSE_CACHE", raising=False)
     arguments = ["--port", "8771", "argument; $(touch injected)"]
     assert wsl.start(arguments, executable="/home/test/runtime/bin/python") == 0
     assert len(launches) == 1
@@ -370,7 +370,7 @@ def test_wsl_gpu_is_visible_inside_the_network_denied_namespace(tmp_path):
 
 
 def test_replacement_control_uses_existing_wsl_runtime_before_install(monkeypatch):
-    from ml_stack.fleet import wsl
+    from poolhouse.fleet import wsl
     calls = []
     def read(*args):
         calls.append(args)
@@ -389,7 +389,7 @@ def test_replacement_control_uses_existing_wsl_runtime_before_install(monkeypatc
 
 @pytest.mark.parametrize('restart', ['preserve'])
 def test_wsl_owned_restart_propagates_job_preserving_mode(monkeypatch, restart):
-    from ml_stack.fleet import wsl
+    from poolhouse.fleet import wsl
     calls = []
     monkeypatch.setattr(wsl, '_read', lambda *args: calls.append(args) or '/home/test/runtime/bin/python')
     wsl.replace_running([], 8770, {'launcher_control': 'a' * 32}, 'b' * 40, restart=restart)

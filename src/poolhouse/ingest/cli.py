@@ -1,0 +1,568 @@
+"""``poolhouse-ingest``: the parser, the words it takes instead of a document, and the
+detached run's record."""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import sys
+import time
+from collections.abc import Callable, Iterable, Sequence
+from pathlib import Path
+from typing import Any
+
+from poolhouse import hub, jobs
+from poolhouse.asking import Asking
+from poolhouse.graph.hygiene import written_from
+from poolhouse.graph.tidy import tidy as hygiene
+from poolhouse.home import state
+from poolhouse.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, score_asked
+from poolhouse.ingest.extract import PER_SECTION, schema
+from poolhouse.ingest.fold import fold
+from poolhouse.ingest.gold import gold_lines, gold_score, read_gold
+from poolhouse.ingest.migrate import migrate
+from poolhouse.ingest.progress import GIVE_UP, Progress, _folded_at
+from poolhouse.ingest.reads import _read_json, forget_reads
+from poolhouse.ingest.run import Stopped, _read_run, _stopping
+from poolhouse.ingest.sources import show, sources
+from poolhouse.ingest.stats import status
+from poolhouse.log import say, warn
+
+__all__ = ["STOP_WAIT", "detach", "home_dir", "main", "parser", "retry", "stop", "wait"]
+
+
+def home_dir() -> Path:
+    """Where a detached run's log and its record of itself live."""
+    return state("ingest")
+"""Where a detached run's log and its record of itself live. Not the store: the store is
+the caller's, named by ``--out``."""
+
+
+KIND = "ingest"
+"""The kind of job a detached run is recorded as, in `poolhouse.jobs`."""
+
+STOP_WAIT = 900.0       # a fold over a 7,000-node source took minutes on the way out
+
+
+def _home() -> Path:
+    """Where a detached run's log and its record of itself live."""
+    from poolhouse import ingest
+
+    return ingest.home_dir()
+
+
+def _jobs_home(home: Path | None = None) -> Path:
+    """The `poolhouse.jobs` record directory under an ingest home."""
+    return Path(home) / "jobs" if home is not None else _home() / "jobs"
+
+
+def _adopt(home: Path | None = None) -> None:
+    """Take over an ``ingesting.json`` -- a run started before the record moved into
+    `poolhouse.jobs` -- as this machine's ``ingest`` job, so `stop` and `wait` still find it."""
+    old = Path(home) / "ingesting.json" if home is not None else _home() / "ingesting.json"
+    old_record = _read_json(old)
+    if not isinstance(old_record, dict) or not int(old_record.get("pid") or 0):
+        return
+    if not jobs.alive(KIND, home=_jobs_home(home)):
+        jobs.record(KIND, pid=int(old_record["pid"]), argv=old_record.get("argv") or (),
+                    log=str(old_record.get("log") or ""),
+                    started=str(old_record.get("started") or ""),
+                    home=_jobs_home(home), refuse_if_alive=False)
+    old.unlink(missing_ok=True)
+
+
+def detach(argv: Sequence[str]) -> Path:
+    """Run ``poolhouse-ingest argv`` owned by no terminal, and return the log it writes."""
+    rest = [a for a in argv if a != "--detach"]
+    log = _home() / "logs" / f"ingest-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    return jobs.detach("poolhouse.ingest", rest, log=log, kind=KIND, home=_jobs_home()).log
+
+
+def retry(out: str | Path, *, say: Callable[[str], None] = say) -> int:
+    """``poolhouse-ingest retry --out STORE``: the units given up on are read again by the
+    next ``--resume`` -- for after the fix that made them fail is in."""
+    where = Progress.beside(out)
+    if not where.is_file():
+        say(f"nothing ingested into {out}: no {where.name}")
+        return 1
+    progress = Progress(where)
+    freed = 0
+    for one in progress.state["sources"].values():
+        for entry in (one.get("done") or {}).values():
+            if entry.get("error") and int(entry.get("attempts") or 1) >= GIVE_UP:
+                entry["attempts"] = 0
+                freed += 1
+    progress.save()
+    say(f"{freed} unit(s) will be read again on the next --resume")
+    return 0
+
+
+def stop(*, say: Callable[[str], None] = say, home: Path | None = None,
+         wait: float = STOP_WAIT) -> int:
+    """``poolhouse-ingest stop``: end the detached run and wait for its last fold to land.
+
+    The run folds the source it is on before it exits -- minutes, for a source of thousands
+    of nodes -- so this waits up to ``wait`` seconds for the process to go, saying so every
+    half minute, and then says whether the store moved. The record is kept while the run
+    is still ending, so `detach` refuses to start another beside it. Whatever was read is
+    kept either way, and the same command with ``--resume`` reads on.
+    """
+    where = _jobs_home(home)
+    _adopt(home)
+    record = jobs.recorded(KIND, home=where)
+    pid = int(record.get("pid") or 0)
+    if not pid:
+        say("no detached ingest is recorded on this machine")
+        return 1
+    out = _out_of(record.get("argv") or ())
+    before = _folded_at(out)
+
+    def waiting(line: str) -> None:
+        # jobs indents what it says while it is still waiting; its conclusions are reworded
+        if line.startswith("  "):
+            say(line.replace("still ending", "still folding"))
+
+    if jobs.stop(KIND, say=waiting, wait=wait, home=where):
+        if jobs.recorded(KIND, home=where):
+            say(f"asked the detached ingest (pid {pid}) to stop; it had not ended after "
+                f"{wait:.0f}s, so its last fold is still being written -- its record stays, "
+                f"and no new run starts beside it until it has")
+        else:
+            say(f"the recorded ingest (pid {pid}) had already ended")
+        return 1
+    after = _folded_at(out)
+    moved = [f"{slug} at unit {units}" for slug, units in sorted(after.items())
+             if units != before.get(slug)]
+    say(f"stopped the detached ingest (pid {pid}); "
+        + (f"folded {', '.join(moved)} into {out}" if moved
+           else f"nothing new was folded into {out}" if out
+           else "its units so far are kept")
+        + "; the same command with --resume reads on")
+    return 0
+
+
+def wait(*, say: Callable[[str], None] = say, home: Path | None = None,
+         every: float = 60.0) -> int:
+    """``poolhouse-ingest wait``: block until the detached run this machine records has
+    ended, saying so every minute -- so the next command can follow it without a loop
+    written by hand (`poolhouse-ingest wait && poolhouse-ingest tidy --out ... --model ...`)."""
+    where = _jobs_home(home)
+    _adopt(home)
+    if not jobs.alive(KIND, home=where):
+        say("no detached ingest is running")
+        return 0
+    return jobs.wait(KIND, say=say, every=every, home=where)
+
+
+def _recorded_alive(home: Path | None = None) -> int:
+    """The pid of the detached run this machine records, when it is still alive; else 0."""
+    _adopt(home)
+    return jobs.alive(KIND, home=_jobs_home(home))
+
+
+def _out_of(argv: Iterable[str]) -> str:
+    """The ``--out`` a recorded run was started with."""
+    argv = list(argv)
+    for index, word in enumerate(argv):
+        if word == "--out" and index + 1 < len(argv):
+            return argv[index + 1]
+        if word.startswith("--out="):
+            return word[len("--out="):]
+    return ""
+
+
+_WORDS = ("status", "show", "sources", "ask", "fold", "import", "retry", "tidy", "migrate",
+          "embed", "forget")
+"""What a run does instead of reading a document, when one is named where a PDF would be."""
+
+
+def parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="poolhouse-ingest", allow_abbrev=False,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Read documents into a knowledge graph, section by section: "
+                    "`poolhouse-ingest DOC.pdf ... --out STORE`.",
+        epilog="Instead of documents, one of these words:\n"
+               "  status   how far the run into --out has got, what failed, what is in the\n"
+               "           store, what it cost per unit, how fast the model is reading and\n"
+               "           writing, how much of the draft head is kept, and how long the\n"
+               "           rest will take\n"
+               "  show     what was read: concepts, relations and the folds each source made\n"
+               "  sources  every source in the store: what the store holds for each, the\n"
+               "           concepts more than one source names, the names tidy joined across\n"
+               "           sources, and the relations between their vocabularies\n"
+               "  ask      ask the store a question with a model -- `ask --out STORE \"...\"` --\n"
+               "           or score a set of questions with --gold FILE\n"
+               "  fold     fold every source that has reads -- part-read ones too -- into the\n"
+               "           store, replacing what the store held for it\n"
+               "  import   a nodes/edges CSV pair another extractor wrote, into this store\n"
+               "           as one source -- `import DIR --out STORE`, or the two files\n"
+               "  retry    let the units given up on be read again by the next --resume\n"
+               "  migrate  bring a store written before sources were called sources up to\n"
+               "           date: `book:` node ids, their edges, the unit documents, the\n"
+               "           progress file and the reads files\n"
+               "  embed    embed every node into the store's vector index --\n"
+               "           `embed --out STORE --embed-url URL --embed-model M`\n"
+               "  forget   delete the extractions kept beside the store: every\n"
+               "           STORE.<slug>.reads.json, or --source SLUG's alone. Each holds\n"
+               "           every concept read with the definition in its source's words,\n"
+               "           and the model's whole reply for a unit that failed. The store's\n"
+               "           nodes and edges stay; fold, show and sources have nothing left\n"
+               "           for a forgotten source, and --resume still skips the units the\n"
+               "           progress file records as done\n"
+               "  stop     end the detached run, after it has folded what it has read\n"
+               "  wait     block until the detached run has ended\n")
+    ap.add_argument("docs", nargs="*", metavar="DOC",
+                    help="the PDFs to read; or one of `status`, `show`, `sources`, `ask`, "
+                         "`fold`, `import`, `retry`, `migrate`, `forget`, `stop` (see "
+                         "below), which "
+                         "does that and stops. `ask` takes the question after it, `import` "
+                         "the CSV pair")
+    ap.add_argument("--out", default="", metavar="STORE",
+                    help="the GraphStore to write into; one store holds every source. "
+                         "Required to read anything; --gold writes nothing and needs none")
+    ap.add_argument("--model", default="", metavar="M",
+                    help="a model to put up, read with and take down: a name, a path or an "
+                         "hf: reference")
+    ap.add_argument("--base-url", default="http://127.0.0.1:8080",
+                    help="the model reading, when nothing is served (default: %(default)s)")
+    ap.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
+                    help="serve --model in the settings it scored best with from poolhouse's profiles "
+                         "(build, head, cache type, thinking budget, raw flags); "
+                         "--no-profile serves it bare")
+    ap.add_argument("--images", action="store_true",
+                    help="show the model each section's figures as pictures, not only their "
+                         "captions; needs a served projector, and without one the captions "
+                         "are all it gets")
+    ap.add_argument("--sample", type=int, default=0, metavar="N",
+                    help="read only the first N sections of each document -- a smoke of "
+                         "the whole path before a night is spent on it; with `show`, how "
+                         "many concepts and relations to print per source (default 5); with "
+                         "`sources`, how many shared concepts and cross-source relations "
+                         "(default 10)")
+    ap.add_argument("--apply", action="store_true",
+                    help="with tidy: write the merges, folds and flags; without it, say what "
+                         "would be done")
+    ap.add_argument("--no-tidy", action="store_true",
+                    help="do not run the hygiene pass over the store at the end of each "
+                         "source (it runs by default, with this run's model judging the "
+                         "names a spelling apart and re-reading the source where it must)")
+    ap.add_argument("--written", default="", metavar="FILE",
+                    help="with tidy: a JSON object {name: the name it is} -- the possible "
+                         "duplicates a person settled")
+    ap.add_argument("--rebuild", action="store_true",
+                    help="with fold: drop each source's own nodes and edges first and write "
+                         "the full fold from its reads -- the only way anything leaves the "
+                         "store, for after a fix that changed what a read means")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with fold or import: say what would be written, and write nothing")
+    ap.add_argument("--section-tag", default="", metavar="TAG",
+                    help="in XML, the element one section is (laws-lois `Section`, eCFR "
+                         "`DIV8`); matched without its namespace or its case")
+    ap.add_argument("--id-attr", default="", metavar="ATTR",
+                    help="in XML, the attribute a section's number is in (default: id)")
+    ap.add_argument("--number-tag", default="", metavar="TAG",
+                    help="in XML, the child element a section's number is in, which is "
+                         "where a statute puts it (laws-lois `Label`); tried before "
+                         "--id-attr")
+    ap.add_argument("--title-tag", default="", metavar="TAG",
+                    help="in XML, the child element a section's heading is in "
+                         "(laws-lois `MarginalNote`)")
+    ap.add_argument("--section-pattern", default="", metavar="REGEX",
+                    help="in HTML, the pattern a heading must match to start a section; "
+                         "its first group is the section's number and its second the title")
+    ap.add_argument("--title", default="", metavar="TITLE",
+                    help="what to call the document, when its markup does not say or says "
+                         "it somewhere this cannot find; one document only")
+    ap.add_argument("--slug", default="", metavar="SLUG",
+                    help="with import: name the source this; by default the file it was read "
+                         "out of names it")
+    ap.add_argument("--confidence", default="medium", choices=("low", "medium", "high"),
+                    metavar="LEVEL",
+                    help="with import: take rows at this confidence and above -- low, "
+                         "medium or high (default: %(default)s)")
+    ap.add_argument("--provisional", action=argparse.BooleanOptionalAction, default=True,
+                    help="with import: take rows their extractor left provisional "
+                         "(default); --no-provisional leaves them")
+    ap.add_argument("--keep-vague", action="store_true",
+                    help="with import: take the relations whose predicate usually stands in "
+                         "for one -- `related_to`, `describes`, `supports`. By default they "
+                         "are counted by name and not carried across: telling a deliberate "
+                         "hedge from a shrug needs the passage, and an import has only "
+                         "another extractor's output")
+    ap.add_argument("--core-only", action="store_true",
+                    help="keep to the core verbs and kinds. Reading a source, the schema "
+                         "is fenced to them, so a section is read with the shared "
+                         "vocabulary and nothing else; importing, only the predicates that "
+                         "map onto them are written and the rest are left, where without "
+                         "it every predicate comes in and the ones outside them are marked "
+                         "as extensions")
+    ap.add_argument("--source", default="", metavar="SLUG",
+                    help="with `show`, `fold` or `forget`, only this source")
+    ap.add_argument("--chapter", default="", metavar="N",
+                    help="read only this chapter of each document")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip the sections the progress file beside --out already records "
+                         "as done")
+    ap.add_argument("--detach", action="store_true",
+                    help=f"run this in the background, owned by nobody's terminal, with its "
+                         f"output in a log under {_home() / 'logs'}")
+    ap.add_argument("--gold", default="", metavar="FILE",
+                    help="score the extraction against a gold set of passages with known "
+                         "triples -- recall, precision and the misses -- instead of reading "
+                         "anything. With `ask`, a set of questions with the entries each "
+                         "answer should select: {\"question\", \"expected\": [ids or labels]}")
+    ap.add_argument("--cite", action="store_true",
+                    help="with `ask`, every entry the model reads says which source, "
+                         "section and pages it was read at, and a `quote` tool gives it the "
+                         "passage behind an entry to answer from")
+    ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
+                    help="exit 1 when --gold scores below this F1 (0-1), reading a gold set "
+                         "or asking one")
+    ap.add_argument("--draft", default="auto", metavar="HEAD",
+                    help="the draft head that guesses tokens ahead for the model to check in one pass: 'auto' takes the smallest one on this machine, 'none' serves without one, or name a head shipped with the model (default: %(default)s)")
+    ap.add_argument("--n-max", type=int, default=None, metavar="N",
+                    help="tokens the draft head guesses ahead each step, over the profile's "
+                         "measured length -- extraction accepts far more of them than "
+                         "answering does, so measure it here (default: the profile's)")
+    ap.add_argument("--per-section", type=float, default=PER_SECTION, metavar="SECONDS",
+                    help="the most one section may take (default: %(default)s)")
+    ap.add_argument("--max-tokens", type=int, default=0, metavar="N",
+                    help="where a long section is split, in tokens (default: the reader's "
+                         "own 2500)")
+    ap.add_argument("--n-predict", type=int, default=16384, metavar="N",
+                    help="the answer's ceiling; a ceiling is not a budget, and a low one "
+                         "truncates the extraction (default: %(default)s)")
+    ap.add_argument("--context", type=int, default=32768, metavar="N",
+                    help="context of the one slot a --model is served with -- extraction "
+                         "reads one unit at a time and never splits the GPU (default: "
+                         "%(default)s)")
+    ap.add_argument("--embed", action=argparse.BooleanOptionalAction, default=True,
+                    help="embed the store when a read run finishes, so it answers by "
+                         "meaning as well as by words; --no-embed leaves it to `embed`")
+    ap.add_argument("--embed-url", default="", metavar="URL",
+                    help="a server that embeds, so the store gets a vector "
+                         "index a search can vote with")
+    ap.add_argument("--embed-model", default="", metavar="M",
+                    help="the model that embeds (default: %(default)s)")
+    ap.add_argument("--smooth", type=int, default=0, metavar="N",
+                    help="with embed: spread each vector over N hops of neighbours "
+                         "afterwards, so a node with no text of its own is still findable "
+                         "(default: %(default)s)")
+    ap.add_argument("--serve-port", type=int, default=8099)
+    ap.add_argument("--no-queue", action="store_true",
+                    help="refuse at once when the bench is measuring, instead of waiting "
+                         "for it (the ingest and the bench take one lock, so one job is on "
+                         "the GPU at a time)")
+    ap.add_argument("--cache", default="", metavar="DIR",
+                    help="keep each extraction under this directory and do not ask twice "
+                         "for the same section and schema")
+    ap.add_argument("--temperature", type=float, default=None,
+                    help="override the sampling temperature (default: 0.1, extraction's "
+                         "own; 0 also zeroes top-p, top-k and min-p, unless given here too)")
+    ap.add_argument("--top-p", type=float, default=None, help="override top_p")
+    ap.add_argument("--top-k", type=int, default=None, help="override top_k")
+    ap.add_argument("--min-p", type=float, default=None, help="override min_p")
+    return ap
+
+
+def _parsed(rest: Sequence[str]) -> Any:
+    """The arguments, with a word written after an option still a word.
+
+    ``ask --out STORE "the question"`` puts a positional after an option, and argparse
+    cannot gather a ``nargs="*"`` positional across one -- it reads the question as an
+    argument it does not recognise. Words it could not place join ``docs``; an option it
+    could not place is still an error, so an abbreviated or misspelled flag is refused
+    rather than read as a document.
+    """
+    ap = parser()
+    args, extra = ap.parse_known_args(list(rest))
+    misplaced = [word for word in extra if word.startswith("-")]
+    if misplaced:
+        ap.error("unrecognized arguments: " + " ".join(misplaced))
+    args.docs = [*args.docs, *[word for word in extra if not word.startswith("-")]]
+    return args
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """``poolhouse-ingest``: documents into one graph, or a gold set scored."""
+    from poolhouse.lock import Busy
+
+    rest = list(sys.argv[1:] if argv is None else argv)
+    args = _parsed(rest)
+    try:
+        return _dispatch(args, rest)
+    except Busy as why:
+        warn(f"error: {why}. The bench is measuring; wait for it, or leave out --no-queue "
+             f"to queue behind it.")
+        return 3
+
+
+def _dispatch(args: Any, rest: list[str]) -> int:
+    from poolhouse import ingest
+
+    if args.docs[:1] == ["stop"]:
+        return stop()
+    if args.docs[:1] == ["wait"]:
+        return wait()
+    word = args.docs[0] if args.docs[:1] and args.docs[0] in _WORDS else ""
+    if word:
+        if not args.out:
+            warn(f"error: {word} needs --out STORE")
+            return 2
+        if word == "fold":
+            return fold(args.out, source=args.source, rebuild=args.rebuild,
+                        dry_run=args.dry_run)
+        if word == "import":
+            return ingest.bring(args.out, args.docs[1:], slug=args.slug,
+                                confidence=args.confidence, provisional=args.provisional,
+                                core_only=args.core_only, keep_vague=args.keep_vague,
+                                dry_run=args.dry_run)
+        if word == "show":
+            return show(args.out, source=args.source, most=args.sample or 5)
+        if word == "sources":
+            return sources(args.out, most=args.sample or 10)
+        if word == "ask":
+            return _ask_run(args)
+        if word == "retry":
+            return retry(args.out)
+        if word == "migrate":
+            return migrate(args.out)
+        if word == "forget":
+            return _forget(args.out, source=args.source)
+        if word == "embed":
+            if not args.embed_url:
+                warn("error: embed needs --embed-url URL")
+                return 2
+            from poolhouse.ingest.embed import embed_store
+
+            got = embed_store(args.out, base_url=args.embed_url,
+                             model=args.embed_model or "embed",
+                             smooth_hops=args.smooth, log=say)
+            say(f"{got.written} of {got.total} embedded")
+            return 0
+        if word == "tidy":
+            # the hygiene pass is graph.tidy's -- a book, a Slack community, any store --
+            # and lives beside the fold here only so the ingest commands are in one place
+            if args.model or args.base_url != parser().get_default("base_url"):
+                # automated: the model judges the names a spelling apart, re-reading the
+                # sources where it must, and the pass applies what it decides -- after the
+                # run that is reading, never beside it (one job on the GPU)
+                alive = _recorded_alive()
+                if alive:
+                    warn(f"error: a detached ingest (pid {alive}) is still reading; "
+                         f"`poolhouse-ingest wait` first, then tidy")
+                    return 2
+                try:
+                    with _stopping(), ingest._serving(args) as client:
+                        judge = ingest._judge(client, args.out, model=args.model)
+                        report = hygiene(args.out, written=written_from(args.written),
+                                         judge=judge, log=print)
+                except Stopped:
+                    say("stopped before the tidy finished; the store is as it was")
+                    return 1
+                return 0 if report.sound else 1
+            report = hygiene(args.out, dry_run=not args.apply,
+                             written=written_from(args.written), log=print)
+            return 0 if report.sound else 1
+        return status(args.out)
+    if not args.docs and not args.gold:
+        warn("error: name at least one document, or --gold FILE")
+        return 2
+    if args.docs and not args.out:
+        warn("error: reading a document needs --out STORE to write it into")
+        return 2
+    if args.detach:
+        alive = _recorded_alive()
+        if alive:
+            # one run at a time, on one model, into one store: a second run beside one
+            # that is still folding its way out adopted its server and lost it when the
+            # first finished (2026-09-03). The record is the lease; it is cleared when
+            # the run ends or `stop` sees it end
+            warn(f"error: a detached ingest (pid {alive}) is still running or still "
+                 f"folding on its way out; `poolhouse-ingest stop` waits for it")
+            return 2
+        log = detach(rest)
+        say(f"detached; the log is {log}")
+        say(f"  poolhouse-ingest status --out {args.out}")
+        return 0
+    if args.gold:
+        return _gold_run(args)
+    return _read_run(args)
+
+
+def _forget(out: str, *, source: str = "") -> int:
+    """``forget``: the reads files deleted, each one named."""
+    gone = forget_reads(out, source=source)
+    for path in gone:
+        say(f"deleted {path}")
+    if not gone:
+        say(f"no reads kept beside {out}" + (f" for {source}" if source else ""))
+    return 0
+
+
+def _ask_run(args: Any) -> int:
+    from poolhouse import ingest
+
+    question = " ".join(str(d) for d in args.docs[1:]).strip()
+    if not question and not args.gold:
+        warn("error: ask needs a question, or --gold FILE")
+        return 2
+    if not Path(args.out).expanduser().exists():
+        warn(f"error: no store at {args.out}")
+        return 2
+    graph = graph_of(args.out, cite=bool(args.cite))
+    if not graph["nodes"]:
+        warn(f"error: nothing in {args.out} to ask about")
+        return 2
+    say(f"{args.out}: {len(graph['nodes'])} node(s), {len(graph['edges'])} edge(s)")
+    # the asking comes from the same profile the serving does, so a model measured with
+    # one way of asking is not served in its shape and asked in somebody else's
+    from poolhouse.serve.profile import asking_for
+
+    measured = str(hub.located(args.model, loose=True) or args.model) if args.model else None
+    how = asking_for(measured) if measured else None
+    if args.cite:
+        how = dataclasses.replace(how or Asking(), cite=True)
+    try:
+        with _stopping(), ingest._serving(args) as client:
+            if not args.gold:
+                ingest.ask(graph, question, client, asking=how)
+                return 0
+            asked = read_asked(args.gold)
+            say(f"asking {len(asked)} question(s) from {args.gold}")
+            rows = score_asked(graph, client, asked, log=print, asking=how)
+    except Stopped:
+        say("stopped before the answer was finished")
+        return 1
+    for line in asked_lines(rows):
+        say(line)
+    f1 = asked_f1(rows)
+    if args.fail_under is not None and f1 < args.fail_under:
+        warn(f"error: F1 {f1:.2f} is under {args.fail_under:g}")
+        return 1
+    return 0
+
+
+def _gold_run(args: Any) -> int:
+    from poolhouse import ingest
+
+    passages = read_gold(args.gold)
+    say(f"gold: {len(passages)} passages from {args.gold}")
+    try:
+        with _stopping(), ingest._serving(args) as client:
+            scored = gold_score(client, passages, schema(core_only=args.core_only),
+                                per_section=args.per_section, log=print)
+    except Stopped:
+        say("stopped before the gold set was scored")
+        return 1
+    for line in gold_lines(scored):
+        say(line)
+    if scored.errors:
+        warn(f"error: {len(scored.errors)} passage(s) did not reach the model; the F1 above "
+             f"is not a score")
+        return 1
+    if args.fail_under is not None and scored.f1 < args.fail_under:
+        warn(f"error: F1 {scored.f1:.2f} is under {args.fail_under:g}")
+        return 1
+    return 0

@@ -1,4 +1,4 @@
-"""`ml-stack-world check`: a corpus read back against the truth it was written from, and
+"""`poolhouse-world check`: a corpus read back against the truth it was written from, and
 every generated name through the name detector.
 
 Every world here is made at the smallest size in ``tmp_path``; nothing reads a home
@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.files import write_json
-from ml_stack.world import check
-from ml_stack.world.cli import main, read_messages
-from ml_stack.world.emit import mbox, slack_export, teams
-from ml_stack.world.organisation import make
-from ml_stack.world.simulate import run
-from ml_stack.world.story import ARCS
+from poolhouse.files import write_json
+from poolhouse.world import check
+from poolhouse.world.cli import main, read_messages
+from poolhouse.world.emit import mbox, slack_export, teams
+from poolhouse.world.organisation import make
+from poolhouse.world.simulate import run
+from poolhouse.world.story import ARCS
 
 DOMAIN = "example.test"
 
@@ -72,7 +72,7 @@ def test_a_made_world_reads_back_consistent_with_its_truth(tmp_path):
 
 
 def test_every_outcome_edge_is_named_at_both_ends_in_its_thread(tmp_path):
-    from ml_stack.world.story import OUTCOMES
+    from poolhouse.world.story import OUTCOMES
 
     _, talk = _world(tmp_path)
     graph = json.loads((talk / "graph.json").read_text(encoding="utf-8"))

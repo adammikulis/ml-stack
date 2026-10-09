@@ -8,10 +8,10 @@ import sys
 
 import pytest
 
-from ml_stack import net
-from ml_stack.httpguard import Limits
-from ml_stack.net.scan import Outcome, ScanPolicy, ScanResult, scan_file, summarise
-from ml_stack.net.scanners import ClamAV, HashLookup, MacNotice, WindowsDefender
+from poolhouse import net
+from poolhouse.httpguard import Limits
+from poolhouse.net.scan import Outcome, ScanPolicy, ScanResult, scan_file, summarise
+from poolhouse.net.scanners import ClamAV, HashLookup, MacNotice, WindowsDefender
 from tests.net_site import EICAR
 
 SCRIPT = """#!/bin/sh
@@ -100,7 +100,7 @@ def test_the_model_policy_says_why_a_virus_scanner_is_not_enough():
 
 
 def test_the_policy_can_be_set_by_the_environment(monkeypatch):
-    monkeypatch.setenv("ML_STACK_NET_UNSCANNED", "archive:allow, model:refuse, data:bogus")
+    monkeypatch.setenv("POOLHOUSE_NET_UNSCANNED", "archive:allow, model:refuse, data:bogus")
     policy = ScanPolicy().from_env()
     assert (policy.archive, policy.model, policy.data) == ("allow", "refuse", "warn")
 
@@ -158,7 +158,7 @@ def test_a_stale_signature_database_is_a_warning(tmp_path):
 def test_a_scan_that_runs_forever_is_an_error(tmp_path, monkeypatch):
     f = tmp_path / "f"
     f.write_text("x")
-    monkeypatch.setattr("ml_stack.net.scanners.TIMEOUT_S", 0.3)
+    monkeypatch.setattr("poolhouse.net.scanners.TIMEOUT_S", 0.3)
     slow = tool(tmp_path, "clamscan", "sleep 5")
     out = ClamAV(clamscan=slow, clamdscan="").scan(f)
     assert out.outcome == Outcome.ERROR and "timed out" in out.detail

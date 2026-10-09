@@ -2,8 +2,8 @@
 
 Coding workers consume structured TaskBoard assignments. Board chat messages discuss work;
 they do not start jobs. An authenticated registered parent runs
-`ml-stack-workspace agent schedule WORKER_NAME --agent PARENT`, and the maintained coding
-launcher runs `ml_stack.workspace.localcoding` for the saved worker identity.
+`poolhouse-workspace agent schedule WORKER_NAME --agent PARENT`, and the maintained coding
+launcher runs `poolhouse.workspace.localcoding` for the saved worker identity.
 
 The scheduler renews the existing delegated seat within the parent's authority and configured
 TTL. It selects queued tasks whose dependencies are independently accepted and whose model
@@ -55,7 +55,7 @@ repeated automatically; the owner inspects a blocked or interrupted candidate be
 requesting further integration. Proposal submission alone never starts publication.
 
 An obsolete repository issue can be excluded by the person or registered worker parent:
-`ml-stack-workspace agent supersede-issue WORKER --issue NUMBER --reason "Current owner decision" --agent PARENT`.
+`poolhouse-workspace agent supersede-issue WORKER --issue NUMBER --reason "Current owner decision" --agent PARENT`.
 The graph records the authenticated decision and its issue relationship. Subsequent
 issue edits do not remove that decision; nothing is posted to GitHub.
 

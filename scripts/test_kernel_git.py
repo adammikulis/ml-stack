@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from ml_stack.activity.source_snapshot import SourceSnapshot, git_output, tree_digest
+from poolhouse.activity.source_snapshot import SourceSnapshot, git_output, tree_digest
 
 
 def source_tree(root: Path, storage: Path) -> str:
@@ -62,7 +62,7 @@ def observe(control: Path) -> dict:
     source_root = Path(__file__).resolve().parents[1]
     source_identity = source_tree(source_root, control)
     clone = root / "snapshot.py"
-    clone.write_bytes((source_root / "src/ml_stack/activity/source_snapshot.py").read_bytes())
+    clone.write_bytes((source_root / "src/poolhouse/activity/source_snapshot.py").read_bytes())
     clone.chmod(0o400)
     nonce = secrets.token_hex(32)
     code = ("import runpy,sys,json; sys.path.insert(0,sys.argv[5]); m=runpy.run_path(sys.argv[1]); "

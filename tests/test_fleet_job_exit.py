@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from ml_stack.fleet import job_exit
-from ml_stack.fleet.job_records import process_started
-from ml_stack.fleet.jobs import Job, JobRunner
+from poolhouse.fleet import job_exit
+from poolhouse.fleet.job_records import process_started
+from poolhouse.fleet.jobs import Job, JobRunner
 
 
 def wait_for(check, timeout=10):

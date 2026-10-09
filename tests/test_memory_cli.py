@@ -1,4 +1,4 @@
-"""``ml-stack-memory``: a person at a terminal can use it, an agent's process is refused."""
+"""``poolhouse-memory``: a person at a terminal can use it, an agent's process is refused."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import types
 
 import pytest
 
-from ml_stack.memory import cli
-from ml_stack.memory.store import Store
+from poolhouse.memory import cli
+from poolhouse.memory.store import Store
 from tests import memory_keys
 
 ring = memory_keys.ring
@@ -29,7 +29,7 @@ class Tty:
 
 @pytest.fixture
 def person(monkeypatch):
-    for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"):
+    for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(cli, "sys", types.SimpleNamespace(stdin=Tty(True), stdout=Tty(True)))
 
@@ -39,7 +39,7 @@ COMMANDS = [["list"], ["show", "m0001"], ["add", "prefers short answers", "--sco
             ["export"], ["stats"]]
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_AGENT"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_AGENT"])
 @pytest.mark.parametrize("argv", COMMANDS)
 def test_an_agents_process_is_refused_and_nothing_changes(person, monkeypatch, capsys, marker, argv):
     store = Store()
@@ -52,7 +52,7 @@ def test_an_agents_process_is_refused_and_nothing_changes(person, monkeypatch, c
 
 
 def test_a_command_that_writes_needs_a_terminal_but_a_read_may_be_piped(monkeypatch, capsys):
-    for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"):
+    for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(cli, "sys", types.SimpleNamespace(stdin=Tty(True), stdout=Tty(False)))
     assert cli.main(["add", "a fact", "--scope", "user"]) == cli.DENIED

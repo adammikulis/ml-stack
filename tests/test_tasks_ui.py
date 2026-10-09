@@ -4,7 +4,7 @@ import pytest
 from browser_expect import expect
 from test_fleet_ui import Serving
 
-from ml_stack.workspace import task_summary
+from poolhouse.workspace import task_summary
 
 pytestmark = pytest.mark.slow
 
@@ -63,7 +63,7 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
             expect(viewer.locator('.badge')).to_have_text('queued')
             assert posts[-1] == {'action': 'resume', 'id': task['id'], 'reason': 'Person resolved approval'}
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-            page.screenshot(path='/private/tmp/ml-stack-tasks-mobile.png', full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-tasks-mobile.png', full_page=True)
     finally:
         server.close()
 
@@ -102,7 +102,7 @@ def test_unavailable_tasks_hide_unknown_lanes_and_recover(tmp_path, playwright, 
             expect(viewer.locator('.task-remaining-number')).to_have_text('—')
             expect(viewer.locator('[data-task-count=queued] strong')).to_have_text('—')
             expect(viewer.get_by_role('button', name='Open Projects', exact=True)).to_be_visible()
-            page.screenshot(path=f'/private/tmp/poolside-tasks-unavailable-{status}.png', full_page=True)
+            page.screenshot(path=f'/private/tmp/poolhouse-tasks-unavailable-{status}.png', full_page=True)
             failing = False
             viewer.get_by_role('button', name='Refresh', exact=True).click()
             expect(viewer.locator('.task-row').filter(has_text='Previously loaded task')).to_be_visible()
@@ -154,10 +154,10 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
 
 @pytest.mark.parametrize('foreign_authority', [False, True])
 def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwright, monkeypatch, foreign_authority):
-    from ml_stack.fleet import project_client
-    from ml_stack.fleet.projects import ProjectRegistry, identity
-    from ml_stack.net import git
-    from ml_stack.workspace.remote_host import WorkspaceHost
+    from poolhouse.fleet import project_client
+    from poolhouse.fleet.projects import ProjectRegistry, identity
+    from poolhouse.net import git
+    from poolhouse.workspace.remote_host import WorkspaceHost
 
     checkout = tmp_path / 'experiment'
     checkout.mkdir()
@@ -177,7 +177,7 @@ def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwr
     try:
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page()
-            page.context.add_cookies([{'name': 'ml_stack_ui', 'value': session.sid,
+            page.context.add_cookies([{'name': 'poolhouse_ui', 'value': session.sid,
                                       'url': f'http://127.0.0.1:{server.port}/ui', 'httpOnly': True}])
             page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' and request.url.endswith('/board/connect') else None)
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
@@ -199,7 +199,7 @@ def test_tasks_join_selected_person_workspace_with_real_backend(tmp_path, playwr
                 expect(viewer.locator('.task-layout')).to_be_visible()
                 expect(viewer.locator('.task-remaining-number')).to_have_text('0')
                 expect(join).to_have_count(0)
-            page.screenshot(path=f'/private/tmp/poolside-tasks-person-join-{foreign_authority}.png', full_page=True)
+            page.screenshot(path=f'/private/tmp/poolhouse-tasks-person-join-{foreign_authority}.png', full_page=True)
     finally:
         server.close()
 

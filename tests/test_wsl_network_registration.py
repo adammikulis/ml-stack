@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ml_stack.fleet import discovery, wsl_network, wsl_registration as registration
+from poolhouse.fleet import discovery, wsl_network, wsl_registration as registration
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def descriptor(tmp_path, monkeypatch):
     process.create_time.return_value = 42.5
     process.is_running.return_value = True
     process.uids.return_value = SimpleNamespace(effective=123)
-    process.cmdline.return_value = ['python', '-m', 'ml_stack.cli.wsl_daemon']
+    process.cmdline.return_value = ['python', '-m', 'poolhouse.cli.wsl_daemon']
     monkeypatch.setattr(registration.psutil, 'Process', lambda *_args: process)
     config = {'address': ['127.0.0.1', 9000], 'token': 'a' * 64}
     return path, process, config
@@ -56,7 +56,7 @@ def test_reused_or_foreign_daemon_is_refused(descriptor, monkeypatch, changed):
         elif changed == 'command':
             process.cmdline.return_value = ['different-worker']
         elif changed == 'module_tail':
-            process.cmdline.return_value = ['python', '-c', 'sleep', 'ml_stack.cli.wsl_daemon']
+            process.cmdline.return_value = ['python', '-c', 'sleep', 'poolhouse.cli.wsl_daemon']
         else:
             process.is_running.return_value = False
         with pytest.raises(OSError, match='stale or invalid'):

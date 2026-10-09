@@ -4,7 +4,7 @@ Select **Join existing cluster**, then enter its name and passphrase. A failed s
 leaves this machine's memberships unchanged. **Create new cluster** starts a separate
 cluster and refuses to replace one already joined here. The name is required; the
 screen selects this machine's primary cluster, or `default` on an unjoined machine.
-From the terminal, join with `ml-stack-peers setup --group NAME`; add `--create` only
+From the terminal, join with `poolhouse-peers setup --group NAME`; add `--create` only
 when starting a new cluster.
 
 The first-run wizard offers a model download alongside the optional model server.
@@ -36,8 +36,8 @@ tested (see "What is built"). Issue: *Zero-install onboarding of devices on the 
 Branch `agent/lan-onboarding`, which builds on `agent/hardening` (signed requests, pinned TLS,
 loopback by default) and changes none of it.
 
-The request: find new devices on my network without downloading ml-stack by hand, ask the
-device's owner to accept, then fetch ml-stack peer to peer and connect.
+The request: find new devices on my network without downloading Poolhouse by hand, ask the
+device's owner to accept, then fetch Poolhouse peer to peer and connect.
 
 ## Decision record
 
@@ -68,15 +68,15 @@ device's owner to accept, then fetch ml-stack peer to peer and connect.
 
 | The new device has | What can be done | By whom |
 |---|---|---|
-| ml-stack already | find it on the LAN, ask its owner on its own screen, pair with a short code, join the cluster | automatic, with a person saying yes |
-| nothing | **nothing can be pushed to it.** A machine that runs no agent of ours has no door; installing software on it without its owner doing something is what malware does, and ml-stack will not do it | the owner of the new device, opt in |
+| Poolhouse already | find it on the LAN, ask its owner on its own screen, pair with a short code, join the cluster | automatic, with a person saying yes |
+| nothing | **nothing can be pushed to it.** A machine that runs no agent of ours has no door; installing software on it without its owner doing something is what malware does, and Poolhouse will not do it | the owner of the new device, opt in |
 | nothing, owner willing | open an address on it, run one command, or hand it a file bundle, or let us install over SSH with the owner's own keys | see "Machines with nothing installed" |
 
-So "add devices without manually downloading ml-stack" has an honest reading: the owner does
-not *download* ml-stack by hand and trust what they got, because the controller serves it,
+So "add devices without manually downloading Poolhouse" has an honest reading: the owner does
+not *download* Poolhouse by hand and trust what they got, because the controller serves it,
 pinned and verified. They still have to do one thing on the new device.
 
-## Machines that already run ml-stack
+## Machines that already run Poolhouse
 
 ```
 new device                                    owner's device (listening)
@@ -103,11 +103,11 @@ optional mDNS/DNS-SD transport (`zeroconf`) not built.
 | dependency | none | one package, pure Python, around a megabyte |
 | hostile input | one JSON object, 1200 byte cap, fields validated | a DNS packet parser on port 5353 for hostile packets |
 | firewalls | needs UDP 8773 and TCP 8772 allowed; **Windows blocks both inbound by default** (`discovery.windows_firewall_rules` shows how for the existing beacons) | UDP 5353 is usually already allowed: Bonjour on macOS, the mDNS rule on Windows, Avahi |
-| interoperability | ml-stack only | any Bonjour/Avahi browser, including phones |
+| interoperability | Poolhouse only | any Bonjour/Avahi browser, including phones |
 | same plumbing as the fleet's beacons | yes | no |
 
 The Windows firewall point is the real argument for mDNS and is why the seam exists: a
-`ZeroconfTransport` is two methods. Whether to ship it as an extra (`ml-stack[discover]`) is a
+`ZeroconfTransport` is two methods. Whether to ship it as an extra (`poolhouse[discover]`) is a
 decision for the owner (below). An announcement is unauthenticated, so it is a hint: the
 address is the datagram's source, text is cleaned to one printable line, the list is capped at
 64 machines and 4 per source address, and entries age out after 30 s. A forged announcement can
@@ -115,7 +115,7 @@ put a wrong name in the list; it cannot get anybody paired.
 
 ### The request and the notification
 
-A machine opens pairing deliberately (`ml-stack cluster listen --for 10m`); by default nothing
+A machine opens pairing deliberately (`poolhouse cluster listen --for 10m`); by default nothing
 listens. A request carries name, hostname, model and the fingerprint of the certificate the new
 device's daemon will serve. The owner sees all of it, plus the address the request came from and
 the fingerprint of the certificate the new device was *seen* to present.
@@ -129,11 +129,11 @@ The owner is asked with **real buttons**, not told to run a command (`onboard/no
   is a timeout. After an Accept a second dialog (one `OK`) shows the code. Both scripts compile
   under the real `osacompile`; the argument handling was checked against the real `osascript`
   with a hostile hostname (it comes back as data); a real dialog is shown only by an opt-in test
-  (`ML_STACK_MANUAL_DIALOG=1`).
+  (`POOLHOUSE_MANUAL_DIALOG=1`).
 * Linux: `notify-send --action=... --wait` where libnotify supports actions, else `zenity
   --list`; argv and parsing are tested with shims, not on a Linux desktop.
 * Windows: toast buttons need a registered app id; designed, not built.
-* Without a desktop (`ML_STACK_NOTIFY=console`) the request is printed and `accept ID
+* Without a desktop (`POOLHOUSE_NOTIFY=console`) the request is printed and `accept ID
   --mine|--other` / `decline ID` answer it; the answer goes through the same state machine
   either way (rate limits, one pending request per device, expiry).
 
@@ -142,7 +142,7 @@ no default) and stored with the device. It is shown in `requests` and `nearby`, 
 the sharing levels read.
 
 **The pairing code is never in the first dialog**, and a test suite never raises a real
-dialog: `tests/conftest.py` sets `ML_STACK_NOTIFY=console` for the session and puts shims named
+dialog: `tests/conftest.py` sets `POOLHOUSE_NOTIFY=console` for the session and puts shims named
 `osascript`, `notify-send`, `zenity` and `kdialog` first on PATH (child processes inherit them);
 a shim records and fails, and the run fails if anything was recorded. The owner's report that
 tests opened Script Editor was this bug: `pick()` ignored any switch and every `listen` process
@@ -200,7 +200,7 @@ the server field too) all fail the confirmation. Properties, each tested:
   with probability 3 in 10^6.
 
 The library is an optional dependency behind the `fleet-onboard` extra (`pip install
-'ml-stack[fleet-onboard]'`: `cryptography`, `spake2`, `keyring`); without it, `listen` fails at
+'Poolhouse[fleet-onboard]'`: `cryptography`, `spake2`, `keyring`); without it, `listen` fails at
 once and `pair` says so, naming the extra.
 
 What the owner is really approving: the default grant is the cluster key. **A cluster member is
@@ -227,10 +227,10 @@ sent when a request is created, once.
 
 ### Revocation
 
-`ml-stack cluster revoke NAME-OR-FINGERPRINT` marks the device revoked: it cannot ask again, and
+`poolhouse cluster revoke NAME-OR-FINGERPRINT` marks the device revoked: it cannot ask again, and
 the key it signs file requests with (issued at pairing, one per device) stops working, so the
 owner's machine serves it nothing. **It cannot take back the cluster key** the device was given.
-`ml-stack-peers members revoke FINGERPRINT` is the per-device revocation: the device's certificate is put out
+`poolhouse-peers members revoke FINGERPRINT` is the per-device revocation: the device's certificate is put out
 of the cluster record and every member refuses it from its next handshake and request. The re-keying flow (mint a new key,
 hand it to each remaining member over its pinned, signed channel) is designed and not
 built. A device-only pairing (`--no-cluster`) has no cluster key to take back.
@@ -239,13 +239,13 @@ built. A device-only pairing (`--no-cluster`) has no cluster key to take back.
 
 Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
 
-1. **An address on the LAN** (`ml-stack cluster bootstrap --share DIR`). The controller serves for
+1. **An address on the LAN** (`poolhouse cluster bootstrap --share DIR`). The controller serves for
    ten minutes, over HTTPS with a certificate made for the offer, an unguessable address
    `https://IP:PORT/b/TOKEN/#fp=CERT-FINGERPRINT` (`--advertise` names the address to print). The
    owner types it (or scans it as a QR code: drawing one needs a library, not built; the string
    is `Offer.url`) on the new device. The page says what will be installed (names, sizes,
    SHA-256), the signing key and manifest digest, and shows one command:
-   `curl --fail -k --pinnedpubkey 'sha256//...' -o ml-stack-install.py https://.../install.py && python3 ml-stack-install.py`.
+   `curl --fail -k --pinnedpubkey 'sha256//...' -o poolhouse-install.py https://.../install.py && python3 poolhouse-install.py`.
    `-k` is intentional: `--pinnedpubkey` is checked even then, and the certificate has no name a
    CA could vouch for. The installer is fixed text (under 90 lines), pins the certificate, and
    refuses unless the manifest matches the digest printed on the page and every file matches
@@ -256,7 +256,7 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
      checks and **without hashes**; a hash-locked requirements file in the manifest closes
      this (designed, not built).
    * Offers carry program files only: models and the cluster key are refused (tested).
-2. **SSH install** (`ml-stack cluster bootstrap --ssh [user@]host --share DIR`, built, owner
+2. **SSH install** (`poolhouse cluster bootstrap --ssh [user@]host --share DIR`, built, owner
    initiated, its own flag, never automatic). Properties, each a test:
    * the system `ssh` with the owner's keys, agent and config; `BatchMode=yes`, so a password is
      never asked for or seen; `StrictHostKeyChecking=yes` always, never `no`; no agent, X11 or
@@ -277,8 +277,8 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
      the Ed25519 signature is `cryptography`'s, and the real `ssh-keygen` verifies it in the
      tests; a pure-Python verifier would have been home-made crypto), that the key is the one
      the owner named, expiry, and the size and SHA-256 of every file, and that no other file came;
-     only then a per-user venv (`~/.ml-stack/venv`, no sudo, no system Python touched) and
-     `pip install`; it then starts `ml-stack-cluster listen` so the normal pairing flow with a
+     only then a per-user venv (`~/.poolhouse/venv`, no sudo, no system Python touched) and
+     `pip install`; it then starts `poolhouse-cluster listen` so the normal pairing flow with a
      code and pinned TLS completes. Models are not copied;
    * nothing is fetched from the internet by the remote side except pip's dependencies (the
      same gap as above); macOS and Linux targets only, Windows OpenSSH designed not built;
@@ -286,7 +286,7 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
    Tested: an exact-argv shim for `ssh`, `ssh-keygen` and `ssh-keyscan`; the remote script run for
    real against a temporary HOME with good, tampered, swapped, wrong-key, extra-file and expired
    payloads; a real venv install of a tiny wheel (slow test); a localhost sshd test exists but
-   runs only with `ML_STACK_TEST_SSHD=1`.
+   runs only with `POOLHOUSE_TEST_SSHD=1`.
 3. **A file bundle** (USB stick, AirDrop; the output of `bootstrap --share`'s manifest plus the
    installer): the manifest digest is read to the person from the owner's screen.
 
@@ -347,15 +347,15 @@ cluster key** (losing one is not losing the other). `onboard/signing.py`:
   directory; an older install's item in the OS keystore is moved there on first use and deleted
   once the file unwraps to the same key. With no usable keystore it is stored in a file
   encrypted under a passphrase (scrypt, ChaCha20-Poly1305, mode 0600) with a warning and a
-  `warning` event; the passphrase comes from `ML_STACK_SIGNING_PASSPHRASE` or a prompt, and with
+  `warning` event; the passphrase comes from `POOLHOUSE_SIGNING_PASSPHRASE` or a prompt, and with
   neither it refuses rather than write a plaintext key. There is no plaintext path; tests scan
   every file under the state directory for the key's raw, base64 and hex forms.
 * **Signing is automatic** when the owner shares or offers files: no prompt.
 * **Export, rotation and revocation need a person at a terminal** (a human grant that follows
   sentinel's rule: stdin and stdout are terminals, no agent marker in the environment, the
   person types the key id back; it is kept as `onboard/human.py` until sentinel is merged).
-  The commands are `ml-stack cluster devices [--learn] [--port P]                         paired devices: lan, tailnet or unreachable; Tailscale found or not
-ml-stack cluster signing show|export|rotate|revoke|confirm|accept`. An agent
+  The commands are `Poolhouse cluster devices [--learn] [--port P]                         paired devices: lan, tailnet or unreachable; Tailscale found or not
+Poolhouse cluster signing show|export|rotate|revoke|confirm|accept`. An agent
   has no path to the key.
 * **Manifests are short-lived** (3 days) and carry a serial that may not go backwards.
 * **New devices pin the public key at pairing**; its fingerprint is printed on both machines
@@ -543,24 +543,24 @@ whose pinned certificate answers on its tailnet address is listed with route `ta
 ## Commands
 
 ```
-ml-stack cluster listen [--for 10m] [--port 8772] [--no-cluster]    open pairing here; asks with a dialog
-ml-stack cluster requests                                            what is waiting
-ml-stack cluster accept ID --mine|--other | decline ID               answer; accept prints the code
-ml-stack cluster nearby                                              who is open to pairing
-ml-stack cluster pair --host H [--port P] [--code C]                 ask to join
-ml-stack cluster revoke NAME-OR-FINGERPRINT
-ml-stack cluster bootstrap --share DIR [--valid 10m]                 offer ml-stack on an address
-ml-stack cluster bootstrap --ssh [user@]host --share DIR [--dry-run] [--host-key-fingerprint SHA256:...]
-ml-stack cluster share --dir DIR [--sharing NAME=open|owner|never] [--licence NAME=ID,URL] [--source NAME=URL]
-ml-stack cluster share --models [--models-dir DIR ...] [--port 8773]  serve the model store
-ml-stack cluster peers [list|add|remove|on|off|limit]                the devices a model pull asks first
-ml-stack cluster fetch NAME... --from HOST:PORT                      fetch into staging (not installed)
-ml-stack cluster signing show|export FILE|rotate|revoke KEYID|confirm on|off|accept
+poolhouse cluster listen [--for 10m] [--port 8772] [--no-cluster]    open pairing here; asks with a dialog
+poolhouse cluster requests                                            what is waiting
+poolhouse cluster accept ID --mine|--other | decline ID               answer; accept prints the code
+poolhouse cluster nearby                                              who is open to pairing
+poolhouse cluster pair --host H [--port P] [--code C]                 ask to join
+poolhouse cluster revoke NAME-OR-FINGERPRINT
+poolhouse cluster bootstrap --share DIR [--valid 10m]                 offer poolhouse on an address
+poolhouse cluster bootstrap --ssh [user@]host --share DIR [--dry-run] [--host-key-fingerprint SHA256:...]
+poolhouse cluster share --dir DIR [--sharing NAME=open|owner|never] [--licence NAME=ID,URL] [--source NAME=URL]
+poolhouse cluster share --models [--models-dir DIR ...] [--port 8773]  serve the model store
+poolhouse cluster peers [list|add|remove|on|off|limit]                the devices a model pull asks first
+poolhouse cluster fetch NAME... --from HOST:PORT                      fetch into staging (not installed)
+poolhouse cluster signing show|export FILE|rotate|revoke KEYID|confirm on|off|accept
 ```
 
 All take `--json` and `--state DIR`. State is under `<state root>/onboard` (requests, devices,
 licences, this machine's pairing certificate, the public half of the signing key), every file
-private; the signing key itself is in the OS keystore. `ML_STACK_NOTIFY=system|console|off` picks
+private; the signing key itself is in the OS keystore. `POOLHOUSE_NOTIFY=system|console|off` picks
 how the owner is asked.
 
 ## Decisions for the owner
@@ -575,7 +575,7 @@ how the owner is asked.
    without a real sshd; run it once on a spare machine with `--dry-run` first.
 4. **Grant by default**: cluster key (every member is fully trusted) or device-only. As built
    the owner chooses with `--no-cluster`; the default gives the key.
-5. **mDNS as an extra** (`ml-stack[discover]`) to avoid the Windows firewall step, or stdlib only.
+5. **mDNS as an extra** (`poolhouse[discover]`) to avoid the Windows firewall step, or stdlib only.
 6. **Budgets.** `http-servers` allows two handlers; onboarding adds one (`onboard/web.py`).
    Folding these routes into the daemon's handler is the clean answer and touches
    `fleet/api.py`; an agent cannot raise a budget.

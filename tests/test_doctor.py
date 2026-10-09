@@ -1,4 +1,4 @@
-"""``ml-stack-doctor`` reads the repositories and the working state, and says what is wrong.
+"""``poolhouse-doctor`` reads the repositories and the working state, and says what is wrong.
 
 Everything it reads is built here: a repository is ``git init`` in ``tmp_path`` with an
 invented author, a worktree is added to it, a venv is a shell script that prints a path,
@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import doctor
-from ml_stack.doctor import (
+from poolhouse import doctor
+from poolhouse.doctor import (
     ahead_of,
     bench_of,
     builds_of,
@@ -207,14 +207,14 @@ def test_a_worktree_at_head_is_not_stale_and_none_says_nothing(tmp_path):
 # -- the editable install --------------------------------------------------------------
 
 def fake_python(repo: Path, prints: str, *, fails: bool = False) -> Path:
-    body = "echo 'ModuleNotFoundError: No module named ml_stack' >&2\nexit 1\n" if fails \
+    body = "echo 'ModuleNotFoundError: No module named poolhouse' >&2\nexit 1\n" if fails \
         else f"echo {prints}\n"
     return _script(repo / ".venv" / "bin" / "python", body)
 
 
 def test_an_install_under_the_checkout_is_good_and_reports_the_path(tmp_path):
     checkout = tmp_path / "checkout"
-    ask = checkout / "src" / "ml_stack" / "graph" / "ask.py"
+    ask = checkout / "src" / "poolhouse" / "graph" / "ask.py"
     ask.parent.mkdir(parents=True)
     ask.write_text("")
     repo = make_repo(tmp_path / "quenlow")
@@ -228,7 +228,7 @@ def test_an_install_under_the_checkout_is_good_and_reports_the_path(tmp_path):
 def test_an_install_in_site_packages_is_a_copy_with_pip_e_as_the_fix(tmp_path):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    copy = tmp_path / "venv" / "lib" / "site-packages" / "ml_stack" / "graph" / "ask.py"
+    copy = tmp_path / "venv" / "lib" / "site-packages" / "poolhouse" / "graph" / "ask.py"
     copy.parent.mkdir(parents=True)
     copy.write_text("")
     repo = make_repo(tmp_path / "quenlow")
@@ -245,7 +245,7 @@ def test_an_import_that_fails_says_why(tmp_path):
     python = fake_python(repo, "", fails=True)
     found = install_of(repo, checkout=tmp_path / "checkout")
     assert not found.good
-    assert found.said == f"{python}: import ml_stack fails -- ModuleNotFoundError: No module named ml_stack"
+    assert found.said == f"{python}: import poolhouse fails -- ModuleNotFoundError: No module named poolhouse"
 
 
 # -- the bench -----------------------------------------------------------------------
@@ -259,7 +259,7 @@ def dead_pid() -> int:
 
 def make_bench(home: Path, *, runs=(), empties=(), lock_pid=None, logs=()) -> Path:
     """A bench home: a runs store, a lock naming ``lock_pid``, and logs by stamp."""
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     home.mkdir(parents=True)
     if runs or empties:
@@ -287,11 +287,11 @@ def test_empty_runs_are_counted_and_named_with_forget_as_the_fix(tmp_path):
     found = by_name(bench_of(home), "bench: runs")
     assert not found.good
     assert found.said == "2 run(s) read back as nothing: bench:hollow:1, bench:hollow:2"
-    assert found.fix == ["ml-stack-bench", "forget", "--empty", "--kept", str(home / "runs.ladybug")]
+    assert found.fix == ["poolhouse-bench", "forget", "--empty", "--kept", str(home / "runs.ladybug")]
 
 
 def test_a_record_whose_pid_is_gone_is_the_last_run_and_not_a_fault(tmp_path):
-    """`ml-stack-bench status` names the last run from this record and `tail` finds its log
+    """`poolhouse-bench status` names the last run from this record and `tail` finds its log
     through it, so a finished measurement is reported and never offered for deletion."""
     pid = dead_pid()
     home = make_bench(tmp_path / "bench", lock_pid=pid)
@@ -307,7 +307,7 @@ def test_a_lock_whose_pid_is_alive_is_a_measurement_in_progress(tmp_path):
     home = make_bench(tmp_path / "bench", lock_pid=os.getpid(), logs=("sweep-x-20260830T100000.log",))
     found = by_name(bench_of(home), "bench: measuring")
     assert found.good
-    assert found.said == f"pid {os.getpid()} since 2026-08-30T10:00:00: ml-stack-bench sweep"
+    assert found.said == f"pid {os.getpid()} since 2026-08-30T10:00:00: poolhouse-bench sweep"
     # the log it is writing is not a run that died
     assert by_name(bench_of(home), "bench: logs").good
 
@@ -362,18 +362,18 @@ def test_a_build_older_than_fourteen_days_is_noted_with_build_as_the_fix(tmp_pat
     found = builds_of(current, tmp_path / "named")[0]
     assert not found.good
     assert found.said == "abc1234, 20d old, answers --help"
-    assert found.fix == ["ml-stack-serve", "build"]
+    assert found.fix == ["poolhouse-serve", "build"]
     assert builds_of(current, tmp_path / "named", stale_days=30)[0].good
 
 
 def test_no_current_and_a_current_that_does_not_answer_are_both_told_to_build(tmp_path):
     found = builds_of(tmp_path / "current", tmp_path / "named")[0]
-    assert (found.good, found.said, found.fix) == (False, "not built yet", ["ml-stack-serve", "build"])
+    assert (found.good, found.said, found.fix) == (False, "not built yet", ["poolhouse-serve", "build"])
     broken = make_build(tmp_path / "broken", commit="bad0000", days_old=1, answers=False)
     found = builds_of(broken, tmp_path / "named")[0]
     assert not found.good
     assert found.said == f"{broken / 'llama-server'} does not answer --help"
-    assert found.fix == ["ml-stack-serve", "build"]
+    assert found.fix == ["poolhouse-serve", "build"]
 
 
 def test_named_builds_are_listed_beside_current(tmp_path):
@@ -397,35 +397,35 @@ def test_repositories_are_those_given_or_named_by_the_environment(tmp_path, monk
         subprocess.run(["git", "init", "-q", str(tmp_path / name)], check=True)
     monkeypatch.chdir(tmp_path / "cwd")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
-    monkeypatch.delenv("ML_STACK_CHECKOUTS", raising=False)
+    monkeypatch.delenv("POOLHOUSE_CHECKOUTS", raising=False)
     assert repositories() == [], "none by default, not even the current directory"
 
-    monkeypatch.setenv("ML_STACK_CHECKOUTS", os.pathsep.join(
+    monkeypatch.setenv("POOLHOUSE_CHECKOUTS", os.pathsep.join(
         [str(tmp_path / "listed"), str(tmp_path / "plain"), str(tmp_path / "listed")]))
     assert repositories() == [tmp_path / "listed"], "a listed non-repository is skipped"
     assert repositories([str(tmp_path / "a"), str(tmp_path / "a")]) == [tmp_path / "a"]
 
 
-def test_the_install_is_checked_against_the_ml_stack_checkout_examined(tmp_path, monkeypatch):
+def test_the_install_is_checked_against_the_poolhouse_checkout_examined(tmp_path, monkeypatch):
     app = make_repo(tmp_path / "quenlow")
     library = make_repo(tmp_path / "library")
-    imported = library / "src" / "ml_stack" / "graph" / "conversation.py"
+    imported = library / "src" / "poolhouse" / "graph" / "conversation.py"
     imported.parent.mkdir(parents=True)
     imported.write_text("")
     fake_python(app, str(imported))
     fake_python(library, str(imported))
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "poolhouse"))
     found = {f.name: f for f in look([app, library], bench_home=tmp_path / "bench")}
     assert found["quenlow: editable install"].good
     assert found["library: editable install"].good
 
 
 def test_a_directory_an_installer_ran_from_is_not_a_checkout(tmp_path, monkeypatch):
-    """`install.sh` runs `ml-stack-doctor` from wherever it was started, often no repository."""
+    """`install.sh` runs `poolhouse-doctor` from wherever it was started, often no repository."""
     (tmp_path / "home").mkdir()
     (tmp_path / "downloads").mkdir()
     monkeypatch.chdir(tmp_path / "downloads")
-    monkeypatch.delenv("ML_STACK_CHECKOUTS", raising=False)
+    monkeypatch.delenv("POOLHOUSE_CHECKOUTS", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     assert repositories() == []
@@ -446,16 +446,16 @@ def everything(tmp_path, monkeypatch):
     """A whole working state, all of it wrong: hooks missing, a dead lock, a stale build."""
     repo = make_repo(tmp_path / "quenlow")
     checkout = tmp_path / "checkout"
-    ask = checkout / "src" / "ml_stack" / "graph" / "ask.py"
+    ask = checkout / "src" / "poolhouse" / "graph" / "ask.py"
     ask.parent.mkdir(parents=True)
     ask.write_text("")
     fake_python(repo, str(ask))
     home = make_bench(tmp_path / "bench", lock_pid=dead_pid())
-    from ml_stack.serve import binary
+    from poolhouse.serve import binary
 
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "poolhouse"))
     make_build(binary.managed_current(), commit="old0000", days_old=40)
-    monkeypatch.setattr("ml_stack.checks.checkout", lambda: checkout)
+    monkeypatch.setattr("poolhouse.checks.checkout", lambda: checkout)
     return repo, home
 
 
@@ -469,28 +469,28 @@ def test_look_names_everything_and_main_exits_one_until_it_is_fixed(everything, 
         "quenlow: hooks", "llama.cpp: current"]
     assert main(["--repo", str(repo), "--bench-home", str(home)]) == 1
     out = capsys.readouterr().out
-    assert out.startswith("ml-stack: the repositories and the working state\n")
+    assert out.startswith("poolhouse: the repositories and the working state\n")
     assert "  ! quenlow: hooks: not installed: pre-commit, commit-msg, pre-push" in out
     assert "ok  bench: measuring: nothing is measuring" in out
     assert "ok  quenlow: working tree: clean" in out
 
 
 def test_yes_runs_the_fixes_it_can_and_does_not_touch_the_build(everything, capsys, monkeypatch):
-    """Installing the hooks is safe; ``ml-stack-serve build`` is a compile, and the test
+    """Installing the hooks is safe; ``poolhouse-serve build`` is a compile, and the test
     replaces it with a record of having been asked."""
     repo, home = everything
     asked: list[list[str]] = []
     real = subprocess.run
 
     def run(cmd, *args, **kwargs):
-        if cmd == ["ml-stack-serve", "build"]:
+        if cmd == ["poolhouse-serve", "build"]:
             asked.append(cmd)
             return subprocess.CompletedProcess(cmd, 0)
         return real(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
     assert main(["--repo", str(repo), "--bench-home", str(home), "--yes"]) == 1
-    assert asked == [["ml-stack-serve", "build"]]
+    assert asked == [["poolhouse-serve", "build"]]
     assert (home / "measuring.json").exists(), "nothing deletes what says what ran last"
     assert hooks_of(repo).good
     found = look([repo], bench_home=home)

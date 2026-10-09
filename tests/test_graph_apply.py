@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-from ml_stack.graph.propose import apply, proposing
-from ml_stack.graph.store import GraphStore
+from poolhouse.graph.propose import apply, proposing
+from poolhouse.graph.store import GraphStore
 
-pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
 
 GRAPH = {
     "nodes": [

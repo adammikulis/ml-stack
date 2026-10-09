@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack import web
-from ml_stack.scrape.polite import Polite
+from poolhouse import web
+from poolhouse.scrape.polite import Polite
 from tests.web_site import allow_all, serving
 
 NAMES = ["http://a.example/1", "http://a.example/2", "http://a.example/3",

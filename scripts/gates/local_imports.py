@@ -1,4 +1,4 @@
-"""ml_stack imports inside a function body."""
+"""poolhouse imports inside a function body."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from ._util import parse
 NAME = "local-imports"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 
 
 def describe() -> str:
-    return ("An ml_stack import inside a function, or an import_module of a literal ml_stack "
+    return ("A poolhouse import inside a function, or an import_module of a literal poolhouse "
             "name; a deferred import hides an import cycle.")
 
 
@@ -24,34 +24,34 @@ _LOADERS = {"import_module", "__import__"}
 
 
 def _loaded(node: ast.Call) -> list[str]:
-    """The ml_stack module an ``import_module``/``__import__`` call names by a literal."""
+    """The poolhouse module an ``import_module``/``__import__`` call names by a literal."""
     func = node.func
     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
     if name not in _LOADERS or not node.args:
         return []
     first = node.args[0]
     if isinstance(first, ast.Constant) and isinstance(first.value, str) \
-            and first.value.split(".")[0] == "ml_stack":
+            and first.value.split(".")[0] == "poolhouse":
         return [first.value]
     return []
 
 
 def _modules(node: ast.AST) -> list[str]:
-    """The ml_stack modules one import statement or loader call defers, else empty."""
+    """The poolhouse modules one import statement or loader call defers, else empty."""
     if isinstance(node, ast.Call):
         return _loaded(node)
     if isinstance(node, ast.Import):
-        return [a.name for a in node.names if a.name.split(".")[0] == "ml_stack"]
+        return [a.name for a in node.names if a.name.split(".")[0] == "poolhouse"]
     if isinstance(node, ast.ImportFrom):
         if node.level:
             return ["." * node.level + (node.module or "")]
-        if (node.module or "").split(".")[0] == "ml_stack":
+        if (node.module or "").split(".")[0] == "poolhouse":
             return [node.module or ""]
     return []
 
 
 def _imports(body: list[ast.stmt]) -> list[tuple[str, ast.stmt]]:
-    """Each ml_stack module this body defers, once, with the statement that named it.
+    """Each poolhouse module this body defers, once, with the statement that named it.
 
     A module named twice in one function is one deferred dependency however many statements
     say so, so splitting ``from x import a, b as c`` in two does not change the count.

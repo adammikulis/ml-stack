@@ -9,8 +9,8 @@ from http.server import BaseHTTPRequestHandler
 
 import pytest
 
-from ml_stack.fleet import autostart, launch
-from ml_stack.http import Server
+from poolhouse.fleet import autostart, launch
+from poolhouse.http import Server
 from tests.cluster_support import join_cluster
 
 
@@ -49,9 +49,9 @@ def test_with_nothing_answering_it_says_how_to_start_the_page():
     assert "  machine     box" in lines
     assert "  open" not in text
     assert not any(line.startswith("  cluster     ") for line in lines)
-    assert f"ml-stack                        -- starts it and opens http://127.0.0.1:{port}/ui/" \
+    assert f"poolhouse                        -- starts it and opens http://127.0.0.1:{port}/ui/" \
         in text
-    assert "ml-stack-cluster join --persist" in text
+    assert "poolhouse-cluster join --persist" in text
 
 
 def test_with_a_daemon_answering_it_names_the_page_and_the_cluster(daemon):
@@ -112,11 +112,11 @@ def test_no_browser_still_waits_for_health(monkeypatch):
 
 
 def test_a_vcs_install_names_its_commit_on_the_done_screen(monkeypatch):
-    from ml_stack.fleet import measuring, updates
+    from poolhouse.fleet import measuring, updates
 
     class VcsInstalled:
         def read_text(self, name):
-            return ('{"url": "https://example.invalid/ml-stack.git", "vcs_info": '
+            return ('{"url": "https://example.invalid/poolhouse.git", "vcs_info": '
                     '{"vcs": "git", "commit_id": "0ce5bc5' + "1" * 33 + '"}}')
 
     monkeypatch.setattr(measuring, "repo_root", lambda where: None)
@@ -246,16 +246,16 @@ def test_the_restart_the_autostart_path_builds_is_accepted_by_the_launcher_and_t
     import sys
     from types import SimpleNamespace
 
-    from ml_stack import jobs, runtime
-    from ml_stack.fleet import daemon
+    from poolhouse import jobs, runtime
+    from poolhouse.fleet import daemon
 
     detached = []
     monkeypatch.setattr(runtime, 'available', lambda: SimpleNamespace(prefix='/elsewhere'))
-    monkeypatch.setattr(sys, 'argv', ['ml-stack', '--port', '8770'])
+    monkeypatch.setattr(sys, 'argv', ['poolhouse', '--port', '8770'])
     monkeypatch.setattr(jobs, 'detach', lambda module, argv, **_kw: detached.append((module, argv)))
     assert autostart.restart() == 'launcher'
     module, argv = detached[0]
-    assert module == 'ml_stack.fleet.launch'
+    assert module == 'poolhouse.fleet.launch'
 
     class Parsed(Exception):
         pass
@@ -263,7 +263,7 @@ def test_the_restart_the_autostart_path_builds_is_accepted_by_the_launcher_and_t
     parse = argparse.ArgumentParser.parse_args
 
     def parse_then_stop(self, args=None, namespace=None):
-        if self.prog != 'ml-stack-traind':
+        if self.prog != 'poolhouse-traind':
             return parse(self, args, namespace)
         raise Parsed(parse(self, args, namespace))
 

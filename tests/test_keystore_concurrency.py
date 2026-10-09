@@ -16,7 +16,7 @@ RACERS = 8
 CREDENTIALS = """
 import os, sys, time
 from pathlib import Path
-from ml_stack import credentials
+from poolhouse import credentials
 real = credentials._wrapped
 def slow():
     table = real()
@@ -31,7 +31,7 @@ credentials._keep(sys.argv[1], "value-" + sys.argv[1])
 PASSPHRASES = """
 import os, sys, time
 from pathlib import Path
-from ml_stack.fleet import recovery
+from poolhouse.fleet import recovery
 real = recovery._held
 def slow(path):
     rows = real(path)
@@ -45,7 +45,7 @@ recovery.remember("pass-" + sys.argv[1], sys.argv[1], sys.argv[2], say=lambda m:
 
 
 def race(tmp_path: Path, script: str, *extra: str) -> None:
-    env = {**child_env(tmp_path), "ML_STACK_TEST_KEYRING_DELAY": "0"}
+    env = {**child_env(tmp_path), "POOLHOUSE_TEST_KEYRING_DELAY": "0"}
     seed = subprocess.run([sys.executable, "-c", CHILD_NOWAIT], env=env, capture_output=True, text=True, timeout=120)
     assert seed.returncode == 0, seed.stderr
     kids = [subprocess.Popen([sys.executable, "-c", script, f"n{i}", *extra], env=env, stdout=subprocess.PIPE,
@@ -70,8 +70,8 @@ def test_concurrent_passphrase_saves_all_land_in_the_passphrase_file(tmp_path):
 
 
 def test_forgetting_a_passphrase_while_another_command_holds_the_file_reports_instead_of_raising(tmp_path, monkeypatch):
-    from ml_stack import lock
-    from ml_stack.fleet import recovery
+    from poolhouse import lock
+    from poolhouse.fleet import recovery
 
     told = []
     monkeypatch.setattr(recovery, "warn", told.append)

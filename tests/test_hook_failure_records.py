@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harnesshook, hook_bootstrap, hook_diagnostics, windows_private, worktreerules
+from poolhouse import harnesshook, hook_bootstrap, hook_diagnostics, windows_private, worktreerules
 
 
 def _record() -> dict:
@@ -45,13 +45,13 @@ def test_import_failure_is_traced_before_heavy_hook_imports(tmp_path, event, sta
 import importlib.abc, runpy, sys
 class Refuse(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'ml_stack.harness_claims':
+        if fullname == 'poolhouse.harness_claims':
             raise ImportError('missing fixture import sk-' + 'a' * 30)
 sys.meta_path.insert(0, Refuse())
 sys.argv = ['harnesshook', sys.argv[1]]
-runpy.run_module('ml_stack.harnesshook', run_name='__main__')
+runpy.run_module('poolhouse.harnesshook', run_name='__main__')
 """
-    environment = dict(os.environ, ML_STACK_HOME=str(tmp_path / "state"))
+    environment = dict(os.environ, POOLHOUSE_HOME=str(tmp_path / "state"))
     done = subprocess.run([sys.executable, "-c", code, event], env=environment,
                           input="{}", capture_output=True, text=True, timeout=20, check=False)
     assert done.returncode == status, done.stderr
@@ -71,7 +71,7 @@ runpy.run_module('ml_stack.harnesshook', run_name='__main__')
 def test_unwritable_diagnostics_do_not_change_event_admission(monkeypatch, tmp_path, capsys):
     root = tmp_path / "state"
     root.write_text("fixture")
-    monkeypatch.setenv("ML_STACK_HOME", str(root))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(root))
     out = io.StringIO()
     assert harnesshook.run(["post", "--unsupported", "fixture"], io.StringIO("{}"), out) == 0
     assert "diagnostic storage unavailable" in capsys.readouterr().err
@@ -84,7 +84,7 @@ def test_symlink_storage_is_refused_without_writing_the_target(monkeypatch, tmp_
     root.mkdir()
     target.mkdir()
     (root / "hook-diagnostics").symlink_to(target, target_is_directory=True)
-    monkeypatch.setenv("ML_STACK_HOME", str(root))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(root))
     text = hook_diagnostics.record(RuntimeError("fixture failure"), "post", "nudge")
     assert "diagnostic storage unavailable" in text
     assert not list(target.iterdir())
@@ -150,19 +150,19 @@ def test_checkout_metadata_is_read_without_git_and_correlation_ids_are_hashed(tm
 def test_post_watchdog_traces_slow_import_and_returns_before_caller_timeout(tmp_path):
     code = """
 import importlib.abc, runpy, sys, time
-from ml_stack import hook_bootstrap
+from poolhouse import hook_bootstrap
 hook_bootstrap.POST_SECONDS = .25
 class Slow(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'ml_stack.harness_claims':
+        if fullname == 'poolhouse.harness_claims':
             time.sleep(3)
 sys.meta_path.insert(0, Slow())
 sys.argv = ['harnesshook', 'post']
-runpy.run_module('ml_stack.harnesshook', run_name='__main__')
+runpy.run_module('poolhouse.harnesshook', run_name='__main__')
 """
     started = time.monotonic()
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, input="{}", text=True,
-                          env=dict(os.environ, ML_STACK_HOME=str(tmp_path / "state")), timeout=5, check=False)
+                          env=dict(os.environ, POOLHOUSE_HOME=str(tmp_path / "state")), timeout=5, check=False)
     assert done.returncode == 0 and time.monotonic() - started < 2
     context = json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"]
     assert "diagnostic=" in context[:250] and "stage=imports" in context
@@ -200,14 +200,14 @@ def test_nonsticky_writable_ancestor_is_refused(monkeypatch, tmp_path):
     parent = tmp_path / "shared"
     parent.mkdir(mode=0o777)
     parent.chmod(0o777)
-    monkeypatch.setenv("ML_STACK_HOME", str(parent / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(parent / "state"))
     result = hook_diagnostics.record(RuntimeError("fixture failure"), "post", "nudge")
     assert "diagnostic storage unavailable" in result
     assert not (parent / "state").exists()
 
 
 def test_doctor_hooks_forwards_the_inspectable_diagnostic_id(capsys):
-    from ml_stack import doctor
+    from poolhouse import doctor
     message = hook_diagnostics.record(RuntimeError("fixture failure"), "post", "nudge")
     identifier = re.search(r"diagnostic=([a-f0-9]{32})", message)[1]
     assert doctor.main(["hooks", identifier]) == 0

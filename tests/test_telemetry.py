@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import json
 
-from ml_stack.client.chat import Reply
-from ml_stack.client.spent import Spent
-from ml_stack.telemetry import ARGS_CAP, Call, args_summary
+from poolhouse.client.chat import Reply
+from poolhouse.client.spent import Spent
+from poolhouse.telemetry import ARGS_CAP, Call, args_summary
 
 
 def reply(*, content="ok", model="tiny-Q4.gguf", prompt_n=300, cache_n=600, predicted_n=40,

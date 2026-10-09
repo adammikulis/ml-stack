@@ -7,7 +7,7 @@ import time
 import pytest
 from workspace_kit import Kit, clean_env, run_python
 
-from ml_stack.workspace import Denied, Refused
+from poolhouse.workspace import Denied, Refused
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def kit(tmp_path, monkeypatch):
 
 
 def test_duplicate_reports_reuse_seq_without_rate_audit_or_wake_writes(kit, monkeypatch):
-    from ml_stack.workspace import wake
+    from poolhouse.workspace import wake
     calls = []
     monkeypatch.setattr(wake, 'signal', lambda *args: calls.append(args))
     first = kit.ws.send(kit.sender, 'receiver', 'status', 'Worker stopped')
@@ -131,14 +131,14 @@ def test_twin_processes_append_one_exact_report_to_the_verified_journal(tmp_path
     kit.agent('receiver')
     code = '''import json, sys, time
 from pathlib import Path
-from ml_stack.workspace import Workspace
+from poolhouse.workspace import Workspace
 Path(sys.argv[1]).write_text('ready')
 until = time.monotonic() + 15
 while not Path(sys.argv[2]).exists():
     if time.monotonic() > until: raise RuntimeError('race barrier timed out')
     time.sleep(.01)
 import os
-row = Workspace().send(os.environ['ML_STACK_WORKSPACE_TOKEN'], 'receiver', 'status', 'Worker stopped')
+row = Workspace().send(os.environ['POOLHOUSE_WORKSPACE_TOKEN'], 'receiver', 'status', 'Worker stopped')
 print(json.dumps({'seq': row['seq']}))
 '''
     ready = [tmp_path / f'ready-{index}' for index in range(2)]

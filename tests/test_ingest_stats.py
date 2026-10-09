@@ -1,4 +1,4 @@
-"""The numbers `ml-stack-ingest status` reads off a run's own files: speed, drafting, and
+"""The numbers `poolhouse-ingest status` reads off a run's own files: speed, drafting, and
 how long it has been going.
 
 Every source, unit and call here is invented, and nothing opens a port.
@@ -9,9 +9,9 @@ from __future__ import annotations
 import pytest
 from test_ingest import a_part_read_source, a_read
 
-from ml_stack import ingest
-from ml_stack.ingest.stats import run_stats, status
-from ml_stack.telemetry import Call
+from poolhouse import ingest
+from poolhouse.ingest.stats import run_stats, status
+from poolhouse.telemetry import Call
 
 SLUG = "velthorne-open-texts"
 
@@ -132,7 +132,7 @@ def test_status_says_nothing_was_measured_when_no_call_reached_the_server(tmp_pa
 
 
 def test_the_head_and_the_depth_come_from_the_run_the_store_kept(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     where = a_run(tmp_path, calls=[a_call()])
     ingest.write_run(where, {"id": "run:20260906T101500", "model": "/w/thornwick-8b.gguf",
                              "n_max": 6, "sampling": {"temperature": 0.1},

@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import project_board_routes, projects
-from ml_stack.workspace import connection_details, remote_cli
-from ml_stack.workspace.identity import Denied
+from poolhouse.fleet import project_board_routes, projects
+from poolhouse.workspace import connection_details, remote_cli
+from poolhouse.workspace.identity import Denied
 
 
 @pytest.mark.parametrize("address", ["", "127.0.0.1", "0.0.0.0", "224.1.2.3", "8.8.8.8", "::1"])  # noqa: S104
 def test_shared_host_refuses_non_network_addresses(monkeypatch, address):
-    monkeypatch.delenv("ML_STACK_WSL_NETWORK", raising=False)
+    monkeypatch.delenv("POOLHOUSE_WSL_NETWORK", raising=False)
     monkeypatch.setattr(projects, "primary_ip", lambda: address)
     assert projects.lan_host(8770) == ""
 
@@ -19,7 +19,7 @@ def test_shared_host_refuses_non_network_addresses(monkeypatch, address):
 @pytest.mark.parametrize("address, expected", [("192.168.40.2", "192.168.40.2"),
                                                ("fd00::2", "[fd00::2]")])
 def test_shared_host_uses_current_route_address(monkeypatch, address, expected):
-    monkeypatch.delenv("ML_STACK_WSL_NETWORK", raising=False)
+    monkeypatch.delenv("POOLHOUSE_WSL_NETWORK", raising=False)
     monkeypatch.setattr(projects, "primary_ip", lambda: address)
     assert projects.lan_host(8770) == f"https://{expected}:8770"
 

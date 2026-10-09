@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.contracts import ContractError, grammar_for
+from poolhouse.contracts import ContractError, grammar_for
 
 EXTRACTION = {
     "type": "object",

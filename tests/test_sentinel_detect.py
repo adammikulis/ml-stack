@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.sentinel import Mode, Sentinel, State, canary, human
-from ml_stack.sentinel.events import Severity
-from ml_stack.sentinel.findings import HIGH
-from ml_stack.sentinel.honey import DECOY_TOOLS, Honey
-from ml_stack.sentinel.integrity import check_file
-from ml_stack.sentinel.rails import RailWatch
-from ml_stack.sentinel.rates import Abuse, AbuseLimits, PeerLimits, PeerWatch, ToolMix, Windows
-from ml_stack.sentinel.servers import exe_mismatches, unmanaged_findings
+from poolhouse.sentinel import Mode, Sentinel, State, canary, human
+from poolhouse.sentinel.events import Severity
+from poolhouse.sentinel.findings import HIGH
+from poolhouse.sentinel.honey import DECOY_TOOLS, Honey
+from poolhouse.sentinel.integrity import check_file
+from poolhouse.sentinel.rails import RailWatch
+from poolhouse.sentinel.rates import Abuse, AbuseLimits, PeerLimits, PeerWatch, ToolMix, Windows
+from poolhouse.sentinel.servers import exe_mismatches, unmanaged_findings
 
 
 def grant(action, subject):
@@ -178,8 +178,8 @@ def test_guarded_mode_watches_heuristics_and_enforce_acts_on_them(tmp_path, mode
 
 
 def test_off_ignores_everything_and_says_so(tmp_path, models, monkeypatch):
-    monkeypatch.setenv("ML_STACK_SENTINEL", "off")
-    monkeypatch.setenv("ML_STACK_SENTINEL_BECAUSE", "a test of the switch")
+    monkeypatch.setenv("POOLHOUSE_SENTINEL", "off")
+    monkeypatch.setenv("POOLHOUSE_SENTINEL_BECAUSE", "a test of the switch")
     node = Sentinel(tmp_path / "s", roots=[models])
     path = _model(models)
     node.manifest.pin(path, "model")
@@ -192,8 +192,8 @@ def test_off_ignores_everything_and_says_so(tmp_path, models, monkeypatch):
 
 
 def test_off_without_a_reason_is_ignored_and_logged(tmp_path, models, monkeypatch):
-    monkeypatch.setenv("ML_STACK_SENTINEL", "off")
-    monkeypatch.delenv("ML_STACK_SENTINEL_BECAUSE", raising=False)
+    monkeypatch.setenv("POOLHOUSE_SENTINEL", "off")
+    monkeypatch.delenv("POOLHOUSE_SENTINEL_BECAUSE", raising=False)
     node = Sentinel(tmp_path / "s", roots=[models])
     assert node.mode != Mode.OFF
     assert any(e.kind == "sentinel.off_refused" for e in node.bus.recent())
@@ -204,7 +204,7 @@ def test_off_without_a_reason_is_ignored_and_logged(tmp_path, models, monkeypatc
 
 
 def test_only_a_person_changes_the_mode(node):
-    from ml_stack.sentinel.human import HumanGrant, HumanRequired
+    from poolhouse.sentinel.human import HumanGrant, HumanRequired
 
     with pytest.raises(HumanRequired):
         node.set_mode(Mode.OFF, HumanGrant("mode", "sentinel", 9e18, object()))

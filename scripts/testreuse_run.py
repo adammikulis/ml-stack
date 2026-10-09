@@ -17,7 +17,7 @@ from pathlib import Path
 import testreuse_key as keys
 import testreuse_store as storage
 
-from ml_stack.log import warn
+from poolhouse.log import warn
 
 CANARY_RATE = 0.05
 WAIT_S = 900.0

@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(os.environ.get("DEV_TEST_REUSE_ROOT", ".")).resolve()
 RECORD = Path(os.environ.get("DEV_TEST_REUSE_RECORD", ""))
-REAL_STATE = tuple(Path.home() / part for part in (".ml-stack", "Library/Keychains", ".ssh", ".gnupg",
+REAL_STATE = tuple(Path.home() / part for part in (".poolhouse", "Library/Keychains", ".ssh", ".gnupg",
                                                      ".cache/huggingface", ".config"))
 IGNORED = (".git", ".pytest_cache", ".testmondata", "__pycache__", ".ruff_cache", ".mypy_cache")
 WRITABLE = tuple({Path(tempfile.gettempdir()), Path(tempfile.gettempdir()).resolve(), Path("/dev")})

@@ -189,9 +189,9 @@ def test_bubblewrap_skips_a_root_that_does_not_exist_and_dies_with_its_parent(tm
 def test_the_protected_roots_cover_the_cache_and_each_override_and_a_dropped_root_is_said(tmp_path, monkeypatch, capsys):
     state, cache, job = tmp_path / "s", tmp_path / "c", tmp_path / "jobs"
     monkeypatch.setattr(deny.home, "account_roots", lambda: (state, cache))
-    monkeypatch.setenv("ML_STACK_HOME", str(state))
-    monkeypatch.setenv("ML_STACK_CACHE", str(cache))
-    monkeypatch.setenv("MLSTACK_JOBS_HOME", str(job))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(state))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(cache))
+    monkeypatch.setenv("POOLHOUSE_JOBS_HOME", str(job))
     monkeypatch.setattr(deny.tempfile, "gettempdir", lambda: str(tmp_path / "t"))
     monkeypatch.setattr(deny.Path, "home", classmethod(lambda cls: tmp_path / "h"))
     got = deny.protected(tmp_path / "checkout")

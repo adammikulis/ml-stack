@@ -26,11 +26,11 @@ from judge_attacks import (
     PLAIN,
 )
 
-from ml_stack.decide import logprob
-from ml_stack.guard import judge as judge_module, native
-from ml_stack.guard.judge import SYSTEM, Judge, TextScreen
-from ml_stack.interventions import Call, Context, Proceed
-from ml_stack.serve.process import every_server
+from poolhouse.decide import logprob
+from poolhouse.guard import judge as judge_module, native
+from poolhouse.guard.judge import SYSTEM, Judge, TextScreen
+from poolhouse.interventions import Call, Context, Proceed
+from poolhouse.serve.process import every_server
 
 pytestmark = [pytest.mark.slow, pytest.mark.redteam]
 
@@ -60,13 +60,13 @@ SHORT_BENIGN = ["Not found", "Build succeeded", '{"status": "Not Found", "code":
 
 @pytest.fixture(scope="module")
 def decider(_real_home):
-    url = os.environ.get("ML_STACK_TEST_JUDGE_URL", "")
+    url = os.environ.get("POOLHOUSE_TEST_JUDGE_URL", "")
     if url:  # a loopback server already serving MODEL (the decider refuses any other host)
         yield native.Leased(url=url, request_timeout=120).asking(SYSTEM)
         return
     account = _real_home.state.parent
-    builds = sorted((account / ".ml-stack" / "llama.cpp" / "builds").glob("*/llama-server"))
-    binary = os.environ.get("ML_STACK_TEST_LLAMA_SERVER") or shutil.which("llama-server") \
+    builds = sorted((account / ".poolhouse" / "llama.cpp" / "builds").glob("*/llama-server"))
+    binary = os.environ.get("POOLHOUSE_TEST_LLAMA_SERVER") or shutil.which("llama-server") \
         or (str(builds[-1]) if builds else "")
     root = account / ".cache" / "huggingface" / "hub"
     found = next(iter(sorted(root.rglob(MODEL))), None) if root.is_dir() else None

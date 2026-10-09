@@ -6,15 +6,15 @@ import pytest
 from git_template import copy_checkout
 from workspace_kit import Kit, clean_env
 
-from ml_stack.net import git
-from ml_stack.workspace import (
+from poolhouse.net import git
+from poolhouse.workspace import (
     device_agent,
     localagent,
     resource_allocations as resources,
     task_worktrees,
     tokens,
 )
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.workspace.taskboard import TaskBoard
 
 
 def _baseline(root):

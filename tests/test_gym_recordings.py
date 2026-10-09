@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from ml_stack.decide.cases import read_cases
-from ml_stack.gym.recordings import export_reviewed
+from poolhouse.decide.cases import read_cases
+from poolhouse.gym.recordings import export_reviewed
 
 
 def test_export_uses_reviewed_label_and_previous_observation(tmp_path):

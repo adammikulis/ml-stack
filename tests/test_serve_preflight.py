@@ -16,11 +16,11 @@ import subprocess
 import pytest
 from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
 
-import ml_stack.serve.preflight as preflight
-from ml_stack.serve import backend as backend_module
-from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
-from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
-from ml_stack.testing.fakes import fake_llama_binary
+import poolhouse.serve.preflight as preflight
+from poolhouse.serve import backend as backend_module
+from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
+from poolhouse.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
+from poolhouse.testing.fakes import fake_llama_binary
 from tests.conftest import leased
 
 
@@ -28,7 +28,7 @@ from tests.conftest import leased
 def _no_source_table(monkeypatch, tmp_path):
     """The tests fake a build's architectures; the machine's real source checkout must not
     add the 144 names it reads (it did, and three refusals stopped refusing)."""
-    monkeypatch.setattr("ml_stack.serve.preflight.source_dir", lambda: tmp_path / "no-src")
+    monkeypatch.setattr("poolhouse.serve.preflight.source_dir", lambda: tmp_path / "no-src")
 
 
 LLAMA_META = {
@@ -91,7 +91,7 @@ class TestShardNames:
 class TestLocalShards:
     def test_a_single_file_that_exists_and_is_not_empty_is_complete(self, tmp_path, monkeypatch):
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         report = Preflight(ServerSpec(model=gguf), binary=fake_binary(tmp_path))
         shards = next(c for c in report.checks if c.name == "shards")
@@ -121,7 +121,7 @@ class TestLocalShards:
 
 class TestArchitecture:
     def test_an_architecture_the_build_reads_passes(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama", "gemma4"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -130,7 +130,7 @@ class TestArchitecture:
         assert arch.ok and arch.detail == "llama"
 
     def test_an_architecture_the_build_does_not_read_fails(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4", "qwen3moe"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -143,7 +143,7 @@ class TestArchitecture:
             self, tmp_path, monkeypatch):
         """Same philosophy as `flags_of`: an unknown build is given no opinion, not told
         it supports nothing."""
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: set())
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -156,7 +156,7 @@ class TestArchitecture:
         wrong -- same philosophy as an unknown build getting no opinion on its flags. This
         is also the shape of the stand-in GGUF (`b\"GGUF\" + 64 zero bytes`) used across
         this whole test suite wherever only *a file exists* matters, not its contents."""
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", {"llama.block_count": 32})
@@ -165,7 +165,7 @@ class TestArchitecture:
         assert arch.ok
 
     def test_a_file_that_is_not_a_gguf_at_all_is_unknown_not_failed(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         not_gguf = tmp_path / "model.gguf"
@@ -177,7 +177,7 @@ class TestArchitecture:
 
 class TestFit:
     def test_the_kv_estimate_matches_the_formula(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -189,7 +189,7 @@ class TestFit:
         assert report.kv_estimate_bytes == int(expected)
 
     def test_a_narrower_cache_type_estimates_smaller(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -199,7 +199,7 @@ class TestFit:
         assert q8.kv_estimate_bytes < f16.kv_estimate_bytes
 
     def test_head_dim_falls_back_to_embedding_over_head_count(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         meta = {
@@ -212,7 +212,7 @@ class TestFit:
         assert report.kv_estimate_bytes == int(32 * 8 * 128 * 4096 * 4.0)
 
     def test_it_reports_the_number_against_a_limit_either_way(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -228,7 +228,7 @@ class TestFit:
         assert not over.ok
 
     def test_no_known_limit_still_reports_the_estimate_and_passes(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -242,7 +242,7 @@ class TestMeasuredFitCheck:
     place of the analytic estimate whenever a record for the model exists."""
 
     def test_an_ordinary_ask_with_no_record_gets_no_extra_check(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -256,8 +256,8 @@ class TestMeasuredFitCheck:
         """A 100G file whose lookup table is paged a row at a time loads at 80G on the
         GPU; the file size refused a shape that runs (driven 2026-09-05, Flash-Next at
         its whole window). Mutation: let the estimate keep the verdict."""
-        import ml_stack.setup as setup_module
-        from ml_stack.serve.fit import Fit
+        import poolhouse.setup as setup_module
+        from poolhouse.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -282,8 +282,8 @@ class TestMeasuredFitCheck:
         assert report.ok
 
     def test_slots_are_charged_each(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
-        from ml_stack.serve.fit import Fit
+        import poolhouse.setup as setup_module
+        from poolhouse.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -297,7 +297,7 @@ class TestMeasuredFitCheck:
         assert "a slot at 2,048 tokens" in found.detail and " x 4" in found.detail
 
     def test_no_measured_record_says_so_and_passes(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -309,8 +309,8 @@ class TestMeasuredFitCheck:
         assert found.ok and "no measured record" in found.detail
 
     def test_a_measured_record_that_fits(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
-        from ml_stack.serve.fit import Fit
+        import poolhouse.setup as setup_module
+        from poolhouse.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -328,8 +328,8 @@ class TestMeasuredFitCheck:
 
     def test_a_measured_record_that_does_not_fit_refuses_with_the_numbers(self, tmp_path,
                                                                           monkeypatch):
-        import ml_stack.setup as setup_module
-        from ml_stack.serve.fit import Fit
+        import poolhouse.setup as setup_module
+        from poolhouse.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -348,7 +348,7 @@ class TestMeasuredFitCheck:
 
 class TestFlags:
     def test_a_flag_the_build_lacks_is_named(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -363,7 +363,7 @@ class TestHfReference:
     def test_the_hub_being_unreachable_is_unknown_not_failed(self, tmp_path, monkeypatch):
         """What the build should hold could not even be asked -- not the same as asking
         and finding a shard absent. A network fault must not read as a missing file."""
-        import ml_stack.hub as hub_module
+        import poolhouse.hub as hub_module
 
         def broken(repo, **kw):
             raise OSError("no route to host")
@@ -379,7 +379,7 @@ class TestHfReference:
         (the same thing `-hf-file` is given), so the file and the reference are both
         flat filenames here -- a directory-per-quantisation repository is a separate,
         pre-existing limitation of that parsing, not of this check."""
-        import ml_stack.hub as hub_module
+        import poolhouse.hub as hub_module
 
         shelves = [
             ("thing-00001-of-00002.gguf", 4_000_000_000),
@@ -399,8 +399,8 @@ class TestHfReference:
         assert report.weights_bytes == 7_000_000_000
 
     def test_every_shard_present_locally_is_complete(self, tmp_path, monkeypatch):
-        import ml_stack.hub as hub_module
-        import ml_stack.setup as setup_module
+        import poolhouse.hub as hub_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         shelves = [("thing-Q4_K_M.gguf", 4_000_000_000)]
@@ -430,7 +430,7 @@ class TestHfReference:
 
 class TestReportFormatting:
     def test_said_is_one_line_per_check(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # wrong on purpose
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -446,7 +446,7 @@ class TestStartRunsPreflight:
     before `Popen` when it comes back wrong."""
 
     def test_a_failing_preflight_stops_the_launch(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # not "llama"
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -456,7 +456,7 @@ class TestStartRunsPreflight:
         def popen(*a, **k):
             raise AssertionError("a process was started despite a failing preflight")
 
-        from ml_stack.serve.ports import free_port
+        from poolhouse.serve.ports import free_port
 
         monkeypatch.setattr(subprocess, "Popen", popen)
         spec = ServerSpec(model=gguf, port=free_port())
@@ -464,8 +464,8 @@ class TestStartRunsPreflight:
             leased(LlamaServerBackend(binary=binary), spec, timeout=1.0)
 
     def test_preflight_can_be_turned_off(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
-        import ml_stack.setup as setup_module
+        monkeypatch.setattr("poolhouse.hub.machine_room", lambda: 1 << 40)
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -490,15 +490,15 @@ class TestLoadTimingAndWarmUp:
     that pays for shader compilation and the first KV allocation."""
 
     def _spec(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
-        from ml_stack.serve.ports import free_port
+        import poolhouse.setup as setup_module
+        from poolhouse.serve.ports import free_port
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
         return ServerSpec(model=gguf, port=free_port())
 
     def test_load_s_and_warmup_s_are_recorded(self, tmp_path, monkeypatch):
-        from ml_stack.serve.process import kill_process_tree
+        from poolhouse.serve.process import kill_process_tree
 
         spec = self._spec(tmp_path, monkeypatch)
         binary = fake_llama_binary(tmp_path)
@@ -510,7 +510,7 @@ class TestLoadTimingAndWarmUp:
             kill_process_tree(info.pid)
 
     def test_warmup_is_skipped_when_asked(self, tmp_path, monkeypatch):
-        from ml_stack.serve.process import kill_process_tree
+        from poolhouse.serve.process import kill_process_tree
 
         spec = self._spec(tmp_path, monkeypatch)
         binary = fake_llama_binary(tmp_path)
@@ -527,7 +527,7 @@ def test_a_per_layer_head_count_is_summed_not_multiplied():
     """gemma-4-26B-A4B stores attention.head_count_kv as one entry per block; a dense model
     stores one integer. Measured 2026-09-01: the array crashed the estimate and with it the
     load. Mutation: multiply the raw value."""
-    from ml_stack.serve.preflight import _kv_estimate_bytes
+    from poolhouse.serve.preflight import _kv_estimate_bytes
 
     dense = {"general.architecture": "x", "x.block_count": 4, "x.attention.head_count_kv": 2,
              "x.attention.key_length": 8}
@@ -541,7 +541,7 @@ def test_a_sparse_attention_layer_is_charged_its_indexer_cache_as_well():
     """Qwen3.8-Flash-Next measured 48K a token (`fit --measure`, 2026-09-02) where its twelve
     attention layers' K/V come to 24K: the indexer keeps a second cache the same size.
     Mutation: drop the `caches` factor."""
-    from ml_stack.serve.preflight import _kv_estimate_bytes
+    from poolhouse.serve.preflight import _kv_estimate_bytes
 
     flash = {"general.architecture": "qwen4exp", "qwen4exp.block_count": 8,
              "qwen4exp.attention.head_count_kv": 2, "qwen4exp.attention.key_length": 256,
@@ -557,10 +557,10 @@ def test_an_architecture_with_a_hyphen_is_known_when_the_source_says_so(monkeypa
     alphanumeric words with a family prefix, so a preflight refused a model the same build
     had served all afternoon (measured 2026-09-01). Mutation: compare without _plain, or
     drop the source table."""
-    from ml_stack.serve import preflight
+    from poolhouse.serve import preflight
 
-    monkeypatch.setattr("ml_stack.serve.build_platform.arches_from_source", lambda source: {"gpt-oss", "llama"})
-    monkeypatch.setattr("ml_stack.setup._arches", lambda binary, **k: {"llama", "gemma3"})
+    monkeypatch.setattr("poolhouse.serve.build_platform.arches_from_source", lambda source: {"gpt-oss", "llama"})
+    monkeypatch.setattr("poolhouse.setup._arches", lambda binary, **k: {"llama", "gemma3"})
     known = preflight.known_architectures(tmp_path / "llama-server")
     assert "gpt-oss" in known
     assert preflight._plain("gpt-oss") == "gptoss" == preflight._plain("GPT_OSS")
@@ -573,10 +573,10 @@ def test_the_flags_check_takes_a_draft_named_by_hf_file(tmp_path, monkeypatch):
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
-    from ml_stack.serve import preflight
-    from ml_stack.serve.backend import ServerSpec
+    from poolhouse.serve import preflight
+    from poolhouse.serve.backend import ServerSpec
 
-    monkeypatch.setattr("ml_stack.serve.backend.flags_of", lambda b, **k: frozenset({"-m", "-md", "--port", "-c", "-np", "--spec-type", "-fa", "--jinja", "--flash-attn", "--ctx-size", "--parallel", "--model", "--model-draft", "--host"}))
+    monkeypatch.setattr("poolhouse.serve.backend.flags_of", lambda b, **k: frozenset({"-m", "-md", "--port", "-c", "-np", "--spec-type", "-fa", "--jinja", "--flash-attn", "--ctx-size", "--parallel", "--model", "--model-draft", "--host"}))
     spec = ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF/MTP/mtp-head-Q4_0.gguf", spec_type="draft-mtp")
     check = preflight._flags_check(spec, binary)
     assert check.name == "flags"
@@ -591,10 +591,10 @@ class TestSeams:
 
     def test_every_fact_handed_in_reaches_no_file_no_hub_and_no_build(self, tmp_path,
                                                                         monkeypatch):
-        import ml_stack.hub as hub_module
-        import ml_stack.setup as setup_module
-        from ml_stack.serve.backend import LlamaServerBackend
-        from ml_stack.serve.emitted import emitted_flags
+        import poolhouse.hub as hub_module
+        import poolhouse.setup as setup_module
+        from poolhouse.serve.backend import LlamaServerBackend
+        from poolhouse.serve.emitted import emitted_flags
 
         def never(*a, **k):
             raise AssertionError("a real reader was reached")
@@ -651,7 +651,7 @@ class TestSeams:
         assert not report.ok
 
     def test_handing_in_nothing_reads_the_file_as_before(self, tmp_path, monkeypatch):
-        import ml_stack.setup as setup_module
+        import poolhouse.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
@@ -746,7 +746,7 @@ class TestAHeaderThatLies:
     def test_a_string_longer_than_the_file_is_refused_not_allocated(self, tmp_path):
         import struct
 
-        from ml_stack.serve.preflight import read_gguf_header
+        from poolhouse.serve.preflight import read_gguf_header
 
         path = self.gguf(tmp_path, struct.pack("<Q", 2**40) + b"key")
         with pytest.raises(ValueError, match="more than the file holds"):
@@ -755,7 +755,7 @@ class TestAHeaderThatLies:
     def test_an_array_that_claims_more_items_than_the_file_has_bytes_is_refused(self, tmp_path):
         import struct
 
-        from ml_stack.serve.preflight import read_gguf_header
+        from poolhouse.serve.preflight import read_gguf_header
 
         name = struct.pack("<Q", 1) + b"k"
         body = name + struct.pack("<I", 9) + struct.pack("<I", 4) + struct.pack("<Q", 2**62)
@@ -763,7 +763,7 @@ class TestAHeaderThatLies:
             read_gguf_header(self.gguf(tmp_path, body))
 
     def test_a_pair_count_no_model_has_is_refused(self, tmp_path):
-        from ml_stack.serve.preflight import read_gguf_header
+        from poolhouse.serve.preflight import read_gguf_header
 
         with pytest.raises(ValueError, match="metadata pairs"):
             read_gguf_header(self.gguf(tmp_path, b"", kv_count=2**60))
@@ -771,7 +771,7 @@ class TestAHeaderThatLies:
     def test_an_honest_header_is_still_read(self, tmp_path):
         import struct
 
-        from ml_stack.serve.preflight import read_gguf_header
+        from poolhouse.serve.preflight import read_gguf_header
 
         body = (struct.pack("<Q", 3) + b"abc" + struct.pack("<I", 4) + struct.pack("<I", 7)
                 + struct.pack("<Q", 1) + b"k" + struct.pack("<I", 8) + struct.pack("<Q", 2)
@@ -779,7 +779,7 @@ class TestAHeaderThatLies:
         assert read_gguf_header(self.gguf(tmp_path, body, kv_count=2)) == {"abc": 7, "k": "hi"}
 
     def test_a_safetensors_header_longer_than_the_file_is_refused(self, tmp_path):
-        from ml_stack.serve.mlx_tree import resident_bytes
+        from poolhouse.serve.mlx_tree import resident_bytes
 
         (tmp_path / "w.safetensors").write_bytes((2**50).to_bytes(8, "little") + b"{}")
         with pytest.raises(ValueError, match="not a safetensors file"):

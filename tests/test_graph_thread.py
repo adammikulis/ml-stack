@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from artifact_cache import cached, expand
 
-from ml_stack.graph.answers import Answer
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.thread import (
+from poolhouse.graph.answers import Answer
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.thread import (
     _rows,
     drew_on,
     follow,
@@ -25,7 +25,7 @@ from ml_stack.graph.thread import (
     turn_of,
 )
 
-GRAPH_SOURCES = Path(__file__).resolve().parents[1] / "src" / "ml_stack" / "graph"
+GRAPH_SOURCES = Path(__file__).resolve().parents[1] / "src" / "poolhouse" / "graph"
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
                "attrs": {}, "messages": []},
@@ -209,9 +209,9 @@ def test_a_graph_that_was_never_talked_to_has_no_conversation(tmp_path):
 
 # ------------------------------------------------------------ of any length
 
-from ml_stack.graph.conversation import converse  # noqa: E402
-from ml_stack.graph.prompts import EARLIER, RECALLED  # noqa: E402
-from ml_stack.graph.thread import (  # noqa: E402
+from poolhouse.graph.conversation import converse  # noqa: E402
+from poolhouse.graph.prompts import EARLIER, RECALLED  # noqa: E402
+from poolhouse.graph.thread import (  # noqa: E402
     EVERY,
     SUMMARY,
     WINDOW,
@@ -220,7 +220,7 @@ from ml_stack.graph.thread import (  # noqa: E402
     summarise,
     write_summary,
 )
-from ml_stack.testing import ScriptedModel  # noqa: E402
+from poolhouse.testing import ScriptedModel  # noqa: E402
 
 LONG_GRAPH = {
     "nodes": [*GRAPH["nodes"],
@@ -500,7 +500,7 @@ class TestAStoreFaultIsNotAnEmptyConversation:
 
 
 def test_an_embedder_that_fails_leaves_recall_to_the_words_and_says_so(store, capsys):
-    from ml_stack.http import ServerUnreachable
+    from poolhouse.http import ServerUnreachable
 
     for n in range(12):
         remember_turn(store, thread="t1", role="user", text=f"Iris and surveying, take {n}")

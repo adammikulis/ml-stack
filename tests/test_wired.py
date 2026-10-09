@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 from conftest import write_gguf
 
-from ml_stack.sentinel.human import HumanRequired
-from ml_stack.serve import wired, wired_apply as apply
+from poolhouse.sentinel.human import HumanRequired
+from poolhouse.serve import wired, wired_apply as apply
 
 GIB = 1024**3
 SRC = str(Path(__file__).resolve().parent.parent / "src")
@@ -63,7 +63,7 @@ class Recorder:
 
 @pytest.fixture(autouse=True)
 def state_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     for name in apply.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
 
@@ -128,7 +128,7 @@ def test_the_growing_parts_are_host_ram_with_their_caps_and_the_uncapped_one_say
 
 
 def test_the_mtp_head_adds_only_its_own_layer_when_it_lives_in_the_weights(tmp_path, monkeypatch):
-    from ml_stack.serve import mtp
+    from poolhouse.serve import mtp
 
     path = str(model(tmp_path, 4 * GIB))
     monkeypatch.setattr(mtp, "embeds_head", lambda _p: True)
@@ -278,10 +278,10 @@ def test_a_cancelled_password_dialog_changes_nothing_and_says_so():
 
 
 def test_the_command_line_refuses_an_agent_process_before_anything_runs(tmp_path):
-    env = {**os.environ, "PYTHONPATH": SRC, "ML_STACK_HOME": str(tmp_path / "home"),
-           "ML_STACK_NO_REAL_KEYSTORE": "1", "CLAUDECODE": "1"}
+    env = {**os.environ, "PYTHONPATH": SRC, "POOLHOUSE_HOME": str(tmp_path / "home"),
+           "POOLHOUSE_NO_REAL_KEYSTORE": "1", "CLAUDECODE": "1"}
     for argv in (["--reset"], ["--apply", "65536"], ["--persist", "65536"], ["--unpersist"]):
-        code = ("import sys; from ml_stack.serve import cli; "
+        code = ("import sys; from poolhouse.serve import cli; "
                 f"sys.exit(cli.COMMANDS.run(['memory', *{argv!r}]))")
         got = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
                              text=True, stdin=subprocess.DEVNULL, timeout=60)
@@ -290,7 +290,7 @@ def test_the_command_line_refuses_an_agent_process_before_anything_runs(tmp_path
 
 
 def test_only_the_command_and_the_ui_route_reach_the_privileged_change():
-    root = Path(SRC) / "ml_stack"
+    root = Path(SRC) / "poolhouse"
     users = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.py")
                    if re.search(r"import .*wired_apply|wired_apply import",
                                 p.read_text(encoding="utf-8")))

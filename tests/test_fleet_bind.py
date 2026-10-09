@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from ml_stack.fleet.daemon import ALL_INTERFACES, LOOPBACK, bind_address
-from ml_stack.fleet.discovery import primary_ip
+from poolhouse.fleet.daemon import ALL_INTERFACES, LOOPBACK, bind_address
+from poolhouse.fleet.discovery import primary_ip
 
 
 def test_the_default_is_this_machine_only():
@@ -35,7 +35,7 @@ def _free_port():
 
 def _daemon(tmp_path, port, *flags):
     return subprocess.Popen(
-        [sys.executable, "-m", "ml_stack.fleet.daemon", "--root", str(tmp_path / "traind"),
+        [sys.executable, "-m", "poolhouse.fleet.daemon", "--root", str(tmp_path / "traind"),
          "--bench-home", str(tmp_path / "bench"), "--port", str(port), "--no-announce",
          "--no-web", "--cluster-key", str(tmp_path / "none.key"), *flags],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -72,11 +72,11 @@ def test_a_daemon_started_with_no_flags_cannot_be_reached_from_the_lan(tmp_path,
 def _ui_daemon(tmp_path, *, ui_from_lan):
     import threading
 
-    from ml_stack.fleet.api import Daemon, make_handler
-    from ml_stack.fleet.daemon import load_or_create_token
-    from ml_stack.fleet.framing import LimitedServer
-    from ml_stack.fleet.jobs import JobRunner
-    from ml_stack.fleet.ui import UI
+    from poolhouse.fleet.api import Daemon, make_handler
+    from poolhouse.fleet.daemon import load_or_create_token
+    from poolhouse.fleet.framing import LimitedServer
+    from poolhouse.fleet.jobs import JobRunner
+    from poolhouse.fleet.ui import UI
 
     root = tmp_path / "traind"
     (root / "files").mkdir(parents=True)
@@ -84,7 +84,7 @@ def _ui_daemon(tmp_path, *, ui_from_lan):
     handler = make_handler(Daemon(runner, root / "files", load_or_create_token(root),
                                   ui=UI(name="box", cluster_key_path=tmp_path / "k"),
                                   ui_from_lan=ui_from_lan))
-    from ml_stack.fleet import tls
+    from poolhouse.fleet import tls
 
     context = tls.server_context(tls.identity(tmp_path / "tls", "box"))
     httpd = LimitedServer((ALL_INTERFACES, 0), handler, tls=context)
@@ -95,11 +95,11 @@ def _ui_daemon(tmp_path, *, ui_from_lan):
 def _status(address, port):
     import http.client
 
-    from ml_stack.fleet.onboard.pairing import unverified_context
+    from poolhouse.fleet.onboard.pairing import unverified_context
 
     conn = (http.client.HTTPConnection(address, port, timeout=5) if address.startswith("127.")
             else http.client.HTTPSConnection(address, port, timeout=5, context=unverified_context()))
-    conn.request("GET", "/ui/", headers={"X-ML-Stack-UI": "1"})
+    conn.request("GET", "/ui/", headers={"X-Poolhouse-UI": "1"})
     got = conn.getresponse().status
     conn.close()
     return got

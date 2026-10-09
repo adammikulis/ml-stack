@@ -3,7 +3,7 @@
 import asyncio
 import types
 
-from ml_stack.client import sdk
+from poolhouse.client import sdk
 
 
 class _TakenSocket:

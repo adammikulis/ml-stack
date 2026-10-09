@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import localcli, localroute, localstart, tokens
+from poolhouse.workspace import localcli, localroute, localstart, tokens
 
 
 @pytest.mark.parametrize('caller', ['cli', 'browser'])
@@ -80,7 +80,7 @@ def test_agent_launch_records_own_child_model_claim_without_person_context(tmp_p
     kit = Kit(clean_env(monkeypatch, tmp_path))
     parent = kit.agent('launcher')
     child = kit.ws.delegate(parent, 'worker')
-    monkeypatch.setenv('ML_STACK_AGENT', '1')
+    monkeypatch.setenv('POOLHOUSE_AGENT', '1')
     monkeypatch.setattr(kit.ws, 'set_model', lambda *_args, **_kwargs: pytest.fail('person model setter'))
     pick = localstart.localmodel.Pick(ref='qwen', name='qwen')
     localstart._record_model(kit.ws, child['id'], pick, 'claude')
@@ -91,8 +91,8 @@ def test_agent_launch_records_own_child_model_claim_without_person_context(tmp_p
 
 @pytest.mark.redteam
 def test_launch_claim_preserves_verified_model_and_refuses_changed_model(tmp_path, monkeypatch):
-    from ml_stack.workspace.identity import Denied
-    from ml_stack.workspace.modelid import VERIFIED
+    from poolhouse.workspace.identity import Denied
+    from poolhouse.workspace.modelid import VERIFIED
 
     kit = Kit(clean_env(monkeypatch, tmp_path))
     parent = kit.agent('launcher')

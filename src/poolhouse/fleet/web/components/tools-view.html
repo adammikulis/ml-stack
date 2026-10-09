@@ -1,0 +1,55 @@
+<style>
+tools-view { display:contents; }
+tools-view .workspace { padding:calc(28px * var(--ui-density,1)) calc(32px * var(--ui-density,1)); }
+tools-view .tools-heading { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:22px; }
+tools-view .tools-heading h1 { margin:0 0 8px; } tools-view .tools-heading p { margin:0; }
+tools-view .tool-tabs { display:flex; gap:8px; border-bottom:1px solid var(--line); margin-bottom:24px; padding-bottom:12px; }
+tools-view .tool-tabs button { margin:0; width:auto; background:transparent; color:var(--text); border:0; padding:calc(12px * var(--ui-density,1)) calc(18px * var(--ui-density,1)); border-radius:10px; }
+tools-view .tool-tabs button[aria-selected=true] { background:var(--poolhouse-yellow); color:var(--poolhouse-yellow-ink,var(--poolhouse-navy)); }
+tools-view .tool-panel { min-width:0; } tools-view .tool-panel[hidden] { display:none; }
+tools-view .workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:24px; align-items:start; }
+tools-view .workspace-card { background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:calc(24px * var(--ui-density,1)); }
+tools-view .workspace-card h2 { margin-top:0; }
+tools-view #catalogue { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; margin-top:20px; }
+tools-view #catalogue .workspace-card { padding:calc(20px * var(--ui-density,1)); }
+tools-view #catalogue h3 { margin:0 0 10px; font-size:1.000rem; overflow-wrap:anywhere; }
+tools-view #search { max-width:500px; }
+tools-view #runner { margin-top:24px; max-width:850px; }
+@media(max-width:1100px) { tools-view .workspace-grid { grid-template-columns:1fr; } }
+@media(max-width:650px) { tools-view .workspace { padding:calc(20px * var(--ui-density,1)); } tools-view .tool-tabs { overflow:auto; } tools-view .tool-tabs button { white-space:nowrap; } }
+</style>
+<template><section class="workspace" hidden>
+<header class="tools-heading"><div><h1>Tools</h1></div></header>
+<nav class="tool-tabs" role="tablist" aria-label="Tool workspace"><button type="button" role="tab" data-tool="decision" aria-selected="true">Decision lab</button><button type="button" role="tab" data-tool="library" aria-selected="false">Command library</button><button type="button" role="tab" data-tool="jobs" aria-selected="false">Running jobs</button></nav>
+<div class="tool-panel" data-tool-panel="decision"><div class="workspace-grid"><div class="workspace-card" id="decision"></div><aside class="workspace-card"><h2>Decision models</h2><p class="hint">Give a decision model a situation and a closed set of options. Evaluate labelled cases to understand its probabilities.</p><p class="hint">The default decider is Strands 2B. Use the advanced controls to choose a backend or checkpoint.</p></aside></div></div>
+<div class="tool-panel" data-tool-panel="library" hidden><h2>Specialist command library</h2><p id="library-status" class="status" role="status" aria-live="polite"></p><input id="search" type="search" aria-label="Search tools" placeholder="Search graph, speech, ingest, security, workspace…"><div class="cards" id="catalogue"></div><div class="workspace-card" id="runner"></div></div>
+<div class="tool-panel" data-tool-panel="jobs" hidden><div class="workspace-card"><workspace-jobs></workspace-jobs></div></div>
+</section></template>
+<script>
+(function(){const M=window.fleetModel,W=window.workspaceModel,E=M.el;
+class ToolsView extends HTMLElement{
+ connectedCallback(){if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.setupTabs();this.libraryNote=this.querySelector('#library-status');const b=this.querySelector('#decision');b.append(E('h2',{},'Decision model lab'));this.mode=W.field(b,'Operation','select');['ask','list','eval','calibrate','bench','fetch'].forEach(x=>this.mode.append(E('option',{value:x},{ask:'Ask a decision question',list:'List trained deciders',eval:'Evaluate labelled cases',calibrate:'Calibrate probabilities',bench:'Compare backends',fetch:'Download Strands 2B'}[x])));this.state=W.field(b,'State / situation','textarea');this.question=W.field(b,'Question','input',{value:'Which action should be taken?'});this.choices=W.field(b,'Options, one per line','textarea');this.choices.value='stop\nproceed';this.cases=W.field(b,'Evaluation cases (JSONL path or guards)','input',{value:'guards'});this.output=W.field(b,'Calibration / evaluation output','input',{value:'decisions/report.json'});this.advanced=E('details',{class:'aside','data-advanced':''},E('summary',{},'Advanced options'));b.append(this.advanced);this.backend=W.field(this.advanced,'Decision backend','select');['pointer','logprob','embed','rules'].forEach(x=>this.backend.append(E('option',{value:x},x)));this.pointer=W.field(b,'Registered decider or checkpoint (blank uses Strands 2B)','input');this.extra=W.field(this.advanced,'Advanced backend arguments as JSON array','textarea');this.extra.value='[]';this.note=E('p',{class:'status',role:'status'});b.append(E('div',{class:'workspace-actions'},W.button('Run operation',()=>this.decide()),W.button('Fine-tune',()=>{document.querySelector('training-view').openRun({workflow:'decider',dataset:this.cases.value});})),this.note);const r=this.querySelector('#runner');r.append(E('h2',{},'Run specialist command'));this.command=W.field(r,'Installed command','select');const commandOptions=E('details',{class:'aside','data-advanced':''},E('summary',{},'Advanced options: command arguments'));r.append(commandOptions);this.args=W.field(commandOptions,'Arguments as JSON array','textarea');this.args.value='["--help"]';this.preview=E('pre',{},'Choose a tool above to inspect its help.');this.runnerNote=E('p',{class:'status',role:'status','aria-live':'polite',id:'runner-status'});r.append(E('div',{class:'workspace-actions'},W.button('Review',()=>this.run(true)),W.button('Run command',()=>this.run(false))),this.preview,this.runnerNote);this.mode.addEventListener('change',()=>this.operationFields());this.operationFields();this.querySelector('#search').addEventListener('input',()=>this.draw());W.route(this.host,'tools',()=>this.load());}
+ setupTabs(){
+  const tabs=[...this.querySelectorAll('[data-tool]')];
+  for(const [index,button] of tabs.entries()){
+   const panel=this.querySelector(`[data-tool-panel="${button.dataset.tool}"]`);
+   button.id=`tools-tab-${button.dataset.tool}`;button.setAttribute('aria-controls',`tools-panel-${button.dataset.tool}`);button.tabIndex=index?-1:0;
+   panel.id=`tools-panel-${button.dataset.tool}`;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',button.id);
+   button.onclick=()=>this.selectPanel(button.dataset.tool);
+   button.onkeydown=event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+    event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+    tabs[next].click();tabs[next].focus();
+   };
+  }
+ }
+ selectPanel(name){for(const panel of this.querySelectorAll('[data-tool-panel]'))panel.hidden=panel.dataset.toolPanel!==name;for(const button of this.querySelectorAll('[data-tool]')){button.setAttribute('aria-selected',String(button.dataset.tool===name));button.tabIndex=button.dataset.tool===name?0:-1;}if(name==='jobs')this.querySelector('workspace-jobs').refresh();}
+ operationFields(){const op=this.mode.value;for(const field of [this.state,this.question,this.choices])W.visible(field,op==='ask');for(const field of [this.cases,this.output])W.visible(field,['eval','calibrate','bench'].includes(op));W.visible(this.pointer,!['list','fetch'].includes(op));this.advanced.hidden=['list','fetch'].includes(op);}
+ async load(){try{const r=await W.api('/ui/workspace/commands');this.commands=r.commands;this.command.replaceChildren(...r.commands.map(c=>E('option',{value:c.name},c.name)));this.draw();this.libraryNote.textContent='';}catch(e){W.status(this.libraryNote,e);}}
+ draw(){const q=this.querySelector('#search').value.toLowerCase();this.querySelector('#catalogue').replaceChildren(...(this.commands||[]).filter(c=>(c.name+' '+c.entry).includes(q)).map(c=>E('article',{class:'workspace-card'},E('h3',{},c.name),E('p',{},c.description||'Inspect options and run this specialist workflow.'),W.button('Open help',async()=>{this.command.value=c.name;this.args.value='["--help"]';await this.run(false);})))) ;}
+ parseArguments(value){const args=JSON.parse(value);if(!Array.isArray(args)||args.some(arg=>typeof arg!=='string'))throw Error('Arguments must be a JSON array of strings.');return args;}
+ async pending(action){if(this.busy)return;this.busy=true;const buttons=[...this.querySelectorAll('#decision button,#runner button,#catalogue button')];buttons.forEach(button=>button.disabled=true);try{await action();}finally{this.busy=false;buttons.forEach(button=>button.disabled=false);}}
+ async run(preview){return this.pending(async()=>{try{this.runnerNote.textContent='';const args=this.parseArguments(this.args.value);const terminal=['poolhouse-chat','poolhouse-memory','poolhouse-security'].includes(this.command.value)&&!args.includes('--help');const r=await W.post('/ui/workspace/jobs',{command:this.command.value,args,preview:preview||terminal});if(terminal){this.preview.textContent='Run this command in your own terminal:\n'+r.command;this.runnerNote.textContent='Run this command in your own terminal. Interactive chat and human-only changes to memory, roles, rules or security require you at the prompt.';return;}this.preview.textContent=r.command||`Queued ${r.id}`;if(!preview){this.querySelector('workspace-jobs').selected=r.id;this.selectPanel('jobs');}}catch(e){W.status(this.runnerNote,e);}});}
+ async decide(){return this.pending(async()=>{try{const op=this.mode.value;let args=[op];if(op==='fetch')args.push('--yes');if(op==='ask'){const choices=this.choices.value.split('\n').map(value=>value.trim()).filter(Boolean);if(!this.question.value.trim()||new Set(choices).size<2)throw Error('Enter a question and at least two distinct options.');args.push(this.question.value,'--state',this.state.value,'--json');for(const choice of choices)args.push('--option',choice);}else if(['eval','calibrate','bench'].includes(op)){args.push(this.cases.value,'--out',this.output.value);}if(!['list','fetch'].includes(op)){args.push('--backend',this.backend.value);if(this.pointer.value)args.push('--pointer',this.pointer.value);args.push(...this.parseArguments(this.extra.value));}const r=await W.launch('poolhouse-decide',args,'Decision '+op);this.note.textContent=`Queued ${r.id}`;this.querySelector('workspace-jobs').selected=r.id;this.selectPanel('jobs');}catch(e){W.status(this.note,e);}});}
+}customElements.define('tools-view',ToolsView);})();
+</script>

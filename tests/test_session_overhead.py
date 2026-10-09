@@ -6,7 +6,7 @@ import time
 
 from conftest import file_mtimes
 
-from ml_stack import home
+from poolhouse import home
 
 STATE_FILES_AT_MOST = 5_000
 SNAPSHOT_SECONDS_AT_MOST = 3.0

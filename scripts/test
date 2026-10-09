@@ -17,7 +17,7 @@
     scripts/test submit TIER [PATH...]   start the same run in the background and print its job id
     scripts/test status [JOB] | wait JOB [--timeout S] | result JOB | cancel JOB
     scripts/test TIER [FILE...] --on DEVICE|all [--split]   the same tier on other devices of the pool (docs/test-farm.md);
-                           `ml-stack-test-devices` lists them
+                           `poolhouse-test-devices` lists them
 
 A tier run is a background job that the command follows; Ctrl-C cancels it. A run that names test
 files reuses an earlier pass of an unchanged file unless --no-reuse is given (docs/test-reuse.md).
@@ -67,11 +67,11 @@ import testselectors
 import testslots_runner
 import testtime
 
-from ml_stack.activity import reuse
-from ml_stack.devbranch import development_branch
-from ml_stack.activity.gate import Run, record_run, tree_hash
-from ml_stack.workspace import testboard, testruns
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.activity import reuse
+from poolhouse.devbranch import development_branch
+from poolhouse.activity.gate import Run, record_run, tree_hash
+from poolhouse.workspace import testboard, testruns
+from poolhouse.workspace.taskboard import TaskBoard
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = development_branch(ROOT)

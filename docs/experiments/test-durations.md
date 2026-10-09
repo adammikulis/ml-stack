@@ -81,10 +81,10 @@ Run 1, by cause (setup + call + teardown, seconds summed over 10,169 timed phase
 4.7 s call tests/test_serve_broker.py::test_a_conflicting_model_waits_for_the_holder_and_kills_nothing_it_holds
 4.7 s call tests/test_serve.py::TestStartGuards::test_a_foreign_process_on_the_port_is_refused_not_killed
 4.6 s call tests/test_gate.py::test_requests_are_served_in_the_order_they_arrived
-4.6 s call tests/test_no_live_calls.py::test_the_switch_runs_a_live_test_and_the_other_switch_does_not[live_api-ML_STACK_LIVE_API]
+4.6 s call tests/test_no_live_calls.py::test_the_switch_runs_a_live_test_and_the_other_switch_does_not[live_api-POOLHOUSE_LIVE_API]
 4.5 s call tests/test_fleet_salt.py::test_words_no_cluster_here_accepts_are_an_error_not_a_new_cluster
 4.5 s call tests/test_gate.py::test_requests_sent_at_the_same_instant_never_overlap
-4.4 s call tests/test_no_live_calls.py::test_the_switch_runs_a_live_test_and_the_other_switch_does_not[live_net-ML_STACK_LIVE_NET]
+4.4 s call tests/test_no_live_calls.py::test_the_switch_runs_a_live_test_and_the_other_switch_does_not[live_net-POOLHOUSE_LIVE_NET]
 4.3 s call tests/test_ingest.py::test_resume_skips_what_is_already_done_and_asks_the_model_nothing_more
 4.1 s call tests/test_serve_llamacpp.py::test_a_build_that_fails_its_smoke_test_leaves_the_old_build_active_and_is_kept
 4.1 s call tests/test_pdf_engine.py::test_work_that_takes_too_long_is_killed
@@ -161,7 +161,7 @@ They are what the tests are for; none was weakened or marked `slow`. The tests t
 | `test_a_server_stops_when_the_host_is_terminated` timed out at 20 s | process-tree kill under load 20+ | the wait is 60 s (it returns at once when it works) |
 
 Not fixed: `test_embedding.py::test_importing_them_loads_only_the_standard_library_and_the_core_dependencies` fails
-every time (importing `ml_stack.serve` and `ml_stack.client` now imports `cryptography`, through the requests
+every time (importing `poolhouse.serve` and `poolhouse.client` now imports `cryptography`, through the requests
 model), a regression on the integration branch and not a flake; and one failure of
 `test_sentinel_notice_storm.py::test_four_changed_files_scanned_by_many_processes_are_one_dialog` at load 29 (no
 dialog started; six repeats at load 18 passed), which may be a lost heads-up under load in the product code.

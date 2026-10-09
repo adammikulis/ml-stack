@@ -159,7 +159,7 @@ public final class ScanActivity extends Activity implements TextureView.SurfaceT
             BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(new PlanarYUVLuminanceSource(
                     luminance, width, height, 0, 0, width, height, false)));
             String text = new QRCodeReader().decode(bitmap, Map.of(DecodeHintType.TRY_HARDER, true)).getText();
-            if (text.length() <= 8192 && text.startsWith("ml-stack://enroll?data=")) {
+            if (text.length() <= 8192 && text.startsWith("poolhouse://enroll?data=")) {
                 finished = true;
                 runOnUiThread(() -> {
                     setResult(RESULT_OK, new Intent().putExtra("invite", text));

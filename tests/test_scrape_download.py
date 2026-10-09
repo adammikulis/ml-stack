@@ -9,9 +9,9 @@ import zipfile
 
 import pytest
 
-from ml_stack.http import Refused
-from ml_stack.scrape.download import ACCEPT_CAD, DownloadError, Wanted, as_dict, download, kind_of
-from ml_stack.scrape.polite import Disallowed, Polite
+from poolhouse.http import Refused
+from poolhouse.scrape.download import ACCEPT_CAD, DownloadError, Wanted, as_dict, download, kind_of
+from poolhouse.scrape.polite import Disallowed, Polite
 from tests.web_site import allow_all, serving
 
 

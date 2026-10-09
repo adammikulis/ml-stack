@@ -5,8 +5,8 @@ import json
 import pytest
 from taskboard_kit import accepted, board as _board_fixture, proposed
 
-from ml_stack.workspace import enforcement, enforcement_check, task_scope
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import enforcement, enforcement_check, task_scope
+from poolhouse.workspace.identity import Denied
 
 board = _board_fixture
 pytestmark = pytest.mark.redteam

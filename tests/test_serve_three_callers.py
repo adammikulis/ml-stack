@@ -15,12 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import gate, limits
-from ml_stack.http import request_json
-from ml_stack.serve import admission, broker_wire
-from ml_stack.serve.leases import lease_file, recorded_servers
-from ml_stack.serve.process import kill_process_tree, pid_exists
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import gate, limits
+from poolhouse.http import request_json
+from poolhouse.serve import admission, broker_wire
+from poolhouse.serve.leases import lease_file, recorded_servers
+from poolhouse.serve.process import kill_process_tree, pid_exists
+from poolhouse.testing.fakes import fake_llama_binary
 
 pytestmark = pytest.mark.slow
 SRC = str(Path(__file__).resolve().parent.parent / "src")
@@ -28,10 +28,10 @@ GIB = 1024 ** 3
 
 CALLER = """
 import json, sys, time
-import ml_stack.serve.unmanaged as unmanaged
+import poolhouse.serve.unmanaged as unmanaged
 unmanaged.every_server = lambda: []
-from ml_stack.serve import ServerManager, ServerSpec, free_port
-from ml_stack.serve.backend import ServerFailed
+from poolhouse.serve import ServerManager, ServerSpec, free_port
+from poolhouse.serve.backend import ServerFailed
 manager = ServerManager()
 try:
     info = manager.lease(ServerSpec(model=sys.argv[1], port=free_port(), context=512),
@@ -46,8 +46,8 @@ time.sleep(float(sys.argv[2]))
 
 
 DAEMON = """
-import ml_stack.serve.unmanaged as unmanaged
-from ml_stack.serve import broker, broker_wire
+import poolhouse.serve.unmanaged as unmanaged
+from poolhouse.serve import broker, broker_wire
 unmanaged.every_server = lambda: []
 made = broker.Broker.__init__
 

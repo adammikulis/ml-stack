@@ -13,9 +13,9 @@ import time
 import pytest
 from test_ingest import a_part_read_source, a_read, in_store, said
 
-from ml_stack import ingest
+from poolhouse import ingest
 
-pytest.importorskip("ladybug", reason="ml-stack[store]")
+pytest.importorskip("ladybug", reason="poolhouse[store]")
 
 FIELD_GUIDE = "ambleford-field-guide"
 OPEN_TEXTS = "velthorne-open-texts"
@@ -85,7 +85,7 @@ def test_a_concept_two_sources_name_is_listed_with_the_sources_that_name_it(tmp_
 def test_an_edge_known_to_different_sources_is_a_relation_between_them(tmp_path):
     """One source's vocabulary reaching into another's: an edge whose ends are not held by
     the same sources, whether or not one of them is shared."""
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     store = two_sources(tmp_path)
     with GraphStore(store) as held:
@@ -109,7 +109,7 @@ def test_an_edge_known_to_different_sources_is_a_relation_between_them(tmp_path)
 
 def test_an_edge_both_sources_hold_each_end_of_is_not_between_them(tmp_path):
     """Inside the vocabulary the two sources share, not a reach from one into the other."""
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     store = two_sources(tmp_path)
     with GraphStore(store) as held:
@@ -126,8 +126,8 @@ def test_an_edge_both_sources_hold_each_end_of_is_not_between_them(tmp_path):
 
 
 def test_the_pairs_the_hygiene_pass_judged_are_counted(tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.verdicts import DECISIONS
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.verdicts import DECISIONS
 
     store = two_sources(tmp_path)
     with GraphStore(store) as held:
@@ -166,8 +166,8 @@ def two_sources_folded_in_turn(tmp_path):
 
 def test_the_fold_writes_each_name_it_lands_on_an_existing_node_with_the_units_of_both(
         tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
     assert ingest.main(["fold", "--out", str(store)]) == 0
@@ -187,8 +187,8 @@ def test_the_fold_writes_each_name_it_lands_on_an_existing_node_with_the_units_o
 
 
 def test_a_fold_repeated_writes_the_landing_once(tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
     ingest.main(["fold", "--out", str(store)])
@@ -216,7 +216,7 @@ def test_a_name_the_fold_landed_across_two_sources_is_between_them_and_the_comma
 def test_a_source_folded_again_keeps_what_the_other_source_gave_a_shared_node(tmp_path):
     """The fold of every source runs in slug order, so the first source is folded again after
     the second landed on its node: the node keeps both sources' units, mentions and names."""
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     store = two_sources_folded_in_turn(tmp_path)
     ingest.main(["fold", "--out", str(store)])
@@ -232,7 +232,7 @@ def test_a_source_folded_again_keeps_what_the_other_source_gave_a_shared_node(tm
 
 
 def test_a_source_read_further_grows_its_own_share_of_a_shared_node(tmp_path):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     store = two_sources_folded_in_turn(tmp_path)
     ingest.main(["fold", "--out", str(store)])
@@ -250,9 +250,9 @@ def test_a_source_read_further_grows_its_own_share_of_a_shared_node(tmp_path):
 
 
 def test_a_fold_in_memory_a_dry_fold_and_a_read_only_absorb_write_no_landing(tmp_path):
-    from ml_stack.graph.absorbing import absorb
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.absorbing import absorb
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
     sources = ingest.Sources(store)
@@ -277,9 +277,9 @@ WRITTEN = {"seam wal": "seam wall"}
 
 def test_tidy_writes_each_merge_it_makes_to_the_store_with_the_units_both_names_came_from(
         tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import tidy
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.tidy import tidy
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_spelled_apart(tmp_path)
     assert tidy(store, dry_run=False, written=WRITTEN).merged_nodes == 1
@@ -299,9 +299,9 @@ def test_tidy_writes_each_merge_it_makes_to_the_store_with_the_units_both_names_
 
 
 def test_a_dry_tidy_writes_no_merge(tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import tidy
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.tidy import tidy
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_spelled_apart(tmp_path)
     assert tidy(store, written=WRITTEN).merged_nodes == 1
@@ -311,9 +311,9 @@ def test_a_dry_tidy_writes_no_merge(tmp_path):
 
 
 def test_a_merge_is_written_once_however_often_tidy_runs(tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import tidy
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.tidy import tidy
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_spelled_apart(tmp_path)
     tidy(store, dry_run=False, written=WRITTEN)
@@ -331,7 +331,7 @@ def test_a_merge_is_written_once_however_often_tidy_runs(tmp_path):
 
 
 def test_a_name_merged_across_two_sources_is_between_them_with_a_weight(tmp_path):
-    from ml_stack.graph.tidy import tidy
+    from poolhouse.graph.tidy import tidy
 
     store = two_sources_spelled_apart(tmp_path)
     tidy(store, dry_run=False, written=WRITTEN)
@@ -346,8 +346,8 @@ def test_a_name_merged_across_two_sources_is_between_them_with_a_weight(tmp_path
 
 
 def test_a_name_merged_within_one_source_is_not_between_sources(tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import tidy
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.tidy import tidy
 
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
@@ -379,8 +379,8 @@ def two_sources_a_plural_apart(tmp_path):
 
 
 def test_a_fold_logs_the_name_it_lands_on_another_source_s_node(tmp_path, capsys):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.verdicts import MERGES
 
     store = two_sources_a_plural_apart(tmp_path)
     assert not store.exists(), "nothing has written the log, or anything else, yet"
@@ -396,7 +396,7 @@ def test_a_fold_logs_the_name_it_lands_on_another_source_s_node(tmp_path, capsys
 
 
 def test_the_sources_command_prints_the_names_joined_across_sources(tmp_path, capsys):
-    from ml_stack.graph.tidy import tidy
+    from poolhouse.graph.tidy import tidy
 
     store = two_sources_spelled_apart(tmp_path)
     tidy(store, dry_run=False, written=WRITTEN)
@@ -420,7 +420,7 @@ def test_the_sources_command_prints_the_sources_the_shared_concepts_and_the_judg
     assert "concepts in more than one source (1)" in said_out
     assert "vault" in said_out and f"{FIELD_GUIDE}, {OPEN_TEXTS}" in said_out
     assert (f"between sources (0): no log of the names the sources share; "
-            f"ml-stack-ingest fold --out {store} re-folds each source from its reads and "
+            f"poolhouse-ingest fold --out {store} re-folds each source from its reads and "
             f"writes one") in said_out
     # each source's own name reaching into the one they both have
     assert "relations between sources (3)" in said_out
@@ -431,9 +431,9 @@ def test_the_sources_command_prints_the_sources_the_shared_concepts_and_the_judg
 
 def test_the_sources_command_asks_for_a_tidy_once_a_merge_is_logged_within_one_source(
         tmp_path, capsys):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import tidy
-    from ml_stack.graph.verdicts import MERGES
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.tidy import tidy
+    from poolhouse.graph.verdicts import MERGES
 
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
@@ -451,7 +451,7 @@ def test_the_sources_command_asks_for_a_tidy_once_a_merge_is_logged_within_one_s
     assert ingest.main(["sources", "--out", str(store)]) == 0
 
     assert (f"between sources (0): no concept merged across sources yet; "
-            f"ml-stack-ingest tidy --out {store}") in capsys.readouterr().out
+            f"poolhouse-ingest tidy --out {store}") in capsys.readouterr().out
 
 
 def test_the_sources_command_takes_a_sample_size(tmp_path, capsys):

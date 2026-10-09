@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import home
-from ml_stack.files import write_json
-from ml_stack.fleet import discovery, project_client, remote
-from ml_stack.workspace import cli, project_connection as connection
-from ml_stack.workspace.identity import Denied
+from poolhouse import home
+from poolhouse.files import write_json
+from poolhouse.fleet import discovery, project_client, remote
+from poolhouse.workspace import cli, project_connection as connection
+from poolhouse.workspace.identity import Denied
 
 PROJECT = "a" * 32
 
@@ -39,7 +39,7 @@ class Remote:
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     root = tmp_path / "project"
     root.mkdir()
     return root
@@ -57,7 +57,7 @@ def test_connected_project_uses_nearest_root_and_refuses_other_authority(project
 
 
 def test_unconfigured_shared_checkout_never_uses_local_workspace(project):
-    write_json(project / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": PROJECT,
+    write_json(project / ".poolhouse-project.json", {"kind": "project-checkout", "project_id": PROJECT,
                                                    "authority": {}})
     with pytest.raises(Denied, match="no board"):
         connection.selected(project)
@@ -113,7 +113,7 @@ def test_auto_discovery_refuses_conflicting_project_authorities(monkeypatch):
 
 
 def test_auto_attach_discovers_authority_without_registering_a_device(monkeypatch, tmp_path):
-    from ml_stack.fleet import projects
+    from poolhouse.fleet import projects
 
     monkeypatch.setattr(connection.git, "run", lambda *args, **kwargs:
                         SimpleNamespace(stdout=str(tmp_path)))
@@ -129,7 +129,7 @@ def test_auto_attach_discovers_authority_without_registering_a_device(monkeypatc
 def test_this_machines_own_beacon_is_named_by_its_loopback_or_its_lan_address(monkeypatch):
     """A board saved as https://127.0.0.1 is still the board when the beacon is heard on the LAN
     address (and the other way round); another machine's beacon is not reached that way."""
-    from ml_stack.fleet import remote as fleet_remote
+    from poolhouse.fleet import remote as fleet_remote
     monkeypatch.setattr(fleet_remote.home, "machine_id", lambda: "mine")
     monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.2.27")
     mine = SimpleNamespace(base_url="https://192.168.2.27:8770",
@@ -146,8 +146,8 @@ def test_this_machines_own_beacon_is_named_by_its_loopback_or_its_lan_address(mo
 
 
 def test_one_daemon_under_its_loopback_and_lan_names_is_one_board(monkeypatch):
-    from ml_stack.fleet import remote as fleet_remote
-    from ml_stack.workspace import automatic_connection as auto
+    from poolhouse.fleet import remote as fleet_remote
+    from poolhouse.workspace import automatic_connection as auto
     monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.2.27")
     loop = {"host": "https://127.0.0.1:8770", "project_id": PROJECT}
     lan = {"host": "https://192.168.2.27:8770", "project_id": PROJECT}
@@ -157,7 +157,7 @@ def test_one_daemon_under_its_loopback_and_lan_names_is_one_board(monkeypatch):
 
 
 def test_tokens_saved_under_the_lan_name_follow_the_loopback_name(tmp_path, monkeypatch):
-    from ml_stack.workspace import remote as ws_remote
+    from poolhouse.workspace import remote as ws_remote
     old, new = tmp_path / "old", tmp_path / "new"
     (old / "tokens").mkdir(parents=True)
     (old / "tokens" / "agent-a").write_text("kept")

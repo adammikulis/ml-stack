@@ -11,7 +11,7 @@ from ._util import read
 NAME = "deep-components"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 SUFFIXES = (".html", ".js", ".css")
 LIMIT = 500
 HARD = True

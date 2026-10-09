@@ -5,9 +5,9 @@ import subprocess
 
 import pytest
 
-from ml_stack import private_path, windows_private
-from ml_stack.workspace import tokens
-from ml_stack.workspace.identity import PREFIX, Denied
+from poolhouse import private_path, windows_private
+from poolhouse.workspace import tokens
+from poolhouse.workspace.identity import PREFIX, Denied
 
 if os.name == "nt":
     import ntsecuritycon

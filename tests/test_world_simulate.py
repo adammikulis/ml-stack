@@ -14,13 +14,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from ml_stack.graph.prompts import TIGHT_SYSTEM_SENTENCE
-from ml_stack.messages import Message
-from ml_stack.world import World
-from ml_stack.world.sentences import template_writer
-from ml_stack.world.simulate import LONGEST, SHORTEST, WORK_END, WORK_START, run, simulate
-from ml_stack.world.speaking import model_writer
-from ml_stack.world.story import ARCS, OUTCOMES, calendar, groups
+from poolhouse.graph.prompts import TIGHT_SYSTEM_SENTENCE
+from poolhouse.messages import Message
+from poolhouse.world import World
+from poolhouse.world.sentences import template_writer
+from poolhouse.world.simulate import LONGEST, SHORTEST, WORK_END, WORK_START, run, simulate
+from poolhouse.world.speaking import model_writer
+from poolhouse.world.story import ARCS, OUTCOMES, calendar, groups
 
 
 def spoken_as(persona: str) -> str:
@@ -302,9 +302,9 @@ def test_a_persona_speaks_over_the_subgraph_it_knows_with_its_own_system_prompt(
 
 
 def test_what_a_persona_said_last_time_in_an_arc_is_a_turn_when_it_speaks_again(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.thread import follow, threads
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.thread import follow, threads
 
     world = tiny_world()
     world.calendar = [{"day": 0, "until": 1, "kind": "incident",
@@ -425,8 +425,8 @@ def test_the_template_writer_never_says_the_same_thing_twice_in_a_thread():
 
 def test_run_with_a_model_takes_the_lock_keeps_memory_beside_the_output_and_prices_it(
         tmp_path, monkeypatch):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    import ml_stack.client
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    import poolhouse.client
 
     world = tiny_world()
     world.calendar = [{"day": 0, "until": 0, "kind": "incident",
@@ -443,7 +443,7 @@ def test_run_with_a_model_takes_the_lock_keeps_memory_beside_the_output_and_pric
         made.append(url)
         return SpeakingModel()
 
-    monkeypatch.setattr(ml_stack.client, "Client", fake_client)
+    monkeypatch.setattr(poolhouse.client, "Client", fake_client)
     counts = run(tmp_path / "in", tmp_path / "out", days=1, mix=1.0,
                  model_url="http://127.0.0.1:8080", seed=2)
     assert made == ["http://127.0.0.1:8080"]
@@ -569,8 +569,8 @@ def test_a_model_written_message_asserts_its_grounding_as_a_lower_bound():
 
 
 def test_asserts_round_trip_through_messages_jsonl_and_the_scraper_rows(tmp_path):
-    from ml_stack.sources import rows as scraper
-    from ml_stack.world.emit import rows
+    from poolhouse.sources import rows as scraper
+    from poolhouse.world.emit import rows
 
     world = tiny_world()
     messages = all_of(world, days=2, writer=None, per_day=2.0)
@@ -606,7 +606,7 @@ def _quoted_graph() -> dict:
 
 
 def test_reconcilable_carries_a_nodes_own_quotes_as_provenance_and_passage():
-    from ml_stack.world.simulate import _reconcilable
+    from poolhouse.world.simulate import _reconcilable
 
     out = _reconcilable(_quoted_graph())
     iris = next(n for n in out["nodes"] if n["id"] == "person:iris-bellweather")
@@ -619,9 +619,9 @@ def test_reconcilable_carries_a_nodes_own_quotes_as_provenance_and_passage():
 
 
 def test_absorbed_leaves_an_empty_store_unchanged(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.world.simulate import _absorbed
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.world.simulate import _absorbed
 
     with GraphStore(tmp_path / "memory.ladybug") as store:
         out = _absorbed(store, _quoted_graph())
@@ -632,9 +632,9 @@ def test_absorbed_leaves_an_empty_store_unchanged(tmp_path):
 
 
 def test_absorbed_lands_a_plural_variant_on_the_existing_node_with_provenance_unioned(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.world.simulate import _absorbed, _reconcilable
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.world.simulate import _absorbed, _reconcilable
 
     with GraphStore(tmp_path / "memory.ladybug") as store:
         store.write(_reconcilable(_quoted_graph()))
@@ -669,14 +669,14 @@ def test_absorbed_lands_a_plural_variant_on_the_existing_node_with_provenance_un
 
 
 def test_run_absorbs_a_second_worlds_graph_into_the_store_the_first_left(tmp_path, monkeypatch):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    import ml_stack.client
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    import poolhouse.client
+    from poolhouse.graph.store import GraphStore
 
     def fake_client(url, **_):
         return SpeakingModel()
 
-    monkeypatch.setattr(ml_stack.client, "Client", fake_client)
+    monkeypatch.setattr(poolhouse.client, "Client", fake_client)
 
     first = tiny_world()
     first.calendar = [{"day": 0, "until": 0, "kind": "incident",

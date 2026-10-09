@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ml_stack.paths import inside_a_repo, repo_root
+from poolhouse.paths import inside_a_repo, repo_root
 
 
 def repo(where: Path) -> Path:

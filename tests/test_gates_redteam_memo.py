@@ -29,7 +29,7 @@ def root(tmp_path, monkeypatch):
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "cache"))
     monkeypatch.delenv(_store.FORCE, raising=False)
     tree = tmp_path / "tree"
-    for name, text in {"src/ml_stack/a.py": "A = 1\n", "src/ml_stack/data/x.json": "{}\n",
+    for name, text in {"src/poolhouse/a.py": "A = 1\n", "src/poolhouse/data/x.json": "{}\n",
                        "pyproject.toml": "[project]\n", memo.MAP: MAP,
                        "docs/redteam/coverage.json": "{}\n", "tests/test_mapped.py": "def test_a(): pass\n",
                        "tests/test_other.py": "def test_b(): pass\n", "README.md": "x\n"}.items():
@@ -38,7 +38,7 @@ def root(tmp_path, monkeypatch):
     return tree
 
 
-@pytest.mark.parametrize("name", ["src/ml_stack/a.py", "src/ml_stack/data/x.json", "pyproject.toml",
+@pytest.mark.parametrize("name", ["src/poolhouse/a.py", "src/poolhouse/data/x.json", "pyproject.toml",
                                   memo.MAP, "docs/redteam/coverage.json", "tests/test_mapped.py"])
 def test_an_input_that_changes_changes_the_fingerprint(root, name):
     before = memo.inputs(root)
@@ -57,10 +57,10 @@ def test_a_file_the_check_does_not_read_leaves_the_fingerprint_alone(root, name)
 
 def test_a_new_source_file_and_a_deleted_one_change_the_fingerprint(root):
     before = memo.inputs(root)
-    (root / "src/ml_stack/b.py").write_text("", encoding="utf-8")
+    (root / "src/poolhouse/b.py").write_text("", encoding="utf-8")
     added = memo.inputs(root)
     assert added != before
-    (root / "src/ml_stack/b.py").unlink()
+    (root / "src/poolhouse/b.py").unlink()
     assert memo.inputs(root) == before
 
 

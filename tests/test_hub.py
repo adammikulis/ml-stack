@@ -5,15 +5,15 @@ from typing import ClassVar
 
 import pytest
 
-from ml_stack.hub import advice
-from ml_stack.testing.fakehub import fake_hub
+from poolhouse.hub import advice
+from poolhouse.testing.fakehub import fake_hub
 
 
 @pytest.fixture(autouse=True)
 def _fresh_draft_notes():
     """The per-process cache of README notes starts empty in every test; the pipeline
     refuses every host unless a test serves a hub of its own."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     hub._DRAFT_NOTES.clear()
     yield
@@ -109,7 +109,7 @@ def test_a_card_that_says_nothing_says_nothing():
 
 def test_a_draft_head_is_found_wherever_the_publisher_put_it(monkeypatch):
     """Not every repository puts it in the same place, and one rule missed two of three."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     shelves = {
         # gemma's QAT repos carry it at the root and again under MTP/
@@ -140,7 +140,7 @@ def test_a_draft_head_is_found_wherever_the_publisher_put_it(monkeypatch):
 
 
 def test_a_repository_that_is_not_there_is_not_a_draft(monkeypatch):
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     def missing(repo, **kw):
         raise OSError("404")
@@ -153,7 +153,7 @@ def test_shards_are_totalled_into_builds(monkeypatch):
     """A large model is published in shards, one directory per quantisation. Forty lines of
     individual files answers no question anybody has -- what decides whether a model can be
     served is the total of a build, and adding those up by hand is the step this removes."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     shelves = [
         ("BF16/thing-BF16-00001-of-00002.gguf", 60_000_000_000),
@@ -175,7 +175,7 @@ def test_shards_are_totalled_into_builds(monkeypatch):
 
 def test_a_subdirectory_does_not_make_something_a_companion():
     """Calling every sharded weight "alongside" buries the model under its own projector."""
-    from ml_stack.hub import aside
+    from poolhouse.hub import aside
 
     assert aside("UD-Q4_K_XL/thing-00001-of-00004.gguf") == 0
     assert aside("thing-Q4_K_M.gguf") == 0
@@ -190,7 +190,7 @@ def test_room_is_what_can_be_served_not_what_is_installed(monkeypatch):
     cache have to fit under what Metal will wire, and `free` does not report that."""
     import subprocess
 
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     class Done:
         def __init__(self, out): self.returncode, self.stdout = 0, out
@@ -210,7 +210,7 @@ def test_an_unset_wired_limit_falls_through_to_the_default_share(monkeypatch):
     a machine with 128G of memory, not a machine with none."""
     import subprocess
 
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     class Done:
         def __init__(self, out): self.returncode, self.stdout = 0, out
@@ -225,7 +225,7 @@ def test_an_unset_wired_limit_falls_through_to_the_default_share(monkeypatch):
 def test_a_listing_says_what_is_already_downloaded(monkeypatch, capsys):
     """Nothing said what was local, so 87G that was already on the disk was nearly fetched
     again. `fleet.models` had known all along; the listing just never asked."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     shelves = [("UD-IQ4_XS/thing-UD-IQ4_XS-00001-of-00002.gguf", 40_000_000_000),
                ("UD-IQ4_XS/thing-UD-IQ4_XS-00002-of-00002.gguf", 46_000_000_000),
@@ -246,7 +246,7 @@ def test_a_listing_says_what_is_already_downloaded(monkeypatch, capsys):
 
 def test_a_partly_downloaded_build_says_so(monkeypatch, capsys):
     """An interrupted fetch is not the same as having it, and looks identical on disk."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     monkeypatch.setattr(hub, "files", lambda repo, **kw: [
         ("UD-IQ4_XS/thing-UD-IQ4_XS-00001-of-00003.gguf", 1),
@@ -263,7 +263,7 @@ def test_a_partly_downloaded_build_says_so(monkeypatch, capsys):
 def test_on_disk_resolves_symlinks_because_a_cache_is_made_of_them(tmp_path, monkeypatch):
     """A Hub cache is symlinks into blobs/, so `ls -l` reports 79 bytes for a 46G
     shard. Reading that as "not downloaded" is the same mistake wearing a different hat."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     blob = tmp_path / "blobs" / "abc123"
     blob.parent.mkdir()
@@ -297,7 +297,7 @@ def _gguf(tmp_path, pairs):
 def test_sampling_is_read_from_the_model_file_itself(tmp_path):
     """`general.sampling.*` is written into the GGUF, so it cannot drift from the weights
     and needs no prose parsed out of a README. Qwen3.8 carries it; many models do not."""
-    from ml_stack.hub import in_gguf
+    from poolhouse.hub import in_gguf
 
     where = _gguf(tmp_path, {"general.sampling.temp": 1.0,
                              "general.sampling.top_k": 20.0,
@@ -311,7 +311,7 @@ def test_sampling_is_read_from_the_model_file_itself(tmp_path):
 
 
 def test_a_file_with_nothing_to_say_says_nothing(tmp_path):
-    from ml_stack.hub import in_gguf
+    from poolhouse.hub import in_gguf
 
     assert in_gguf(_gguf(tmp_path, {"general.file_type": 30.0})) == {}
     assert in_gguf(tmp_path / "does-not-exist.gguf") == {}
@@ -324,7 +324,7 @@ def test_a_draft_head_is_found_whatever_method_it_implements(monkeypatch):
     """A head is named by its method, not by being a draft. Knowing only `mtp-` reported
     "no draft" for gpt-oss-120b, which ships two EAGLE3 heads and no mtp- file -- so it was
     served unaccelerated with nothing saying why."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     shelves = {
         "maker/oss-GGUF": [("oss-MXFP4.gguf", 60_000_000_000),
@@ -344,7 +344,7 @@ def test_a_draft_head_is_found_whatever_method_it_implements(monkeypatch):
 def test_a_head_says_which_kind_of_speculation_it_needs():
     """A head implements one method. An EAGLE3 head served as draft-simple is not slower,
     it is being asked to do something it does not do."""
-    from ml_stack.hub import spec_for
+    from poolhouse.hub import spec_for
 
     assert spec_for("hf:maker/x/eagle3-oss-Q8_0.gguf") == "draft-eagle3"
     assert spec_for("/models/mtp-gemma-4-E4B-it.gguf") == "draft-mtp"
@@ -370,7 +370,7 @@ class TestDraftForBorrows:
     }
 
     def _repo(self, monkeypatch, tmp_path, *, note: str = ""):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         hub._DRAFT_NOTES.clear()
         monkeypatch.setattr(hub, "files", lambda repo, **kw: self.SHELVES.get(repo, []))
@@ -402,11 +402,11 @@ class TestDraftForBorrows:
 
 
 class TestFetch:
-    """Downloading an `hf:` reference into ml-stack's store without serving it -- what a
+    """Downloading an `hf:` reference into poolhouse's store without serving it -- what a
     preflight calls so a download never happens inside a benchmark's timed window."""
 
     def test_every_shard_of_the_named_build_is_downloaded(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         held = {"maker/thing-GGUF": {"thing-00001-of-00002.gguf": gguf(40),
                                      "thing-00002-of-00002.gguf": gguf(30),
@@ -422,7 +422,7 @@ class TestFetch:
         assert not got.with_name("mmproj-F32.gguf").exists()
 
     def test_an_unsharded_reference_downloads_just_the_one_file(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         with fake_hub({"maker/thing-GGUF": {"thing-Q4_K_M.gguf": gguf(40),
                                             "thing-Q8_0.gguf": gguf(50)}}) as server:
@@ -432,7 +432,7 @@ class TestFetch:
         assert got.name == "thing-Q4_K_M.gguf" and got.read_bytes() == gguf(40)
 
     def test_a_file_the_repo_does_not_hold_names_what_it_does(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         with fake_hub({"maker/thing-GGUF": {"thing-UD-Q4_K_XL.gguf": gguf(4),
                                             "mmproj-F16.gguf": gguf(1)}}) as server:
@@ -444,7 +444,7 @@ class TestFetch:
                                      "it holds thing-UD-Q4_K_XL.gguf")
 
     def test_a_reference_with_no_file_is_rejected(self):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         with pytest.raises(ValueError, match=r"hf:owner/repo/file\.gguf"):
             hub.fetch("hf:maker/thing-GGUF")
@@ -452,11 +452,11 @@ class TestFetch:
 
 class TestLocated:
     """The one way a name becomes a model file: the bench, the serve preflight, the fleet
-    and `ml-stack-chat` all ask this, so it has to answer for a name copied out of
-    `ml-stack-models files`, a path, an `hf:` reference and a half-typed name alike."""
+    and `poolhouse-chat` all ask this, so it has to answer for a name copied out of
+    `poolhouse-models files`, a path, an `hf:` reference and a half-typed name alike."""
 
     def test_a_path_is_returned_expanded_and_an_hf_reference_is_not_a_local_file(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         here = tmp_path / "thing-Q4_K_M.gguf"
         here.write_bytes(b"x")
@@ -465,7 +465,7 @@ class TestLocated:
         assert hub.located("") is None
 
     def test_every_model_root_is_searched_not_only_the_hub_cache(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         beside = tmp_path / "models"
         beside.mkdir()
@@ -474,7 +474,7 @@ class TestLocated:
             == beside / "quince-2b-Q4_K_M.gguf"
 
     def test_a_half_typed_name_matches_only_when_loose_is_asked_for(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         (tmp_path / "quince-2b-UD-Q4_K_XL.gguf").write_bytes(b"x")
         assert hub.located("quince", roots=[tmp_path]) is None
@@ -482,7 +482,7 @@ class TestLocated:
             == tmp_path / "quince-2b-UD-Q4_K_XL.gguf"
 
     def test_a_draft_head_answers_only_a_name_that_asks_for_one(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         (tmp_path / "quince-2b.draft.gguf").write_bytes(b"x")
         assert hub.located("quince", roots=[tmp_path], loose=True) is None
@@ -490,14 +490,14 @@ class TestLocated:
             == tmp_path / "quince-2b.draft.gguf"
 
     def test_a_file_under_min_size_is_passed_over(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         (tmp_path / "quince-2b.gguf").write_bytes(b"x" * 16)
         assert hub.located("quince-2b.gguf", roots=[tmp_path]) is not None
         assert hub.located("quince-2b.gguf", roots=[tmp_path], min_size=1 << 20) is None
 
     def test_an_exact_filename_is_found_as_the_link_whose_size_reads_through(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         cache = tmp_path / "hub"
         blob = cache / "models--maker--thing-GGUF" / "blobs" / "deadbeef"
@@ -514,7 +514,7 @@ class TestLocated:
         assert found.stat().st_size == blob.stat().st_size
 
     def test_a_shard_less_stem_finds_the_first_shard(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         cache = tmp_path / "hub"
         snapshot = (cache / "models--maker--big-GGUF" / "snapshots" / "abc123"
@@ -527,7 +527,7 @@ class TestLocated:
         assert found is not None and found.name == "thing-00001-of-00002.gguf"
 
     def test_a_name_that_matches_nothing_is_none_not_an_error(self, tmp_path):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         assert hub.located("nowhere.gguf", roots=[tmp_path]) is None
         assert hub.located("nowhere.gguf", roots=[tmp_path / "does-not-exist"]) is None
@@ -539,7 +539,7 @@ class TestDraftNote:
     README says why in one line."""
 
     def test_reads_the_sentence_naming_mainline(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         text = ("# MTP heads\n\nThese heads are trained alongside the model. "
                 "These do not work on mainline ggml-org/llama.cpp yet. "
@@ -555,21 +555,21 @@ class TestDraftNote:
             assert len([p for _m, p, _r, _a in server.hub_seen if p.endswith("README.md")]) == 1
 
     def test_falls_back_to_the_plain_readme_when_there_is_no_mtp_one(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         text = "This repository requires the unsloth fork of llama.cpp.\n"
         with readmes(monkeypatch, {"maker/plain-GGUF": {"README.md": text}}):
             assert "requires" in hub.draft_note("maker/plain-GGUF").lower()
 
     def test_a_card_with_nothing_to_say_about_either_returns_empty(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         text = "Just an ordinary model card, nothing special here.\n"
         with readmes(monkeypatch, {"maker/quiet-GGUF": {"README.md": text}}):
             assert hub.draft_note("maker/quiet-GGUF") == ""
 
     def test_invisible_characters_in_a_card_are_stripped_before_it_is_read(self, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         text = "This requires the fork\u200b of llama.cpp \U000e0041.\n"
         with readmes(monkeypatch, {"maker/odd-GGUF": {"README.md": text}}):
@@ -606,7 +606,7 @@ class TestChooseHead:
     }
 
     def _hub(self, monkeypatch, tmp_path, *, notes: dict[str, str] | None = None):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         hub._DRAFT_NOTES.clear()
         monkeypatch.setattr(hub, "files", lambda repo, **kw: self.SHELVES.get(repo, []))
@@ -645,10 +645,10 @@ class TestChooseHead:
         assert hub.choose_head("hf:maker/flash-GGUF", binary=bottle).path == ""
 
     def test_a_named_fork_build_is_given_the_shared_q8_head(self, monkeypatch, tmp_path):
-        import ml_stack.serve.binary as binary_module
+        import poolhouse.serve.binary as binary_module
 
         hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
-        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "poolhouse"))
         fork = self._binary(binary_module.managed_named() / "forkname")
 
         chosen = hub.choose_head("hf:maker/flash-GGUF", binary=fork)
@@ -713,7 +713,7 @@ class TestChooseHead:
         assert hub.choose_head(str(lone), binary=mainline).path == ""
 
     def test_a_bare_name_resolves_through_the_hub_cache(self, monkeypatch, tmp_path):
-        """A filename copied out of `ml-stack-models files` names a file in the cache, whose
+        """A filename copied out of `poolhouse-models files` names a file in the cache, whose
         directory names the repository -- so the listing, the README and the head are all
         found from nothing but the name."""
         hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
@@ -736,7 +736,7 @@ class TestChooseHead:
     def test_a_listing_that_cannot_be_fetched_is_answered_from_the_disk(
             self, monkeypatch, tmp_path):
         """Offline, the head already downloaded beside the weights is still the head."""
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         hub._DRAFT_NOTES.clear()
 
@@ -758,16 +758,16 @@ class TestChooseHead:
 
     def test_the_listing_says_what_each_build_here_would_serve(
             self, monkeypatch, tmp_path, capsys):
-        """`ml-stack-models files` names the head, its warning, and the chooser's answer for
+        """`poolhouse-models files` names the head, its warning, and the chooser's answer for
         the default build and every named build -- which `--build` a head needs, before a
         load, is the whole point of asking."""
-        import ml_stack.serve.binary as binary_module
+        import poolhouse.serve.binary as binary_module
 
         hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
         monkeypatch.setattr(hub, "room", lambda: 0)
         monkeypatch.setattr(hub, "on_disk", lambda: {})
         current = self._binary(tmp_path / "current")
-        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "poolhouse"))
         self._binary(binary_module.managed_named() / "forkname")
         monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: current)
 
@@ -781,7 +781,7 @@ class TestChooseHead:
 
 class TestPrettyName:
     def test_the_quantisation_moves_into_brackets_and_the_rest_goes(self):
-        from ml_stack.hub import pretty_name
+        from poolhouse.hub import pretty_name
 
         assert pretty_name("hf:maker/thing-GGUF/UD-IQ4_XS/thing-Flash-UD-IQ4_XS-00001-of-00003.gguf") \
             == "thing-Flash (IQ4_XS)"
@@ -799,9 +799,9 @@ class TestPrettyName:
         import shutil
         import subprocess
 
-        from ml_stack.fleet.page import COMPONENTS_DIR
-        from ml_stack.graph.page import template
-        from ml_stack.hub import pretty_name
+        from poolhouse.fleet.page import COMPONENTS_DIR
+        from poolhouse.graph.page import template
+        from poolhouse.hub import pretty_name
 
         fit_model = (COMPONENTS_DIR / "fit-model.html").read_text(encoding="utf-8")
         for text in (fit_model, template()):
@@ -821,7 +821,7 @@ class TestPrettyName:
 
 class TestShardsBeside:
     def test_every_shard_of_the_build_and_nothing_else(self, tmp_path):
-        from ml_stack.hub import shards_beside
+        from poolhouse.hub import shards_beside
 
         for n in (1, 2, 3):
             (tmp_path / f"thing-Q4_K_M-0000{n}-of-00003.gguf").write_bytes(b"x" * n)
@@ -833,7 +833,7 @@ class TestShardsBeside:
 
 
 def test_an_iq_build_is_marked_as_the_slow_choice_on_a_mac_only():
-    from ml_stack.hub import iq_on_metal
+    from poolhouse.hub import iq_on_metal
 
     assert iq_on_metal("thing-UD-IQ4_XS", platform="darwin")
     assert iq_on_metal("thing-IQ2_M.gguf", platform="darwin")
@@ -846,7 +846,7 @@ class TestHeadsOnThisMachine:
     """Which draft heads a model on this machine could be served with, cheapest first."""
 
     def _machine(self, tmp_path, monkeypatch, names):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         root = tmp_path / "models"
         (root / "MTP").mkdir(parents=True)
@@ -856,7 +856,7 @@ class TestHeadsOnThisMachine:
         return root
 
     def test_a_head_is_not_offered_as_a_model_to_serve(self, tmp_path, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         self._machine(tmp_path, monkeypatch, {"thing-Q4_K_M.gguf": 900,
                                               "mtp-thing-Q8_0.gguf": 100,
@@ -865,14 +865,14 @@ class TestHeadsOnThisMachine:
         assert len(hub.on_disk(alongside=True)) == 3
 
     def test_the_words_that_name_the_model_survive_quantisation_and_shards(self):
-        from ml_stack.hub import base_words
+        from poolhouse.hub import base_words
 
         assert (base_words("mtp-Quince-9.9-Flash-shared-Q8_0.gguf")
                 == base_words("Quince-9.9-Flash-UD-Q4_K_XL-00001-of-00004.gguf"))
         assert base_words("eagle3-quince-oss-20b-BF16.gguf") == ("quince", "oss", "20b")
 
     def test_a_head_for_another_model_is_not_offered(self, tmp_path, monkeypatch):
-        from ml_stack.hub import heads_for
+        from poolhouse.hub import heads_for
 
         root = self._machine(tmp_path, monkeypatch,
                              {"quince-2b-it-qat-UD-Q4_K_XL.gguf": 900})
@@ -881,7 +881,7 @@ class TestHeadsOnThisMachine:
         assert heads_for("quince-2b-it-qat-UD-Q4_K_XL.gguf", binary="") == []
 
     def test_the_cheapest_head_is_offered_first_with_its_size(self, tmp_path, monkeypatch):
-        from ml_stack.hub import heads_for
+        from poolhouse.hub import heads_for
 
         root = self._machine(tmp_path, monkeypatch,
                              {"quince-9b-UD-Q4_K_XL.gguf": 9000,
@@ -897,7 +897,7 @@ class TestHeadsOnThisMachine:
         assert "100B of memory" in found[0].said()
 
     def test_a_head_under_mtp_is_found_beside_the_weights(self, tmp_path, monkeypatch):
-        from ml_stack.hub import heads_for
+        from poolhouse.hub import heads_for
 
         root = self._machine(tmp_path, monkeypatch,
                              {"quince-9b-UD-Q4_K_XL.gguf": 9000,
@@ -907,7 +907,7 @@ class TestHeadsOnThisMachine:
 
     def test_a_borrowing_head_is_named_for_the_build_that_loads_it(self, tmp_path,
                                                                    monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         root = self._machine(tmp_path, monkeypatch,
                              {"quince-9b-UD-Q4_K_XL.gguf": 9000,
@@ -921,7 +921,7 @@ class TestHeadsOnThisMachine:
 
     def test_a_borrowing_head_is_left_out_when_no_build_here_loads_it(self, tmp_path,
                                                                      monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         root = self._machine(tmp_path, monkeypatch,
                              {"quince-9b-UD-Q4_K_XL.gguf": 9000,
@@ -932,7 +932,7 @@ class TestHeadsOnThisMachine:
             "mtp-quince-9b-Q8_0.gguf"]
 
     def test_a_fork_build_takes_the_borrowing_head_as_it_stands(self, tmp_path, monkeypatch):
-        import ml_stack.hub as hub
+        import poolhouse.hub as hub
 
         root = self._machine(tmp_path, monkeypatch,
                              {"quince-9b-UD-Q4_K_XL.gguf": 9000,

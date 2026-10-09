@@ -28,12 +28,12 @@ def test_the_web_interface_ships_in_the_fleet_wheel(tmp_path):
     wheel = build(tmp_path)
     names = zipfile.ZipFile(wheel).namelist()
 
-    from ml_stack.fleet.page import COMPONENTS
+    from poolhouse.fleet.page import COMPONENTS
 
     for asset in ("shell.html", "style.css"):
-        assert f"ml_stack/fleet/web/{asset}" in names, f"{asset} missing from {wheel.name}"
+        assert f"poolhouse/fleet/web/{asset}" in names, f"{asset} missing from {wheel.name}"
     for name in COMPONENTS:
-        assert f"ml_stack/fleet/web/components/{name}.html" in names, \
+        assert f"poolhouse/fleet/web/components/{name}.html" in names, \
             f"{name} missing from {wheel.name}"
 
 
@@ -50,21 +50,21 @@ def test_the_contract_data_ships_in_the_contracts_wheel(tmp_path):
 
 @pytest.mark.slow
 def test_the_model_tier_table_ships_in_the_wheel(tmp_path):
-    """The coordinator gate reads `ml_stack/workspace/model_tiers.json`; without it every model is unknown."""
+    """The coordinator gate reads `poolhouse/workspace/model_tiers.json`; without it every model is unknown."""
     wheel = build(tmp_path)
     names = zipfile.ZipFile(wheel).namelist()
 
-    assert "ml_stack/workspace/model_tiers.json" in names, f"model_tiers.json missing from {wheel.name}"
+    assert "poolhouse/workspace/model_tiers.json" in names, f"model_tiers.json missing from {wheel.name}"
 
 
 @pytest.mark.slow
 def test_the_measured_fit_records_ship_in_the_wheel(tmp_path):
-    """`ml-stack-serve fit` reads `ml_stack/data/fit.json` at runtime, and a wheel without
+    """`poolhouse-serve fit` reads `poolhouse/data/fit.json` at runtime, and a wheel without
     it is a command that says nothing has ever been measured."""
     wheel = build(tmp_path)
     names = zipfile.ZipFile(wheel).namelist()
 
-    assert "ml_stack/data/fit.json" in names, f"fit.json missing from {wheel.name}"
+    assert "poolhouse/data/fit.json" in names, f"fit.json missing from {wheel.name}"
 
 
 def console_scripts() -> dict:
@@ -75,7 +75,7 @@ def console_scripts() -> dict:
 
 def test_serving_a_model_has_a_command_of_its_own():
     """Without it, answering 'what is serving, on which port' is lsof and curl."""
-    assert console_scripts().get("ml-stack-serve") == "ml_stack.serve.cli:main"
+    assert console_scripts().get("poolhouse-serve") == "poolhouse.serve.cli:main"
 
 
 def _binds(path: Path, attr: str) -> bool:
@@ -147,10 +147,10 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
 
     (tmp_path / "artifacts" / "wheels").mkdir(parents=True)
     (tmp_path / "artifacts" / "mac").mkdir()
-    (tmp_path / "artifacts" / "mac" / "ml-stack-macos-arm64-v9.9.9.zip").write_text("x")
+    (tmp_path / "artifacts" / "mac" / "poolhouse-macos-arm64-v9.9.9.zip").write_text("x")
     (tmp_path / "artifacts" / "install.sh").write_text("x")
     (tmp_path / "artifacts" / "install.ps1").write_text("x")
-    (tmp_path / "artifacts" / "wheels" / "ml_stack-0-py3-none-any.whl").write_text("x")
+    (tmp_path / "artifacts" / "wheels" / "poolhouse-0-py3-none-any.whl").write_text("x")
     out = tmp_path / "out"
     out.touch()
 
@@ -162,10 +162,10 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     assert done.returncode == 0, done.stderr
 
     body = out.read_text()
-    assert "releases/download/v9.9.9/ml-stack-macos-arm64-v9.9.9.zip" in body
-    assert "ml-stack-windows-x86_64" not in body, "linked a bundle that did not build"
-    assert "ml-stack-linux-x86_64" not in body, "linked a bundle that did not build"
-    assert "pip install ml-stack" in body
+    assert "releases/download/v9.9.9/poolhouse-macos-arm64-v9.9.9.zip" in body
+    assert "poolhouse-windows-x86_64" not in body, "linked a bundle that did not build"
+    assert "poolhouse-linux-x86_64" not in body, "linked a bundle that did not build"
+    assert "pip install poolhouse" in body
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
@@ -176,7 +176,7 @@ def test_the_notes_offer_pip_only_when_the_upload_succeeded(tmp_path, result):
     import os
 
     (tmp_path / "artifacts" / "wheels").mkdir(parents=True)
-    (tmp_path / "artifacts" / "wheels" / "ml_stack-0-py3-none-any.whl").write_text("x")
+    (tmp_path / "artifacts" / "wheels" / "poolhouse-0-py3-none-any.whl").write_text("x")
     out = tmp_path / "out"
     out.touch()
 
@@ -253,9 +253,9 @@ def test_a_tag_with_no_entry_falls_back_to_the_subjects(tmp_path):
         git("add", "-A", cwd=repo)
         git("commit", "-qm", subject, cwd=repo)
 
-    commit("Before the tag", "src/ml_stack/fleet/a.py")
+    commit("Before the tag", "src/poolhouse/fleet/a.py")
     git("tag", "v0.1.0", cwd=repo)
-    commit("Chat with a model on any machine", "src/ml_stack/fleet/b.py")
+    commit("Chat with a model on any machine", "src/poolhouse/fleet/b.py")
     commit("Write down what is pending", "HANDOFF.md")
     commit("Version 0.2.0", "pyproject.toml")
     commit("Explain the recipes", "docs/FEATURES.md")
@@ -281,7 +281,7 @@ def test_a_tag_with_no_entry_falls_back_to_the_subjects(tmp_path):
 
 def test_the_name_of_a_download_says_which_release_it_is():
     """Two downloads in one folder are two files, and the updater and both installers
-    still find theirs: they look for ml-stack-<os>-<arch> inside the name."""
+    still find theirs: they look for poolhouse-<os>-<arch> inside the name."""
     import re
 
     text = (WORKFLOW.parent / "release-build.yml").read_text()
@@ -302,7 +302,7 @@ def test_release_please_is_pointed_at_every_file_that_holds_the_version():
     config = json.loads((REPO / "release-please-config.json").read_text())
     listed = {e["path"] for e in config["packages"]["."]["extra-files"]}
     carry = {str(p.relative_to(REPO)) for p in (REPO.glob("pyproject.toml"))}
-    carry |= {"app/src-tauri/Cargo.toml", "app/poolside-node/Cargo.toml"}
+    carry |= {"app/src-tauri/Cargo.toml", "app/poolhouse-node/Cargo.toml"}
 
     assert listed == carry, f"registered: {listed}; carrying: {carry}"
     for path in sorted(carry):
@@ -325,7 +325,7 @@ def test_the_version_in_a_checkout_is_read_without_the_marker():
     """The marker is a comment on the same line; the reader has to stop at it."""
     import json
 
-    from ml_stack.fleet.updates import _version_in_source
+    from poolhouse.fleet.updates import _version_in_source
 
     want = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
     assert _version_in_source() == want
@@ -338,7 +338,7 @@ def test_the_package_says_what_it_is_and_where_it_came_from():
     import tomllib
 
     meta = tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]
-    assert meta["name"] == "ml-stack"
+    assert meta["name"] == "poolhouse"
     assert meta["readme"] == "README.md" and (REPO / "README.md").is_file()
     assert meta["urls"]["Homepage"].startswith("https://github.com/")
     assert meta["classifiers"], "no classifiers, so it is filed under nothing"

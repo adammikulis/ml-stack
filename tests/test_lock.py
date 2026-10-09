@@ -13,7 +13,7 @@ import textwrap
 
 import pytest
 
-from ml_stack.lock import Busy, held_by, only_one, release, take
+from poolhouse.lock import Busy, held_by, only_one, release, take
 
 
 def test_a_second_holder_is_refused_rather_than_allowed_to_overlap(tmp_path):
@@ -52,7 +52,7 @@ def test_waiting_is_announced_rather_than_silent(tmp_path):
     other = subprocess.Popen(
         [sys.executable, "-c", textwrap.dedent(f"""
             import time
-            from ml_stack.lock import only_one
+            from poolhouse.lock import only_one
             with only_one({str(tmp_path / 'l')!r}):
                 print("held", flush=True)
                 time.sleep(1.5)
@@ -75,7 +75,7 @@ def test_a_bounded_wait_gives_up_and_says_so(tmp_path):
 def test_only_the_measuring_subcommands_take_it():
     """`show` reads the store and touches no GPU; making it queue behind a run would be a new
     way to hang."""
-    from ml_stack.bench import MEASURING
+    from poolhouse.bench import MEASURING
 
     assert set(MEASURING) == {"run", "sweep", "drafts", "concurrent", "extract", "speed"}
     assert "show" not in MEASURING and "prepare" not in MEASURING
@@ -86,7 +86,7 @@ def test_a_refused_attempt_leaves_the_holder_named(tmp_path):
     next asker saw "held by somebody". Mutation: drop the `taken` guard."""
     import os
 
-    from ml_stack.lock import Busy, only_one
+    from poolhouse.lock import Busy, only_one
 
     path = tmp_path / "measuring.lock"
     with only_one(path, wait=False):
@@ -109,7 +109,7 @@ def test_a_lock_taken_on_an_open_file_excludes_another_process(tmp_path):
     other = subprocess.Popen(
         [sys.executable, "-c", textwrap.dedent(f"""
             import os, sys, time
-            from ml_stack.lock import take
+            from poolhouse.lock import take
             handle = os.open({str(path)!r}, os.O_RDWR | os.O_CREAT, 0o644)
             print("held" if take(handle) else "refused", flush=True)
             time.sleep(3)

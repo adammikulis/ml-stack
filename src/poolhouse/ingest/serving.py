@@ -1,0 +1,188 @@
+"""The model a run reads with: one lease in the settings it scored best with, held throughout."""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+from poolhouse import hub
+from poolhouse.log import say
+
+__all__ = [
+    "EXTRACT_SAMPLING",
+    "SERVE_EXTRA",
+    "_alive",
+    "_run",
+    "_sampling",
+    "_serving",
+    "_serving_said",
+]
+
+
+SERVE_EXTRA: dict[str, Any] = {"timeout": 900.0, "cache_reuse": 256, "warmup": False,
+                               "roam": False}
+"""What `serve` takes that no `Serving` field names: how long the server is given to come up,
+how much of a prompt it may reuse from the last one, that it is not warmed, and that it is
+served on the port asked for and no other. The ingest's, not the profile's -- a measurement
+of how a model answers says nothing about them."""
+
+
+EXTRACT_SAMPLING: dict[str, Any] = {"temperature": 0.1}
+"""Extraction's own default sampling, independent of whatever a profile measured for
+answering: a whisker of temperature over full greedy, so a decode that would otherwise
+repeat forever has an escape a zero temperature does not -- on a workload whose grammar
+already closes every list at a `maxItems` cap. Chosen on reasoning, not a finished
+measurement: `HANDOFF.md` carries the comparison still owed against temperature 0 and 1.0."""
+
+
+def _sampling(args: Any) -> dict[str, Any]:
+    """Extraction's sampling: :data:`EXTRACT_SAMPLING`, with a flag on the command line
+    replacing one setting by name -- and ``--temperature 0`` taking `top_k`, `top_p` and
+    `min_p` with it, so nothing left at a server's own default can reintroduce sampling
+    under an explicit greedy choice."""
+    out = dict(EXTRACT_SAMPLING)
+    for name, value in (("temperature", getattr(args, "temperature", None)),
+                        ("top_p", getattr(args, "top_p", None)),
+                        ("top_k", getattr(args, "top_k", None)),
+                        ("min_p", getattr(args, "min_p", None))):
+        if value is not None:
+            out[name] = value
+    if out.get("temperature") == 0:
+        out.setdefault("top_k", 1)
+        out.setdefault("top_p", 1.0)
+        out.setdefault("min_p", 0.0)
+    return out
+
+
+def _said(measured: Any) -> str:
+    """One profile as a person reads it. Imported where it is used, so a caller that
+    replaced `poolhouse.serve.profile.said` is the one that answers."""
+    from poolhouse.serve.profile import said
+
+    return said(measured)
+
+
+def _run(args: Any, *, resolve: bool = True,
+         say: Callable[[str], None] = lambda _line: None) -> tuple[Any, Any]:
+    """The whole :class:`~poolhouse.serve.Config` this ingest reads with, and the profile that
+    measured it (None when nothing did).
+
+    One object -- how to serve the model, the asking it measured best with, the client to
+    ask it with -- built here and nowhere else, so the lease that is taken and the serving
+    the run record names are the same thing rather than two derivations that drift.
+
+    The command line is laid over the measurement with :meth:`Config.over`, each field going
+    to the section that owns it: ``--context`` is the one slot's whole context, ``--n-max``
+    the draft's length, ``--per-section`` the cap on one call, ``--n-predict`` the ceiling,
+    and the samplers the client's.
+    """
+    from poolhouse.serve.serving import Config, Serving, drafted
+
+    model = str(getattr(args, "model", "") or "")
+    found = str(hub.located(model, loose=True) or model) if model else ""
+    port = int(getattr(args, "serve_port", 8080) or 8080)
+    # One slot, one unit at a time. Adam: "we shouldn't be handling parallel requests while
+    # extracting. In fact, we should never be splitting the GPU like that" -- and the run
+    # measured it: one worker read a unit in 86 s, two workers sharing the model averaged
+    # 140 s each, slower in aggregate as well as apiece.
+    slots = 1
+    n_predict = int(getattr(args, "n_predict", None) or 16384)
+    timeout = float(getattr(args, "per_section", None) or 300.0)
+
+    measured = None
+    if model and getattr(args, "profile", True):
+        from poolhouse.serve.profile import profile_for
+
+        measured = profile_for(found, workload="ingest")
+    if measured is not None:
+        config = measured.config(port=port, slots=slots, resolve=resolve,
+                           n_predict=n_predict, timeout=timeout)
+        say(f"    serving in the settings it scored best with: {_said(measured)}")
+        config = drafted(config, "none", say=lambda line: say(f"    {line}"))
+    else:
+        config = Config(serving=Serving(model=found, port=port, slots=slots)).over(
+            n_predict=n_predict, timeout=timeout)
+        if found:
+            asked = str(getattr(args, "draft", "auto") or "auto")
+            config = drafted(config, asked, say=lambda line: say(f"    {line}"))
+
+    # The whole --context is the one slot's: a 2,500-token unit with four figures through
+    # the projector and a reply of several thousand tokens overran a 16k slot on the first
+    # night. A profile that measured a wider slot keeps it.
+    config = config.over(slot_context=max(int(getattr(args, "context", 0) or 0),
+                                    int(config.serving.slot_context or 0)))
+    sampling = _sampling(args)
+    if sampling:
+        config = config.over(**sampling)
+    if not getattr(args, "images", False) and config.serving.mmproj:
+        config = config.over(mmproj="")
+    if getattr(args, "n_max", None) is not None:
+        # the draft length for this run, over the one the profile measured
+        if not (config.serving.draft or config.serving.spec_type):
+            say("--n-max: no draft head is being served, so there is no draft to lengthen")
+        else:
+            config = config.over(draft_n_max=int(args.n_max))
+            say(f"    draft length {args.n_max} over the profile's")
+    return config, measured
+
+
+@contextmanager
+def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
+    """A client for the run: one lease, held throughout, in the settings the model scored best with,
+    under the bench's measuring lock so the two never share the GPU.
+
+    The same branch the extract bench takes, and for the same reason: a model served bare
+    when a profile measured it with a build, a head and a cache type is a different program
+    from the one the measurement was about.
+    """
+    from poolhouse import bench
+    from poolhouse.lock import only_one
+
+    config, _measured = _run(args, say=say)
+    with only_one(bench.home_dir() / "measuring.lock",
+                  wait=not getattr(args, "no_queue", False),
+                  announce=lambda line: say(f"waiting for the bench -- {line}")):
+        if not getattr(args, "model", ""):
+            yield config.client(args.base_url)
+            return
+
+        from poolhouse.serve.manager import serve
+
+        began = time.time()
+        with serve(config.model, manager=config.serving.manager(), **config.lease(),
+                   **SERVE_EXTRA, reason=f"ingest with {Path(config.model).name}") as server:
+            say(f"    up in {time.time() - began:.0f}s")
+            yield config.client(server.base_url, index=0)
+
+
+def _alive(client: Any) -> bool:
+    """Whether the run's server still answers at all."""
+    from poolhouse.client import is_healthy
+
+    base_url = str(getattr(client, "base_url", "") or "")
+    return bool(base_url) and is_healthy(base_url, timeout=3.0)
+
+
+def _serving_said(args: Any) -> str:
+    """The settings a --model is served in, for the run record.
+
+    Read off the same `Config` `_serving` leases, so a record says what was actually asked for
+    -- the slot's context, the draft's length -- and not a second derivation of it that can
+    differ from what the server was told.
+    """
+    if not getattr(args, "model", ""):
+        return f"base_url {getattr(args, 'base_url', '')}"
+    try:
+        config, measured = _run(args, resolve=False)
+        lease = config.lease()
+        laid = [f"context {lease.get('context')}", f"parallel {lease.get('parallel')}"]
+        if lease.get("spec_draft_max") is not None:
+            laid.append(f"draft {lease['spec_draft_max']}")
+        served = _said(measured) if measured is not None else "bare"
+        return f"{served}\n  as served   {', '.join(laid)}"
+    except Exception:  # noqa: BLE001 - a record, never a reason not to read
+        return "unknown"
+

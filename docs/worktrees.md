@@ -1,9 +1,9 @@
 # Worktrees: owners, orphans and the one way to remove one
 
 Every worktree of a repository has an **owner** and a **state**, kept in one registry file in the
-shared git directory (`ml-stack-trees.json`, next to the repository's other git state; it is not
-versioned). Code: `src/ml_stack/trees.py` (registry, states, `close`, `sweep`),
-`src/ml_stack/trees_notice.py` (thresholds, who is told, caps), `scripts/worktrees` (the commands),
+shared git directory (`poolhouse-trees.json`, next to the repository's other git state; it is not
+versioned). Code: `src/poolhouse/trees.py` (registry, states, `close`, `sweep`),
+`src/poolhouse/trees_notice.py` (thresholds, who is told, caps), `scripts/worktrees` (the commands),
 `scripts/hooks/tree_watch.py` and `scripts/hooks/post-commit` (the hooks' side) and the gate
 `scripts/gates/orphan_trees.py`.
 
@@ -15,7 +15,7 @@ versioned). Code: `src/ml_stack/trees.py` (registry, states, `close`, `sweep`),
 - **By hand (`git worktree add`)**: no hook is needed. `worktrees scan` (run by SessionStart, the
   attention hook, the post-commit hook, `worktrees` and the gate) registers any tree it has not
   seen as owner `unknown`. A commit made in the tree by an agent claims it for
-  `ML_STACK_WORKSPACE_AGENT`.
+  `POOLHOUSE_WORKSPACE_AGENT`.
 - `worktrees claim TREE OWNER [PURPOSE] [--pid N] [--scratch]` registers one explicitly. A
   `--scratch` tree (a baseline or throwaway checkout) never counts and is never nagged about;
   `sweep` removes it once its owner stops, if it is clean.
@@ -37,7 +37,7 @@ development branch is the branch the primary checkout is on. The primary checkou
 
 ## Seeing trees
 
-Waiting and orphan trees show with no delay in `ml-stack-workspace digest --status`, the lead's
+Waiting and orphan trees show with no delay in `poolhouse-workspace digest --status`, the lead's
 attention hook and SessionStart context, the heartbeat, and `scripts/worktrees`. The report exits 1
 for an orphan (not for a waiting tree) or a tree over a hygiene limit. Each line names the tree,
 branch, unlanded commits, dirty files, owner, how long ago the owner stopped and the actions.
@@ -53,7 +53,7 @@ scripts/worktrees sweep                             # close every landed tree wh
 `close` is the only removal path for agents and the lead. `--landed` refuses unless the claim is
 true; `--bundle` refuses dirty files (commit them or abandon) and verifies the bundle holds the tip
 before removing anything; `--abandon` needs a reason. Bundles and dirty diffs go to
-`ml-stack-bundles/` in the git directory. A tree removed some other way (`git worktree remove`,
+`poolhouse-bundles/` in the git directory. A tree removed some other way (`git worktree remove`,
 `rm -rf`) is not an error: the next scan drops it and records "removed-outside-the-tool" in the
 registry history.
 
@@ -68,7 +68,7 @@ coordinator when the owner has stopped, is unknown, or was silent. Each recipien
 gets at most `cap_per_hour` messages an hour: the last is a roll-up line, the rest are held and
 show in `scripts/worktrees`. Delivery runs in a detached process so a slow board never holds up a
 hook. The coordinator is the session that last started as lead (`worktrees lead NAME`, or
-`ML_STACK_TREES_LEAD`).
+`POOLHOUSE_TREES_LEAD`).
 
 ## The gate
 
@@ -93,5 +93,5 @@ get one stderr line when the commit count crosses the threshold.
 Defaults: `grace_h` 2, `claim_h` 1, `ttl_h` 12, `max_ahead` 10, `max_behind` 20, `max_age_h` 4,
 `repeat_min` 30, `cap_per_hour` 6. Override per repository in the registry's `policy` object, or
 per pool or session with the variable named in `trees.ENVIRONMENT` (for example
-`ML_STACK_TREES_GRACE_H=4`); the environment wins. The post-commit prefilter reads only
-`ML_STACK_TREES_MAX_AHEAD` and `ML_STACK_TREES_REPEAT_MIN` from the environment.
+`POOLHOUSE_TREES_GRACE_H=4`); the environment wins. The post-commit prefilter reads only
+`POOLHOUSE_TREES_MAX_AHEAD` and `POOLHOUSE_TREES_REPEAT_MIN` from the environment.

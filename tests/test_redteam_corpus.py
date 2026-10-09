@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from ml_stack.redteam import corpus
+from poolhouse.redteam import corpus
 
 
 def test_every_file_in_the_manifest_matches_its_recorded_hash():

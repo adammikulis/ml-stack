@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from ml_stack import board_names
-from ml_stack.graph.store import GraphStore
-from ml_stack.memory import vault
-from ml_stack.reputation.sealed import SealedGraph
-from ml_stack.workspace.claims import Claims
+from poolhouse import board_names
+from poolhouse.graph.store import GraphStore
+from poolhouse.memory import vault
+from poolhouse.reputation.sealed import SealedGraph
+from poolhouse.workspace.claims import Claims
 
 AUTHORITY = "a" * 32
 OLD_OWNER = f"canonical:{AUTHORITY}:codex-fixture"

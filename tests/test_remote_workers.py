@@ -8,23 +8,23 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from ml_stack import http
-from ml_stack.fleet import api, discovery, project_enrollment, tls
-from ml_stack.fleet.discovery import (
+from poolhouse import http
+from poolhouse.fleet import api, discovery, project_enrollment, tls
+from poolhouse.fleet.discovery import (
     Beacon,
     Membership,
     _write_memberships,
     derive_token,
     memberships,
 )
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.pool_roster import Pool
-from ml_stack.fleet.remote import Peer
-from ml_stack.workspace import localagent, localloop, localmodel, remote_workers, tokens
-from ml_stack.workspace.remote import RemoteWorkspace
-from ml_stack.workspace.remote_host import WorkspaceHost
-from ml_stack.workspace.service import Workspace
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.pool_roster import Pool
+from poolhouse.fleet.remote import Peer
+from poolhouse.workspace import localagent, localloop, localmodel, remote_workers, tokens
+from poolhouse.workspace.remote import RemoteWorkspace
+from poolhouse.workspace.remote_host import WorkspaceHost
+from poolhouse.workspace.service import Workspace
 
 PROJECT = 'a' * 32
 CLUSTER = 'development'
@@ -62,10 +62,10 @@ def _membership(root):
 
 @pytest.fixture
 def devices(tmp_path, monkeypatch):
-    monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(_membership(tmp_path)))
-    monkeypatch.setattr('ml_stack.home.state', lambda *parts: tmp_path / 'device-a' / 'state' / '/'.join(parts))
-    monkeypatch.setattr('ml_stack.home.device_id', lambda: 'device-b')
-    monkeypatch.setattr('ml_stack.home.machine_id', lambda: remote_workers.home.device_id())
+    monkeypatch.setenv('POOLHOUSE_CLUSTER_KEY', str(_membership(tmp_path)))
+    monkeypatch.setattr('poolhouse.home.state', lambda *parts: tmp_path / 'device-a' / 'state' / '/'.join(parts))
+    monkeypatch.setattr('poolhouse.home.device_id', lambda: 'device-b')
+    monkeypatch.setattr('poolhouse.home.machine_id', lambda: remote_workers.home.device_id())
     roots, servers, runners, peers, spawned = {}, [], [], [], []
     project = SimpleNamespace(name='sample', board_host='', root='')
     class Projects:
@@ -109,7 +109,7 @@ def devices(tmp_path, monkeypatch):
         monkeypatch.setattr(remote_workers, 'Workspace', lambda path=None: Workspace(path) if path else local)
         pick = localmodel.Pick(ref='fixture.gguf', name='Qwen3.8-test', size_bytes=1)
         monkeypatch.setattr(localmodel, 'choose', lambda *args, **kwargs: pick)
-        monkeypatch.setattr('ml_stack.workspace.localprofile.admit', lambda *args: ('', ''))
+        monkeypatch.setattr('poolhouse.workspace.localprofile.admit', lambda *args: ('', ''))
         monkeypatch.setattr(remote_workers.jobs, 'detach', lambda module, args, **kwargs:
                             spawned.append((module, args, kwargs)) or SimpleNamespace(pid=0, log=kwargs['log']))
         caller = actual_remote(peers[0].base_url, PROJECT, cluster=CLUSTER)
@@ -136,13 +136,13 @@ def test_tls_launch_and_local_loop_exchange_on_the_board(devices):
     result = state.target._request('worker', state.body)
     assert result['project_id'] == PROJECT
     assert result['identity'].startswith('lan-device-b-')
-    assert state.spawned[0][0] == 'ml_stack.workspace.remote_workers'
+    assert state.spawned[0][0] == 'poolhouse.workspace.remote_workers'
     assert state.spawned[0][1] == [str(state.local.base), 'local-qwen']
     agent = localagent.load(state.local, 'local-qwen')
     assert agent.project == str(state.roots['device-b'])
     assert agent.max_output_tokens == 1234
     assert agent.orders_from == ('test-caller',)
-    record = __import__('ml_stack.files', fromlist=['read_json']).read_json(
+    record = __import__('poolhouse.files', fromlist=['read_json']).read_json(
         localagent.folder(state.local) / 'local-qwen.remote.json', {})
     worker = remote_workers.BoardWorker(state.local, record)
     assert worker.base == state.local.base
@@ -235,7 +235,7 @@ def test_cli_discovers_target_without_a_saved_project_connection(devices, monkey
     worker = localagent.load(state.local, 'cli-qwen')
     assert worker.orders_from == (helper_name,)
     helper_info = helper.call('whoami', helper_token)
-    assert helper_info['model'] == '' and helper_info['harness'] == 'ml-stack-workspace'
+    assert helper_info['model'] == '' and helper_info['harness'] == 'poolhouse-workspace'
     assert discovered == [state.roots['device-a']]
     assert len(state.spawned) == 1
 
@@ -293,7 +293,7 @@ def test_worker_alias_database_cannot_follow_a_symlink(devices, tmp_path):
 
 @pytest.mark.redteam
 def test_malformed_worker_alias_cannot_probe_paths_outside_session_storage(devices, monkeypatch):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
     path = devices.caller.base / 'worker-identities.db'
     with GraphStore(path) as graph:
         path.chmod(0o600)
@@ -329,7 +329,7 @@ def _rotate_cluster(state, group=CLUSTER):
 @pytest.mark.parametrize('legacy', [False, True])
 @pytest.mark.parametrize('group', [CLUSTER, 'converged-development'])
 def test_worker_alias_renews_after_dev_key_rotation_without_changing_identity(devices, legacy, group):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
     before = remote_workers.credential(devices.caller, 'rotating-worker', 'Qwen3.8-test', 'device-a')
     identity = devices.caller.call('whoami', before)['id']
     if legacy:
@@ -368,7 +368,7 @@ def test_rekey_cannot_restore_a_revoked_worker(devices):
 @pytest.mark.parametrize('group', [CLUSTER, 'converged-development'])
 def test_live_board_worker_refreshes_tls_transport_and_sidecar_after_rekey(devices, group):
     result = devices.target._request('worker', devices.body)
-    from ml_stack.files import read_json
+    from poolhouse.files import read_json
     path = localagent.folder(devices.local) / 'local-qwen.remote.json'
     worker = remote_workers.BoardWorker(devices.local, read_json(path, {}))
     old_token = worker.token
@@ -400,7 +400,7 @@ def test_explicit_missing_cli_identity_cannot_enroll_a_replacement(devices, monk
 
 
 def test_restarted_worker_renews_saved_scope_after_dev_group_convergence(devices):
-    from ml_stack.files import read_json
+    from poolhouse.files import read_json
     result = devices.target._request('worker', devices.body)
     path = localagent.folder(devices.local) / 'local-qwen.remote.json'
     record = read_json(path, {})
@@ -414,7 +414,7 @@ def test_restarted_worker_renews_saved_scope_after_dev_group_convergence(devices
 
 @pytest.mark.redteam
 def test_running_worker_cannot_adopt_another_board_certificate_during_rekey(devices):
-    from ml_stack.files import read_json
+    from poolhouse.files import read_json
     devices.target._request('worker', devices.body)
     path = localagent.folder(devices.local) / 'local-qwen.remote.json'
     worker = remote_workers.BoardWorker(devices.local, read_json(path, {}))
@@ -490,7 +490,7 @@ def test_self_lan_alias_transport_refuses_another_signed_certificate(devices, mo
 @pytest.mark.redteam
 @pytest.mark.parametrize('binding', ['absent', 'certificate', 'machine', 'userinfo', 'path'])
 def test_exact_endpoint_requires_a_signed_device_origin(devices, binding):
-    from ml_stack.fleet.remote import device_address
+    from poolhouse.fleet.remote import device_address
     node = devices.peers[0]
     beacon = SimpleNamespace(machine=node.beacon.machine, cert=node.beacon.cert)
     host = node.base_url
@@ -531,7 +531,7 @@ def test_tls_worker_normalizes_model_claim_and_preserves_full_runtime_reference(
 
 
 def test_remote_none_and_large_explicit_task_limits_preserve_shape():
-    from ml_stack.workspace import remote_workers
+    from poolhouse.workspace import remote_workers
     body = {"cluster": "dev", "cluster_id": "id", "max_output_tokens": None,
             "task_caps": {"seconds": 200000, "rounds": None}}
     assert remote_workers._settings(body, ("dev", "id")) == "local-qwen"
@@ -568,5 +568,5 @@ def test_cli_prints_authenticated_followup_and_effective_limits(monkeypatch, cap
     output = capsys.readouterr().out
     assert 'Caller: caller' in output
     assert 'Requested context: auto' in output
-    assert f"cd '{project.resolve()}' && ml-stack-workspace thread 17 --agent caller" in output
+    assert f"cd '{project.resolve()}' && poolhouse-workspace thread 17 --agent caller" in output
     assert '"max_output_tokens": null' in output

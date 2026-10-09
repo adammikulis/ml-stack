@@ -115,7 +115,7 @@ def stamps(files: set[Path]) -> dict[str, list[int]]:
 def third_party(entries: tuple[str, ...], root: Path = ROOT) -> dict[str, str]:
     """`walk`'s names, remembered in the temp directory until a file it read changes (the walk parses ~600 files)."""
     key = hashlib.sha256(f"{root}\0{entries}".encode()).hexdigest()[:16]
-    memo = Path(tempfile.gettempdir()) / f"ml-stack-preflight-{key}.json"
+    memo = Path(tempfile.gettempdir()) / f"poolhouse-preflight-{key}.json"
     try:
         held = json.loads(memo.read_text(encoding="utf-8"))
         if held["files"] == stamps({Path(p) for p in held["files"]}):
@@ -190,11 +190,11 @@ def fits(version: str, spec: str) -> bool:
 
 
 def extra_requirements(extra: str, root: Path = ROOT) -> list[str]:
-    """The requirement strings of an optional-dependency group, the groups it names inside ``ml-stack[...]`` included."""
+    """The requirement strings of an optional-dependency group, the groups it names inside ``poolhouse[...]`` included."""
     extras = pyproject(root)["project"]["optional-dependencies"]
     out: list[str] = []
     for text in extras.get(extra, []):
-        inner = re.fullmatch(r"ml-stack\[(.+)\]", text)
+        inner = re.fullmatch(r"poolhouse\[(.+)\]", text)
         out += [r for e in inner.group(1).split(",") for r in extra_requirements(e.strip(), root)] if inner else [text]
     return out
 

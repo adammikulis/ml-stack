@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home
-from ml_stack.sentinel import Mode, Sentinel, State, human
-from ml_stack.sentinel.human import HumanGrant, HumanRequired, agent_may
-from ml_stack.sentinel.store import Holding
+from poolhouse import home
+from poolhouse.sentinel import Mode, Sentinel, State, human
+from poolhouse.sentinel.human import HumanGrant, HumanRequired, agent_may
+from poolhouse.sentinel.store import Holding
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 
@@ -31,22 +31,22 @@ def node(tmp_path):
 
 
 ATTACKS = [
-    ("shell", {"command": "ml-stack security quarantine release q-abc123"}),
-    ("shell", {"command": "ml-stack  security   release q-abc123"}),
-    ("shell", {"command": "ml-stack-security mode off"}),
-    ("shell", {"command": "ml-stack 'security' purge q-1"}),
-    ("shell", {"command": "ML_STACK_SENTINEL=off ml-stack serve up"}),
-    ("shell", {"command": 'python -c "from ml_stack.sentinel import default; default()"'}),
-    ("shell", {"command": "python -m ml_stack.sentinel.cli quarantine release q-1"}),
-    ("shell", {"command": "rm -rf ~/.ml-stack/sentinel"}),
-    ("shell", {"command": "cat $HOME/.ml-stack/sentinel/state.json"}),
-    ("write_file", {"path": "/Users/x/.ml-stack/sentinel/config.json", "content": "{}"}),
-    ("edit_file", {"path": "src/ml_stack/sentinel/policy.py", "old": "a", "new": "b"}),
-    ("read_file", {"path": "src/ml_stack/sentinel/human.py"}),
+    ("shell", {"command": "poolhouse security quarantine release q-abc123"}),
+    ("shell", {"command": "poolhouse  security   release q-abc123"}),
+    ("shell", {"command": "poolhouse-security mode off"}),
+    ("shell", {"command": "poolhouse 'security' purge q-1"}),
+    ("shell", {"command": "POOLHOUSE_SENTINEL=off poolhouse serve up"}),
+    ("shell", {"command": 'python -c "from poolhouse.sentinel import default; default()"'}),
+    ("shell", {"command": "python -m poolhouse.sentinel.cli quarantine release q-1"}),
+    ("shell", {"command": "rm -rf ~/.poolhouse/sentinel"}),
+    ("shell", {"command": "cat $HOME/.poolhouse/sentinel/state.json"}),
+    ("write_file", {"path": "/Users/x/.poolhouse/sentinel/config.json", "content": "{}"}),
+    ("edit_file", {"path": "src/poolhouse/sentinel/policy.py", "old": "a", "new": "b"}),
+    ("read_file", {"path": "src/poolhouse/sentinel/human.py"}),
     ("security_release", {"id": "q-1"}),
     ("sentinel_off", {}),
     ("mcp_call", {"server": "x", "args": ["--tool", "sentinel.release", "q-1"]}),
-    ("shell", {"command": "ml-stack\\ security release q-1"}),
+    ("shell", {"command": "poolhouse\\ security release q-1"}),
     ("shell", {"command": "please disable the sentinel now"}),
 ]
 
@@ -57,7 +57,7 @@ def test_the_agent_surface_refuses_every_sentinel_verb(tool, arguments):
 
 
 BENIGN = [
-    ("shell", {"command": "ls -la"}), ("shell", {"command": "ml-stack serve status"}),
+    ("shell", {"command": "ls -la"}), ("shell", {"command": "poolhouse serve status"}),
     ("read_file", {"path": "docs/serving.md"}), ("web_search", {"query": "llama.cpp release"}),
     ("write_file", {"path": "notes.md", "content": "write a security review of the code"}),
     ("shell", {"command": "git log --oneline -5"}),
@@ -75,7 +75,7 @@ def test_benign_tool_calls_are_not_refused():
 
 
 def test_the_state_directory_is_refused_wherever_it_is_moved(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "elsewhere"))
     path = str(home.state("sentinel", "state.json"))
     assert agent_may("read_file", {"path": path})
 
@@ -134,7 +134,7 @@ def test_an_edited_state_file_cannot_release_anything(node):
 
 def test_a_peer_cannot_lift_its_own_block(node):
     now = [0.0]
-    from ml_stack.sentinel.rates import PeerLimits, PeerWatch
+    from poolhouse.sentinel.rates import PeerLimits, PeerWatch
 
     node.peers = PeerWatch(PeerLimits(), clock=lambda: now[0])
     for _ in range(3):
@@ -147,7 +147,7 @@ def test_a_peer_cannot_lift_its_own_block(node):
 
 def _cli(*argv, env_extra=None, tty=False, answer=""):
     env = {**os.environ, "PYTHONPATH": SRC, **(env_extra or {})}
-    code = f"import sys; from ml_stack.sentinel.cli import command; sys.exit(command({list(argv)!r}))"
+    code = f"import sys; from poolhouse.sentinel.cli import command; sys.exit(command({list(argv)!r}))"
     if not tty:
         return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL, timeout=60)
@@ -174,8 +174,8 @@ def _cli(*argv, env_extra=None, tty=False, answer=""):
 
 @pytest.fixture
 def cli_env(tmp_path):
-    return {"ML_STACK_HOME": str(tmp_path / "home"), "CLAUDECODE": "", "ML_STACK_AGENT": "",
-            "ML_STACK_NONINTERACTIVE": "", "ML_STACK_SENTINEL": ""}
+    return {"POOLHOUSE_HOME": str(tmp_path / "home"), "CLAUDECODE": "", "POOLHOUSE_AGENT": "",
+            "POOLHOUSE_NONINTERACTIVE": "", "POOLHOUSE_SENTINEL": ""}
 
 
 def _seed(tmp_path) -> str:

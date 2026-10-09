@@ -13,5 +13,5 @@ surprised us; kept because the next release of the same family will not.
 - [gpt-oss](gpt-oss.md) -- alternating 128-token sliding layers; harmony template with
   `reasoning_effort`.
 
-`ml-stack-models layout MODEL` (the attention layout in a paragraph and bullets) and
-`ml-stack-serve fit --tensors MODEL` (what the file is made of) are how a note starts.
+`poolhouse-models layout MODEL` (the attention layout in a paragraph and bullets) and
+`poolhouse-serve fit --tensors MODEL` (what the file is made of) are how a note starts.

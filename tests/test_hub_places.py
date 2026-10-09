@@ -6,10 +6,10 @@ import json
 import os
 from pathlib import Path
 
-from ml_stack.hub import places
+from poolhouse.hub import places
 
 HOME = Path("/h")
-STATE = Path("/h/.ml-stack")
+STATE = Path("/h/.poolhouse")
 
 
 def where(system: str, **env: str) -> dict[str, list[str]]:
@@ -27,7 +27,7 @@ def test_macos_folders():
     assert got["huggingface"] == ["/h/.cache/huggingface/hub"]
     assert got["lmstudio"] == ["/h/.lmstudio/models", "/h/.cache/lm-studio/models"]
     assert got["ollama"] == ["/h/.ollama/models"]
-    assert got["ml-stack"] == ["/h/.ml-stack/models"]
+    assert got["poolhouse"] == ["/h/.poolhouse/models"]
     assert "/h/Library/Application Support/Jan/data/llamacpp/models" in got["jan"]
 
 
@@ -66,7 +66,7 @@ def test_cache_variables_replace_the_default_folders():
 
 def test_extra_folders_come_from_the_path_list():
     sep = os.pathsep
-    got = where("Linux", ML_STACK_MODEL_PATHS=f"/one{sep}{sep}/two")
+    got = where("Linux", POOLHOUSE_MODEL_PATHS=f"/one{sep}{sep}/two")
     assert got["extra"] == ["/one", "/two"]
 
 

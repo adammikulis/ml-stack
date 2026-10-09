@@ -1,8 +1,8 @@
 """Device daemon composition supplies the project workspace service."""
 
-from ml_stack.cli import daemon as composition
-from ml_stack.fleet import autostart
-from ml_stack.workspace.remote_host import WorkspaceHost
+from poolhouse.cli import daemon as composition
+from poolhouse.fleet import autostart
+from poolhouse.workspace.remote_host import WorkspaceHost
 
 
 def test_daemon_entrypoint_injects_project_host(monkeypatch):
@@ -19,4 +19,4 @@ def test_daemon_entrypoint_injects_project_host(monkeypatch):
 
 def test_autostart_uses_composed_daemon(monkeypatch):
     monkeypatch.setattr(autostart.shutil, 'which', lambda name: None)
-    assert autostart._executable()[-1] == "ml_stack.cli.daemon"
+    assert autostart._executable()[-1] == "poolhouse.cli.daemon"

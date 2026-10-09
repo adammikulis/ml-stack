@@ -4,12 +4,12 @@ ends is the relationship, which of two definitions to keep and what a doubtful l
 
 import json
 
-from ml_stack import ingest
-from ml_stack.graph.absorbing import absorb
-from ml_stack.graph.judging import ModelJudge, excerpts, judge_gold, load_gold
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.tidy import tidy
-from ml_stack.graph.verdicts import DECISIONS
+from poolhouse import ingest
+from poolhouse.graph.absorbing import absorb
+from poolhouse.graph.judging import ModelJudge, excerpts, judge_gold, load_gold
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.tidy import tidy
+from poolhouse.graph.verdicts import DECISIONS
 from tests.test_graph_tidy import _edge, _ids, _node, _store
 
 
@@ -208,14 +208,14 @@ def test_judge_gold_scores_overall_and_per_class_and_counts_the_second_looks(tmp
 
 def test_the_gold_gate_prints_the_number_and_exits_one_under_the_bar(tmp_path, capsys,
                                                                     monkeypatch):
-    from ml_stack.graph import store_cli
+    from poolhouse.graph import store_cli
 
     gold = _a_gold_file(tmp_path)
     client = Scripted({("glimmer node", "glimer node"): "same",
                        ("sylvane", "sylvene"): "different"},
                       after_reading={("cinder vault", "cinder vaulf"): "same",
                                      ("tessel ring", "tessel ridge"): "same"})
-    monkeypatch.setattr("ml_stack.client.Client", lambda *a, **kw: client)
+    monkeypatch.setattr("poolhouse.client.Client", lambda *a, **kw: client)
     assert store_cli.main(["tidy", "--gold", str(gold), "--base-url", "http://nowhere"]) == 0
     out = capsys.readouterr().out
     assert "4 pair(s), 3 right (75%)" in out and "wrong (unsure-then-different)" in out
@@ -456,7 +456,7 @@ def test_a_graph_that_keeps_its_pointers_elsewhere_says_where(tmp_path):
 
 def test_a_failed_model_call_leaves_the_pair_unsure_and_undecided_and_the_pass_goes_on(tmp_path):
     """One pair's compute error is that pair's, not the pass's -- and not a verdict."""
-    from ml_stack.http import ServerError
+    from poolhouse.http import ServerError
 
     class Flaky(Scripted):
         def extract(self, text, schema, *, prompting=None, checking=None, cache=None):

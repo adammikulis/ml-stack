@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import do, home, memory
-from ml_stack.memory import cli, project as projects, recall as recalling, store as storing, vault
-from ml_stack.memory.facts import Refused
+from poolhouse import do, home, memory
+from poolhouse.memory import cli, project as projects, recall as recalling, store as storing, vault
+from poolhouse.memory.facts import Refused
 from tests import memory_keys
 from tests.test_memory import Person, by_name, inject
 from tests.test_memory_cli import person  # noqa: F401  (fixture)
@@ -124,7 +124,7 @@ def test_a_project_file_moved_to_the_user_path_or_another_project_does_not_open(
 
 
 def test_the_stores_are_protected_from_tool_calls(mem):
-    from ml_stack.sentinel.human import agent_may
+    from poolhouse.sentinel.human import agent_may
 
     mem.user.add("a", "note")
     mem.project.add("b", "note")

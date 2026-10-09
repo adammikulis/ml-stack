@@ -101,11 +101,11 @@ ignore configuration are not imported, and unsupported split or sparse indexes f
 # The real state root is write-denied
 
 Without `--confine`, `scripts/test` (and `scripts/testslots run`) still keep every test process from
-writing under the real `~/.ml-stack` (`scripts/testwritedeny.py`), so a test that reaches for it gets
+writing under the real `~/.poolhouse` (`scripts/testwritedeny.py`), so a test that reaches for it gets
 `EPERM` at the line that did it instead of failing the run afterwards ("real state root changed
 during the run", which also names other agents' live writers the suite did not cause). On macOS the
 pytest tree runs under `sandbox-exec` with an allow-default profile that denies `file-write*` under the
-account's state and cache roots and every root the launching environment names (`ML_STACK_HOME`, `ML_STACK_CACHE` and each set `home.OVERRIDES` variable); a root that holds the checkout, the temporary directory or HOME is left out with a printed notice; on Linux under `bwrap` with the root
+account's state and cache roots and every root the launching environment names (`POOLHOUSE_HOME`, `POOLHOUSE_CACHE` and each set `home.OVERRIDES` variable); a root that holds the checkout, the temporary directory or HOME is left out with a printed notice; on Linux under `bwrap` with the root
 bound read-only, but only when a probe on a scratch directory shows both that it denies and that a
 nested `bwrap` still starts. Windows and a host without either tool run unwrapped, and the
 after-the-fact check alone applies, with a notice. `DEV_TEST_WRITE_DENY=0` turns it off for one run. The supervisor sets `DEV_TEST_WRITE_DENY=1` in a child only after it wrapped that child, and a value set by hand is never proof: a run already under a denial is recognised by effect (opening an existing file under the root for writing is refused), and `tests/test_real_state_write_denied.py` checks the same way, without creating or changing anything.

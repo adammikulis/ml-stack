@@ -18,11 +18,11 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack import private_path, roles
-from ml_stack.hub.discover import ModelInfo
-from ml_stack.hub.probe import MachineMemory
-from ml_stack.testing.fakes import reply_from
-from ml_stack.workspace import (
+from poolhouse import private_path, roles
+from poolhouse.hub.discover import ModelInfo
+from poolhouse.hub.probe import MachineMemory
+from poolhouse.testing.fakes import reply_from
+from poolhouse.workspace import (
     device_agent,
     localagent as la,
     localloop,
@@ -97,7 +97,7 @@ def test_auto_selects_a_dense_qwen_when_it_fits_and_no_moe_is_available(tmp_path
 def test_with_only_flash_next_downloaded_it_says_what_to_fetch_and_picks_nothing():
     pick = localmodel.choose(localmodel.AUTO, installed=[info("Qwen3.8-Flash-Next-Q4.gguf", 4)],
                              selection=localmodel.Selection(machine=BIG, search=False))
-    assert not pick.ok and "ml-stack-models find" in pick.hint and not pick.ref
+    assert not pick.ok and "poolhouse-models find" in pick.hint and not pick.ref
 
 
 def test_a_model_that_does_not_fit_gets_one_line_and_the_smaller_choice():
@@ -174,7 +174,7 @@ def test_stop_releases_the_lease_the_loop_recorded(kit):
 
 def test_hostile_names_projects_and_roles_are_refused_before_anything_is_written(kit, tmp_path):
     before = sorted(p.name for p in kit.base.rglob("*"))
-    for ask in (ls.Ask(max_output_tokens=0), ls.Ask(max_output_tokens=True), ls.Ask(name="../evil"), ls.Ask(name="human"), ls.Ask(name="ml-stack-x"),
+    for ask in (ls.Ask(max_output_tokens=0), ls.Ask(max_output_tokens=True), ls.Ask(name="../evil"), ls.Ask(name="human"), ls.Ask(name="poolhouse-x"),
                 ls.Ask(name="a" * 60), ls.Ask(project="/nonexistent/x"), ls.Ask(project=str(kit.base)),
                 ls.Ask(project="/tmp\x00x"), ls.Ask(role="root"), ls.Ask(orders_from=("a/b/c",))):
         with pytest.raises(ValueError):
@@ -220,7 +220,7 @@ class Rig:
         la.save(kit.ws, la.Agent(name="local-t", model="m", model_name="m", role=role,
                                  orders_from=orders, effort=effort))
         tokens.store(kit.base, "local-t", kit.ws.registry.mint(
-            __import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "local-t", "agent", 3600))
+            __import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP, "local-t", "agent", 3600))
         self.cancel = threading.Event()
         held = localloop.Held(model, {"id": "L9"}, lambda: self.released.append("L9"))
         self.settings = localloop.Settings(cancel=self.cancel, serve=lambda agent: held,
@@ -240,7 +240,7 @@ class Rig:
 
     def __exit__(self, *exc):
         self.cancel.set()
-        from ml_stack.workspace import wake
+        from poolhouse.workspace import wake
         wake.signal(self.kit.base / "wake", ["local-t"])
         self.thread.join(timeout=20)
         assert not self.thread.is_alive()
@@ -280,7 +280,7 @@ def test_a_task_from_the_person_is_done_and_answered_on_the_thread(kit):
 def test_a_message_from_a_sender_it_does_not_obey_is_information_only(kit):
     model = Script([done("never")])
     with Rig(kit, model):
-        kit.ws.send(kit.ws.registry.mint(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP,
+        kit.ws.send(kit.ws.registry.mint(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP,
                                          "eve", "agent", 600), "local-t", "task", "do the thing")
         kit.ws.send(kit.owner, "local-t", "status", "fyi")
         waited(lambda: la.status_of(kit.ws, "local-t").get("ignored", 0) >= 2)
@@ -289,7 +289,7 @@ def test_a_message_from_a_sender_it_does_not_obey_is_information_only(kit):
 
 
 def test_a_task_naming_a_giver_the_person_listed_is_obeyed_but_a_stranger_is_not(kit):
-    cc = kit.ws.registry.mint(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP,
+    cc = kit.ws.registry.mint(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP,
                               "claude-code2", "agent", 600)
     model = Script([done("ok")])
     with Rig(kit, model, orders=("claude-code2",)) as rig:
@@ -334,9 +334,9 @@ def test_an_agent_gives_orders_through_the_normal_send(kit):
 
 
 def test_after_reading_an_agent_it_does_not_obey_it_cannot_send_a_task(kit):
-    from ml_stack.workspace import localtools as lt
+    from poolhouse.workspace import localtools as lt
     kit.agent("bob")
-    eve = kit.ws.registry.mint(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "eve", "agent", 600)
+    eve = kit.ws.registry.mint(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP, "eve", "agent", 600)
     root = kit.ws.send(eve, "bob", "note", "hello")["seq"]
     state = lt.TaskState()
     tok = kit.agent("local-z")
@@ -361,10 +361,10 @@ def test_the_loop_stops_at_its_step_cap_its_clock_and_the_kill_switch(kit):
         assert got["type"] == "status" and words in got["text"], got["text"]
         assert model.calls <= 3
         la.stop_file(kit2.ws, "local-t").unlink(missing_ok=True)
-        kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "local-t")
-        kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "claude")
-        kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "mallory")
-        kit2.ws.registry.revoke(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP, "bob")
+        kit2.ws.registry.revoke(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP, "local-t")
+        kit2.ws.registry.revoke(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP, "claude")
+        kit2.ws.registry.revoke(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP, "mallory")
+        kit2.ws.registry.revoke(__import__("poolhouse.workspace.onboard", fromlist=["x"]).SETUP, "bob")
 
 
 def test_the_kill_switch_file_ends_the_task_and_the_loop_and_releases_the_lease(kit):
@@ -459,7 +459,7 @@ def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(serv
     assert status == 200 and json.loads(body)["roles"] == la.role_choices()
     ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r", "max_output_tokens": 23456})
     assert ok[0] == 200 and json.loads(ok[1])["name"] == "local-r"
-    from ml_stack.workspace.device_accounts import account_for
+    from poolhouse.workspace.device_accounts import account_for
     worker = la.load(kit.ws, "local-r")
     assert account_for(kit.ws, worker.identity)["base_id"].startswith("local-device-")
     parent = kit.ws.auth(tokens.load(kit.base, worker.identity)).parent
@@ -483,7 +483,7 @@ def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(serv
 
 
 def test_the_element_builds_nothing_from_markup_and_is_loaded_by_ml_ui():
-    from ml_stack.ui import assets_dir
+    from poolhouse.ui import assets_dir
     src = (assets_dir() / "agents.js").read_text(encoding="utf-8")
     assert 'import "./agents.js"' in (assets_dir() / "ml-ui.js").read_text(encoding="utf-8")
     for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "eval(", "new Function",
@@ -513,7 +513,7 @@ def run_tasks(kit, model, texts, **kwargs):
 
 
 def test_effort_defaults_to_off_and_the_rule_table_picks_for_auto():
-    from ml_stack.workspace import localeffort as le
+    from poolhouse.workspace import localeffort as le
     assert le.DEFAULT == "off" and le.pick_for("show the status", "high") == "off"
     assert le.pick_for("plan the migration", "high") == "medium"
     assert le.pick_for("plan the migration", "low") == "low" and le.pick_for("tidy up", "high") == "low"
@@ -551,7 +551,7 @@ def test_auto_effort_thinks_for_a_plan_and_not_for_a_status(kit):
 
 # -- the prompt cache ---------------------------------------------------------------------
 def test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_prefix(kit):
-    from ml_stack.testing.fakes import Served, fake_llama_server
+    from poolhouse.testing.fakes import Served, fake_llama_server
 
     with fake_llama_server(Served(answer="words only")) as fake:
         client = localloop.client_on(fake.base_url)
@@ -574,7 +574,7 @@ def test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_p
 
 
 def test_with_no_one_to_ask_an_acting_call_and_a_plan_are_denied(kit):
-    from ml_stack.interventions import Confirm
+    from poolhouse.interventions import Confirm
     state = localtools.TaskState()
     person = localtools.Unattended("local-t", state, lambda needs: False)
     ask = Confirm("serve_up will start a model server.", {"tool": "serve_up"})
@@ -604,26 +604,26 @@ def test_automatic_and_coding_agents_choose_the_best_qwen_and_never_flash_next()
 def test_a_context_that_does_not_fit_says_the_longest_that_does_and_the_person_only_command(monkeypatch):
     from types import SimpleNamespace as NS
 
-    from ml_stack.serve import wired
-    from ml_stack.workspace import localprofile as lp
+    from poolhouse.serve import wired
+    from poolhouse.workspace import localprofile as lp
     rows = [NS(context=c, enough_now=c <= 65536) for c in (32768, 65536, 131072, 262144)]
     monkeypatch.setattr(wired, "plan", lambda model, ask: NS(
         enough_now=False, table=rows, need_bytes=120 * 2**30, model="m.gguf"))
     problem, hint = lp.admit("m.gguf", 262144)
     assert "64K" in problem and "120.0 GiB" in problem
-    assert hint == "ml-stack-serve memory --for m.gguf --ctx 262144 --kv q8_0 --apply"
+    assert hint == "poolhouse-serve memory --for m.gguf --ctx 262144 --kv q8_0 --apply"
 
 
 def test_start_refuses_a_context_that_does_not_fit_before_minting_anything(kit, monkeypatch):
-    from ml_stack.workspace import localprofile as lp
-    monkeypatch.setattr(lp, "admit", lambda model, ctx: ("too big", "ml-stack-serve memory --apply"))
+    from poolhouse.workspace import localprofile as lp
+    monkeypatch.setattr(lp, "admit", lambda model, ctx: ("too big", "poolhouse-serve memory --apply"))
     with pytest.raises(ls.Unavailable, match="memory --apply"):
         ls.start(kit.ws, ls.Ask(profile="coding"), pick=PICK, spawn=sleeper)
     assert kit.ws.registry.ids() == ["owner"]
 
 
 def test_trim_drops_whole_oldest_turns_once_and_the_prompt_only_grows_after():
-    from ml_stack.workspace import localprofile as lp
+    from poolhouse.workspace import localprofile as lp
     big = "x" * 3000
     msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "task"}]
     for n in range(40):
@@ -654,7 +654,7 @@ def test_the_guarded_client_trims_a_long_task_before_a_call(kit):
 
 
 def test_the_default_approval_raises_a_request_and_waits_for_the_stop_flag(kit):
-    from ml_stack import requests
+    from poolhouse import requests
     la.save(kit.ws, la.Agent(name="local-t", model="m", model_name="m"))
     tokens.store(kit.base, "local-t", kit.agent("local-t"))
     loop = localloop.Loop(kit.ws, la.load(kit.ws, "local-t"), localloop.Held(None, {}),
@@ -667,7 +667,7 @@ def test_the_default_approval_raises_a_request_and_waits_for_the_stop_flag(kit):
 
 def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit, monkeypatch):
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
-    from ml_stack.workspace import localprofile as lp
+    from poolhouse.workspace import localprofile as lp
     monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
     got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
@@ -682,8 +682,8 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
 def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_path):
     from test_device_agent import owned_launcher
 
-    from ml_stack.net import git
-    from ml_stack.workspace import localprofile as lp
+    from poolhouse.net import git
+    from poolhouse.workspace import localprofile as lp
 
     project = tmp_path / "repo"
     project.mkdir()
@@ -696,7 +696,7 @@ def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_pa
     parent = owned_launcher(kit, "queue-parent")
     assert tokens.load(kit.base, "queue-parent") == parent
     assert kit.ws.registry._load()["queue-parent"]["minted_by"] == "local-account"
-    from ml_stack.workspace import project as projects
+    from poolhouse.workspace import project as projects
     kit.ws.registry.set_project(kit.ws.auth(kit.owner), "queue-parent", projects.describe(project))
     got = ls.start(kit.ws, ls.Ask(name="queue-worker", profile="coding", project=str(project),
                                   repo="sample/project", harness="claude"), pick=PICK,
@@ -710,10 +710,10 @@ def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_pa
 
 
 def test_a_shared_server_with_a_smaller_context_than_asked_is_refused():
-    from ml_stack.testing.fakes import Served, fake_llama_server
+    from poolhouse.testing.fakes import Served, fake_llama_server
     with fake_llama_server(Served(context=32768)) as fake:
         why = localloop.check_context(262144, fake.base_url)
-        assert "32K" in why and "256K" in why and "ml-stack-serve down" in why
+        assert "32K" in why and "256K" in why and "poolhouse-serve down" in why
         assert localloop.check_context(32768, fake.base_url) == ""
 
 
@@ -729,11 +729,11 @@ def test_start_records_the_configured_model_as_claimed(kit, monkeypatch):
 
 
 def test_coding_entrypoint_uses_worker(kit, monkeypatch):
-    from ml_stack.workspace import localcoding
+    from poolhouse.workspace import localcoding
 
     seen = []
-    monkeypatch.setenv('ML_STACK_AGENT', '1')
-    monkeypatch.setenv('ML_STACK_NONINTERACTIVE', '1')
+    monkeypatch.setenv('POOLHOUSE_AGENT', '1')
+    monkeypatch.setenv('POOLHOUSE_NONINTERACTIVE', '1')
     monkeypatch.setattr(localcoding, 'Workspace', lambda: kit.ws)
     monkeypatch.setattr(localcoding.task_worker, 'run', lambda ws, name: seen.append((ws, name)))
     assert localcoding.run_detached(['local-qwen']) == 0
@@ -741,7 +741,7 @@ def test_coding_entrypoint_uses_worker(kit, monkeypatch):
 
 
 def test_empty_native_result_cannot_submit_artifacts(kit, monkeypatch, tmp_path):
-    from ml_stack.workspace import task_coding
+    from poolhouse.workspace import task_coding
 
     monkeypatch.setattr(task_coding.TaskManager, "_run", lambda *args: None)
     monkeypatch.setattr(task_coding.git, 'head', lambda *_: 'a' * 40)
@@ -890,6 +890,6 @@ def test_reasoning_effort_never_overrides_explicit_response_budget(effort):
      'qwen3.8-27b-ud'),
 ])
 def test_model_identity_keeps_valid_claims_and_bounds_display_names(name, expected):
-    from ml_stack.workspace.modelid import clean_model
+    from poolhouse.workspace.modelid import clean_model
     assert localmodel.model_identity(name) == expected
     assert clean_model(localmodel.model_identity(name)) == expected

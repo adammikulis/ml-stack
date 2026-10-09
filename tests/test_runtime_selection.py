@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import jobs, runtime
-from ml_stack.fleet import runtime_wheel
+from poolhouse import jobs, runtime
+from poolhouse.fleet import runtime_wheel
 
 A = "a" * 40
 B = "b" * 40
@@ -20,18 +20,18 @@ B = "b" * 40
 
 def _wheel(tmp_path, commit, value, runtime_module=True):
     root = Path(__file__).resolve().parents[1]
-    wheel = tmp_path / commit / "ml_stack-0.1.0-py3-none-any.whl"
+    wheel = tmp_path / commit / "poolhouse-0.1.0-py3-none-any.whl"
     wheel.parent.mkdir()
-    contents = {f"ml_stack/{name}": (root / "src/ml_stack" / name).read_bytes()
+    contents = {f"poolhouse/{name}": (root / "src/poolhouse" / name).read_bytes()
                 for name in ("runtime.py", "home.py", "files.py", "platform.py", "windows_private.py")}
-    contents["ml_stack/__init__.py"] = b""
+    contents["poolhouse/__init__.py"] = b""
     if not runtime_module:
-        del contents["ml_stack/runtime.py"]
-    contents["ml_stack/lazy_probe.py"] = f"VALUE = {value!r}\n".encode()
-    contents["ml_stack/runtime_probe.py"] = b"from ml_stack.lazy_probe import VALUE\nprint(VALUE, flush=True)\n"
-    contents["ml_stack-0.1.0.dist-info/METADATA"] = b"Metadata-Version: 2.1\nName: ml-stack\nVersion: 0.1.0\n"
-    contents["ml_stack-0.1.0.dist-info/WHEEL"] = b"Wheel-Version: 1.0\nGenerator: regression\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
-    contents["ml_stack-0.1.0.dist-info/RECORD"] = b""
+        del contents["poolhouse/runtime.py"]
+    contents["poolhouse/lazy_probe.py"] = f"VALUE = {value!r}\n".encode()
+    contents["poolhouse/runtime_probe.py"] = b"from poolhouse.lazy_probe import VALUE\nprint(VALUE, flush=True)\n"
+    contents["poolhouse-0.1.0.dist-info/METADATA"] = b"Metadata-Version: 2.1\nName: poolhouse\nVersion: 0.1.0\n"
+    contents["poolhouse-0.1.0.dist-info/WHEEL"] = b"Wheel-Version: 1.0\nGenerator: regression\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+    contents["poolhouse-0.1.0.dist-info/RECORD"] = b""
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, data in contents.items():
             archive.writestr(name, data)
@@ -41,7 +41,7 @@ def _wheel(tmp_path, commit, value, runtime_module=True):
 
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("PIP_NO_INDEX", "1")
     return tmp_path
 
@@ -50,7 +50,7 @@ def isolated(tmp_path, monkeypatch):
 def test_normal_package_without_installer_helpers_is_verified(isolated):
     chosen = runtime_wheel.prepare(_wheel(isolated, A, "normal", runtime_module=False), A, timeout=60)
     assert runtime.verify(chosen) == chosen
-    assert not list(chosen.prefix.rglob("ml_stack/runtime.py"))
+    assert not list(chosen.prefix.rglob("poolhouse/runtime.py"))
 
 
 @pytest.mark.slow
@@ -60,7 +60,7 @@ def test_retained_worker_lazy_imports_stay_old_after_new_runtime_selection(isola
     marker = old.prefix / "pyvenv.cfg"
     baseline = marker.read_bytes()
     old_sources = {path: path.read_bytes() for path in old.prefix.rglob("*.py")}
-    script = "import sys;print('ready',flush=True);sys.stdin.readline();from ml_stack.lazy_probe import VALUE;print(VALUE,flush=True)"
+    script = "import sys;print('ready',flush=True);sys.stdin.readline();from poolhouse.lazy_probe import VALUE;print(VALUE,flush=True)"
     child = subprocess.Popen([str(old.python), "-I", "-c", script], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                              env=runtime.environment())
@@ -78,12 +78,12 @@ def test_retained_worker_lazy_imports_stay_old_after_new_runtime_selection(isola
         assert old.prefix != newer.prefix
         assert runtime.selected() == newer
         monkeypatch.setenv("PYTHONPATH", str(isolated / "changing-checkout"))
-        detached = jobs.detach("ml_stack.runtime_probe", [], log=isolated / "new-worker.log")
+        detached = jobs.detach("poolhouse.runtime_probe", [], log=isolated / "new-worker.log")
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline and "new\n" not in detached.log.read_text():
             time.sleep(0.05)
         assert "new\n" in detached.log.read_text()
-        assert detached.command[:4] == (str(newer.python), "-I", "-m", "ml_stack.runtime_probe")
+        assert detached.command[:4] == (str(newer.python), "-I", "-m", "poolhouse.runtime_probe")
     finally:
         if child.poll() is None:
             child.kill()
@@ -147,15 +147,15 @@ def test_launcher_forward_preserves_arguments_and_removes_source_paths(isolated,
     monkeypatch.setenv("PYTHONPATH", str(isolated / "source"))
     calls = []
     monkeypatch.setattr(os, "execve", lambda *args: calls.append(args))
-    assert runtime.forward("ml_stack.fleet.launch", ["--root", "studio", "--restart"])
+    assert runtime.forward("poolhouse.fleet.launch", ["--root", "studio", "--restart"])
     python, argv, environment = calls[0]
     assert python == str(chosen.python)
-    assert argv == [python, "-I", "-m", "ml_stack.fleet.launch", "--root", "studio", "--restart"]
+    assert argv == [python, "-I", "-m", "poolhouse.fleet.launch", "--root", "studio", "--restart"]
     assert "PYTHONPATH" not in environment
 
 
 def test_selected_restart_uses_a_separate_authenticated_launcher(isolated, monkeypatch):
-    from ml_stack.fleet import autostart
+    from poolhouse.fleet import autostart
 
     chosen = runtime.Runtime(isolated / "runtime", B, "0.1.0", runtime.identity())
     monkeypatch.setattr(runtime, "selected", lambda: chosen)
@@ -166,8 +166,8 @@ def test_selected_restart_uses_a_separate_authenticated_launcher(isolated, monke
     monkeypatch.setattr(jobs, "detach", lambda *args, **kwargs: calls.append((args, kwargs)))
     assert autostart.restart() == "launcher"
     module, argv = calls[0][0]
-    assert (module, argv) == ("ml_stack.fleet.launch", ["--restart", "--no-browser", "--root", "studio", "--port", "8771"])
-    from ml_stack.fleet import launch
+    assert (module, argv) == ("poolhouse.fleet.launch", ["--restart", "--no-browser", "--root", "studio", "--port", "8771"])
+    from poolhouse.fleet import launch
     known, rest = launch._arguments(argv)
     assert known.restart and known.port == 8771 and rest == ["--root", "studio"]
 

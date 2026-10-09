@@ -12,7 +12,7 @@ from datetime import datetime
 
 import pytest
 
-from ml_stack.fleet.availability import Availability, parse_window
+from poolhouse.fleet.availability import Availability, parse_window
 
 MON, SAT = "2026-08-24", "2026-08-22"
 

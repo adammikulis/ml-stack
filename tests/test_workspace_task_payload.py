@@ -3,7 +3,7 @@ import threading
 
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import localagent as la, localloop
+from poolhouse.workspace import localagent as la, localloop
 
 
 def test_worker_receives_constraints_after_a_long_task(monkeypatch, tmp_path):

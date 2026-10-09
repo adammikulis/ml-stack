@@ -6,15 +6,15 @@ import json
 
 import pytest
 
-from ml_stack.gym.adapters import actions, make_environment, render_state
-from ml_stack.gym.drone_definition import build
+from poolhouse.gym.adapters import actions, make_environment, render_state
+from poolhouse.gym.drone_definition import build
 
 
 @pytest.fixture
 def native_drone(monkeypatch, tmp_path):
     pytest.importorskip('PyFlyt')
-    monkeypatch.setenv('ML_STACK_CACHE', str(tmp_path / 'cache'))
-    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(tmp_path))
+    monkeypatch.setenv('POOLHOUSE_CACHE', str(tmp_path / 'cache'))
+    monkeypatch.setenv('POOLHOUSE_GYM_FILES_ROOT', str(tmp_path))
     definition = {'version': 1, 'size': 20, 'n_agents': 2, 'trees': [],
                   'hikers': [{'x': 5, 'y': 0}], 'fires': [{'x': 6, 'y': 2}]}
     (tmp_path / 'forest.json').write_text(json.dumps(definition))
@@ -30,8 +30,8 @@ def native_drone(monkeypatch, tmp_path):
 def test_native_forest_visuals_preserve_tree_colliders(monkeypatch, tmp_path):
     pytest.importorskip('PyFlyt')
     from PIL import Image
-    monkeypatch.setenv('ML_STACK_CACHE', str(tmp_path / 'cache'))
-    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(tmp_path))
+    monkeypatch.setenv('POOLHOUSE_CACHE', str(tmp_path / 'cache'))
+    monkeypatch.setenv('POOLHOUSE_GYM_FILES_ROOT', str(tmp_path))
     definition = {'version': 1, 'size': 20, 'n_agents': 1,
                   'trees': [{'x': 6, 'y': 2, 'height': 6, 'radius': .7}], 'hikers': [], 'fires': []}
     (tmp_path / 'forest.json').write_text(json.dumps(definition))
@@ -99,7 +99,7 @@ def test_native_camera_reward_and_persistent_clock(native_drone):
 def test_native_occlusion_hides_targets_and_thermal(native_drone):
     import numpy as np
 
-    from ml_stack.gym.drone_sensors import capture
+    from poolhouse.gym.drone_sensors import capture
     env = native_drone
     assert env.visible_targets
     native = env.native
@@ -122,7 +122,7 @@ def test_native_occlusion_hides_targets_and_thermal(native_drone):
 @pytest.mark.slow
 def test_procedural_collision_geometry_seed_and_episode_reset(monkeypatch, tmp_path):
     pytest.importorskip('PyFlyt')
-    monkeypatch.setenv('ML_STACK_CACHE', str(tmp_path / 'cache'))
+    monkeypatch.setenv('POOLHOUSE_CACHE', str(tmp_path / 'cache'))
     config = {'task_horizon': 1, 'world': {'trees': 6, 'hikers': 1, 'fires': 1}}
     env = make_environment('drone', config, seed=2)
     try:
@@ -142,7 +142,7 @@ def test_procedural_collision_geometry_seed_and_episode_reset(monkeypatch, tmp_p
 @pytest.mark.redteam
 @pytest.mark.parametrize('definition', [None, [], {'version': 2}, {'version': 1, 'size': True}])
 def test_manual_forest_rejects_invalid_shapes(monkeypatch, tmp_path, definition):
-    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(tmp_path))
+    monkeypatch.setenv('POOLHOUSE_GYM_FILES_ROOT', str(tmp_path))
     (tmp_path / 'forest.json').write_text(json.dumps(definition))
     with pytest.raises(ValueError):
         build({'mode': 'manual', 'map_file': 'forest.json'})
@@ -195,10 +195,10 @@ def test_native_patrol_moves_selected_drone_without_task_reset(native_drone):
 def test_simulation_drone_records_exact_sensor_input_for_reuse(monkeypatch, tmp_path):
     import numpy as np
 
-    from ml_stack.gym.recordings import export_reviewed
-    from ml_stack.gym.simulation import Simulation
+    from poolhouse.gym.recordings import export_reviewed
+    from poolhouse.gym.simulation import Simulation
     pytest.importorskip('PyFlyt')
-    monkeypatch.setenv('ML_STACK_CACHE', str(tmp_path / 'cache'))
+    monkeypatch.setenv('POOLHOUSE_CACHE', str(tmp_path / 'cache'))
     simulation = Simulation({'id': 'drone-trajectory-proof', 'environment': 'drone',
                              'controller': 'manual', 'seed': 2,
                              'config': {'simulation_mode': 'world', 'task_horizon': 2,

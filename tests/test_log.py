@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack import log
+from poolhouse import log
 
 
 class TestTheConsole:

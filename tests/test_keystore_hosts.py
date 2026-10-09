@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import keystore, platform, private_path
+from poolhouse import keystore, platform, private_path
 from tests import keystore_support, test_keystore
 
 counting = keystore_support.counting
@@ -52,7 +52,7 @@ def test_a_failed_grant_never_reaches_the_step_that_would_lock_everyone_out(tmp_
                                            stdout=f'"HOST\\fixture","{SID}"\n')
 
     monkeypatch.setattr(platform.subprocess, "run", run)
-    with caplog.at_level("WARNING", logger="ml_stack.keystore"):
+    with caplog.at_level("WARNING", logger="poolhouse.keystore"):
         make(tmp_path)._ensure_dir()
     assert "could not restrict" in caplog.text
     assert not any(a[-1] == "/inheritance:r" for a in as_windows)
@@ -74,7 +74,7 @@ def test_private_dir_without_a_sid_says_it_did_nothing(tmp_path, monkeypatch):
 def test_a_state_root_on_a_windows_drive_is_refused_before_anything_is_made(tmp_path, counting, monkeypatch):
     monkeypatch.setattr(private_path, "windows_mount", lambda path: True)
     store = make(tmp_path)
-    with pytest.raises(keystore.KeystoreUnavailable, match="ML_STACK_HOME"):
+    with pytest.raises(keystore.KeystoreUnavailable, match="POOLHOUSE_HOME"):
         store.subkey("memory", "a")
     assert not (tmp_path / "ks").exists()
 
@@ -85,7 +85,7 @@ def test_windows_mount_reads_the_mount_table(tmp_path, monkeypatch):
     table = f"C:\\134 {drive} 9p rw 0 0\next4 / ext4 rw 0 0\n"
     monkeypatch.setattr(Path, "read_text", lambda self, **_k: (
         "5.15.90.1-microsoft-standard-WSL2" if self.name == "osrelease" else table))
-    assert private_path.windows_mount(drive / "Users" / "me" / ".ml-stack") is True
+    assert private_path.windows_mount(drive / "Users" / "me" / ".poolhouse") is True
     assert private_path.windows_mount(tmp_path / "home") is False
 
 

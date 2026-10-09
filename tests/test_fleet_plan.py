@@ -1,4 +1,4 @@
-"""``ml-stack-cluster plan``: which model each peer serves, and how many slots, for N users.
+"""``poolhouse-cluster plan``: which model each peer serves, and how many slots, for N users.
 
 Profiles, memory records and peers are invented; the command is driven through `join.main`
 against daemons on loopback, and ``--apply`` against the real daemon handler over a
@@ -14,20 +14,20 @@ from pathlib import Path
 import pytest
 from test_fleet_join import WORDS, FakeDaemon, _free_tcp, _free_udp
 
-from ml_stack.fleet import join as joining
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import Advertiser, Beacon, load_cluster_key
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.join import main
-from ml_stack.fleet.models import Models
-from ml_stack.fleet.plan import Room, fit_for, place, ranked, room_of, table
-from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.fleet.serving import Hosting, NoRoom, ServeSettings, Serving
-from ml_stack.http import Server
-from ml_stack.serve.fit import Fit
-from ml_stack.serve.profile import Profile
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse.fleet import join as joining
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.discovery import Advertiser, Beacon, load_cluster_key
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.join import main
+from poolhouse.fleet.models import Models
+from poolhouse.fleet.plan import Room, fit_for, place, ranked, room_of, table
+from poolhouse.fleet.remote import Peer, PeerError
+from poolhouse.fleet.serving import Hosting, NoRoom, ServeSettings, Serving
+from poolhouse.http import Server
+from poolhouse.serve.fit import Fit
+from poolhouse.serve.profile import Profile
+from poolhouse.testing.fakes import fake_llama_binary
 from tests.cluster_support import join as join_cluster
 
 G = 1 << 30
@@ -237,7 +237,7 @@ class TestCommand:
         roomy, small = _free_tcp(), _free_tcp()
         daemons.append(FakeDaemon(roomy, raw, udp, name="roomy", device=_device(96 * G)))
         daemons.append(FakeDaemon(small, raw, udp, name="small", device=_device(24 * G)))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         code = main(["--cluster-key", str(key), "--port", str(roomy), "plan", "--users", "5",
                      "--context", "16384", "--json", "--timeout", "1"])
         got = json.loads(capsys.readouterr().out)
@@ -251,7 +251,7 @@ class TestCommand:
         raw = load_cluster_key(key)
         small = _free_tcp()
         daemons.append(FakeDaemon(small, raw, udp, name="small", device=_device(24 * G)))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         code = main(["--cluster-key", str(key), "--port", str(small), "plan", "--users", "4",
                      "--timeout", "1"])
         out = capsys.readouterr().out
@@ -266,7 +266,7 @@ class TestCommand:
         raw = load_cluster_key(key)
         port = _free_tcp()
         daemons.append(FakeDaemon(port, raw, udp, name="midsize", device=_device(57 * G)))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         argv = ["--cluster-key", str(key), "--port", str(port), "plan", "--users", "3",
                 "--context", "16384", "--timeout", "1"]
         assert main([*argv, "--json"]) == 1
@@ -288,13 +288,13 @@ class TestCommand:
 
     def test_in_no_cluster_it_says_join(self, tmp_path, capsys):
         assert main(["--cluster-key", str(tmp_path / "none.key"), "plan", "--users", "1"]) == 1
-        assert "ml-stack-cluster join" in capsys.readouterr().err
+        assert "poolhouse-cluster join" in capsys.readouterr().err
 
 
 # -- POST /serve, and --apply -------------------------------------------------------------
 @pytest.fixture
 def llama_binary(tmp_path, monkeypatch):
-    from ml_stack.serve import backend as backend_module
+    from poolhouse.serve import backend as backend_module
 
     monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
     return fake_llama_binary(tmp_path)
@@ -306,7 +306,7 @@ class ServingDaemon:
 
     def __init__(self, tmp_path: Path, binary: Path, *, name: str, room: int,
                  key: bytes | None = None, udp: int = 0, fits=None) -> None:
-        from ml_stack.serve import LlamaServerBackend, ServerManager
+        from poolhouse.serve import LlamaServerBackend, ServerManager
 
         root = tmp_path / name
         (root / "files").mkdir(parents=True)
@@ -409,7 +409,7 @@ class TestApply:
         d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G, key=raw,
                           udp=udp)
         daemons.append(d)
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         code = main(["--cluster-key", str(key), "--port", str(d.port), "plan", "--users",
                      "2", "--context", "16384", "--apply", "--timeout", "1"])
         out = capsys.readouterr().out
@@ -426,7 +426,7 @@ class TestApply:
         d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G, key=raw,
                           udp=udp)
         daemons.append(d)
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         main(["--cluster-key", str(key), "--port", str(d.port), "plan", "--users", "2",
               "--apply", "--json", "--timeout", "1"])
         got = json.loads(capsys.readouterr().out)
@@ -444,7 +444,7 @@ class TestApply:
         monkeypatch.setattr(joining, "_measurements", lambda: (
             [Profile(model=BIG, questions=100, right=0.9)],
             [Fit(model=BIG, weights_gpu=G, compute=0, per_token=1024)]))
-        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(udp))
         code = main(["--cluster-key", str(key), "--port", str(d.port), "plan", "--users",
                      "1", "--apply", "--json", "--timeout", "1"])
         got = json.loads(capsys.readouterr().out)

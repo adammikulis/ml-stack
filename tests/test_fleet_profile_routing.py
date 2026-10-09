@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import daemon, join
-from ml_stack.fleet.discovery import derive_token
+from poolhouse.fleet import daemon, join
+from poolhouse.fleet.discovery import derive_token
 
 PRODUCTION = base64.urlsafe_b64encode(bytes(range(32))).rstrip(b"=")
 DEVELOPMENT = base64.urlsafe_b64encode(bytes(reversed(range(32)))).rstrip(b"=")
@@ -79,7 +79,7 @@ def test_maintained_launcher_records_selected_profile_and_mode(tmp_path, monkeyp
     monkeypatch.setattr(join, "detach", detach)
     profile = tmp_path / "development.key"
     assert join.start_daemon(9123, tmp_path / "daemon", "device", cluster_key_path=profile, mode="dev") == 42
-    assert captured[0][0] == "ml_stack.cli.daemon"
+    assert captured[0][0] == "poolhouse.cli.daemon"
     assert captured[0][1] == ["--port", "9123", "--root", str(tmp_path / "daemon"),
                               "--name", "device", "--cluster-key", str(profile.resolve()), "--mode", "dev"]
     record = join.read_json(join.started_file(tmp_path / "daemon"), {})

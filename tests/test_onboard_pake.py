@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from ml_stack.fleet.onboard import pake
+from poolhouse.fleet.onboard import pake
 
 CTX = b"ctx"
 

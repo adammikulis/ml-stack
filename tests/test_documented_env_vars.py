@@ -1,7 +1,7 @@
-"""Every ML_STACK_* variable the docs name is read (or set) somewhere in the shipped source.
+"""Every POOLHOUSE_* variable the docs name is read (or set) somewhere in the shipped source.
 
 A documented switch that the code does not know silently does nothing; this caught CHANGELOG.md naming
-``ML_STACK_UNMANAGED`` for the variable the code reads as ``ML_STACK_ADOPT_UNMANAGED``.
+``POOLHOUSE_UNMANAGED`` for the variable the code reads as ``POOLHOUSE_ADOPT_UNMANAGED``.
 """
 
 from __future__ import annotations
@@ -14,19 +14,19 @@ DOCS = [ROOT / "CHANGELOG.md", ROOT / "README.md", *sorted((ROOT / "docs").glob(
 SOURCE_DIRS = ["src", "scripts", "packaging", "app/src", "app/src-tauri/src", "contracts"]
 SOURCE_FILES = ["pyproject.toml"]
 TEXT = {".py", ".rs", ".ts", ".tsx", ".js", ".sh", ".ps1", ".toml", ".json", ".yml", ".yaml", ".nsi", ".cmd", ".md", ""}
-NAME = re.compile(r"\bML_STACK_[A-Z0-9_]*[A-Z0-9]\b")
+NAME = re.compile(r"\bPOOLHOUSE_[A-Z0-9_]*[A-Z0-9]\b")
 
 EXTERNAL: dict[str, str] = {
-    "ML_STACK_FROZEN_BINARY": "standalone daemon input for packaging conversation tests",
-    "ML_STACK_FROZEN_CODING_BINARY": "standalone daemon input for packaging coding tests",
-    "ML_STACK_ACCEPTANCE_DECIDE_CACHE": "installed decide cache input for native gym acceptance tests",
-    "ML_STACK_ACCEPTANCE_DECISION_DEVICE": "accelerator selection for native gym acceptance tests",
-    "ML_STACK_ACCEPTANCE_VISION": "opt-in native vision gym acceptance test",
-    "ML_STACK_TEST_GGUF": "opt-in input of the real-model tests, read by tests/ only",
-    "ML_STACK_TEST_SSHD": "opt-in switch of the localhost-sshd onboarding test, read by tests/ only",
-    "ML_STACK_PUSH_MAIN": "documented as inert: the Bash guard no longer reads it; release-main approval replaces it",
-    "ML_STACK_FLEET_TLS": "documented as removed: the pool has no TLS-off switch (docs/pool-encryption.md); tests/ sets it to prove it is ignored",
-    "ML_STACK_MANUAL_DIALOG": "opt-in switch of the manual notification-dialog test, read by tests/ only",
+    "POOLHOUSE_FROZEN_BINARY": "standalone daemon input for packaging conversation tests",
+    "POOLHOUSE_FROZEN_CODING_BINARY": "standalone daemon input for packaging coding tests",
+    "POOLHOUSE_ACCEPTANCE_DECIDE_CACHE": "installed decide cache input for native gym acceptance tests",
+    "POOLHOUSE_ACCEPTANCE_DECISION_DEVICE": "accelerator selection for native gym acceptance tests",
+    "POOLHOUSE_ACCEPTANCE_VISION": "opt-in native vision gym acceptance test",
+    "POOLHOUSE_TEST_GGUF": "opt-in input of the real-model tests, read by tests/ only",
+    "POOLHOUSE_TEST_SSHD": "opt-in switch of the localhost-sshd onboarding test, read by tests/ only",
+    "POOLHOUSE_PUSH_MAIN": "documented as inert: the Bash guard no longer reads it; release-main approval replaces it",
+    "POOLHOUSE_FLEET_TLS": "documented as removed: the pool has no TLS-off switch (docs/pool-encryption.md); tests/ sets it to prove it is ignored",
+    "POOLHOUSE_MANUAL_DIALOG": "opt-in switch of the manual notification-dialog test, read by tests/ only",
 }
 """Documented variables that are intentionally not in the shipped source, each with the reason."""
 
@@ -52,7 +52,7 @@ def documented() -> dict[str, list[str]]:
     return found
 
 
-def test_every_documented_ml_stack_variable_exists_in_the_source():
+def test_every_documented_poolhouse_variable_exists_in_the_source():
     source = source_text()
     known = set(NAME.findall(source))
     docs = documented()

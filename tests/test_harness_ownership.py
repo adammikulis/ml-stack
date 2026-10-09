@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import harness_claims, harnesshook
-from ml_stack.workspace import Conflict, Denied, tokens
-from ml_stack.workspace.project import describe
+from poolhouse import harness_claims, harnesshook
+from poolhouse.workspace import Conflict, Denied, tokens
+from poolhouse.workspace.project import describe
 
 pytestmark = pytest.mark.redteam
 
@@ -36,7 +36,7 @@ def test_actual_hook_blocks_other_owner_and_symlink_alias_before_write(kit):
     kit.ws.claim(tokens.load(kit.base, 'beta'), 'file', str(target))
     payload = {'tool_name': 'Write', 'tool_input': {'file_path': str(alias / target.name), 'content': 'hostile'},
                'cwd': str(kit.project)}
-    done = subprocess.run([sys.executable, '-m', 'ml_stack.harnesshook', 'pre', '--role', 'plan-and-go',
+    done = subprocess.run([sys.executable, '-m', 'poolhouse.harnesshook', 'pre', '--role', 'plan-and-go',
                            '--agent', 'alpha', '--root', str(kit.project)],
                           input=json.dumps(payload), text=True, capture_output=True,
                           env={**os.environ, 'PYTHONPATH': str(Path(__file__).parents[1] / 'src')},
@@ -78,7 +78,7 @@ def test_explicit_port_worktree_and_install_mutations_reserve_native_resources(k
     python = kit.project / 'venv' / 'bin' / 'python'
     which = harness_claims.shutil.which
     monkeypatch.setattr(harness_claims.shutil, 'which', lambda name: str(python) if name == 'python' else which(name))
-    command = f'git -C {kit.project} add result.txt; python -m pip install wheel; ml-stack-serve down --port 51548'
+    command = f'git -C {kit.project} add result.txt; python -m pip install wheel; poolhouse-serve down --port 51548'
     required = harness_claims.resources('Bash', {'command': command}, str(kit.project))
     assert ('worktree', str(kit.project)) in required
     assert ('install', str(python.parent.parent)) in required
@@ -117,7 +117,7 @@ def test_separate_worktrees_share_source_area_but_allow_independent_files(kit, t
 
 
 @pytest.mark.parametrize('command', [
-    "ls src/ml_stack/models* 2>/dev/null; find src -name '*model*' -maxdepth 3 | head",
+    "ls src/poolhouse/models* 2>/dev/null; find src -name '*model*' -maxdepth 3 | head",
     "cat HANDOFF.md 2>/dev/null | head",
     "ls 1>/dev/null 2>>/dev/null",
     "ls &>/dev/null",

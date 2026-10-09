@@ -1,16 +1,16 @@
-"""``ml-stack-store``: ``check`` and ``docs``, run in-process on stores built in tmp_path.
+"""``poolhouse-store``: ``check`` and ``docs``, run in-process on stores built in tmp_path.
 
-Nothing under ``~/.ml-stack`` is touched, and no real graph is read.
+Nothing under ``~/.poolhouse`` is touched, and no real graph is read.
 """
 
 import json
 
 import pytest
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.store_cli import main
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.store_cli import main
 
-pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
 
 GRAPH = {
     "nodes": [
@@ -126,7 +126,7 @@ def test_check_warns_and_names_the_finishing_command_when_coverage_is_partial(tm
     out, err = capsys.readouterr()
     assert "vectors: 1 of 2 node(s) (50%)" in out
     assert "1 node(s) short of a vector" in err
-    assert "ml-stack-ingest embed --out" in err
+    assert "poolhouse-ingest embed --out" in err
 
 
 def test_check_over_nothing_worth_embedding_says_so_without_a_denominator(tmp_path, capsys):
@@ -148,14 +148,14 @@ def test_a_path_with_no_store_exits_2(tmp_path, capsys):
 
 def test_tidy_rejudge_asks_a_served_judge_again_about_the_remembered_verdicts(tmp_path, capsys,
                                                                        monkeypatch):
-    from ml_stack.graph.verdicts import DECISIONS
+    from poolhouse.graph.verdicts import DECISIONS
     from tests.test_graph_tidy import _node, _store
     from tests.test_graph_tidy_judge import Scripted
 
     path = _store(tmp_path, [_node("concept:glimmer-node", "glimmer node", mentions=4),
                              _node("concept:glimer-node", "glimer node", mentions=1)], [])
     scripted = Scripted({("glimmer node", "glimer node"): "different"})
-    monkeypatch.setattr("ml_stack.client.Client", lambda url, **kw: scripted)
+    monkeypatch.setattr("poolhouse.client.Client", lambda url, **kw: scripted)
     assert main(["tidy", str(path), "--base-url", "http://localhost:1"]) == 0
     assert "judged 0 pair(s) the same and 1 different" in capsys.readouterr().out
     assert len(scripted.calls) == 1

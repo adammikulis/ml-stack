@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import home
-from ml_stack.activity import source_snapshot as source
+from poolhouse import home
+from poolhouse.activity import source_snapshot as source
 
 pytestmark = pytest.mark.redteam
 
@@ -22,10 +22,10 @@ def test_spoofed_home_preserves_actual_account_roots_and_explicit_overrides(tmp_
     if os.name != "posix":
         pytest.skip("POSIX account identity")
     account = tmp_path / "account"
-    actual = {account / home.DEFAULT_NAME, account / ".cache" / "ml_stack"}
+    actual = {account / home.DEFAULT_NAME, account / ".cache" / "poolhouse"}
     monkeypatch.setenv("HOME", str(tmp_path / "spoofed"))
     monkeypatch.setattr(home, "user_home", lambda: tmp_path / "spoofed")
-    override = {"ML_STACK_HOME": str(tmp_path / "state"), "ML_STACK_CACHE": str(tmp_path / "cache")}
+    override = {"POOLHOUSE_HOME": str(tmp_path / "state"), "POOLHOUSE_CACHE": str(tmp_path / "cache")}
     assert set(source.protected_roots(override)) == actual | {Path(value) for value in override.values()}
 
 

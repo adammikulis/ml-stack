@@ -1,6 +1,6 @@
 """The keystore on every platform: who may cause a prompt, what never hangs, which backends may hold the
 key, and what happens when the key is gone. No test touches the machine's own keystore: each installs the
-in-memory fake from `tests/keystore_support.py` (see AGENTS.md, "ML_STACK_NO_REAL_KEYSTORE")."""
+in-memory fake from `tests/keystore_support.py` (see AGENTS.md, "POOLHOUSE_NO_REAL_KEYSTORE")."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ import keyring
 import pytest
 from keyring.backend import KeyringBackend
 
-from ml_stack import keystore, keystore_guard, person
-from ml_stack.keystore import Keystore, Wires
+from poolhouse import keystore, keystore_guard, person
+from poolhouse.keystore import Keystore, Wires
 from tests import keystore_support
 from tests.test_keystore import Said, make
 
@@ -57,7 +57,7 @@ def test_an_agent_on_a_desktop_cannot_make_the_master(tmp_path, counting, at_a_d
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setattr(keystore, "interactive", REAL_INTERACTIVE)
     ks = Keystore(directory=tmp_path / "ks", wires=Wires(say=Said()))
-    with pytest.raises(keystore.KeystoreLocked, match="ml-stack-security unlock"):
+    with pytest.raises(keystore.KeystoreLocked, match="poolhouse-security unlock"):
         ks.subkey("memory", "a")
     assert counting.calls == [] and counting.held == {}
 

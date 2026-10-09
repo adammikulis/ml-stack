@@ -15,8 +15,8 @@ from pathlib import Path
 import psutil
 from test_kernel_role_home import IMPORT_NODE
 
-from ml_stack.platform import start_process, terminate_process_group
-from ml_stack.sandbox.seatbelt import Seatbelt
+from poolhouse.platform import start_process, terminate_process_group
+from poolhouse.sandbox.seatbelt import Seatbelt
 
 CONTROL_NODE = "tests/test_kernel_role_home.py::test_owned_smoke_reaps_exited_leader_and_known_stdout_child"
 CONTROL_SCRIPT = (
@@ -30,10 +30,10 @@ CONTROL_SCRIPT = (
 SCRIPT = (
     "import sys;assert sys.stdin.buffer.read(1)==b'G';import site;site.main();"
     "import json;from pathlib import Path;from importlib.metadata import distribution;"
-    "import ml_stack,psutil;from ml_stack.serve import holder_protocol;"
+    "import poolhouse,psutil;from poolhouse.serve import holder_protocol;"
     "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey;"
-    "from ml_stack import runtime;"
-    "d=distribution('ml-stack');p=Path(ml_stack.__file__).resolve();"
+    "from poolhouse import runtime;"
+    "d=distribution('poolhouse');p=Path(poolhouse.__file__).resolve();"
     "r=runtime.Runtime(Path(sys.prefix),'a'*40,'0.1.0','darwin-arm64-cpython-313');"
     "assert runtime.verify(r)==r;"
     "key=Ed25519PrivateKey.generate();data=b'owned inert fixture';"
@@ -165,7 +165,7 @@ def observe(confined, base):
     runtime = entry["prepared"]["runtime"]
     if any(record["path"].endswith(".pth") for record in entry["prepared"]["files"]):
         raise RuntimeError("holder smoke: startup path hooks are not admitted")
-    policy = replace(base, env={**base.env, "ML_STACK_HOME": entry["home"]}).validated()
+    policy = replace(base, env={**base.env, "POOLHOUSE_HOME": entry["home"]}).validated()
     profile_path = confined.control / "holder-import-smoke.sb"
     wrapped = Seatbelt().wrap([runtime["python"], "-I", "-S", "-c", SCRIPT], policy, profile_path=profile_path)
     with profile_path.open("a") as stream:
@@ -185,7 +185,7 @@ def observe(confined, base):
         if (set(value) != {"prefix", "package", "version", "stamp", "holder", "psutil"}
                 or value["prefix"] != str(prefix) or value["version"] != runtime["version"]
                 or value["stamp"] != runtime["commit"]
-                or Path(value["package"]) != prefix / "lib/python3.13/site-packages/ml_stack/__init__.py"
+                or Path(value["package"]) != prefix / "lib/python3.13/site-packages/poolhouse/__init__.py"
                 or not all(Path(value[key]).is_relative_to(prefix) for key in ("holder", "psutil"))):
             raise RuntimeError("holder smoke: imported identity does not match pinned runtime")
         assets.recheck()

@@ -2,8 +2,8 @@
 
 import pytest
 
-from ml_stack.fleet.settings import Settings
-from ml_stack.fleet.ui import UI
+from poolhouse.fleet.settings import Settings
+from poolhouse.fleet.ui import UI
 
 
 def test_advanced_options_preference_survives_restart(tmp_path):

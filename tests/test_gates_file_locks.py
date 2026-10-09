@@ -7,7 +7,7 @@ from gates import file_locks
 
 
 def _find(tmp_path: Path, source: str):
-    path = tmp_path / "src" / "ml_stack" / "sample.py"
+    path = tmp_path / "src" / "poolhouse" / "sample.py"
     path.parent.mkdir(parents=True)
     path.write_text(source, encoding="utf-8")
     return file_locks.find(tmp_path)

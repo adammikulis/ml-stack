@@ -8,20 +8,20 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit
 
-from ml_stack import home
-from ml_stack.fleet import daemon, tls
-from ml_stack.fleet.onboard import cli as onboard
-from ml_stack.fleet.onboard.requests import Device, Devices
-from ml_stack.fleet.remote import Peer
-from ml_stack.hub.peerbook import PeerBook
-from ml_stack.workspace import (
+from poolhouse import home
+from poolhouse.fleet import daemon, tls
+from poolhouse.fleet.onboard import cli as onboard
+from poolhouse.fleet.onboard.requests import Device, Devices
+from poolhouse.fleet.remote import Peer
+from poolhouse.hub.peerbook import PeerBook
+from poolhouse.workspace import (
     coordinator_client,
     coordinator_config,
     coordinator_routes,
     device_agent,
     tokens,
 )
-from ml_stack.workspace.identity import AGENT, Denied
+from poolhouse.workspace.identity import AGENT, Denied
 
 
 @pytest.fixture(autouse=True)
@@ -150,7 +150,7 @@ def test_concurrent_host_and_connect_cannot_replace_authority(tmp_path, monkeypa
 
 
 def test_production_daemon_reuses_pairing_certificate_and_isolated_roots_stay_separate(tmp_path, monkeypatch):
-    monkeypatch.setenv('ML_STACK_HOME', str(tmp_path / 'installation'))
+    monkeypatch.setenv('POOLHOUSE_HOME', str(tmp_path / 'installation'))
     paired = onboard._identity(home.state('onboard'))
     serving = tls.identity(daemon.identity_directory(daemon.default_root()), 'daemon')
     assert serving.beacon == paired.beacon
@@ -160,7 +160,7 @@ def test_production_daemon_reuses_pairing_certificate_and_isolated_roots_stay_se
 
 @pytest.mark.parametrize('mismatch', ['', 'workspace', 'endpoint', 'name', 'revoked', 'certificate', 'offline'])
 def test_saved_daemon_certificate_recovers_only_same_active_paired_authority(tmp_path, monkeypatch, mismatch):
-    monkeypatch.setenv('ML_STACK_HOME', str(tmp_path / 'installation'))
+    monkeypatch.setenv('POOLHOUSE_HOME', str(tmp_path / 'installation'))
     base = tmp_path / 'workspace'
     base.mkdir()
     paired = onboard._identity(home.state('onboard'))

@@ -2,8 +2,8 @@
 
 import pytest
 
-from ml_stack.httpguard import Limits
-from ml_stack.net import browserguard
+from poolhouse.httpguard import Limits
+from poolhouse.net import browserguard
 from tests.net_site import Site
 
 LOCAL = Limits(allow_hosts=frozenset({"127.0.0.1"}))

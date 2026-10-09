@@ -7,12 +7,12 @@ import time
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack import chatpolicy as policy, do, roles, rules as saved
-from ml_stack.decide import router
-from ml_stack.guard import destructive_rail
-from ml_stack.guard.destructive_model import ModelLayer, from_environment
-from ml_stack.guard.destructive_rail import DestructiveRail
-from ml_stack.interventions import Call, Confirm, Context, Deny, Proceed
+from poolhouse import chatpolicy as policy, do, roles, rules as saved
+from poolhouse.decide import router
+from poolhouse.guard import destructive_rail
+from poolhouse.guard.destructive_model import ModelLayer, from_environment
+from poolhouse.guard.destructive_rail import DestructiveRail
+from poolhouse.interventions import Call, Confirm, Context, Deny, Proceed
 from tests.test_chat import call, session
 
 RAN: list = []
@@ -80,7 +80,7 @@ def test_a_rule_cannot_be_made_for_what_the_classifier_asks_about():
 def composed(monkeypatch, *, role=roles.DEFAULT, rules=None, plan=None, answer=False):
     """A role rail beside the classifier rail over the extension's shell tool, and the questions
     put to the person."""
-    from ml_stack.interventions import Run
+    from poolhouse.interventions import Run
 
     monkeypatch.setitem(policy.CONFIRM, "run_shell", "run a shell command")
     asked: list = []
@@ -245,8 +245,8 @@ def test_the_model_sees_a_sanitised_call_and_answers_are_cached(server):
 
 def test_the_model_layer_is_on_only_when_a_person_sets_the_environment():
     assert from_environment({}) is None
-    assert from_environment({"ML_STACK_DESTRUCTIVE_MODEL": "yes"}) is None
-    on = from_environment({"ML_STACK_DESTRUCTIVE_MODEL": "1", "ML_STACK_DESTRUCTIVE_FLOOR": "0.1"})
+    assert from_environment({"POOLHOUSE_DESTRUCTIVE_MODEL": "yes"}) is None
+    on = from_environment({"POOLHOUSE_DESTRUCTIVE_MODEL": "1", "POOLHOUSE_DESTRUCTIVE_FLOOR": "0.1"})
     assert on is not None and on.floor == 0.5
 
 

@@ -16,9 +16,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ml_stack.platform import start_process, terminate_process_group
-from ml_stack.sandbox.policy import Net, Policy
-from ml_stack.sandbox.seatbelt import Seatbelt
+from poolhouse.platform import start_process, terminate_process_group
+from poolhouse.sandbox.policy import Net, Policy
+from poolhouse.sandbox.seatbelt import Seatbelt
 
 SOURCE = "03a4ff9101896ea5673726c664bbfd5a172fa906"
 MANIFEST = "a479fb1c2e7939be92e98e3e95d94d7b7a2c7643adb2c9e1cfeece2c005e06b0"
@@ -59,9 +59,9 @@ RUNTIME_PROBES = frozenset({"tests/test_test_kernel_isolation.py::test_verified_
                           "tests/test_kernel_role_home.py::test_role_home_atomic_state_and_immutable_fences",
                           "tests/test_kernel_role_home.py::test_fixed_normal_role_imports_and_runtime_verification"})
 IDENTITY_PROBES = frozenset({"tests/test_test_kernel_isolation.py::test_pinned_normal_package_identity_uses_only_verified_import_files"})
-IDENTITY_FILES = ("pyvenv.cfg", "lib/python3.13/site-packages/ml_stack/__init__.py",
-                  "lib/python3.13/site-packages/ml_stack/__pycache__/__init__.cpython-313.pyc",
-                  "lib/python3.13/site-packages/ml_stack-0.1.0.dist-info/METADATA")
+IDENTITY_FILES = ("pyvenv.cfg", "lib/python3.13/site-packages/poolhouse/__init__.py",
+                  "lib/python3.13/site-packages/poolhouse/__pycache__/__init__.cpython-313.pyc",
+                  "lib/python3.13/site-packages/poolhouse-0.1.0.dist-info/METADATA")
 
 VARIANTS_BY_NODE = {
     'tests/test_holder_protocol.py::test_actual_immutable_runtime_receipt_is_verified_outside_the_socket_deadline': frozenset({'normal'}),
@@ -157,7 +157,7 @@ def private_directory(path: Path) -> tuple[int, int]:
 
 
 def namespace(protected: tuple[Path, ...]) -> Path:
-    from ml_stack.activity.source_snapshot import validate_storage
+    from poolhouse.activity.source_snapshot import validate_storage
     # Short Darwin sockaddr_un names cannot fit the OS account temporary path.
     base = validate_storage(Path("/private/tmp"), protected)
     result = Path(tempfile.mkdtemp(prefix="mlh-", dir=base))
@@ -266,7 +266,7 @@ def prepare(command: list[str], control: Path, environment: dict[str, str],
         compilation = compile_namespace(channel_root, control)
         environment.update(TMPDIR=str(channel_root), DEV_TEST_HOLDER_NAMESPACE=str(channel_root))
         return None, channel_root, compilation
-    source = Path("/private/tmp/ml-stack-holder-fixture-prefixes-68a5f5/holder-manifest.json")
+    source = Path("/private/tmp/poolhouse-holder-fixture-prefixes-68a5f5/holder-manifest.json")
     manifest = read_manifest(source)
     assets = verify_assets(manifest, protected, admitted)
     from test_kernel_role_home import selected_cases
@@ -287,7 +287,7 @@ def prepare(command: list[str], control: Path, environment: dict[str, str],
     assets.identities[copied] = identity(copied.lstat())
     channel_root = namespace(protected)
     compilation = compile_namespace(channel_root, control)
-    environment.update(TMPDIR=str(channel_root), ML_STACK_TEST_HOLDER_MANIFEST=str(copied),
+    environment.update(TMPDIR=str(channel_root), POOLHOUSE_TEST_HOLDER_MANIFEST=str(copied),
                        DEV_TEST_HOLDER_NAMESPACE=str(channel_root))
     assets.compilation = compilation
     return assets, channel_root, compilation
@@ -351,7 +351,7 @@ def prepare_roles(manifest: dict, originals: Assets, command: list[str], context
         os.close(fd)
     copied.files.append(path)
     copied.identities[path] = identity(path.lstat())
-    environment["ML_STACK_TEST_HOLDER_ROLE_BANK"] = str(path)
+    environment["POOLHOUSE_TEST_HOLDER_ROLE_BANK"] = str(path)
     copied.recheck()
     return copied
 

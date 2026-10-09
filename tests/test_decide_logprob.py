@@ -8,9 +8,9 @@ import math
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack.decide import Calibration
-from ml_stack.decide.logprob import Chat, LogprobDecider, letter_probabilities, render
-from ml_stack.decide.types import DecideError, options_of
+from poolhouse.decide import Calibration
+from poolhouse.decide.logprob import Chat, LogprobDecider, letter_probabilities, render
+from poolhouse.decide.types import DecideError, options_of
 
 OPTIONS = {"safe": "reads only", "reversible": "can be undone", "destructive": "cannot be undone"}
 
@@ -97,7 +97,7 @@ def test_an_unreachable_server_is_a_decide_error():
 def test_batch_and_async_forms_agree_with_the_single_call(server):
     import asyncio
 
-    from ml_stack.decide.base import Request
+    from poolhouse.decide.base import Request
     fake = server(logprob_handler(lambda user: {"A": 0.3, "B": 0.7}))
     d = LogprobDecider(fake.base_url)
     one = d.decide("q", "s", ["x", "y"])
@@ -107,7 +107,7 @@ def test_batch_and_async_forms_agree_with_the_single_call(server):
 
 
 def test_a_decision_stays_unthinking_whatever_the_person_set(server, monkeypatch):
-    monkeypatch.setenv("ML_STACK_THINK", "on")
+    monkeypatch.setenv("POOLHOUSE_THINK", "on")
     seen: list[dict] = []
     fake = server(logprob_handler(lambda u: {"A": 0.5, "B": 0.5}, seen=seen))
     LogprobDecider(Chat(fake.base_url)).decide("q", "s", ["x", "y"])

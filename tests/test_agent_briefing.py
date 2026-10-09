@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harnessid, harnessing
-from ml_stack.briefing import REQUIRED_BRIEFING
-from ml_stack.workspace import onboard
+from poolhouse import harnessid, harnessing
+from poolhouse.briefing import REQUIRED_BRIEFING
+from poolhouse.workspace import onboard
 
 
 def _required(text):

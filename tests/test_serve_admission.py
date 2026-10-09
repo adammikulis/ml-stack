@@ -16,15 +16,15 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import limits
-from ml_stack.serve import admission
-from ml_stack.serve.backend import LlamaServerBackend, ServerBackend, ServerInfo, ServerSpec
-from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.manager import ServerManager
-from ml_stack.serve.ports import free_port
-from ml_stack.serve.process import pid_exists
-from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
-from ml_stack.testing.registry import record_server
+from poolhouse import limits
+from poolhouse.serve import admission
+from poolhouse.serve.backend import LlamaServerBackend, ServerBackend, ServerInfo, ServerSpec
+from poolhouse.serve.leases import recorded_servers
+from poolhouse.serve.manager import ServerManager
+from poolhouse.serve.ports import free_port
+from poolhouse.serve.process import pid_exists
+from poolhouse.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
+from poolhouse.testing.registry import record_server
 
 GIB = 1024 ** 3
 SRC = str(Path(__file__).resolve().parent.parent / "src")
@@ -252,9 +252,9 @@ def test_two_processes_that_do_not_fit_together_do_not_both_start(tmp_path, mach
     first = weights(tmp_path, "first.gguf", 6)
     second = weights(tmp_path, "second.gguf", 6)
     code = ("import sys, time\n"
-            "import ml_stack.serve.unmanaged as u\n"
+            "import poolhouse.serve.unmanaged as u\n"
             "u.every_server = lambda: []\n"
-            "from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port\n"
+            "from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port\n"
             f"m = ServerManager(LlamaServerBackend(binary={str(binary)!r}))\n"
             "i = m.lease(ServerSpec(model=sys.argv[1], port=free_port(), context=512), "
             "preflight=False, timeout=60)\n"
@@ -295,9 +295,9 @@ def test_the_rating_follows_the_thresholds():
 def test_admission_the_estimator_and_the_bars_share_one_pair_of_thresholds():
     import json
 
-    from ml_stack import ui
-    from ml_stack.serve import estimate
-    from ml_stack.ui import verdict
+    from poolhouse import ui
+    from poolhouse.serve import estimate
+    from poolhouse.ui import verdict
 
     shipped = json.loads((ui.assets_dir() / "verdict.json").read_text(encoding="utf-8"))
     wanted = (shipped["yellow_at"], shipped["red_at"])

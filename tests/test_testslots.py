@@ -489,7 +489,7 @@ with Path(os.environ["TEST_LOG"]).open("a") as stream:
 
 
 def test_live_incomplete_records_do_not_crash_admission(tmp_path):
-    from ml_stack.lock import take
+    from poolhouse.lock import take
 
     directory = tmp_path / 'slots'
     directory.mkdir()
@@ -619,7 +619,7 @@ def _concurrent_lease(module, index):
 def test_rpc_admission_survives_a_live_incomplete_record(tmp_path, monkeypatch):
     import concurrent.futures
 
-    from ml_stack.lock import take
+    from poolhouse.lock import take
 
     rpc = _rpc_module()
     monkeypatch.setenv('DEV_TEST_SLOTS_DIR', str(tmp_path / 'slots'))

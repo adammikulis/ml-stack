@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files, worktreerules
-from ml_stack.safenames import safe_join
+from poolhouse import files, worktreerules
+from poolhouse.safenames import safe_join
 
 REPOSITORY = "openlifescienceai/medmcqa"
 REVISION = "91c6572c454088bf71b679ad90aa8dffcd0d5868"

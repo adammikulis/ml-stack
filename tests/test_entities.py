@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.entities import fold_duplicates, fold_key, looks_like_handle, preferred, stem
+from poolhouse.entities import fold_duplicates, fold_key, looks_like_handle, preferred, stem
 
 # a word and its inflections have to reduce to one form, or a fold key never matches
 SAME = [

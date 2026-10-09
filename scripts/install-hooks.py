@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge", "post-commit")
-MARKER = "# ml-stack managed hook"
+MARKER = "# poolhouse managed hook"
 
 
 def install() -> None:

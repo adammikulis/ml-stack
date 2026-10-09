@@ -6,10 +6,10 @@ import pytest
 from test_fleet_initial_setup import initial
 from test_fleet_ui import Serving, no_release_lookup
 
-from ml_stack.fleet import automatic_clusters
-from ml_stack.fleet.projects import ProjectRegistry
-from ml_stack.fleet.ui import UI
-from ml_stack.scrape.browser import Window, browser
+from poolhouse.fleet import automatic_clusters
+from poolhouse.fleet.projects import ProjectRegistry
+from poolhouse.fleet.ui import UI
+from poolhouse.scrape.browser import Window, browser
 
 __all__ = ["no_release_lookup"]
 
@@ -38,7 +38,7 @@ def test_unregistered_self_address_has_no_invented_lan_host():
 @pytest.mark.slow
 @pytest.mark.parametrize("advertised", ["http://192.168.4.8:8770", ""])
 def test_fleet_card_displays_authoritative_lan_address(tmp_path, monkeypatch, advertised):
-    pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
     monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
     served = Serving(tmp_path, secure=False)
     try:

@@ -18,7 +18,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-PHASES_ENV = "MLSTACK_PHASES_FILE"
+PHASES_ENV = "POOLHOUSE_PHASES_FILE"
 OVERHEAD_SECONDS = 5.0
 OVERHEAD_SHARE = 0.25
 SHARE_FLOOR_SECONDS = 3.0
@@ -103,4 +103,4 @@ def pytest_configure(config) -> None:
     """Start recording on the controller, and on nothing else."""
     path = os.environ.get(PHASES_ENV)
     if path and not hasattr(config, "workerinput"):
-        config.pluginmanager.register(Recorder(path), "mlstack-phases")
+        config.pluginmanager.register(Recorder(path), "poolhouse-phases")

@@ -17,8 +17,8 @@ HOST = """
 import os, signal, subprocess, sys, time
 sys.path.insert(0, {src!r})
 {before}
-from ml_stack.serve import exit_guard
-from ml_stack.platform import process_group_kwargs
+from poolhouse.serve import exit_guard
+from poolhouse.platform import process_group_kwargs
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
                          **process_group_kwargs())
 exit_guard.protect(child.pid)
@@ -29,7 +29,7 @@ print(child.pid, flush=True)
 
 
 NO_WATCHDOG = """
-from ml_stack.serve import exit_guard
+from poolhouse.serve import exit_guard
 exit_guard._watch = lambda pid, created: None
 """
 
@@ -121,7 +121,7 @@ def test_a_released_server_outlives_the_host(tmp_path, hosts):
 def test_a_pid_that_is_no_longer_the_server_is_left_alone(tmp_path):
     victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        from ml_stack.serve import exit_guard
+        from poolhouse.serve import exit_guard
 
         exit_guard._guarded[victim.pid] = time.time() - 3600
         assert exit_guard.stop_guarded() == []
@@ -137,8 +137,8 @@ def test_importing_serve_installs_no_handler_and_no_exit_hook():
                f"sys.path.insert(0, {str(REPO / 'src')!r})\n"
                "before = [signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)]\n"
                "hooks = atexit._ncallbacks()\n"
-               "import ml_stack.serve\n"
-               "from ml_stack.serve import ServerManager\n"
+               "import poolhouse.serve\n"
+               "from poolhouse.serve import ServerManager\n"
                "ServerManager()\n"
                "assert [signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)] == before\n"
                "assert atexit._ncallbacks() == hooks, 'registered at import'\n")
@@ -159,8 +159,8 @@ MANAGER_HOST = """
 import sys, time
 sys.path.insert(0, {src!r})
 from pathlib import Path
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-from ml_stack.testing import fake_llama_binary
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from poolhouse.testing import fake_llama_binary
 root = Path({root!r})
 model = root / "model.gguf"
 model.write_bytes(b"GGUF" + b"\\x00" * 64)

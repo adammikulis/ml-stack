@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import node_supervise
+from poolhouse import node_supervise
 
 pytest_plugins = ["node_kit"]
 HOOKS = Path(__file__).resolve().parents[1] / "scripts/hooks"
@@ -166,7 +166,7 @@ def test_public_records_filter_for_anyone(team):
 def test_notes_carry_a_trust_level_supersede_and_verify_through_an_allow_listed_command(team):
     from dataclasses import replace
 
-    from ml_stack.workspace import limits
+    from poolhouse.workspace import limits
 
     old = json.loads(team.cli("notes-add", "fact", "port", "the port is 9000", "--tags", "net,port", "--source", "docs/x.md",
                               "--ttl-days", "30", "--verify-cmd", "true", "--json", who=team.lead).stdout)
@@ -196,7 +196,7 @@ def test_notes_carry_a_trust_level_supersede_and_verify_through_an_allow_listed_
 def test_a_failing_verification_is_recorded_and_the_note_stays_claimed(team):
     from dataclasses import replace
 
-    from ml_stack.workspace import limits
+    from poolhouse.workspace import limits
 
     root = limits.root()
     limits.save(root, replace(limits.load(root), verify_allow=[["false"]]))
@@ -291,15 +291,15 @@ def test_the_bash_guard_makes_a_subagent_name_itself_in_workspace_commands(team)
         done = subprocess.run([str(guard)], input=json.dumps(asked), text=True, capture_output=True, env=team.env(), timeout=90)
         return done.returncode, done.stderr
 
-    code, why = run_guard("ml-stack-workspace inbox", agent_id="agent-a")
+    code, why = run_guard("poolhouse-workspace inbox", agent_id="agent-a")
     assert code == 2 and f"--agent {child.name}" in why
-    assert run_guard(f"ml-stack-workspace inbox --agent {child.name}", agent_id="agent-a")[0] == 0
-    assert run_guard("ml-stack-workspace inbox")[0] == 0
+    assert run_guard(f"poolhouse-workspace inbox --agent {child.name}", agent_id="agent-a")[0] == 0
+    assert run_guard("poolhouse-workspace inbox")[0] == 0
     assert run_guard("ls", agent_id="agent-a")[0] == 0
 
 
 def test_a_device_that_follows_a_remote_coordinator_still_uses_its_own_node(team):
-    from ml_stack.workspace import coordinator_config, limits
+    from poolhouse.workspace import coordinator_config, limits
 
     coordinator_config.save(limits.root(), {"mode": "remote", "workspace": "workspace:" + "a" * 32,
                                             "endpoint": "https://coordinator.example:8770"})

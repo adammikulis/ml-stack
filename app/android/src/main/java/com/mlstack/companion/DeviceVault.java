@@ -21,8 +21,8 @@ import javax.crypto.spec.GCMParameterSpec;
 final class DeviceVault {
     static final int AUTHENTICATORS = BiometricManager.Authenticators.BIOMETRIC_STRONG
             | BiometricManager.Authenticators.DEVICE_CREDENTIAL;
-    private static final String ALIAS = "ml-stack-companion-grant";
-    private static final byte[] AAD = "ml-stack/android/device-grant".getBytes(StandardCharsets.UTF_8);
+    private static final String ALIAS = "poolhouse-companion-grant";
+    private static final byte[] AAD = "poolhouse/android/device-grant".getBytes(StandardCharsets.UTF_8);
     private final Context context;
     private final AtomicFile file;
 

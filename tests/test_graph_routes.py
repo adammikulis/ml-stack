@@ -12,9 +12,9 @@ import urllib.request
 import pytest
 from conftest import threaded_server
 
-from ml_stack.files import read_json, write_json
-from ml_stack.graph.review import Queue
-from ml_stack.graph.serve import Handler
+from poolhouse.files import read_json, write_json
+from poolhouse.graph.review import Queue
+from poolhouse.graph.serve import Handler
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
@@ -219,7 +219,7 @@ def test_draft_is_a_404_without_a_drafter_and_a_500_when_it_raises(capsys):
 
 
 def test_the_served_page_is_a_whole_document_with_the_live_sign_first(tmp_path):
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = tmp_path / "index.html"
     page.write_text(render(GRAPH, title="Invented"), encoding="utf-8")
@@ -244,7 +244,7 @@ def test_the_bare_handler_still_404s_the_optional_routes(path):
 
 
 def _bound(argv):
-    from ml_stack.graph.serve import bind
+    from poolhouse.graph.serve import bind
 
     httpd = bind(argv)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -289,7 +289,7 @@ def test_the_command_files_a_request_into_the_review_queue_beside_the_store(tmp_
 
 
 def test_a_request_is_in_the_queue_while_the_model_is_still_reading_it(tmp_path):
-    from ml_stack.graph.serve import READING
+    from poolhouse.graph.serve import READING
 
     reading = threading.Event()
 

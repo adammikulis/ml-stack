@@ -45,7 +45,7 @@ def test_the_pip_audit_step_runs_the_gate_and_cannot_be_swallowed():
 
 
 def test_the_redteam_attack_step_compares_with_the_committed_baseline_and_cannot_be_swallowed():
-    step = step_with("redteam.yml", "redteam", "ml_stack.redteam run")
+    step = step_with("redteam.yml", "redteam", "poolhouse.redteam run")
     assert step.get("continue-on-error") in (None, False)
     run = step["run"]
     assert "--against" in run and "||" not in run
@@ -55,7 +55,7 @@ def test_the_redteam_attack_step_compares_with_the_committed_baseline_and_cannot
 
 
 def test_the_weekly_redteam_run_gates_the_deterministic_scenarios_against_a_committed_baseline():
-    step = step_with("redteam.yml", "redteam", "ml_stack.redteam run")
+    step = step_with("redteam.yml", "redteam", "poolhouse.redteam run")
     run = " ".join(step["run"].split())
     scenarios = run.split("--scenarios")[1].split()[0].split(",")
     assert {"extraction", "fleet", "sentinel"} <= set(scenarios)

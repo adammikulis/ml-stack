@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_stack.backend import available, get_backend
-from ml_stack.graph import (
+from poolhouse.backend import available, get_backend
+from poolhouse.graph import (
     Graph,
     NotADAG,
     batch_graphs,
@@ -19,8 +19,8 @@ from ml_stack.graph import (
     resolvent_sweep,
     topological_order,
 )
-from ml_stack.graph.topology import build_topology, knn_edges, morton_codes, mst_edges
-from ml_stack.testing import assert_forward_parity, needs_a_backend, needs_both
+from poolhouse.graph.topology import build_topology, knn_edges, morton_codes, mst_edges
+from poolhouse.testing import assert_forward_parity, needs_a_backend, needs_both
 
 BACKENDS = available()
 each_backend = pytest.mark.parametrize("name", BACKENDS)

@@ -10,11 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import routes, tls
-from ml_stack.fleet.discovery import Membership
-from ml_stack.fleet.invite_routes import public, ui_route
-from ml_stack.fleet.invites import Invitations, decode, proof
-from ml_stack.fleet.ui import UI
+from poolhouse.fleet import routes, tls
+from poolhouse.fleet.discovery import Membership
+from poolhouse.fleet.invite_routes import public, ui_route
+from poolhouse.fleet.invites import Invitations, decode, proof
+from poolhouse.fleet.ui import UI
 
 
 @pytest.fixture
@@ -160,7 +160,7 @@ def test_grant_proof_covers_raw_payload(invitation):
     fields = claim(store, data, fields)
     answer = store.exchange("redeem", fields)
     raw = decode(answer["grant_data"])
-    message = ("ml-stack-invite-grant/v1\n" + fields["challenge"] + "\n").encode() + raw
+    message = ("poolhouse-invite-grant/v1\n" + fields["challenge"] + "\n").encode() + raw
     assert hmac.compare_digest(answer["proof"], hmac.new(decode(data["secret"]), message, hashlib.sha256).hexdigest())
 
 

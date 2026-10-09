@@ -1,6 +1,6 @@
 """Known names are swapped for stable placeholders."""
 
-from ml_stack.redact import Redactor, tag
+from poolhouse.redact import Redactor, tag
 
 
 def test_the_same_name_always_gives_the_same_tag():
@@ -57,14 +57,14 @@ def _graph_and_log(tmp_path):
 
 
 def test_names_are_read_from_the_graphs_people_and_from_who_sent_each_message(tmp_path):
-    from ml_stack.redact import names_in
+    from poolhouse.redact import names_in
 
     graph, log = _graph_and_log(tmp_path)
     assert names_in(graph, log) == {"Ada Lovelace", "Bea Marlow", "Joan Clarke"}
 
 
 def test_a_two_letter_name_is_left_out_because_it_is_also_a_word(tmp_path):
-    from ml_stack.redact import names_in
+    from poolhouse.redact import names_in
 
     graph, log = _graph_and_log(tmp_path)
     assert "Bo" not in names_in(graph, log)
@@ -72,7 +72,7 @@ def test_a_two_letter_name_is_left_out_because_it_is_also_a_word(tmp_path):
 
 
 def test_a_file_that_is_missing_or_not_json_contributes_nothing(tmp_path):
-    from ml_stack.redact import names_in
+    from poolhouse.redact import names_in
 
     graph, log = _graph_and_log(tmp_path)
     (tmp_path / "broken.json").write_text("{", encoding="utf-8")
@@ -83,7 +83,7 @@ def test_a_file_that_is_missing_or_not_json_contributes_nothing(tmp_path):
 
 
 def test_what_the_names_are_read_from_can_be_chosen(tmp_path):
-    from ml_stack.redact import names_in
+    from poolhouse.redact import names_in
 
     graph, _ = _graph_and_log(tmp_path)
     assert names_in(graph, kind="topic", field="nobody") == {"looms"}
@@ -94,7 +94,7 @@ def test_allow_puts_a_phrase_on_the_list_once(tmp_path):
     already there is not added twice, and nothing to allow is a refusal that says how."""
     import io
 
-    from ml_stack.redact import hook
+    from poolhouse.redact import hook
 
     fixtures = tmp_path / "tests" / "known-fixtures.txt"
     fixtures.parent.mkdir()
@@ -121,7 +121,7 @@ def test_a_name_on_the_list_is_allowed_with_the_sentences_punctuation_on_it(tmp_
     import io
     import subprocess
 
-    from ml_stack.redact import hook
+    from poolhouse.redact import hook
 
     repo = tmp_path
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -157,7 +157,7 @@ def _check(tmp_path, why: bool = False, **files: str):
     import io
     import subprocess
 
-    from ml_stack.redact import hook
+    from poolhouse.redact import hook
 
     for name, body in files.items():
         (tmp_path / name).write_text(body, encoding="utf-8")
@@ -174,7 +174,7 @@ def _needs_recogniser():
     nothing to stand down and the test would pass for the wrong reason."""
     import pytest
 
-    from ml_stack.redact import hook
+    from poolhouse.redact import hook
 
     if hook.recogniser() is None:
         pytest.skip("presidio is not installed")
@@ -305,7 +305,7 @@ def test_allow_why_names_the_rule_that_almost_applied(tmp_path):
     shape, rather than a fixture, which covers one."""
     import io
 
-    from ml_stack.redact import hook
+    from poolhouse.redact import hook
 
     fixtures = tmp_path / "tests" / "known-fixtures.txt"
     fixtures.parent.mkdir()

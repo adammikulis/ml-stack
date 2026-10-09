@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import runtime_candidates as candidates
+from poolhouse.fleet import runtime_candidates as candidates
 
 COMMIT = "a" * 40
 
 
 def test_frozen_headless_fixed_dependency_probe(monkeypatch):
-    from ml_stack import agent_dependency
+    from poolhouse import agent_dependency
 
     called = []
-    monkeypatch.setattr(candidates.sys, "argv", ["ml-stack-headless", "--check-agent-runtime"])
+    monkeypatch.setattr(candidates.sys, "argv", ["poolhouse-headless", "--check-agent-runtime"])
     monkeypatch.setattr(agent_dependency, "report", lambda: called.append(True) or 0)
     with pytest.raises(SystemExit) as stopped:
         runpy.run_path(str(Path(__file__).parents[1] / "packaging/launcher-headless.py"), run_name="__main__")
@@ -25,7 +25,7 @@ def test_frozen_headless_fixed_dependency_probe(monkeypatch):
 def artifact(tmp_path, monkeypatch):
     source = tmp_path / "reviewed.zip"
     source.write_bytes(b"reviewed immutable artifact")
-    monkeypatch.setattr(candidates, "_verify", lambda archive, commit: "Poolside.app")
+    monkeypatch.setattr(candidates, "_verify", lambda archive, commit: "Poolhouse.app")
     return source, hashlib.sha256(source.read_bytes()).hexdigest()
 
 
@@ -35,11 +35,11 @@ def test_candidate_retains_exact_identity_and_rechecks_artifact(tmp_path, artifa
     row = registry.register(source, COMMIT, sha256)
     assert row["commit"] == COMMIT
     assert row["sha256"] == sha256
-    assert registry.select("Poolside.app") == row
+    assert registry.select("Poolhouse.app") == row
     assert registry.select("Other.app") is None
     (registry.path / (sha256 + ".zip")).write_bytes(b"changed")
     with pytest.raises(ValueError, match="changed"):
-        registry.select("Poolside.app")
+        registry.select("Poolhouse.app")
 
 
 def test_registration_checks_expected_digest_before_execution(tmp_path, artifact, monkeypatch):
@@ -91,7 +91,7 @@ def test_registry_auxiliary_symlinks_are_refused(tmp_path, name):
     registry = candidates.Candidates(tmp_path / "owned")
     (registry.path / name).symlink_to(tmp_path / "elsewhere")
     with pytest.raises(ValueError, match="auxiliary"):
-        registry.select("Poolside.app")
+        registry.select("Poolhouse.app")
 
 
 @pytest.mark.parametrize("ready,commit", [(False, COMMIT), (True, "b" * 40)])
@@ -99,7 +99,7 @@ def test_candidate_probe_refuses_unready_or_wrong_source(tmp_path, monkeypatch, 
     monkeypatch.setattr(candidates.sys, "platform", "darwin")
 
     def unpack(archive, into):
-        executable = into / "Poolside.app/Contents/MacOS/ml-stack-headless"
+        executable = into / "Poolhouse.app/Contents/MacOS/poolhouse-headless"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"frozen")
 
@@ -116,7 +116,7 @@ def test_candidate_probe_refuses_unready_or_wrong_source(tmp_path, monkeypatch, 
 
 def test_signature_failure_never_executes_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(candidates.sys, "platform", "darwin")
-    monkeypatch.setattr(candidates, "unpack", lambda archive, into: (into / "Poolside.app").mkdir())
+    monkeypatch.setattr(candidates, "unpack", lambda archive, into: (into / "Poolhouse.app").mkdir())
     called = []
 
     def run(argv, **kwargs):

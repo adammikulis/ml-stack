@@ -1,11 +1,11 @@
 """The hygiene pass: duplicates merged with everything kept, inverses folded, the doubtful
 flagged, the rest reported -- dry by default, idempotent, never a hidden node."""
 
-from ml_stack.graph.hygiene import Report
-from ml_stack.graph.names import suspect
-from ml_stack.graph.relations import standard_direction
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.tidy import tidy
+from poolhouse.graph.hygiene import Report
+from poolhouse.graph.names import suspect
+from poolhouse.graph.relations import standard_direction
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.tidy import tidy
 
 
 def _node(id_, label, kind="concept", mentions=1, **attrs):
@@ -183,8 +183,8 @@ def test_conflicts_orphans_and_self_loops_are_reported_and_left(tmp_path):
 
 
 def test_the_store_and_ingest_commands_run_the_pass_dry_unless_told_to_apply(tmp_path, capsys):
-    from ml_stack import ingest
-    from ml_stack.graph import store_cli
+    from poolhouse import ingest
+    from poolhouse.graph import store_cli
 
     path = _store(tmp_path, [_node("concept:acid", "acid", mentions=3),
                              _node("concept:acids", "acids", mentions=1)], [])
@@ -199,7 +199,7 @@ def test_the_store_and_ingest_commands_run_the_pass_dry_unless_told_to_apply(tmp
 def test_a_written_file_settles_possible_duplicates_from_the_command_line(tmp_path, capsys):
     import json
 
-    from ml_stack.graph import store_cli
+    from poolhouse.graph import store_cli
 
     path = _store(tmp_path, [_node("concept:glimmer-node", "glimmer node", mentions=4),
                              _node("concept:glimer-node", "glimer node", mentions=1)], [])
@@ -235,8 +235,8 @@ def test_a_merge_keeps_both_definitions_rather_than_the_one_it_found_first(tmp_p
 def test_the_pass_checks_the_store_after_its_writes_and_refuses_success_over_an_unsound_one(tmp_path, monkeypatch, capsys):
     """2026-09-03: a store engine blanked other nodes' strings on a delete and the pass
     reported success over a store that no longer read back by id."""
-    from ml_stack.graph import store_cli
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph import store_cli
+    from poolhouse.graph.store import GraphStore
 
     path = _store(tmp_path, [_node("concept:acid", "acid", mentions=3),
                              _node("concept:acids", "acids", mentions=1)], [])
@@ -254,7 +254,7 @@ def test_the_pass_checks_the_store_after_its_writes_and_refuses_success_over_an_
 
 
 def test_the_pass_reports_the_soundness_a_fresh_reader_finds(tmp_path):
-    from ml_stack.graph.tidy import _recheck
+    from poolhouse.graph.tidy import _recheck
 
     path = _store(tmp_path, [
         _node("concept:acid", "acid", mentions=5),

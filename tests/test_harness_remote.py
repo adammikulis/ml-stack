@@ -4,15 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harnesshook
-from ml_stack.workspace import (
+from poolhouse import harnesshook
+from poolhouse.workspace import (
     harness_remote,
     integration_git as repo,
     remote_cli,
     worktree_lifecycle,
 )
-from ml_stack.workspace.claims import Conflict
-from ml_stack.workspace.identity import AGENT, Denied, Identity
+from poolhouse.workspace.claims import Conflict
+from poolhouse.workspace.identity import AGENT, Denied, Identity
 
 
 @pytest.fixture
@@ -145,8 +145,8 @@ def test_stop_uses_identity_for_local_durable_cleanup(setup):
 
 @pytest.mark.redteam
 def test_native_reservation_uses_actual_remote_capability_api(setup, monkeypatch):
-    from ml_stack.workspace import tokens
-    from ml_stack.workspace.remote import RemoteWorkspace
+    from poolhouse.workspace import tokens
+    from poolhouse.workspace.remote import RemoteWorkspace
 
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.host, remote.project_id, remote.base = setup.remote.host, setup.remote.project_id, setup.remote.base

@@ -12,11 +12,11 @@ import keyring
 import pytest
 from keyring.backend import KeyringBackend
 
-from ml_stack import keystore
-from ml_stack.http import Server
-from ml_stack.inbox.route import MAX_BODY, RequestsApp
-from ml_stack.person import AGENT_MARKERS
-from ml_stack.requests import Ask, Origin
+from poolhouse import keystore
+from poolhouse.http import Server
+from poolhouse.inbox.route import MAX_BODY, RequestsApp
+from poolhouse.person import AGENT_MARKERS
+from poolhouse.requests import Ask, Origin
 
 HERE = str(Path(__file__).resolve().parent)
 SRC = str(Path(__file__).resolve().parent.parent / "src")
@@ -29,7 +29,7 @@ class FileRing(KeyringBackend):
     priority = 1  # type: ignore[assignment]
 
     def _path(self) -> Path:
-        return Path(os.environ["MLSTACK_TEST_RING"])
+        return Path(os.environ["POOLHOUSE_TEST_RING"])
 
     def _held(self) -> dict[str, str]:
         try:
@@ -63,13 +63,13 @@ def person_home(monkeypatch, tmp_path):
     """A person's process with a provisioned keystore under ``tmp_path``; returns the child environment."""
     for name in AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("MLSTACK_TEST_RING", str(tmp_path / "ring.json"))
+    monkeypatch.setenv("POOLHOUSE_TEST_RING", str(tmp_path / "ring.json"))
     before = keyring.get_keyring()
     keyring.set_keyring(FileRing())
     keystore.default().provision()
     yield {**os.environ, "PYTHONPATH": os.pathsep.join([SRC, HERE, "."]),
-           "PYTHON_KEYRING_BACKEND": "requests_support.FileRing", "ML_STACK_HOME": os.environ["ML_STACK_HOME"],
-           "MLSTACK_TEST_RING": str(tmp_path / "ring.json"), "ML_STACK_NOTIFY": "off"}
+           "PYTHON_KEYRING_BACKEND": "requests_support.FileRing", "POOLHOUSE_HOME": os.environ["POOLHOUSE_HOME"],
+           "POOLHOUSE_TEST_RING": str(tmp_path / "ring.json"), "POOLHOUSE_NOTIFY": "off"}
     keyring.set_keyring(before)
 
 

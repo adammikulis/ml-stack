@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.serve import LlamaServerBackend, ServerManager
-from ml_stack.serve.broker import Ask, Broker, BrokerError
-from ml_stack.serve.process import every_server, kill_process_tree, pid_exists
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse.serve import LlamaServerBackend, ServerManager
+from poolhouse.serve.broker import Ask, Broker, BrokerError
+from poolhouse.serve.process import every_server, kill_process_tree, pid_exists
+from poolhouse.testing.fakes import fake_llama_binary
 
 
 @pytest.fixture
@@ -171,7 +171,7 @@ def test_a_held_server_is_not_stopped_on_request_and_a_foreign_one_never(
     grant = broker.lease(ask(models[0], a.pid), timeout=30)
     assert broker.stop(grant.port)["stopped"] is False
 
-    from ml_stack.serve.ports import free_port
+    from poolhouse.serve.ports import free_port
 
     port = free_port()
     foreign = subprocess.Popen([str(llama_binary), "--port", str(port), "-m", models[1]])
@@ -193,8 +193,8 @@ def test_a_held_server_is_not_stopped_on_request_and_a_foreign_one_never(
 
 
 def _outside(llama_binary, model):
-    from ml_stack.client import is_healthy
-    from ml_stack.serve.ports import free_port
+    from poolhouse.client import is_healthy
+    from poolhouse.serve.ports import free_port
 
     port = free_port()
     foreign = subprocess.Popen([str(llama_binary), "--port", str(port), "-m", model])
@@ -220,7 +220,7 @@ def test_a_server_started_outside_the_broker_is_listed_and_not_leased_from(
 
 def test_an_unmanaged_server_is_shared_when_adoption_is_on_and_it_passes_the_checks(
         broker, models, holders, llama_binary, monkeypatch):
-    from ml_stack.serve import unmanaged
+    from poolhouse.serve import unmanaged
 
     port, foreign = _outside(llama_binary, models[0])
     monkeypatch.setenv(unmanaged.ENV, "auto")
@@ -258,9 +258,9 @@ def test_a_restarted_broker_keeps_a_live_holders_lease(broker, models, holders, 
 
 def test_a_server_put_up_by_hand_is_held_by_itself_and_never_reaped(
         models, holders, llama_binary, tmp_path):
-    """`ml-stack-serve up` records the server as its own owner; the broker never stops it."""
-    from ml_stack.serve import ServerSpec
-    from ml_stack.serve.ports import free_port
+    """`poolhouse-serve up` records the server as its own owner; the broker never stops it."""
+    from poolhouse.serve import ServerSpec
+    from poolhouse.serve.ports import free_port
 
     manager = ServerManager(LlamaServerBackend(binary=llama_binary),
                             state_file=tmp_path / "servers.json")
@@ -276,7 +276,7 @@ def test_a_server_put_up_by_hand_is_held_by_itself_and_never_reaped(
     try:
         watcher.adopt()
         held = watcher.servers[info.port]
-        assert [label for _, label in held.holders.values()] == ["ml-stack-serve up"]
+        assert [label for _, label in held.holders.values()] == ["poolhouse-serve up"]
         time.sleep(0.05)
         assert watcher.reap() == [] and pid_exists(info.pid)
         with pytest.raises(BrokerError):
@@ -305,7 +305,7 @@ def test_a_server_nobody_holds_is_not_reaped_while_it_is_answering(broker, model
 
 def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, holders):
     """The card being measured is a holder like any other: the lease waits for it."""
-    from ml_stack.serve.manager import Measuring
+    from poolhouse.serve.manager import Measuring
 
     started = broker.manager._start_server
     refusals = {"left": 2}
@@ -313,7 +313,7 @@ def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, hold
     def measuring_first(spec, **kwargs):
         if refusals["left"]:
             refusals["left"] -= 1
-            raise Measuring("the card is being measured by ml-stack-bench (pid 1)")
+            raise Measuring("the card is being measured by poolhouse-bench (pid 1)")
         return started(spec, **kwargs)
 
     broker.manager._start_server = measuring_first
@@ -330,7 +330,7 @@ def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, m
     env = {**os.environ, "LLAMA_CPP_SERVER": str(llama_binary),
            "PYTHONPATH": os.pathsep.join(p for p in (src, os.environ.get("PYTHONPATH")) if p)}
     client = ("import json, sys, time\n"
-              "from ml_stack.serve import broker_wire\n"
+              "from poolhouse.serve import broker_wire\n"
               "g = broker_wire.lease('chat', [sys.argv[1]], reason='test', spec={'context': 512}, timeout=60)\n"
               "print(json.dumps(g.as_dict()), flush=True)\n"
               "time.sleep(float(sys.argv[2]))\n")
@@ -339,7 +339,7 @@ def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, m
         return subprocess.Popen([sys.executable, "-c", client, model, str(hold)], env=env,
                                 stdout=subprocess.PIPE, text=True)
 
-    from ml_stack.serve import broker_wire
+    from poolhouse.serve import broker_wire
 
     holder = run(models[0], 60)
     sharer = run(models[0], 10)
@@ -374,13 +374,13 @@ def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, m
 
 
 def _broker_process(tmp_path: Path, *extra: str) -> tuple[subprocess.Popen, Path]:
-    """``ml-stack-serve broker`` as its own process under a state root in ``tmp_path``, once
+    """``poolhouse-serve broker`` as its own process under a state root in ``tmp_path``, once
     its record names it."""
     state = tmp_path / "broker-home"
     src = str(Path(__file__).resolve().parents[1] / "src")
-    env = {**os.environ, "ML_STACK_HOME": str(state),
+    env = {**os.environ, "POOLHOUSE_HOME": str(state),
            "PYTHONPATH": os.pathsep.join(p for p in (src, os.environ.get("PYTHONPATH")) if p)}
-    proc = subprocess.Popen([sys.executable, "-m", "ml_stack.serve.cli", "broker", *extra],
+    proc = subprocess.Popen([sys.executable, "-m", "poolhouse.serve.cli", "broker", *extra],
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     record = state / "broker.json"
     deadline = time.monotonic() + 30
@@ -420,8 +420,8 @@ def test_a_broker_whose_home_is_removed_exits(tmp_path):
 
 
 def test_asking_for_cores_with_no_broker_starts_none():
-    from ml_stack import home
-    from ml_stack.testing.cores import workers_for
+    from poolhouse import home
+    from poolhouse.testing.cores import workers_for
 
     assert workers_for(3) == 3
     assert not home.state("broker.json").exists()
@@ -487,9 +487,9 @@ def test_loading_model_placeholder_refuses_gpu_claim(broker, models, holders, mo
 
 @pytest.mark.redteam
 def test_direct_native_start_reserves_gpu_until_its_lease_is_recorded(broker, models, holders, monkeypatch):
-    from ml_stack.serve import ServerSpec
-    from ml_stack.serve.events import Caller
-    from ml_stack.serve.ports import free_port
+    from poolhouse.serve import ServerSpec
+    from poolhouse.serve.events import Caller
+    from poolhouse.serve.ports import free_port
 
     entered, resume = threading.Event(), threading.Event()
     native_start = broker.manager._start_server
@@ -527,14 +527,14 @@ def test_direct_native_start_reserves_gpu_until_its_lease_is_recorded(broker, mo
 def test_paused_vision_child_releases_its_broker_model_lease(tmp_path, llama_binary, models, monkeypatch):
     from types import SimpleNamespace
 
-    from ml_stack.gym import decision_process
-    from ml_stack.gym.simulation import Simulation
-    from ml_stack.gym.vision_process import VisionProcess
-    from ml_stack.platform import start_process
-    from ml_stack.serve import broker_wire
+    from poolhouse.gym import decision_process
+    from poolhouse.gym.simulation import Simulation
+    from poolhouse.gym.vision_process import VisionProcess
+    from poolhouse.platform import start_process
+    from poolhouse.serve import broker_wire
 
     monkeypatch.setenv('LLAMA_CPP_SERVER', str(llama_binary))
-    script = ('import json,time\nfrom ml_stack.serve import broker_wire\n'
+    script = ('import json,time\nfrom poolhouse.serve import broker_wire\n'
               f'g=broker_wire.lease("vision", [{models[0]!r}], spec={{"context":512}}, timeout=20, reason="Paused vision child lease cleanup regression")\n'
               'print(json.dumps({"status":"ready"}),flush=True)\ntime.sleep(120)\n')
     monkeypatch.setattr(decision_process, 'start_process', lambda argv, **kwargs:

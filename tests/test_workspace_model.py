@@ -8,11 +8,11 @@ import re
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack.person import HumanRequired
-from ml_stack.requests import Origin
-from ml_stack.workspace import Denied, onboard, tokens
-from ml_stack.workspace.identity import Registry
-from ml_stack.workspace.modelid import clean_harness, clean_model
+from poolhouse.person import HumanRequired
+from poolhouse.requests import Origin
+from poolhouse.workspace import Denied, onboard, tokens
+from poolhouse.workspace.identity import Registry
+from poolhouse.workspace.modelid import clean_harness, clean_model
 
 pytest_plugins = ["node_kit"]
 PERSON = {"terminal": (True, True), "env": {}}

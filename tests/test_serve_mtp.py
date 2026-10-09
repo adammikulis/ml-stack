@@ -14,10 +14,10 @@ import gguf
 import numpy as np
 import pytest
 
-from ml_stack import sentinel
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port, mtp
-from ml_stack.serve.process import every_server, pid_exists
-from ml_stack.testing.fakes import LLAMA_SERVER_FLAGS, fake_llama_binary
+from poolhouse import sentinel
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port, mtp
+from poolhouse.serve.process import every_server, pid_exists
+from poolhouse.testing.fakes import LLAMA_SERVER_FLAGS, fake_llama_binary
 
 MTP_HELP = "".join(
     f"{('--spec-type none,draft-simple,draft-mtp,ngram-mod' if flag == '--spec-type TYPE' else flag):<52}"
@@ -129,7 +129,7 @@ def test_the_draft_depth_follows_the_measured_architecture(cache, tmp_path, stop
     assert after(argv_of(binary), "--spec-draft-n-max") == expect
 
 
-def test_ml_stack_mtp_off_serves_without(cache, tmp_path, stop, monkeypatch):
+def test_poolhouse_mtp_off_serves_without(cache, tmp_path, stop, monkeypatch):
     model = a_gguf(snapshot(cache) / "Own-Q4_K_M.gguf", layer=True)
     binary, manager = server(tmp_path)
     monkeypatch.setenv(mtp.ENV, "off")
@@ -264,13 +264,13 @@ def test_the_off_words_for_the_environment(monkeypatch):
 
 
 def test_the_judge_lease_asks_for_no_mtp_and_a_none_arm_serves_without():
-    from ml_stack.bench.serve import drafted_by
-    from ml_stack.serve.serving import Config, Serving
+    from poolhouse.bench.serve import drafted_by
+    from poolhouse.serve.serving import Config, Serving
 
     config = Config(serving=Serving(model="m.gguf"))
     assert drafted_by(config, "").lease()["mtp"] is False
     assert "mtp" not in drafted_by(config, "head.gguf").lease()
-    source = Path(__file__).resolve().parent.parent / "src/ml_stack/guard/native.py"
+    source = Path(__file__).resolve().parent.parent / "src/poolhouse/guard/native.py"
     assert '"mtp": False' in source.read_text()
 
 
@@ -279,10 +279,10 @@ def test_a_real_server_drafts_by_default_and_keeps_greedy_output(cache, tmp_path
     """The managed build, a small model that carries its own prediction layer, and nothing else
     running: the default serves draft-mtp, and greedy output equals that of the same model
     served with MTP off."""
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     account = _real_home.state.parent
-    builds = sorted((account / ".ml-stack" / "llama.cpp" / "builds").glob("*/llama-server"))
+    builds = sorted((account / ".poolhouse" / "llama.cpp" / "builds").glob("*/llama-server"))
     hub = account / ".cache" / "huggingface" / "hub"
     models = [p for p in hub.rglob("*.gguf") if mtp.embeds_head(p) and "mtp" not in p.name.lower()
               and 0 < p.stat().st_size < 4 * 1024 ** 3] if hub.is_dir() else []

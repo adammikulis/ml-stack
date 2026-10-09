@@ -8,10 +8,10 @@ import threading
 
 import pytest
 
-from ml_stack import http, hub
-from ml_stack.httpguard import Refused
-from ml_stack.hub import remote, transfer as pulling
-from ml_stack.testing.fakehub import fake_hub
+from poolhouse import http, hub
+from poolhouse.httpguard import Refused
+from poolhouse.hub import remote, transfer as pulling
+from poolhouse.testing.fakehub import fake_hub
 
 MIB = 1 << 20
 
@@ -132,7 +132,7 @@ def test_a_wrong_checksum_is_refused_and_the_partial_removed(server, tmp_path):
         hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
     assert not list(tmp_path.glob("thing-Q4_K_M.gguf*"))
     assert not list((tmp_path / "machine-state" / "net" / "staging").glob("*.part*"))
-    (held,) = (tmp_path / "machine-state" / ".ml-stack-quarantine").rglob("*thing-Q4_K_M.gguf")
+    (held,) = (tmp_path / "machine-state" / ".poolhouse-quarantine").rglob("*thing-Q4_K_M.gguf")
     assert held.stat().st_size == 3 * MIB
 
 
@@ -227,15 +227,15 @@ def test_the_token_comes_from_the_environment_then_the_login_file(tmp_path, monk
     assert remote.token() == "from-env"
 
 
-def test_the_token_can_come_from_the_ml_stack_credential_store(tmp_path, monkeypatch):
-    from ml_stack import credentials
+def test_the_token_can_come_from_the_poolhouse_credential_store(tmp_path, monkeypatch):
+    from poolhouse import credentials
 
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
-    credentials.set("HF_TOKEN", "from-ml-stack")
-    assert remote.token() == "from-ml-stack"
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
+    credentials.set("HF_TOKEN", "from-poolhouse")
+    assert remote.token() == "from-poolhouse"
 
 
 def test_search_returns_gguf_repositories_with_builds_and_sizes(server):
@@ -263,7 +263,7 @@ def guarded(monkeypatch):
     this machine is a redirect to a host the policy refuses."""
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
-    monkeypatch.delenv("ML_STACK_FETCH_ALLOW_HOSTS", raising=False)
+    monkeypatch.delenv("POOLHOUSE_FETCH_ALLOW_HOSTS", raising=False)
     monkeypatch.setenv("HF_HOME", "/nonexistent-hf-home")
     with fake_hub(REPOS) as hub_:
         monkeypatch.setenv("HF_ENDPOINT", hub_.url)
@@ -279,23 +279,23 @@ def test_a_redirect_to_a_host_the_address_policy_refuses_is_never_followed(guard
 
 def test_a_redirect_must_pass_the_allow_list_and_the_address_policy_each_on_its_own(
         guarded, tmp_path, monkeypatch):
-    from ml_stack.net.policy import NeedsApproval
+    from poolhouse.net.policy import NeedsApproval
 
     cdn = guarded.cdn_url.split("//", 1)[1]
-    monkeypatch.setenv("ML_STACK_NET_ALLOW_HOSTS", cdn)  # listed, but still a private address
+    monkeypatch.setenv("POOLHOUSE_NET_ALLOW_HOSTS", cdn)  # listed, but still a private address
     with pytest.raises(Refused, match="not on the public internet") as listed_only:
         hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
     assert not isinstance(listed_only.value, NeedsApproval)
-    monkeypatch.delenv("ML_STACK_NET_ALLOW_HOSTS")
-    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", cdn)  # private allowed, but not on the list
+    monkeypatch.delenv("POOLHOUSE_NET_ALLOW_HOSTS")
+    monkeypatch.setenv("POOLHOUSE_FETCH_ALLOW_HOSTS", cdn)  # private allowed, but not on the list
     with pytest.raises(NeedsApproval):
         hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
     assert guarded.cdn_seen == []
 
 
 def test_a_host_the_operator_names_may_be_redirected_to(guarded, tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1,localhost")
-    monkeypatch.setenv("ML_STACK_NET_ALLOW_HOSTS", "127.0.0.1")
+    monkeypatch.setenv("POOLHOUSE_FETCH_ALLOW_HOSTS", "127.0.0.1,localhost")
+    monkeypatch.setenv("POOLHOUSE_NET_ALLOW_HOSTS", "127.0.0.1")
     got = hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
     assert got.read_bytes() == REPOS["maker/thing-GGUF"]["thing-Q4_K_M.gguf"]
     assert guarded.cdn_seen

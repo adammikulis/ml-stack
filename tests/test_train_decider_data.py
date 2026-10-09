@@ -7,11 +7,11 @@ import json
 
 import pytest
 
-from ml_stack.decide import registry
-from ml_stack.decide.guards.scoperules import ScopeDecider, violations
-from ml_stack.decide.sources import CONFIG, FORMAT
-from ml_stack.decide.types import DecideError
-from ml_stack.train.decider_data import Plan, default_prompts, guard_cases_from_tools, risk_of
+from poolhouse.decide import registry
+from poolhouse.decide.guards.scoperules import ScopeDecider, violations
+from poolhouse.decide.sources import CONFIG, FORMAT
+from poolhouse.decide.types import DecideError
+from poolhouse.train.decider_data import Plan, default_prompts, guard_cases_from_tools, risk_of
 
 
 def tool(name, description, **props):

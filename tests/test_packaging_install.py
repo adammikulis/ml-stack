@@ -4,7 +4,7 @@ promise has to match what the code expects.
 One script per platform, four modes each. These check the promises that can be checked
 without a fresh machine to run them on: they parse, they offer every mode the README names,
 the Windows one opens the firewall by the names and ports `discovery.py` uses, and neither
-reimplements in shell what an ml-stack command already does.
+reimplements in shell what a poolhouse command already does.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.discovery import (
+from poolhouse.fleet.discovery import (
     DEFAULT_HTTP_PORT,
     FIREWALL_RULE_DISCOVERY,
     FIREWALL_RULE_HTTP,
@@ -67,8 +67,8 @@ def test_both_installers_offer_every_mode(mode):
     assert f"${mode.capitalize()}" in windows or f'"{mode}"' in windows
 
 
-@pytest.mark.parametrize("command", ["ml-stack-serve", "ml-stack-setup", "ml-stack-models",
-                                     "ml-stack-cluster", "ml-stack-doctor"])
+@pytest.mark.parametrize("command", ["poolhouse-serve", "poolhouse-setup", "poolhouse-models",
+                                     "poolhouse-cluster", "poolhouse-doctor"])
 def test_the_installers_call_the_commands_rather_than_redoing_them(command):
     """Sizing a machine, building llama.cpp, fetching a model and joining a fleet are each
     a command already. A shell reimplementation is a second answer that goes stale the
@@ -77,9 +77,9 @@ def test_the_installers_call_the_commands_rather_than_redoing_them(command):
     assert command in PS1.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("name", ["ML_STACK_PASSPHRASE", "ML_STACK_NAME", "ML_STACK_MODELS",
-                                  "ML_STACK_OFFLINE_ZIP", "ML_STACK_OFFLINE_WHEELS",
-                                  "ML_STACK_MODE"])
+@pytest.mark.parametrize("name", ["POOLHOUSE_PASSPHRASE", "POOLHOUSE_NAME", "POOLHOUSE_MODELS",
+                                  "POOLHOUSE_OFFLINE_ZIP", "POOLHOUSE_OFFLINE_WHEELS",
+                                  "POOLHOUSE_MODE"])
 def test_every_prompt_can_be_answered_from_the_environment(name):
     """A machine being set up by a script has no terminal to type at, and prompting one
     that cannot answer hangs the install rather than failing it."""
@@ -107,9 +107,9 @@ NAMES_THE_EXTRAS = {"install.sh": r'^EXTRAS="([^"]+)"',
 
 @pytest.mark.parametrize("script", [SH, PS1], ids=["sh", "ps1"])
 def test_the_extras_the_installer_asks_for_are_the_ones_a_full_install_reports(script):
-    """`ml-stack-setup` lists one line per extra a full install has. A set that drifts from
+    """`poolhouse-setup` lists one line per extra a full install has. A set that drifts from
     the installer's own would call an install complete that is missing half of itself."""
-    from ml_stack.installed import extras
+    from poolhouse.installed import extras
 
     named = re.search(NAMES_THE_EXTRAS[script.name], script.read_text(encoding="utf-8"), re.M)
     assert named, f"{script.name} no longer names the extras it installs"
@@ -118,9 +118,9 @@ def test_the_extras_the_installer_asks_for_are_the_ones_a_full_install_reports(s
 
 @pytest.mark.parametrize("script", [SH, PS1], ids=["sh", "ps1"])
 def test_an_offline_install_takes_its_extras_from_wheels_on_the_disk(script):
-    """Without them an offline machine is an ml-stack with no store, no downloads and no
+    """Without them an offline machine is a poolhouse with no store, no downloads and no
     graph, which is not the machine the online path produces, and it says which parts it
     did not get."""
     body = script.read_text(encoding="utf-8")
     assert "--no-index" in body and "--find-links" in body
-    assert "ml_stack.installed" in body
+    assert "poolhouse.installed" in body

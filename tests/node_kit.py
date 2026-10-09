@@ -3,7 +3,7 @@
 Import `node_binary` and `workspace_node` into a test module to use them. The state directory is
 under /tmp with a short name because a Unix socket path is limited to about 100 characters, which
 a pytest `tmp_path` can exceed. The node binary is built once per session with
-``cargo build -p poolside-node``.
+``cargo build -p poolhouse-node``.
 """
 
 from __future__ import annotations
@@ -20,13 +20,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import node_binary as node_binary_module, node_launch, node_supervise
-from ml_stack.board import client as board_client, credentials, session as board_session
+from poolhouse import node_binary as node_binary_module, node_launch, node_supervise
+from poolhouse.board import client as board_client, credentials, session as board_session
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = str(ROOT / "src")
-STRIPPED = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE",
-            "ML_STACK_WORKSPACE_TOKEN", "ML_STACK_WORKSPACE_DENYLIST", "ML_STACK_WORKSPACE_AGENT", "ML_STACK_BOARD")
+STRIPPED = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE",
+            "POOLHOUSE_WORKSPACE_TOKEN", "POOLHOUSE_WORKSPACE_DENYLIST", "POOLHOUSE_WORKSPACE_AGENT", "POOLHOUSE_BOARD")
 BOARD = "demo"
 
 
@@ -46,12 +46,12 @@ def node_binary(tmp_path_factory) -> Path:
     target.mkdir(parents=True, exist_ok=True)
     with (target / ".test-build.lock").open("w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        done = subprocess.run([cargo, "build", "-p", "poolside-node"], cwd=ROOT / "app", env=env, capture_output=True,
+        done = subprocess.run([cargo, "build", "-p", "poolhouse-node"], cwd=ROOT / "app", env=env, capture_output=True,
                               text=True, check=False)
         if done.returncode:
-            pytest.fail(f"cargo build -p poolside-node failed:\n{done.stderr[-2000:]}", pytrace=False)
-        mine = tmp_path_factory.mktemp("node") / "poolside-node"
-        shutil.copy2(target / "debug" / "poolside-node", mine)
+            pytest.fail(f"cargo build -p poolhouse-node failed:\n{done.stderr[-2000:]}", pytrace=False)
+        mine = tmp_path_factory.mktemp("node") / "poolhouse-node"
+        shutil.copy2(target / "debug" / "poolhouse-node", mine)
     return mine
 
 
@@ -65,7 +65,7 @@ class Member:
     session: str = ""
 
     def env(self) -> dict[str, str]:
-        return {"ML_STACK_WORKSPACE_AGENT": self.name}
+        return {"POOLHOUSE_WORKSPACE_AGENT": self.name}
 
 
 @dataclass
@@ -98,13 +98,13 @@ class WorkspaceNode:
     def env(self, who: Member | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
         """The environment of a command run for ``who``: this node, this board, no marker of another agent."""
         env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
-        env.update({"PYTHONPATH": SRC, "ML_STACK_HOME": str(self.state.parent), "ML_STACK_BOARD": self.board, **(who.env() if who else {}), **(extra or {})})
+        env.update({"PYTHONPATH": SRC, "POOLHOUSE_HOME": str(self.state.parent), "POOLHOUSE_BOARD": self.board, **(who.env() if who else {}), **(extra or {})})
         return env
 
     def cli(self, *argv: str, who: Member | None = None, env: dict[str, str] | None = None, stdin: str | None = None,
             timeout: float = 90, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        """Run ``ml-stack-workspace`` as a subprocess, as ``who``."""
-        return subprocess.run([sys.executable, "-m", "ml_stack.workspace.cli", *argv], env=self.env(who, env),
+        """Run ``poolhouse-workspace`` as a subprocess, as ``who``."""
+        return subprocess.run([sys.executable, "-m", "poolhouse.workspace.cli", *argv], env=self.env(who, env),
                               capture_output=True, text=True, timeout=timeout, check=False, input=stdin, cwd=cwd)
 
     def stop(self) -> None:
@@ -118,10 +118,10 @@ def workspace_node(node_binary, monkeypatch):
     root = Path(tempfile.mkdtemp(prefix="ml", dir="/tmp"))
     state = root / "node"
     state.mkdir(mode=0o700)
-    monkeypatch.setenv("ML_STACK_HOME", str(root))
-    monkeypatch.setenv("ML_STACK_BOARD", BOARD)
+    monkeypatch.setenv("POOLHOUSE_HOME", str(root))
+    monkeypatch.setenv("POOLHOUSE_BOARD", BOARD)
     for name in STRIPPED:
-        if name != "ML_STACK_BOARD":
+        if name != "POOLHOUSE_BOARD":
             monkeypatch.delenv(name, raising=False)
     node_supervise.point(state, node_binary, node_binary_module.sha256(node_binary))
     node = WorkspaceNode(state, board_client.Client(state), node_binary)

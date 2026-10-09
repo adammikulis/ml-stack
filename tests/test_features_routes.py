@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from test_fleet_ui import Serving, a_keystore, counting  # noqa: F401
 
-from ml_stack import features
+from poolhouse import features
 
 
 @pytest.fixture(autouse=True)
@@ -15,10 +15,10 @@ def the_passphrase_is_kept(a_keystore):  # noqa: F811
 
 @pytest.fixture
 def daemon(tmp_path, monkeypatch):
-    from ml_stack.fleet.onboard import joining
+    from poolhouse.fleet.onboard import joining
 
     monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     s = Serving(tmp_path)
     try:
         yield s
@@ -47,7 +47,7 @@ def test_the_route_changes_nothing(daemon):
 
 
 def test_the_page_carries_the_component_on_the_settings_screen(daemon):
-    from ml_stack.fleet.page import render
+    from poolhouse.fleet.page import render
 
     page = render()
     assert page.count("<feature-flags>") == 1 and 'customElements.define("feature-flags"' in page

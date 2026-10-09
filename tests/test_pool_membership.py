@@ -9,13 +9,13 @@ from dataclasses import dataclass
 
 import pytest
 
-from ml_stack import http, macauth
-from ml_stack.fleet import discovery, membership, tls
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.discovery import Beacon, derive_token, memberships
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.pool_roster import Pool
+from poolhouse import http, macauth
+from poolhouse.fleet import discovery, membership, tls
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.discovery import Beacon, derive_token, memberships
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.pool_roster import Pool
 
 SPARE = macauth.PREFIX + "a-secret-no-cluster-key-made"
 """A request secret the daemon accepts that is derived from no cluster, so only the certificate decides."""

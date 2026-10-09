@@ -18,20 +18,20 @@ from launch_support import browser, hand_typed, redeem, sign_in, ticket
 from test_fleet_ui import WORDS, Serving
 from test_redteam_human_floor import run_command
 
-from ml_stack import home
-from ml_stack.fleet import session as session_module
-from ml_stack.fleet.launch_secret import HEADER, LaunchSecret
-from ml_stack.fleet.projects import ProjectRegistry, identity
-from ml_stack.net import git
-from ml_stack.workspace.identity import HUMAN
-from ml_stack.workspace.remote_host import WorkspaceHost
+from poolhouse import home
+from poolhouse.fleet import session as session_module
+from poolhouse.fleet.launch_secret import HEADER, LaunchSecret
+from poolhouse.fleet.projects import ProjectRegistry, identity
+from poolhouse.net import git
+from poolhouse.workspace.identity import HUMAN
+from poolhouse.workspace.remote_host import WorkspaceHost
 
 pytestmark = pytest.mark.redteam
 
 
 @pytest.fixture
 def window(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_WORKSPACE_HOME", str(tmp_path / "machine-workspace"))
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_HOME", str(tmp_path / "machine-workspace"))
     checkout = tmp_path / "experiment"
     checkout.mkdir()
     git.run(["init"], cwd=checkout)
@@ -64,7 +64,7 @@ def connect(window, cookie="", headers=None):
 def raw_post(window, path, headers, body=b"{}"):
     conn = http.client.HTTPConnection("127.0.0.1", window.port, timeout=10)
     try:
-        conn.request("POST", path, body=body, headers={"Content-Type": "application/json", "X-ML-Stack-UI": "1",
+        conn.request("POST", path, body=body, headers={"Content-Type": "application/json", "X-Poolhouse-UI": "1",
                                                        "Content-Length": str(len(body)), **headers})
         reply = conn.getresponse()
         return reply.status, reply.getheader("Set-Cookie"), reply.read()
@@ -223,7 +223,7 @@ def test_a_page_opened_by_hand_says_how_to_open_it_and_a_launched_page_does_not(
         with hand_typed():
             page.goto(base)
         expect(page.locator("#launch-needed")).to_be_visible()
-        expect(page.locator("#launch-needed-command")).to_have_text("ml-stack peers open")
+        expect(page.locator("#launch-needed-command")).to_have_text("poolhouse peers open")
         launched = chromium.new_page()
         launched.goto(f"{base}?launch_ticket={ticket(window)[1]['ticket']}")
         launched.wait_for_selector("#app:not([hidden])")
@@ -234,7 +234,7 @@ def test_a_page_opened_by_hand_says_how_to_open_it_and_a_launched_page_does_not(
 @pytest.fixture
 def machine(window, tmp_path, monkeypatch):
     """The window's daemon, recorded under the state root a child process of this test will read."""
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     window.ui.launch = LaunchSecret(home.state("traind"), window.port)
     return window
 
@@ -245,7 +245,7 @@ def launch_tickets(machine) -> list[dict]:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_the_open_command_hands_a_person_at_a_terminal_a_one_use_address(machine, tmp_path):
-    done = run_command(tmp_path, ("ml_stack.fleet.peers", "main", ["open", "--print"]), agent=False, terminal=True)
+    done = run_command(tmp_path, ("poolhouse.fleet.peers", "main", ["open", "--print"]), agent=False, terminal=True)
     assert done.returncode == 0, done.stdout
     found = re.search(rf"http://127\.0\.0\.1:{machine.port}/ui/\?launch_ticket=([\w-]+)", done.stdout)
     assert found, done.stdout
@@ -257,7 +257,7 @@ def test_the_open_command_hands_a_person_at_a_terminal_a_one_use_address(machine
 def test_the_open_command_hands_an_agent_or_a_pipe_nothing(machine, tmp_path, agent, terminal):
     if terminal and sys.platform == "win32":
         pytest.skip("requires a POSIX pseudoterminal")
-    done = run_command(tmp_path, ("ml_stack.fleet.peers", "main", ["open", "--print"]), agent=agent, terminal=terminal)
+    done = run_command(tmp_path, ("poolhouse.fleet.peers", "main", ["open", "--print"]), agent=agent, terminal=terminal)
     assert done.returncode != 0
     assert "launch_ticket" not in done.stdout + (done.stderr or "")
     assert launch_tickets(machine) == []
@@ -284,7 +284,7 @@ def test_the_routes_that_act_for_the_person_answer_only_a_credentialed_session(w
 
 
 def test_credential_changes_need_a_credentialed_session(window):
-    from ml_stack import credentials
+    from poolhouse import credentials
 
     body = {"name": "HF_TOKEN", "value": "isolated-secret"}
     bare = window.ui.sessions.open("setup")

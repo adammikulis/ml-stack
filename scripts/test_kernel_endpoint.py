@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 def private_directory() -> Path:
-    from ml_stack.activity.source_snapshot import private_namespace
-    return private_namespace(dict(os.environ), "ml-stack-admission-")
+    from poolhouse.activity.source_snapshot import private_namespace
+    return private_namespace(dict(os.environ), "poolhouse-admission-")
 
 
 def socket_identity(path: str) -> tuple[int, int, int]:

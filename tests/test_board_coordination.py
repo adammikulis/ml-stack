@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 from workspace_kit import SRC
 
-from ml_stack import node_supervise
-from ml_stack.board import session as board_session
-from ml_stack.workspace import agent_display, board_cli, limits
+from poolhouse import node_supervise
+from poolhouse.board import session as board_session
+from poolhouse.workspace import agent_display, board_cli, limits
 
 pytest_plugins = ["node_kit"]
 HOOKS = Path(__file__).resolve().parents[1] / 'scripts/hooks'
@@ -31,21 +31,21 @@ def board(workspace_node, monkeypatch, tmp_path):
     node.alice, node.bob, node.carol = (node.member(n) for n in ('alice', 'bob', 'carol'))
     binary = tmp_path / 'bin'
     binary.mkdir()
-    wrapper = binary / 'ml-stack-workspace'
-    wrapper.write_text(f'#!{sys.executable}\nimport sys\nfrom ml_stack.workspace.cli import main\n'
+    wrapper = binary / 'poolhouse-workspace'
+    wrapper.write_text(f'#!{sys.executable}\nimport sys\nfrom poolhouse.workspace.cli import main\n'
                        'raise SystemExit(main(sys.argv[1:]))\n')
     wrapper.chmod(0o700)
     monkeypatch.chdir(tmp_path)  # outside any checkout, so the hooks report no worktrees of the real one
     monkeypatch.setenv('PATH', f'{binary}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.setenv('PYTHONPATH', SRC)
-    monkeypatch.setenv('ML_STACK_HOOK_STATE', str(tmp_path / 'hookstate'))
-    monkeypatch.setenv('ML_STACK_NONINTERACTIVE', '1')
-    monkeypatch.setenv('ML_STACK_RUNTIME_ENSURE', 'off')
+    monkeypatch.setenv('POOLHOUSE_HOOK_STATE', str(tmp_path / 'hookstate'))
+    monkeypatch.setenv('POOLHOUSE_NONINTERACTIVE', '1')
+    monkeypatch.setenv('POOLHOUSE_RUNTIME_ENSURE', 'off')
     return node
 
 
 def run(name, *argv):
-    return subprocess.run(['ml-stack-workspace', *argv, '--agent', name], capture_output=True, text=True, timeout=90,
+    return subprocess.run(['poolhouse-workspace', *argv, '--agent', name], capture_output=True, text=True, timeout=90,
                           check=False)
 
 
@@ -259,7 +259,7 @@ def test_lead_attention_hook_injects_once_per_interval_and_skips_subagents(board
     assert context['hookEventName'] == 'UserPromptSubmit' and f'[{seq}] question from {board.alice.name}' in context['additionalContext']
     assert hook('claude-lead-attention', event).stdout == ''
     assert hook('claude-lead-attention', {**event, 'agent_id': 'sub1'}).stdout == ''
-    monkeypatch.setenv('ML_STACK_ATTENTION_EVERY_S', '0')
+    monkeypatch.setenv('POOLHOUSE_ATTENTION_EVERY_S', '0')
     assert 'Unanswered for you' in hook('claude-lead-attention', {**event, 'hook_event_name': 'PostToolUse'}).stdout
 
 
@@ -269,6 +269,6 @@ def test_lead_attention_hook_is_silent_when_nothing_is_owed_or_the_node_cannot_s
     assert done.returncode == 0 and done.stdout == ''
     board.stop()
     node_supervise.point(board.state, None)
-    monkeypatch.setenv('ML_STACK_ATTENTION_EVERY_S', '0')
+    monkeypatch.setenv('POOLHOUSE_ATTENTION_EVERY_S', '0')
     failed = hook('claude-lead-attention', event)
     assert failed.returncode == 0 and failed.stdout == ''

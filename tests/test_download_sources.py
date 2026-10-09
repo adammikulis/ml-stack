@@ -4,10 +4,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from ml_stack.fleet import llama
-from ml_stack.fleet.models import Model, ModelError, Models
-from ml_stack.fleet.routes import ModelRoutes
-from ml_stack.fleet.settings import Settings
+from poolhouse.fleet import llama
+from poolhouse.fleet.models import Model, ModelError, Models
+from poolhouse.fleet.routes import ModelRoutes
+from poolhouse.fleet.settings import Settings
 
 
 @pytest.mark.parametrize('policy', ['', 'lan'])

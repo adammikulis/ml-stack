@@ -7,13 +7,13 @@ import collections
 
 import pytest
 
-from ml_stack.decide import Rule, RulesDecider
-from ml_stack.decide.guard import Policy, ToolCallGuard, last_tool_output
-from ml_stack.decide.guards import guard_cases
-from ml_stack.decide.guards.scoperules import ScopeDecider, parse_state, path_outside, violations
-from ml_stack.decide.guards.states import QUESTIONS, destructive_state, scope_state
-from ml_stack.decide.types import DecideError, Decision
-from ml_stack.interventions import Call, Confirm, Context, Deny, Proceed, guard_tool_call
+from poolhouse.decide import Rule, RulesDecider
+from poolhouse.decide.guard import Policy, ToolCallGuard, last_tool_output
+from poolhouse.decide.guards import guard_cases
+from poolhouse.decide.guards.scoperules import ScopeDecider, parse_state, path_outside, violations
+from poolhouse.decide.guards.states import QUESTIONS, destructive_state, scope_state
+from poolhouse.decide.types import DecideError, Decision
+from poolhouse.interventions import Call, Confirm, Context, Deny, Proceed, guard_tool_call
 
 CASES = guard_cases()
 
@@ -187,7 +187,7 @@ def test_a_guard_runs_inside_the_reference_loop_step():
 
 
 def test_rules_and_the_guard_combine_through_a_layered_decider():
-    from ml_stack.decide import Layered
+    from poolhouse.decide import Layered
     hard = RulesDecider([Rule("destructive", pattern=r"rm -rf")])
     guard = ToolCallGuard(Layered(hard, Scripted(SAFE)), checks=("destructive",))
     assert isinstance(guard.before_tool_call(Call("run_shell", {"command": "rm -rf /"}), CTX),

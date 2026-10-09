@@ -3,11 +3,11 @@
 Goal (owner): organise and employ as much of this machine (and any peers) as possible for coding,
 together with cloud model usage. Nothing below is built as one piece; this is the ordered plan.
 
-1. **Measure utilisation first.** One page (and `ml-stack-serve status`) showing, per resource:
+1. **Measure utilisation first.** One page (and `poolhouse-serve status`) showing, per resource:
    memory held vs wired limit, GPU/CPU busy %, tokens/s per lease, queue depth and wait time,
    idle minutes per day; cloud usage (per harness, per window) against its limit. Without this
    every other step is a guess. Profiles: write the missing measured profile for the coding
-   model (`ml-stack-bench report --profile`) so the broker sizes slots, context and speculative
+   model (`poolhouse-bench report --profile`) so the broker sizes slots, context and speculative
    settings from numbers.
 2. **A task queue with routing, not just a board.** Work items typed by difficulty and risk
    (bulk edit, test fix, refactor, design, review). Route cheap bulk work to local models

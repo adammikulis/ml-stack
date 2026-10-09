@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.cypher import CypherStore, census, literal
-from ml_stack.graph.snapshots import take
+from poolhouse.graph.cypher import CypherStore, census, literal
+from poolhouse.graph.snapshots import take
 
 
 def a_people_store(path):

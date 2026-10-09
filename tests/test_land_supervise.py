@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import land_supervise
 
-from ml_stack.lock import only_one, pid_alive
-from ml_stack.workspace import landing
+from poolhouse.lock import only_one, pid_alive
+from poolhouse.workspace import landing
 
 CRASH = [sys.executable, "-c", "import sys; sys.exit(3)"]
 SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
@@ -71,7 +71,7 @@ def test_a_second_supervisor_is_refused(world):
 
 
 def test_up_starts_a_runner_that_lands_a_request_and_down_stops_it_cleanly(world):
-    world.proj.env["ML_STACK_WORKSPACE_TOKEN"] = world.lead
+    world.proj.env["POOLHOUSE_WORKSPACE_TOKEN"] = world.lead
     assert "NOT RUNNING" in "\n".join(landing.status_lines(world.ws))
     rid, _ = world.ready("viaup", {**mod(60)})
     code, out, done = world.proj.land("up", "--interval", "1")

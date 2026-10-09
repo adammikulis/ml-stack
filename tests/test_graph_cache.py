@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from ml_stack.graph.answers import Answer
-from ml_stack.graph.cache import PREFIX, asked, digest, fingerprint, forget, kept, recall, remember
-from ml_stack.graph.store import GraphStore
+from poolhouse.graph.answers import Answer
+from poolhouse.graph.cache import PREFIX, asked, digest, fingerprint, forget, kept, recall, remember
+from poolhouse.graph.store import GraphStore
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",

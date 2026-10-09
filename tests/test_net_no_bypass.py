@@ -1,8 +1,8 @@
 """Nothing outside the net pipeline opens a connection to a host on the internet.
 
-The scan reads every module under ``src/ml_stack`` and flags: imports of network libraries,
+The scan reads every module under ``src/poolhouse`` and flags: imports of network libraries,
 a raw connection, a git or download program run by subprocess, and a call into
-``ml_stack.http``'s request functions (the client for servers on this machine or network).
+``poolhouse.http``'s request functions (the client for servers on this machine or network).
 A module may do these only when it is on a list below with the reason its traffic stays on
 this machine or network, or is handed to a library the pipeline cannot wrap. A relative import
 (``from .requests import ...``) is a sibling module, never a network library.
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent / "src" / "ml_stack"
+ROOT = Path(__file__).resolve().parent.parent / "src" / "poolhouse"
 
 LIBRARIES = {"urllib.request", "http.client", "requests", "httpx", "aiohttp", "huggingface_hub",
              "ftplib", "smtplib", "telnetlib", "urllib3", "websocket", "websockets"}
@@ -49,7 +49,7 @@ ALLOWED: dict[str, str] = {
                                "any other endpoint is refused",
     "fleet/launch_open.py": "asks the recorded daemon on 127.0.0.1 for a one-use launch ticket",
     "fleet/wsl_ui.py": "relays stdio to the daemon through a Linux loopback connection",
-    "http_cancel.py": "cancellable sockets under ml_stack.http; it is the guarded client's own plumbing",
+    "http_cancel.py": "cancellable sockets under poolhouse.http; it is the guarded client's own plumbing",
     "train/recipes/tool_calls_mlx.py": "resolves a base model already on disk (local_files_only=True); "
                                        "it downloads nothing",
     "fleet/ui.py": "a /metrics address a person typed into the fleet view (needs a session)",
@@ -59,7 +59,7 @@ ALLOWED: dict[str, str] = {
     "bench/": "model servers on this machine or network",
     "client/": "model servers the person chose; the chat endpoint is configured, not fetched",
     "decide/logprob.py": "the decide backend: the model server the person configured "
-                         "(ML_STACK_DECIDE_URL: this machine only unless the operator names the host)",
+                         "(POOLHOUSE_DECIDE_URL: this machine only unless the operator names the host)",
     "decide/router.py": "reachability of that same configured decide server",
     "serve/slotdump.py": "slot save and restore on a model server this machine started",
     "serve/llamacpp_smoke.py": "health, chat and slot checks on the model server a smoke test started",
@@ -116,14 +116,14 @@ def findings(path: Path) -> list[str]:
             elif module in ("urllib", "http"):
                 found += [f"from {module} import {a.name}" for a in node.names
                           if f"{module}.{a.name}" in LIBRARIES]
-            elif module == "ml_stack.http" or (node.level and module == "http"):
-                found += [f"from ml_stack.http import {a.name}" for a in node.names
+            elif module == "poolhouse.http" or (node.level and module == "http"):
+                found += [f"from poolhouse.http import {a.name}" for a in node.names
                           if a.name in REQUESTS]
         elif isinstance(node, ast.Call):
             called = names(node.func)
             if called in CALLS or called.split(".")[-1] == "urlopen":
                 found.append(f"call {called}")
-            if called.split(".")[-1] in REQUESTS and called.startswith(("http.", "ml_stack.http.")):
+            if called.split(".")[-1] in REQUESTS and called.startswith(("http.", "poolhouse.http.")):
                 found.append(f"call {called}")
             if called.startswith("subprocess.") and node.args:
                 found += program_findings(node.args[0])
@@ -153,7 +153,7 @@ def test_no_module_outside_the_pipeline_reaches_the_internet_on_its_own():
             continue
         for item in findings(path):
             bad.append(f"{rel}: {item}")
-    assert not bad, "network I/O outside ml_stack.net:\n  " + "\n  ".join(bad)
+    assert not bad, "network I/O outside poolhouse.net:\n  " + "\n  ".join(bad)
 
 
 def test_every_allowed_module_exists_and_still_needs_its_place():
@@ -182,8 +182,8 @@ def test_every_allowed_module_exists_and_still_needs_its_place():
     "import subprocess\nsubprocess.run(['curl', 'u'])\n",
     "import subprocess\nsubprocess.run(['python', '-m', 'pip', 'install', 'x'])\n",
     "from huggingface_hub import hf_hub_download\n",
-    "from ml_stack.http import open_stream\n",
-    "from ml_stack import http\nhttp.request_json('u')\n",
+    "from poolhouse.http import open_stream\n",
+    "from poolhouse import http\nhttp.request_json('u')\n",
 ])
 def test_the_scan_recognises_each_way_of_reaching_out(tmp_path, source):
     path = tmp_path / "m.py"

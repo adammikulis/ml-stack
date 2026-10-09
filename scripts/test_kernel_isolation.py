@@ -24,10 +24,10 @@ from test_kernel_holder import (
 )
 from test_kernel_selectors import admitted_node
 
-from ml_stack.activity.source_snapshot import actual_git, git_environment
-from ml_stack.sandbox.path_language import exact_language
-from ml_stack.sandbox.policy import Net, Policy
-from ml_stack.sandbox.seatbelt import Seatbelt, quote
+from poolhouse.activity.source_snapshot import actual_git, git_environment
+from poolhouse.sandbox.path_language import exact_language
+from poolhouse.sandbox.policy import Net, Policy
+from poolhouse.sandbox.seatbelt import Seatbelt, quote
 
 GATE = frozenset({"test_layers.py", "test_budgets.py", "test_budget_floors.py",
                   "test_budget_ratchet.py", "test_redteam_human_floor.py", "test_requests_floor.py",
@@ -99,8 +99,8 @@ def source_metadata(repo: Path, directories: set[Path], aliases: set[Path]) -> s
 
 
 def source_reads(repo: Path, environment: dict[str, str]) -> tuple[list[Path], set[Path]]:
-    from ml_stack.activity.source_snapshot import SourceSnapshot, private_namespace
-    storage = private_namespace(environment, "ml-stack-inventory-")
+    from poolhouse.activity.source_snapshot import SourceSnapshot, private_namespace
+    storage = private_namespace(environment, "poolhouse-inventory-")
     snapshot = None
     try:
         snapshot = SourceSnapshot(repo, storage)
@@ -173,7 +173,7 @@ class ConfinedRun:
         import pwd
         check_selectors(command)
         base = supervisor_storage(environment)
-        self.control = Path(tempfile.mkdtemp(prefix="ml-stack-confined-", dir=base)).resolve()
+        self.control = Path(tempfile.mkdtemp(prefix="poolhouse-confined-", dir=base)).resolve()
         self.scratch = self.control / "scratch"
         self.scratch.mkdir(mode=0o700)
         roots = {name: self.scratch / name for name in ("home", "state", "cache", "tmp")}
@@ -184,8 +184,8 @@ class ConfinedRun:
         self.environment = filtered_environment(environment)
         config_keys = {"GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"}
         self.environment.update({key: value for key, value in git_environment().items() if key in config_keys})
-        self.environment.update(HOME=str(roots["home"]), ML_STACK_HOME=str(roots["state"]),
-                                XDG_CACHE_HOME=str(roots["cache"]), ML_STACK_CACHE=str(roots["cache"]), TMPDIR=str(roots["tmp"]),
+        self.environment.update(HOME=str(roots["home"]), POOLHOUSE_HOME=str(roots["state"]),
+                                XDG_CACHE_HOME=str(roots["cache"]), POOLHOUSE_CACHE=str(roots["cache"]), TMPDIR=str(roots["tmp"]),
                                 PYTHONPATH=os.pathsep.join((str(repo / "src"), str(repo / "scripts"))),
                                 PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1",
                                 PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
@@ -304,7 +304,7 @@ class ConfinedRun:
         from test_kernel_role_smoke import CONTROL_NODE, observe_control
         if CONTROL_NODE in arguments:
             report, receipt = observe_control(self, policy)
-            self.environment["ML_STACK_TEST_ROLE_CONTROL_REPORT"] = str(report)
+            self.environment["POOLHOUSE_TEST_ROLE_CONTROL_REPORT"] = str(report)
             policy = replace(policy, read_files=(*policy.read_files, str(report))).validated()
             if self.artifacts is not None:
                 self.artifacts.proof["owned_process_control"] = receipt
@@ -312,7 +312,7 @@ class ConfinedRun:
         if IMPORT_NODE in arguments:
             from test_kernel_role_smoke import observe as observe_role
             report, receipt = observe_role(self, policy)
-            self.environment["ML_STACK_TEST_ROLE_IMPORT_REPORT"] = str(report)
+            self.environment["POOLHOUSE_TEST_ROLE_IMPORT_REPORT"] = str(report)
             policy = replace(policy, read_files=(*policy.read_files, str(report))).validated()
             self.holder_assets.identities[report] = holder_asset_identity(report.lstat())
             if self.artifacts is not None:
@@ -431,12 +431,12 @@ class ConfinedRun:
 
 
 def supervisor_storage(environment: dict[str, str]) -> Path:
-    from ml_stack.activity.source_snapshot import validate_storage
+    from poolhouse.activity.source_snapshot import validate_storage
     return validate_storage(Path(tempfile.gettempdir()), protected_roots(environment))
 
 
 def protected_roots(environment: dict[str, str]) -> tuple[Path, ...]:
-    from ml_stack.activity.source_snapshot import protected_roots as roots
+    from poolhouse.activity.source_snapshot import protected_roots as roots
     return roots(environment)
 
 

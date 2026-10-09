@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import join as fleet_join
-from ml_stack.fleet.discovery import Advertiser, Beacon, DiscoveryError, check_name, mint_cluster
-from ml_stack.fleet.onboard import joining
-from ml_stack.fleet.onboard.clusters import (
+from poolhouse.fleet import join as fleet_join
+from poolhouse.fleet.discovery import Advertiser, Beacon, DiscoveryError, check_name, mint_cluster
+from poolhouse.fleet.onboard import joining
+from poolhouse.fleet.onboard.clusters import (
     Choice,
     Cluster,
     format_clusters,
     known_clusters,
     pick_cluster,
 )
-from ml_stack.fleet.onboard.joining import find_clusters
+from poolhouse.fleet.onboard.joining import find_clusters
 
 WORDS = "quince larch marlow"
 
@@ -36,7 +36,7 @@ def _free_udp() -> int:
 @pytest.fixture
 def udp(monkeypatch) -> int:
     port = _free_udp()
-    monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(port))
+    monkeypatch.setenv("POOLHOUSE_DISCOVERY_PORT", str(port))
     return port
 
 
@@ -150,8 +150,8 @@ def test_n_asks_for_the_name_of_a_new_cluster():
 
 def test_enter_takes_the_default_when_nothing_is_listed():
     ask, seen = _answers("")
-    assert pick_cluster([], ask, lambda _: None) == Choice("ml-stack", False)
-    assert "[ml-stack]" in seen[0]
+    assert pick_cluster([], ask, lambda _: None) == Choice("poolhouse", False)
+    assert "[poolhouse]" in seen[0]
 
 
 def test_enter_alone_does_not_pick_when_clusters_are_listed():
@@ -207,9 +207,9 @@ def captured(monkeypatch, tmp_path):
         return fleet_join.Joined(name="x", port=1, root=Path(kw["root"]), group=kw["group"])
 
     monkeypatch.setattr(fleet_join, "join_machine", fake)
-    monkeypatch.delenv("ML_STACK_PASSPHRASE", raising=False)
-    monkeypatch.delenv("ML_STACK_CLUSTER", raising=False)
-    monkeypatch.delenv("ML_STACK_NONINTERACTIVE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_PASSPHRASE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_CLUSTER", raising=False)
+    monkeypatch.delenv("POOLHOUSE_NONINTERACTIVE", raising=False)
     return asked
 
 
@@ -268,7 +268,7 @@ def test_a_script_is_never_asked(captured, tmp_path, monkeypatch):
 
 
 def test_a_terminal_marked_non_interactive_is_never_asked(captured, tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_NONINTERACTIVE", "1")
+    monkeypatch.setenv("POOLHOUSE_NONINTERACTIVE", "1")
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked an agent"))
     monkeypatch.setattr(sys, "stdin", _Terminal(f"{WORDS}\n"))
     assert _join(tmp_path) == 0
@@ -276,17 +276,17 @@ def test_a_terminal_marked_non_interactive_is_never_asked(captured, tmp_path, mo
 
 
 def test_a_passphrase_from_the_environment_is_never_asked_for_a_name(captured, tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
+    monkeypatch.setenv("POOLHOUSE_PASSPHRASE", WORDS)
     monkeypatch.setattr(sys, "stdin", _Terminal(""))
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked an install script"))
-    monkeypatch.setenv("ML_STACK_CLUSTER", "attic")
+    monkeypatch.setenv("POOLHOUSE_CLUSTER", "attic")
     assert _join(tmp_path) == 0
     assert captured["group"] == "attic"
     assert captured["passphrase"] == WORDS
 
 
 def test_a_bad_group_name_is_refused_with_a_plain_message(tmp_path, capsys, monkeypatch):
-    monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
+    monkeypatch.setenv("POOLHOUSE_PASSPHRASE", WORDS)
     assert _join(tmp_path, "--group", "a/b") == 2
     assert "A cluster name cannot contain '/'" in capsys.readouterr().err
 
@@ -308,7 +308,7 @@ def test_the_clusters_command_says_when_there_is_none(tmp_path, udp, capsys):
 
 
 def test_environment_passphrase_requires_explicit_cluster_name(captured, tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
+    monkeypatch.setenv("POOLHOUSE_PASSPHRASE", WORDS)
     monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("asked an install script"))
     assert _join(tmp_path) == 2
     assert "cluster name is required" in capsys.readouterr().err

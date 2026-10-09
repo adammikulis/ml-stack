@@ -9,17 +9,17 @@ import threading
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.deciding import MAX_REQUEST, Deciding
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.http import Server, ServerError, request_bytes
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.deciding import MAX_REQUEST, Deciding
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.http import Server, ServerError, request_bytes
 
 
 @pytest.fixture
 def api(tmp_path, server):
     chat = server(logprob_handler(lambda user: {"A": 0.1, "B": 0.9}))
-    from ml_stack.decide import router
+    from poolhouse.decide import router
     files = tmp_path / "files"
     files.mkdir()
     runner = JobRunner(tmp_path / "traind")
@@ -91,7 +91,7 @@ def test_abstain_below_marks_a_low_confidence_answer(api):
 
 
 def test_no_backend_available_is_a_503_that_says_why(tmp_path):
-    from ml_stack.decide import router
+    from poolhouse.decide import router
     answer = Deciding(config=router.Config(url="http://127.0.0.1:9", order=("logprob",))).answer(
         {"question": "q", "options": ["a", "b"]})
     assert answer[0] == 503 and "did not answer" in answer[1]["error"]
@@ -123,8 +123,8 @@ def test_the_decider_for_a_server_is_built_once(api):
 
 
 def test_the_mcp_tool_decides_with_descriptions_and_an_abstain_threshold(server, monkeypatch):
-    from ml_stack import mcp
-    from ml_stack.decide import router
+    from poolhouse import mcp
+    from poolhouse.decide import router
     chat = server(logprob_handler(lambda user: {"A": 0.3, "B": 0.7}))
     monkeypatch.setattr(router, "shared", lambda backend, url: router.Config(backend=backend, url=chat.base_url))
     got = mcp.decide("Which?", ["x=first option", "y"], state_text="the state",

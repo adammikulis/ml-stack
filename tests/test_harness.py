@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from conftest import on_a_fresh_thread
 
-from ml_stack import harness
+from poolhouse import harness
 
 
 class _Text:
@@ -75,7 +75,7 @@ def test_ask_runs_one_task_and_says_what_it_spent(fake_sdk):
 
 
 def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake_sdk, monkeypatch, capsys):
-    from ml_stack.serve.profile import record
+    from poolhouse.serve.profile import record
 
     seen = {}
 
@@ -90,15 +90,15 @@ def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake
         yield Server()
         seen["released"] = True
 
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for",
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for",
                         lambda m, **_: record("kestrel-8B-UD-Q4_K_XL.gguf",
                                               cache_type="q8_0"))
-    monkeypatch.setattr("ml_stack.hub.located",
+    monkeypatch.setattr("poolhouse.hub.located",
                         lambda *a, **k: Path("/m/kestrel-8B-UD-Q4_K_XL.gguf"))
     monkeypatch.setattr(harness, "alias_of", lambda url, model: "kestrel-8B")
     # the model's template refuses a late system message; the lease carries a forgiving one
-    monkeypatch.setattr("ml_stack.serve.chat_template.written_beside",
+    monkeypatch.setattr("poolhouse.serve.chat_template.written_beside",
                         lambda model: pathlib.Path("/tmp/kestrel-8B.jinja"))
     assert on_a_fresh_thread(harness.main, ["what is this?", "--model", "kestrel", "--port", "8899",
                                             "--context", "256k", "--allow", "Read",
@@ -117,8 +117,8 @@ def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake
 
 def _hooks(task=""):
     pytest.importorskip("claude_agent_sdk")
-    from ml_stack.guard import start
-    from ml_stack.guard.hooks import sdk_guard, sdk_hooks
+    from poolhouse.guard import start
+    from poolhouse.guard.hooks import sdk_guard, sdk_hooks
 
     guard = start(sdk_guard(), task=task)
     made = sdk_hooks(guard)

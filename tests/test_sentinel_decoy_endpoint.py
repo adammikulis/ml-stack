@@ -16,14 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, sentinel
-from ml_stack.agent import Agent, Done, FunctionTools
-from ml_stack.agent.watched import Watch
-from ml_stack.client import Client
-from ml_stack.http import ServerError, request_json
-from ml_stack.sentinel import State, human, watch
-from ml_stack.serve import decoy
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse import home, sentinel
+from poolhouse.agent import Agent, Done, FunctionTools
+from poolhouse.agent.watched import Watch
+from poolhouse.client import Client
+from poolhouse.http import ServerError, request_json
+from poolhouse.sentinel import State, human, watch
+from poolhouse.serve import decoy
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -146,7 +146,7 @@ def test_off_needs_a_reason_and_is_logged() -> None:
 
 def test_the_broker_daemon_starts_the_listener_and_stops_it(tmp_path) -> None:
     env = {**os.environ, "PYTHONPATH": str(REPO / "src"), watch.ENV_SCAN: "60"}
-    daemon = subprocess.Popen([sys.executable, "-m", "ml_stack.serve.cli", "broker",
+    daemon = subprocess.Popen([sys.executable, "-m", "poolhouse.serve.cli", "broker",
                                "--quit-after", "120"], env=env, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL)
     file = home.home() / "credentials.endpoint"

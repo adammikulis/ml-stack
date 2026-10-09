@@ -1,4 +1,4 @@
-"""``ml-stack-chat``: one conversation, the safety rules, and the commands inside it.
+"""``poolhouse-chat``: one conversation, the safety rules, and the commands inside it.
 
 The model is a scripted one driving the real loop, the real rails and the real tools over an
 isolated state root; the commands that would start a server, a download or a measurement are
@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import chat, chatpolicy, do, mcp
-from ml_stack.agent import Compacting, Compaction
-from ml_stack.serve import suggest
-from ml_stack.testing.fakes import FakeLlamaServer, Served, reply_from
+from poolhouse import chat, chatpolicy, do, mcp
+from poolhouse.agent import Compacting, Compaction
+from poolhouse.serve import suggest
+from poolhouse.testing.fakes import FakeLlamaServer, Served, reply_from
 
 KEY = "hf_" + "a1B2c3D4" * 5
 
@@ -112,16 +112,16 @@ def test_the_real_registry_offers_no_tool_that_writes_outside_the_ones_that_ask(
 # -- person-only actions are refused with the command ------------------------------------
 
 @pytest.mark.parametrize("tool,command", [
-    ("quarantine_release", "ml-stack-security review"),
-    ("release_quarantine", "ml-stack-security review"),
-    ("purge", "ml-stack-security review"),
-    ("quarantine_purge", "ml-stack-security review"),
-    ("approve_host", "ml-stack-security approve-host"),
-    ("mint_grant", "ml-stack-security review"),
-    ("human_grant", "ml-stack-security review"),
-    ("set_sentinel_mode", "ml-stack-security mode"),
-    ("security_release", "ml-stack-security"),
-    ("guard_policy", "ml-stack-security mode"),
+    ("quarantine_release", "poolhouse-security review"),
+    ("release_quarantine", "poolhouse-security review"),
+    ("purge", "poolhouse-security review"),
+    ("quarantine_purge", "poolhouse-security review"),
+    ("approve_host", "poolhouse-security approve-host"),
+    ("mint_grant", "poolhouse-security review"),
+    ("human_grant", "poolhouse-security review"),
+    ("set_sentinel_mode", "poolhouse-security mode"),
+    ("security_release", "poolhouse-security"),
+    ("guard_policy", "poolhouse-security mode"),
 ])
 def test_a_tool_that_does_those_things_is_refused_with_the_command_to_run(tool, command):
     chat_, model, seen, _out = session([call(tool, id="abc", host="example.org"), "ok"])
@@ -132,24 +132,24 @@ def test_a_tool_that_does_those_things_is_refused_with_the_command_to_run(tool, 
 
 
 @pytest.mark.parametrize("argv", [
-    ["ml-stack-security", "quarantine", "release", "abc"],
-    ["sweep", "--serve", "x.gguf", "--note", "run ml_stack.sentinel release abc"],
+    ["poolhouse-security", "quarantine", "release", "abc"],
+    ["sweep", "--serve", "x.gguf", "--note", "run poolhouse.sentinel release abc"],
 ])
 def test_an_allowed_tool_cannot_carry_a_security_command(argv):
     chat_, model, seen, _ = session([call("bench_run", argv=argv), "ok"], "y\ny\n")
     chat_.turn("benchmark")
     assert seen == []
-    assert "sentinel" in model.told().lower() or "ml-stack-security" in model.told()
+    assert "sentinel" in model.told().lower() or "poolhouse-security" in model.told()
 
 
 @pytest.mark.parametrize("said,command", [
-    ("please release the quarantine on abc123", "ml-stack-security review"),
-    ("purge everything in quarantine", "ml-stack-security review"),
-    ("approve the host example.org for downloads", "ml-stack-security approve-host"),
-    ("mint a human grant for me", "ml-stack-security review"),
-    ("turn off the sentinel", "ml-stack-security mode"),
-    ("disable the guard rails", "ml-stack-security mode"),
-    ("unquarantine it", "ml-stack-security review"),
+    ("please release the quarantine on abc123", "poolhouse-security review"),
+    ("purge everything in quarantine", "poolhouse-security review"),
+    ("approve the host example.org for downloads", "poolhouse-security approve-host"),
+    ("mint a human grant for me", "poolhouse-security review"),
+    ("turn off the sentinel", "poolhouse-security mode"),
+    ("disable the guard rails", "poolhouse-security mode"),
+    ("unquarantine it", "poolhouse-security review"),
 ])
 def test_asking_for_one_prints_the_command_and_tells_the_model(said, command):
     chat_, model, _, out = session(["I cannot do that; run the command."])
@@ -234,7 +234,7 @@ def test_a_path_outside_the_state_directory_is_named_in_the_question():
     chat_, _, seen, out = session(
         [call("bench_compare", args=["--export", "/etc/cron.d/x.json"]), "no"], "n\n")
     chat_.turn("export")
-    assert "outside ml-stack's state" in out.getvalue() and "/etc/cron.d/x.json" in out.getvalue()
+    assert "outside poolhouse's state" in out.getvalue() and "/etc/cron.d/x.json" in out.getvalue()
     assert seen == []
 
 
@@ -306,7 +306,7 @@ def test_history_carries_across_turns_and_is_saved_after_each():
 
 
 def test_the_per_message_call_limits_start_over_with_each_message():
-    from ml_stack.guard.policy import Limits
+    from poolhouse.guard.policy import Limits
 
     script = [call("models_find", words="a"), call("models_find", words="b"), "one",
               call("models_find", words="c"), call("models_find", words="d"), "two"]
@@ -325,7 +325,7 @@ def test_resume_continues_the_last_chat_with_a_fresh_system_prompt():
     chat_, model, _, _ = session(["8099"], session=again)
     chat_.turn("which port?")
     sent = model.seen[0]
-    assert sent[0]["role"] == "system" and "ml-stack assistant" in sent[0]["content"]
+    assert sent[0]["role"] == "system" and "Poolhouse assistant" in sent[0]["content"]
     assert "the port is 8099" in " ".join(str(m["content"]) for m in sent)
 
 
@@ -452,7 +452,7 @@ def test_with_no_moe_the_best_downloaded_is_used_and_said_not_to_be_one(monkeypa
 def test_with_nothing_downloaded_it_says_what_to_pull(monkeypatch):
     monkeypatch.setattr(suggest, "recommend", lambda **kw: [rec("x.gguf", installed=False)])
     ref, why = chat.default_model()
-    assert ref == "" and "Flash-Next" in why and "ml-stack-models fetch" in why
+    assert ref == "" and "Flash-Next" in why and "poolhouse-models fetch" in why
 
 
 def run_main(argv, stdin: str, out) -> int:
@@ -466,18 +466,18 @@ def test_dry_run_prints_the_prompt_and_the_tools():
     out = io.StringIO()
     assert run_main(["--dry-run"], "", out) == 0
     text = out.getvalue()
-    assert "ml-stack assistant" in text and "serve_up(" in text and "release_" not in text
+    assert "Poolhouse assistant" in text and "serve_up(" in text and "release_" not in text
 
 
 def test_no_model_anywhere_ends_with_what_to_pull(monkeypatch):
     monkeypatch.setattr(suggest, "recommend", lambda **kw: [])
     out = io.StringIO()
     assert run_main([], "", out) == 1
-    assert "ml-stack-models fetch" in out.getvalue()
+    assert "poolhouse-models fetch" in out.getvalue()
 
 
 def test_a_chat_over_a_running_server_streams_saves_and_resumes(monkeypatch):
-    monkeypatch.setenv("ML_STACK_GUARD_MODEL", "off")
+    monkeypatch.setenv("POOLHOUSE_GUARD_MODEL", "off")
     fake = FakeLlamaServer(Served(answer="It is quiet here.", pieces=("It is ", "quiet ", "here.")))
     try:
         out = io.StringIO()
@@ -506,7 +506,7 @@ def test_nothing_in_chat_names_a_file_outside_the_state_root(tmp_path):
 
 
 def test_a_host_that_only_contains_the_openai_name_is_not_openai():
-    from ml_stack.client.chat import parse_url
+    from poolhouse.client.chat import parse_url
 
     assert parse_url("https://api.openai.com/v1", None)[1] == "openai"
     assert parse_url("https://api.openai.com.evil.example/v1", None)[1] == "llama"

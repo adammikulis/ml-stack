@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.fleet.conversations import Conversations
+from poolhouse.fleet.conversations import Conversations
 
 
 @pytest.fixture
@@ -147,7 +147,7 @@ def test_old_saved_messages_acquire_default_settings_and_version_on_update(store
 
 
 def test_conversations_link_messages_models_and_projects_in_the_graph(store):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     made = store.start(model="chosen-model", settings={"project": "/tmp/project"})
     store.append(made.id, "user", "Inspect the sensors")
@@ -171,7 +171,7 @@ def test_concurrent_handles_append_without_overwriting_messages(store):
 
 
 def test_plain_conversations_do_not_install_search_extensions(store, monkeypatch):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     def refuse(extension):
         raise AssertionError(f"unexpected search extension: {extension}")

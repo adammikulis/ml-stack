@@ -6,8 +6,8 @@ from test_fleet_initial_setup import initial
 from test_fleet_ui import Serving, no_release_lookup
 from test_workspace_board_ui import browser
 
-from ml_stack.fleet import automatic_clusters
-from ml_stack.fleet.discovery import mint_cluster
+from poolhouse.fleet import automatic_clusters
+from poolhouse.fleet.discovery import mint_cluster
 
 __all__ = ["browser", "no_release_lookup"]
 

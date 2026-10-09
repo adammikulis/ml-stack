@@ -7,9 +7,9 @@ from launch_support import signed
 from test_fleet_ui import Serving
 from workspace_kit import Kit, clean_env
 
-from ml_stack.fleet import extension_routes, routes
-from ml_stack.workspace import task_routes, tokens
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.fleet import extension_routes, routes
+from poolhouse.workspace import task_routes, tokens
+from poolhouse.workspace.taskboard import TaskBoard
 
 pytestmark = pytest.mark.redteam
 

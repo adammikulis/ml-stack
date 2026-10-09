@@ -11,14 +11,14 @@ import os
 
 import pytest
 
-import ml_stack.bench as bench
-from ml_stack.bench import standard
+import poolhouse.bench as bench
+from poolhouse.bench import standard
 
 URL = "http://127.0.0.1:1/v1/chat/completions"
 
 
 def standard_cmd(argv):
-    """``ml-stack-bench standard ARGS``, parsed and dispatched as the command is."""
+    """``poolhouse-bench standard ARGS``, parsed and dispatched as the command is."""
     return bench._main(["standard", *argv])
 
 
@@ -227,7 +227,7 @@ def test_humaneval_confirms_unsafe_code_and_lets_code_eval_run(tmp_path, faked, 
 
 def test_no_queue_is_refused_with_3_while_another_measurement_holds_the_lock(
         tmp_path, faked, capsys):
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
 
     calls, script = faked
     script["ifeval"] = recorded("ifeval", 1, 541, **{"prompt_level_strict_acc,none": 1.0})
@@ -245,7 +245,7 @@ def test_no_queue_is_refused_with_3_while_another_measurement_holds_the_lock(
 
 def test_the_lock_is_let_go_after_a_run_and_after_a_harness_failure(tmp_path, faked,
                                                                     monkeypatch):
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
 
     calls, script = faked
 

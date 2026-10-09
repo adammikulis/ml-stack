@@ -12,7 +12,7 @@ from ._util import parse
 NAME = "wide-signatures"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 LIMIT = 8
 
 

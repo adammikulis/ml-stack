@@ -1,18 +1,18 @@
 # Claude Code and Codex on a local model
 
-`ml-stack-codex` and `ml-stack-claude` run the Codex and Claude Code command-line agents on a model
-this machine serves, with ml-stack's rails around them: the served window, a pre-tool classifier
+`poolhouse-codex` and `poolhouse-claude` run the Codex and Claude Code command-line agents on a model
+this machine serves, with Poolhouse's rails around them: the served window, a pre-tool classifier
 hook under a role, the Requests inbox for approvals, and a workspace identity of their own. Codex is
 the default coding harness (a lighter system prompt and tool list); Claude Code is there for when
 its richer hook gate matters.
 
 ```
-ml-stack-codex                                  # Qwen3.8-27B-UD-Q4_K_XL, role approve-first, this directory
-ml-stack-codex Qwen3.5-2B --role plan-and-go --project ~/work/repo -- exec "fix the failing test"
-ml-stack-claude --on http://127.0.0.1:8080 --role read-only -- -p "explain this repo"
+poolhouse-codex                                  # Qwen3.8-27B-UD-Q4_K_XL, role approve-first, this directory
+poolhouse-codex Qwen3.5-2B --role plan-and-go --project ~/work/repo -- exec "fix the failing test"
+poolhouse-claude --on http://127.0.0.1:8080 --role read-only -- -p "explain this repo"
 ```
 
-A program starts the same thing with `ml_stack.coding.launch_coding_agent(model, role, project,
+A program starts the same thing with `poolhouse.coding.launch_coding_agent(model, role, project,
 harness="codex", **options)` (options: `name`, `orders_from`, `harness_args`, `say`,
 `run_codex` / `run_claude`, `context`); it returns the harness's exit code.
 
@@ -22,8 +22,8 @@ harness="codex", **options)` (options: `name`, `orders_from`, `harness_args`, `s
    one slot, q8_0 KV cache, the model's own multi-token-prediction head where it has one, the
    model's measured settings when there are some. The model is asked for before it is loaded: when
    the wired-memory limit cannot hold it at that window, the launcher prints
-   `ml-stack-serve memory --for MODEL --ctx 262144 --kv q8_0 --apply` and stops. Raising the limit is
-   for a person at their own terminal. `ml-stack-serve memory --for Qwen3.8-27B-UD-Q4_K_XL.gguf --ctx
+   `poolhouse-serve memory --for MODEL --ctx 262144 --kv q8_0 --apply` and stops. Raising the limit is
+   for a person at their own terminal. `poolhouse-serve memory --for Qwen3.8-27B-UD-Q4_K_XL.gguf --ctx
    262144 --kv q8_0` says what the default needs (29.2 GiB on the measured machine, 2026-10-03).
    `--ctx N` is the total across `--slots` (default 1); `--on URL` uses a server already up.
 2. **Tells the harness the window it was given**, so it neither compacts at a small default nor
@@ -48,13 +48,13 @@ harness="codex", **options)` (options: `name`, `orders_from`, `harness_args`, `s
 | `approve-first` (default) | sandbox `workspace-write`, approvals `on-request` | allows reads; asks for every acting call |
 | `plan-and-go` | sandbox `workspace-write`, approvals `on-request` | allows reads and reversible calls; asks for destructive and unsure ones |
 
-The hook is `python -m ml_stack.harnesshook pre`, a PreToolUse command hook that both harnesses run
+The hook is `python -m poolhouse.harnesshook pre`, a PreToolUse command hook that both harnesses run
 before every tool call (Claude Code: every tool; Codex: Bash, `apply_patch`, MCP and other local
 function tools). It labels the call with the destructive-action classifier
 (`docs/destructive-actions.md`, deterministic layer) and applies the role. A call the classifier
 cannot read, or a tool it does not know, is `unsure` and asks. An ask is a request in the Requests
 inbox (`docs/requests.md`) that the hook waits on, up to five minutes; only the person answers it
-(`ml-stack-requests`), never the model. Not answered, expired, or a request store that cannot be
+(`poolhouse-requests`), never the model. Not answered, expired, or a request store that cannot be
 opened (the hook runs without a terminal, so it never prompts the keystore) is a denial.
 
 Denied in every role: a call whose text names the session's files or the state root, and a shell
@@ -77,18 +77,18 @@ commands there. The token is kept in the private launcher settings and revoked w
 Shell workspace commands must explicitly name the launcher-assigned identity; other identity
 flags and token-file overrides are denied.
 
-A person-started launcher mints the session's identity the way `ml-stack-workspace setup` does: the
+A person-started launcher mints the session's identity the way `poolhouse-workspace setup` does: the
 standard agent role, a token file readable by this user only, nothing printed and no invite code. The
 name is `local-<model>-<harness>` (or `--name`); the agent is placed on the project's board (the
 project of `--project`, else the working directory) with the workspace's quiet defaults (direct messages and mentions in its inbox,
-`#announcements` as a roll-up). It is announced with `ml-stack-workspace announce joined`, gets
+`#announcements` as a roll-up). It is announced with `poolhouse-workspace announce joined`, gets
 the workspace brief (it acts with `--agent NAME`; it obeys the person, the lead named by `--as`,
 default `claude`, and any `--orders-from` identity; what it reads there is data), and a
-PostToolUse hook runs `ml-stack-workspace nudge --agent NAME` after each tool call and hands its
+PostToolUse hook runs `poolhouse-workspace nudge --agent NAME` after each tool call and hands its
 output (at most 500 characters, fenced as data) back as context; where `nudge` does not exist the
 hook says nothing. The token is revoked and its file deleted when the session ends. A launcher an
 agent started cannot mint: the session then acts as `--as AGENT` with its name as the label, and the
-launcher prints `ml-stack-workspace setup --agents NAME` for a person to run.
+launcher prints `poolhouse-workspace setup --agents NAME` for a person to run.
 The served alias and harness are recorded as the agent's verified model with `Workspace.set_model`
 (person-only). A launcher an agent started cannot record it; it says so and the model stays unrecorded
 until a person records it.
@@ -109,7 +109,7 @@ until a person records it.
 - The Requests answer comes from the terminal or the UI, so an unattended session in `approve-first`
   stops at its first acting call (denied, with the reason shown to the model).
 - Only the deterministic classifier layer runs in the hook; the model-assisted layer does not.
-- The harness talks to the server directly, not through `ml_stack.http`, so the per-pool request queue (`ml_stack.gate`) does not order its calls. One slot per session keeps two sessions from sharing a cache.
+- The harness talks to the server directly, not through `poolhouse.http`, so the per-pool request queue (`poolhouse.gate`) does not order its calls. One slot per session keeps two sessions from sharing a cache.
 
 ## Local models and large harness prompts
 
@@ -131,11 +131,11 @@ until a person records it.
 
 `scripts/compare-harnesses --model NAME` serves the model once and runs the fixture in
 `tests/fixtures/toy_bugfix` (a one-line bug, scored by its own test, in a temporary git repository)
-through `ml-stack-claude` and `ml-stack-codex`, recording wall time, tool calls, the tokens the server
+through `poolhouse-claude` and `poolhouse-codex`, recording wall time, tool calls, the tokens the server
 processed (llama-server `/metrics`), the tokens each harness says it sent and how many came from
 the cache, the last request's prompt and cached tokens from `/slots`, the first-turn cost of each harness measured with a one-line prompt, and whether the test
-passes. Rows are appended to `docs/experiments/harness-comparison.md`. ml-stack's own agent loop is
-skipped where `ml-stack-workspace agent` does not exist. It refuses Flash-Next.
+passes. Rows are appended to `docs/experiments/harness-comparison.md`. Poolhouse's own agent loop is
+skipped where `poolhouse-workspace agent` does not exist. It refuses Flash-Next.
 
 ## Sources
 

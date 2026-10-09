@@ -1,4 +1,4 @@
-"""The Claude Code hook that refuses an edit writing what src/ml_stack already has."""
+"""The Claude Code hook that refuses an edit writing what src/poolhouse already has."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def count_kinds(entries):
 
 @pytest.fixture
 def tree(tmp_path):
-    where = tmp_path / "src" / "ml_stack"
+    where = tmp_path / "src" / "poolhouse"
     where.mkdir(parents=True)
     (where / "one.py").write_text(TALLY, encoding="utf-8")
     (where / "two.py").write_text('"""Two."""\n\nfrom __future__ import annotations\n',
@@ -62,7 +62,7 @@ def tree(tmp_path):
 def run(given: dict, *, tool: str = "Write", cache: Path, guard: Path = GUARD, **env):
     done = subprocess.run(
         [str(guard)], text=True, capture_output=True,
-        env={**os.environ, "MLSTACK_GUARD_CACHE": str(cache), **env},
+        env={**os.environ, "POOLHOUSE_GUARD_CACHE": str(cache), **env},
         input=json.dumps({"tool_name": tool, "tool_input": given}))
     assert done.returncode in (BLOCKED, ALLOWED), done.stderr
     said = done.stderr if done.returncode == BLOCKED else done.stdout
@@ -72,11 +72,11 @@ def run(given: dict, *, tool: str = "Write", cache: Path, guard: Path = GUARD, *
 
 
 def write(tree: Path, name: str, body: str) -> dict:
-    return {"file_path": str(tree / "src" / "ml_stack" / name), "content": body}
+    return {"file_path": str(tree / "src" / "poolhouse" / name), "content": body}
 
 
 def edit(tree: Path, name: str, added: str) -> dict:
-    return {"file_path": str(tree / "src" / "ml_stack" / name),
+    return {"file_path": str(tree / "src" / "poolhouse" / name),
             "old_string": "from __future__ import annotations",
             "new_string": "from __future__ import annotations\n\n" + added}
 
@@ -85,21 +85,21 @@ def test_a_body_the_tree_already_holds_is_refused(tree, tmp_path):
     code, said = run(write(tree, "three.py", RENAMED), cache=tmp_path / "cache")
     assert code == BLOCKED
     assert "`count_kinds` has the same body as `tally`" in said
-    assert "src/ml_stack/one.py:4" in said
+    assert "src/poolhouse/one.py:4" in said
 
 
 def test_the_same_body_arriving_through_multiedit_is_refused(tree, tmp_path):
-    given = {"file_path": str(tree / "src" / "ml_stack" / "two.py"),
+    given = {"file_path": str(tree / "src" / "poolhouse" / "two.py"),
              "edits": [{"old_string": "from __future__ import annotations",
                         "new_string": "from __future__ import annotations\n\n" + RENAMED}]}
     code, said = run(given, tool="MultiEdit", cache=tmp_path / "cache")
     assert code == BLOCKED
-    assert "src/ml_stack/one.py" in said
+    assert "src/poolhouse/one.py" in said
 
 
 def test_editing_a_function_that_is_already_there_is_not_a_duplicate(tree, tmp_path):
     """Rewriting one line of `tally` must not report `tally` against itself."""
-    given = {"file_path": str(tree / "src" / "ml_stack" / "one.py"),
+    given = {"file_path": str(tree / "src" / "poolhouse" / "one.py"),
              "old_string": '"""How often each kind appears."""',
              "new_string": '"""How often each kind is named."""'}
     assert run(given, tool="Edit", cache=tmp_path / "cache")[0] == ALLOWED
@@ -107,13 +107,13 @@ def test_editing_a_function_that_is_already_there_is_not_a_duplicate(tree, tmp_p
 
 @pytest.mark.parametrize("added, expected", [
     ("def fetch(url):\n    with urllib.request.urlopen(url) as r:\n        return r.read()",
-     "ml_stack.http.request_json"),
+     "poolhouse.http.request_json"),
     ("def live():\n    return list(psutil.process_iter(['pid']))",
-     "ml_stack.serve.process"),
+     "poolhouse.serve.process"),
     ("def save(path, obj):\n    tmp = path.with_suffix('.json.tmp')\n"
      "    tmp.write_text(json.dumps(obj))\n    os.replace(tmp, path)",
-     "ml_stack.files.write_json"),
-    ("HOME = Path('~/.ml-stack/two').expanduser()", "~/.ml-stack"),
+     "poolhouse.files.write_json"),
+    ("HOME = Path('~/.poolhouse/two').expanduser()", "~/.poolhouse"),
     ('def notes(a):\n    """One.\n' + "\n".join(f"    line {i}" for i in range(14))
      + '\n    """\n    return a', "docstring"),
     ("def wide(a, b, c, d, e, f, g, h, i):\n    return a", "9 parameters"),
@@ -148,14 +148,14 @@ def test_only_library_modules_are_guarded(tree, tmp_path, name):
     assert run(write(tree, name, RENAMED), cache=tmp_path / "cache")[0] == ALLOWED
 
 
-def test_a_file_outside_src_ml_stack_is_left_alone(tree, tmp_path):
+def test_a_file_outside_src_poolhouse_is_left_alone(tree, tmp_path):
     given = {"file_path": str(tree / "elsewhere.py"), "content": RENAMED}
     assert run(given, cache=tmp_path / "cache")[0] == ALLOWED
 
 
 def test_the_guard_can_be_switched_off_for_a_session(tree, tmp_path):
     assert run(write(tree, "three.py", RENAMED), cache=tmp_path / "cache",
-               MLSTACK_GUARD="off")[0] == ALLOWED
+               POOLHOUSE_GUARD="off")[0] == ALLOWED
 
 
 def test_a_corrupt_index_is_rebuilt_rather_than_believed(tree, tmp_path):
@@ -184,7 +184,7 @@ def test_a_guard_that_cannot_run_does_not_stop_the_work(tree, tmp_path):
 def test_only_the_writing_tools_are_guarded(tree, tmp_path):
     done = subprocess.run(
         [str(GUARD)], text=True, capture_output=True,
-        env={**os.environ, "MLSTACK_GUARD_CACHE": str(tmp_path / "cache")},
+        env={**os.environ, "POOLHOUSE_GUARD_CACHE": str(tmp_path / "cache")},
         input=json.dumps({"tool_name": "Read",
                           "tool_input": write(tree, "three.py", RENAMED)}))
     assert done.returncode == ALLOWED
@@ -192,7 +192,7 @@ def test_only_the_writing_tools_are_guarded(tree, tmp_path):
 
 def test_a_malformed_event_is_not_an_edit_to_refuse(tmp_path):
     done = subprocess.run([str(GUARD)], text=True, capture_output=True,
-                          env={**os.environ, "MLSTACK_GUARD_CACHE": str(tmp_path / "cache")},
+                          env={**os.environ, "POOLHOUSE_GUARD_CACHE": str(tmp_path / "cache")},
                           input="not json at all")
     assert done.returncode == ALLOWED
 
@@ -205,7 +205,7 @@ def lines(count: int) -> str:
 def test_a_write_that_crosses_the_line_limit_is_refused(tree, tmp_path):
     code, said = run(write(tree, "long.py", lines(FILE_LIMIT + 1)), cache=tmp_path / "cache")
     assert code == BLOCKED
-    assert "src/ml_stack/long.py" in said
+    assert "src/poolhouse/long.py" in said
     assert f"{FILE_LIMIT + 1} lines" in said and f"the limit is {FILE_LIMIT}" in said
     assert "scripts/budgets --show deep-files" in said
 
@@ -216,7 +216,7 @@ def test_a_file_at_exactly_the_limit_is_written(tree, tmp_path):
 
 
 def test_a_write_that_lengthens_a_file_already_over_the_limit_is_refused(tree, tmp_path):
-    where = tree / "src" / "ml_stack" / "deep.py"
+    where = tree / "src" / "poolhouse" / "deep.py"
     where.write_text(lines(FILE_LIMIT + 500), encoding="utf-8")
     code, said = run(write(tree, "deep.py", lines(FILE_LIMIT + 501)),
                      cache=tmp_path / "cache")
@@ -225,14 +225,14 @@ def test_a_write_that_lengthens_a_file_already_over_the_limit_is_refused(tree, t
 
 
 def test_a_write_that_shortens_a_file_over_the_limit_is_allowed(tree, tmp_path):
-    where = tree / "src" / "ml_stack" / "deep.py"
+    where = tree / "src" / "poolhouse" / "deep.py"
     where.write_text(lines(FILE_LIMIT + 500), encoding="utf-8")
     assert run(write(tree, "deep.py", lines(FILE_LIMIT + 100)),
                cache=tmp_path / "cache") == (ALLOWED, "")
 
 
 def test_deleting_lines_is_always_allowed(tree, tmp_path):
-    where = tree / "src" / "ml_stack" / "deep.py"
+    where = tree / "src" / "poolhouse" / "deep.py"
     where.write_text(lines(FILE_LIMIT + 500), encoding="utf-8")
     for left in (FILE_LIMIT + 499, FILE_LIMIT, 10):
         assert run(write(tree, "deep.py", lines(left)),
@@ -240,7 +240,7 @@ def test_deleting_lines_is_always_allowed(tree, tmp_path):
 
 
 def test_a_component_is_refused_at_its_own_limit(tree, tmp_path):
-    web = tree / "src" / "ml_stack" / "web"
+    web = tree / "src" / "poolhouse" / "web"
     web.mkdir()
     given = {"file_path": str(web / "screen.html"), "content": lines(COMPONENT_LIMIT + 1)}
     code, said = run(given, cache=tmp_path / "cache")
@@ -252,7 +252,7 @@ def test_a_component_is_refused_at_its_own_limit(tree, tmp_path):
 
 
 def test_an_edit_that_grows_an_over_limit_file_is_refused(tree, tmp_path):
-    where = tree / "src" / "ml_stack" / "deep.py"
+    where = tree / "src" / "poolhouse" / "deep.py"
     where.write_text("from __future__ import annotations\n" + lines(FILE_LIMIT + 500),
                      encoding="utf-8")
     code, said = run(edit(tree, "deep.py", "added = 1\n"), tool="Edit",

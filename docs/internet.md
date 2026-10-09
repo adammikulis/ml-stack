@@ -1,11 +1,11 @@
 # Everything from the internet
 
-Every request ml-stack makes to a host outside this machine and its network, and every file or
-page that comes back, goes through one module: `ml_stack.net`. This page lists each path,
+Every request Poolhouse makes to a host outside this machine and its network, and every file or
+page that comes back, goes through one module: `poolhouse.net`. This page lists each path,
 what protected it before, what protects it now, and what is left.
 
 ```python
-from ml_stack import net
+from poolhouse import net
 
 page = net.default().get("https://huggingface.co/api/models/owner/repo")
 done = net.download(url, dest, net.Want(sha256=digest, require_digest=True))
@@ -15,7 +15,7 @@ done = net.download(url, dest, net.Want(sha256=digest, require_digest=True))
 
 | Step | What happens | Where |
 |---|---|---|
-| Policy | A host is reached only if it is on the allow-list (`huggingface.co`, `*.hf.co`, `github.com` and its release hosts, `nominatim.openstreetmap.org`, the host of `$HF_ENDPOINT`, hosts in `$ML_STACK_NET_ALLOW_HOSTS`) or a person approved it. An approval is a row in `net/approvals.jsonl` with who, when, why and an optional expiry. `NeedsApproval` names the host and the command. Web pages a model reads use the origin rule below instead. | `net/policy.py` |
+| Policy | A host is reached only if it is on the allow-list (`huggingface.co`, `*.hf.co`, `github.com` and its release hosts, `nominatim.openstreetmap.org`, the host of `$HF_ENDPOINT`, hosts in `$POOLHOUSE_NET_ALLOW_HOSTS`) or a person approved it. An approval is a row in `net/approvals.jsonl` with who, when, why and an optional expiry. `NeedsApproval` names the host and the command. Web pages a model reads use the origin rule below instead. | `net/policy.py` |
 | Address | The name is resolved once, every address must be public (no loopback, private, link-local, the cloud metadata address, carrier-grade NAT, multicast, or any of those wrapped in IPv6), the connection goes to the address that was checked, and the check repeats on every redirect hop. A redirect from HTTPS to HTTP is refused. | `httpguard.py` |
 | TLS | Certificates are verified against the system store; there is no switch to turn that off. | `httpguard.py` |
 | Credentials | A token goes to the host it was given for, over HTTPS (a private mirror the person named may use HTTP). `Authorization`, `Cookie`, `Proxy-Authorization` and `X-Api-Key` are dropped on a redirect to another host. No cookie jar exists. | `net/pipeline.py`, `httpguard.py` |
@@ -25,7 +25,7 @@ done = net.download(url, dest, net.Want(sha256=digest, require_digest=True))
 | Format | A `.gguf` must have GGUF magic, a known version and sane counts. A `.safetensors` must have a header that parses as JSON, known dtypes and tensor spans inside the data and not overlapping; tensors are never loaded. A PDF must have its header and a trailer, and is flagged for `/JavaScript`, `/Launch`, `/OpenAction` and embedded files. An archive is audited without extracting it: entry count, unpacked size, compression ratio, links and devices, absolute or climbing paths, and archives inside archives. Native-executable magic is refused for any data kind. Pickle suffixes (`.pt`, `.bin`, `.ckpt`, `.pkl`, ...) are refused as weights. A `text/html` answer for a binary kind is refused. | `net/sniff.py` |
 | Scan | Every available scanner looks at the file (below). Infected files are never kept. | `net/scan.py`, `net/scanners.py` |
 | Promotion | The file is moved to its final path in one step, and `<file>.provenance.json` is written beside it: URL, final URL, redirects, time, SHA-256, size, kind, a subset of response headers, the host, the scan line, warnings. The same row is appended to `net/downloads.jsonl`. | `net/provenance.py` |
-| Failure | A file that fails a check is handed to sentinel's quarantine store (kind `artifact`, moved to `.ml-stack-quarantine/`), sentinel raises its event, and the failure is recorded in the index with the reason. | `net/hold.py` |
+| Failure | A file that fails a check is handed to sentinel's quarantine store (kind `artifact`, moved to `.poolhouse-quarantine/`), sentinel raises its event, and the failure is recorded in the index with the reason. | `net/hold.py` |
 
 Nothing downloaded is executed, imported or loaded with `trust_remote_code` by the pipeline.
 llama.cpp builds and the Python runtime are unpacked only by the command the person ran to
@@ -59,9 +59,9 @@ one `taint.Label(Level.UNTRUSTED, origin)` takes where the taint ledger is in us
 
 ## Every path
 
-Paths are those found by searching `src/ml_stack` for `urlopen`, `urllib`, `http.client`,
+Paths are those found by searching `src/poolhouse` for `urlopen`, `urllib`, `http.client`,
 `huggingface_hub`, `socket`, `subprocess` against `git`/`curl`/`pip`, `playwright`, `requests`
-and URL literals. `tests/test_net_no_bypass.py` fails when a module outside `ml_stack.net`
+and URL literals. `tests/test_net_no_bypass.py` fails when a module outside `poolhouse.net`
 reaches the internet on its own.
 
 | # | Path | Module | Before | Now | What is left |
@@ -84,7 +84,7 @@ reaches the internet on its own.
 | 16 | Geocoding | `geo.py` | urllib | pipeline | place names leave the machine |
 | 17 | Hub and release lookups | `fleet/catalogue.py`, `fleet/weights.py`, `fleet/llama.py` | urllib | pipeline | |
 | 18 | Hash reputation lookup | `net/scanners.py` | none | off by default; sends only a SHA-256 to a VirusTotal-style service with a key from the credentials module; the host needs approval | |
-| 19 | Installers | `packaging/install.sh`, `install.ps1` | `curl` and the release digest | unchanged (they run before ml-stack exists) | |
+| 19 | Installers | `packaging/install.sh`, `install.ps1` | `curl` and the release digest | unchanged (they run before Poolhouse exists) | |
 | 20 | Benchmark datasets | `bench/standard.py` | `lm-eval` downloads through `datasets` | unchanged | the harness fetches datasets itself |
 | 21 | Fleet peers | `fleet/*` | signed, TLS-pinned LAN traffic | unchanged | not the internet |
 | 22 | Model servers and chat endpoints | `client/*`, `claude.py`, `bench/*` | urllib to the endpoint the person configured | unchanged | a remote provider's answers are model output |
@@ -92,7 +92,7 @@ reaches the internet on its own.
 | 24 | Decider checkpoint files | `decide/fetch.py` | `hf_hub_download` (its own transport, hash checked after the file was kept) | pipeline: pinned size and SHA-256 required, laid out as the repository is, held when they differ | |
 | 25 | Injection classifier model | `guard/classifier.py` | `snapshot_download` | pipeline, with the Hub's own size and SHA-256 per file | the Hub's hash is as good as the Hub |
 | 26 | Onboarding: pairing, manifest and file transfer | `fleet/onboard/pairing.py`, `fleet/onboard/transfer.py` | own connections to a peer | unchanged transport (the peer's certificate is pinned), but a public address is refused at every connection (`fleet/onboard/lan.py`) | a peer on a tailnet or VPN counts as this network |
-| 27 | Decide backend | `decide/logprob.py`, `decide/router.py` | `ml_stack.http` to `ML_STACK_DECIDE_URL` | loopback only unless the host is named in `ML_STACK_FETCH_ALLOW_HOSTS` | a decider sees every call it judges, so a remote one is an explicit choice |
+| 27 | Decide backend | `decide/logprob.py`, `decide/router.py` | `poolhouse.http` to `POOLHOUSE_DECIDE_URL` | loopback only unless the host is named in `POOLHOUSE_FETCH_ALLOW_HOSTS` | a decider sees every call it judges, so a remote one is an explicit choice |
 
 ## Scanning
 
@@ -107,7 +107,7 @@ the last is never reported as clean.
 | macOS | says `no malware scanner on macOS; install ClamAV (brew install clamav) for scanning`, adds the `com.apple.quarantine` flag and, for executables, what `spctl --assess` says, labelled as Gatekeeper and not a malware scan | macOS |
 | Hash reputation | the `HashLookup` class takes a key (`VIRUSTOTAL_API_KEY` in the credentials module). It is not in `default_scanners()` and no environment variable or command turns it on yet. Only the SHA-256 is sent. An unknown hash is not clean. | against a local server |
 
-Whether a file nobody could scan is kept is a policy per category, `ml-stack-security
+Whether a file nobody could scan is kept is a policy per category, `poolhouse-security
 scan-policy`: executables and archives are refused, data files and model weights are kept with
 a warning. Model weights are not sent to a virus scanner by default (it cannot judge them and a
 scan of a multi-gigabyte file is slow); `scan-policy scan_models on` sends them.
@@ -119,13 +119,13 @@ are accepted as safetensors or GGUF only; pickle-based formats are refused.
 
 ## Commands
 
-`ml-stack-security downloads` lists recent downloads with their provenance, scan status and
+`poolhouse-security downloads` lists recent downloads with their provenance, scan status and
 whether the file is still there and unchanged (`--verify` re-hashes). `hosts` lists the
 allow-list and the approvals; `approve-host HOST` records one (a person at a terminal who types
 the host back; refused when an agent started the process). `scanners` says which backends this
 machine has. `scan-policy` shows or sets the unscanned-file policy.
 
 State: `net/approvals.jsonl`, `net/downloads.jsonl`, `net/scan-policy.json`, `net/staging/`
-under the state root. `ML_STACK_NET_ALLOW_HOSTS`, `ML_STACK_NET_UNSCANNED`
-(`archive:warn,model:allow`) and `ML_STACK_NET_SCAN_MODELS` set the
+under the state root. `POOLHOUSE_NET_ALLOW_HOSTS`, `POOLHOUSE_NET_UNSCANNED`
+(`archive:warn,model:allow`) and `POOLHOUSE_NET_SCAN_MODELS` set the
 same things for one run.

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ml-stack"
+name = "poolhouse"
 version = "0.2.2"  # x-release-please-version
 description = "Train and run models across every machine on your network."
 readme = "README.md"
@@ -23,7 +23,7 @@ classifiers = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
-# ml_stack.installed reads the pins with Requirement, SpecifierSet and Version.
+# poolhouse.installed reads the pins with Requirement, SpecifierSet and Version.
 dependencies = [
     "cryptography>=50",
     "ladybug>=0.20.4,<0.21",
@@ -34,19 +34,19 @@ dependencies = [
 ]
 
 # Nothing below is needed to find the other machines and pass work between them.
-# Each extra is what one part of ml_stack needs to do its own job.
+# Each extra is what one part of poolhouse needs to do its own job.
 [project.optional-dependencies]
 gym-drone = ["PyFlyt==0.29.0; python_version < '3.13'", "pillow>=10; python_version < '3.13'"]
 gym-driving = ["gymnasium>=1.0", "pillow>=10"]
 gym-warehouse = ["rware>=2.0", "gymnasium>=1.0"]
 gym-traffic = ["sumo-rl>=1.4.5", "eclipse-sumo>=1.24", "gymnasium>=1.0", "defusedxml>=0.7"]
 gym-rl = ["stable-baselines3>=2.7", "gymnasium>=1.0"]
-gym = ["ml-stack[gym-driving,gym-warehouse,gym-traffic,gym-rl]"]
+gym = ["poolhouse[gym-driving,gym-warehouse,gym-traffic,gym-rl]"]
 privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
 # presidio over a transformers NER model rather than spaCy's own
-privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
+privacy-transformers = ["poolhouse[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
 test = [
-    "ml-stack[agents,memory,store,arrays]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
+    "poolhouse[agents,memory,store,arrays]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
     "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7",
 ]
 
@@ -55,38 +55,38 @@ arrays = ["numpy>=1.24"]
 torch = ["torch>=2.14"]
 transformers = ["transformers>=5.17"]
 mlx = ["mlx>=0.32.2"]
-# `ml_stack.memory`: the agent's facts are encrypted with AES-256-GCM under a key in the OS keystore
+# `poolhouse.memory`: the agent's facts are encrypted with AES-256-GCM under a key in the OS keystore
 memory = ["cryptography>=50", "keyring>=24"]
-# `ml_stack.spec`: tree speculative decoding over mlx-lm's hybrid models, which it drives
+# `poolhouse.spec`: tree speculative decoding over mlx-lm's hybrid models, which it drives
 # through their own layer classes
 spec = ["mlx>=0.32.2", "mlx-lm>=0.31.3", "mlx-vlm>=0.7.1", "numpy>=1.24", "huggingface_hub>=1.32"]
 train = ["numpy>=1.24", "safetensors>=0.4"]
-train-mlx = ["ml-stack[train,mlx]", "mlx-lm>=0.31.3", "huggingface_hub>=1.32"]
+train-mlx = ["poolhouse[train,mlx]", "mlx-lm>=0.31.3", "huggingface_hub>=1.32"]
 # a LoRA rather than a full fine-tune: two small matrices on each projection, the
 # base frozen. What makes an 8B tool caller trainable on one machine, where a full
 # fine-tune of it would need ~128G of optimizer state.
-train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
+train-lora = ["poolhouse[train,torch,transformers]", "peft>=0.21.0"]
 # a daemon on the LAN makes its own TLS certificate with this (or with openssl on PATH)
 fleet-tls = ["cryptography>=50"]
-# verifying the signature on a release or a tracked commit (`ml-stack-cluster` updates)
+# verifying the signature on a release or a tracked commit (`poolhouse-cluster` updates)
 fleet-update = ["cryptography>=50"]
-# adding a machine with a short code (`ml-stack-cluster listen` / `pair`): SPAKE2 from the
+# adding a machine with a short code (`poolhouse-cluster listen` / `pair`): SPAKE2 from the
 # maintained `spake2` package, Ed25519 signing from cryptography, the signing key in the OS
 # keystore through `keyring`
 fleet-onboard = ["cryptography>=50", "spake2>=0.9", "keyring>=24", "py-machineid", "qrcode"]
 coordinator = ["py-machineid"]
-# `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
-# pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
+# `poolhouse-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
+# pair of files named by POOLHOUSE_PIPER_VOICE; `poolhouse-speech providers` says what
 # each engine still wants
 speech = ["faster-whisper>=1.2.1", "piper-tts>=1.8.0"]
-audio = ["ml-stack[speech]", "imageio-ffmpeg>=0.6,<1", "torchaudio>=2.11"]
+audio = ["poolhouse[speech]", "imageio-ffmpeg>=0.6,<1", "torchaudio>=2.11"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
-# `ml-stack-decide`: the embed backend's head
+# `poolhouse-decide`: the embed backend's head
 decide = ["numpy>=1.24", "safetensors>=0.4"]
 decide-data = ["pyarrow>=19"]
 # the pointer backend runs a released checkpoint on torch; its files are downloaded only on request
-decide-pointer = ["ml-stack[decide]", "torch>=2.14", "transformers>=5.17", "peft>=0.21.0",
+decide-pointer = ["poolhouse[decide]", "torch>=2.14", "transformers>=5.17", "peft>=0.21.0",
                   "huggingface_hub>=1.32"]
 # an embedded property graph: one file on disk, native Cypher, no server.
 # tests/test_graph_engine_contract.py is what a bump is measured against
@@ -95,53 +95,53 @@ store = ["ladybug>=0.20.4,<0.21"]
 scrape = ["playwright>=1.40"]
 # searching the web beside the graph: ddgs is keyless and rate-limited, SearXNG is not
 web = ["ddgs>=9", "trafilatura>=2"]
-# ml-stack-models fetch and hub.located read and fill the Hub cache through this
+# poolhouse-models fetch and hub.located read and fill the Hub cache through this
 hub = ["huggingface_hub>=1.32"]
 vision = ["numpy>=1.24", "pillow>=10.0"]
-# a book is a source like any other: `ml_stack.sources.pdf` reads one into sections through
+# a book is a source like any other: `poolhouse.sources.pdf` reads one into sections through
 # pdfminer.six (MIT), which gives text with the font it was set in -- how a heading is found in a
 # PDF with no outline -- and the position of every picture; Pillow renders the pictures. The
-# reading runs in a bounded child process (`ml_stack.net.pdfread`). Pages are rendered to PNG by
+# reading runs in a bounded child process (`poolhouse.net.pdfread`). Pages are rendered to PNG by
 # PDFium (pypdfium2: Apache-2.0/BSD-3-Clause, one 3-4 MB wheel with no dependencies) in a second
-# bounded child (`ml_stack.net.pdfrender`); `pdf-render` is that part alone, and `pdf` includes it.
+# bounded child (`poolhouse.net.pdfrender`); `pdf-render` is that part alone, and `pdf` includes it.
 pdf-render = ["pypdfium2>=4.30", "pillow>=10.0"]
-pdf = ["pdfminer.six>=20251230", "pillow>=10.0", "ml-stack[pdf-render]"]
+pdf = ["pdfminer.six>=20251230", "pillow>=10.0", "poolhouse[pdf-render]"]
 # MuPDF is AGPL-3.0 (or Artifex's commercial licence): a network service built on it must offer
 # its source. It is NOT in `pdf`, `all` or `redteam`; install it only on purpose, and select it
-# with ML_STACK_PDF_ENGINE=pymupdf. Only the datasheet pin tables need it now: page pictures and
+# with POOLHOUSE_PDF_ENGINE=pymupdf. Only the datasheet pin tables need it now: page pictures and
 # outline pages work with the permissive `pdf` extra.
 pdf-agpl = ["pymupdf>=1.24"]
-# `ml-stack-bench animate`: a comparison of builds as an animated graphic
+# `poolhouse-bench animate`: a comparison of builds as an animated graphic
 viz = ["manim>=0.19"]
-# `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
+# `poolhouse-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
 # own --plot writes hand-built SVG with no library, so it opens on a machine with no packages
 plot = ["matplotlib>=3.11.2"]
 testing = ["distlib", "numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
-# `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that.
-# `ml_stack.agent.McpTools` is an MCP client on the same SDK (2026-07-28 revision).
+# `poolhouse-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that.
+# `poolhouse.agent.McpTools` is an MCP client on the same SDK (2026-07-28 revision).
 mcp = ["mcp>=2.3,<3"]
-# NVIDIA NeMo Guardrails as one more rail over the built-in ones (`ml_stack.guard.nemo`); its
+# NVIDIA NeMo Guardrails as one more rail over the built-in ones (`poolhouse.guard.nemo`); its
 # rails call the llama.cpp server a configuration names. The built-in rails need no extra.
 # nemoguardrails ships no release for Python 3.14 or later (Requires-Python <3.14), so the
 # extra is empty there and the NeMo rail reports itself unavailable.
 guardrails = ["nemoguardrails>=0.24.1,<0.25; python_version < '3.14'"]
-# a prompt-injection classifier run on the CPU through onnxruntime (`ml_stack.guard.classifier`);
+# a prompt-injection classifier run on the CPU through onnxruntime (`poolhouse.guard.classifier`);
 # the ONNX export of protectai/deberta-v3-base-prompt-injection-v2 is fetched once
 guard-model = ["onnxruntime>=1.20", "tokenizers>=0.21", "numpy>=1.24", "huggingface_hub>=1.32"]
-# `ml-stack-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;
+# `poolhouse-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;
 # `ifeval` brings langdetect, immutabledict and nltk
 standard = ["lm-eval[ifeval]>=0.4"]
-# `python -m ml_stack.redteam`: attacks on this library's own model-facing surfaces, sent through
+# `python -m poolhouse.redteam`: attacks on this library's own model-facing surfaces, sent through
 # PyRIT: about 110 packages and 550 MB, installed in a virtualenv of its own.
-redteam = ["ml-stack[web,pdf,testing]", "pyrit>=1.1,<2"]
+redteam = ["poolhouse[web,pdf,testing]", "pyrit>=1.1,<2"]
 agents = ["openai-agents>=0.23.1"]
 pi = ["nodejs-wheel==24.19.0"]
 all = [
-    "ml-stack[agents,train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-update,fleet-onboard]",
+    "poolhouse[agents,train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-update,fleet-onboard]",
 ]
 wsl-dev = [
-    "ml-stack[all,test,arrays,audio,claude,coordinator,decide,decide-data,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,standard,train-lora,web]",
+    "poolhouse[all,test,arrays,audio,claude,coordinator,decide,decide-data,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,standard,train-lora,web]",
 ]
 
 [project.urls]
@@ -150,102 +150,103 @@ Repository = "https://github.com/adammikulis/ml-stack"
 Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
 
 [project.scripts]
-ml-stack-gym = "ml_stack.gym.cli:main"
-# Every command this package installs starts with `ml-stack`, so `compgen -c ml-stack` (or a
+poolhouse-gym = "poolhouse.gym.cli:main"
+# Every command this package installs starts with `poolhouse`, so `compgen -c poolhouse` (or a
 # tab) lists the whole toolkit. That is not tidiness for its own sake: an agent that cannot
 # enumerate these writes the command again by hand, which is how searching the Hub, timing a
 # question set and picking a free port each got done twice before becoming commands.
 #
-# `ml-stack <command>` runs any `ml-stack-<command>` below; bare, it starts the daemon and
-# opens the browser on it (`ml_stack.fleet.launch`).
-ml-stack = "ml_stack.cli:main"
-ml-stack-traind = "ml_stack.cli.daemon:main"
+# `poolhouse <command>` runs any `poolhouse-<command>` below; bare, it starts the daemon and
+# opens the browser on it (`poolhouse.fleet.launch`).
+poolhouse = "poolhouse.cli:main"
+poolhouse-traind = "poolhouse.cli.daemon:main"
 # the macOS identity of the LAN node: build Poolhouse.app, ask for Local Network permission
-ml-stack-node = "ml_stack.node_permission:main"
-ml-stack-peers = "ml_stack.fleet.peers:main"
+poolhouse-node = "poolhouse.node_permission:main"
+poolhouse-peers = "poolhouse.fleet.peers:main"
 # one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce
-ml-stack-cluster = "ml_stack.fleet.join:main"
+poolhouse-cluster = "poolhouse.fleet.join:main"
 # the same functions the commands call, as MCP tools over stdio, for an agent to drive
-ml-stack-mcp = "ml_stack.mcp:main"
-ml-stack-train-run = "ml_stack.train.run:main"
+poolhouse-mcp = "poolhouse.mcp:main"
+poolhouse-train-run = "poolhouse.train.run:main"
 # a project's tools -> synthetic conversations -> a fine-tuned caller -> a GGUF
-ml-stack-train-tools = "ml_stack.train.tools:main"
+poolhouse-train-tools = "poolhouse.train.tools:main"
 # choose one of a named set of options and say how sure: ask, score, calibrate, compare
-ml-stack-decide = "ml_stack.decide_cli:main"
+poolhouse-decide = "poolhouse.decide_cli:main"
 # a pointer-head decision model fine-tuned from labelled cases
-ml-stack-train-decider = "ml_stack.train.decider_cli:main"
+poolhouse-train-decider = "poolhouse.train.decider_cli:main"
 # what this machine can do, and what it does without being asked; --checkouts adds the
-# repositories and working state ml-stack-doctor checks on their own
-ml-stack-setup = "ml_stack.setup:main"
-ml-stack-doctor = "ml_stack.doctor:main"
+# repositories and working state poolhouse-doctor checks on their own
+poolhouse-setup = "poolhouse.setup:main"
+poolhouse-doctor = "poolhouse.doctor:main"
 # experimental features: list them, turn one on or off (audited)
-ml-stack-features = "ml_stack.features_cli:main"
+poolhouse-features = "poolhouse.features_cli:main"
+poolhouse-migrate = "poolhouse.migrate:main"
 # tokens and keys: set, list, unset; read from a prompt or stdin, kept in a 0600 file or the keychain
-ml-stack-credentials = "ml_stack.credentials.cli:command"
+poolhouse-credentials = "poolhouse.credentials.cli:command"
 # what this machine can hear and say: transcribe a file, say a line, find the speech in it
-ml-stack-speech = "ml_stack.speech.cli:main"
-ml-stack-serve = "ml_stack.serve.cli:main"
+poolhouse-speech = "poolhouse.speech.cli:main"
+poolhouse-serve = "poolhouse.serve.cli:main"
 # what a change to the asking costs, and whether it was worth it
-ml-stack-bench = "ml_stack.bench.run:main"
+poolhouse-bench = "poolhouse.bench.run:main"
 # find a model newer than anything the assistant remembers, and print how to serve it
-ml-stack-models = "ml_stack.serve.models_cli:run"
-ml-stack-store = "ml_stack.graph.store_cli:main"
+poolhouse-models = "poolhouse.serve.models_cli:run"
+poolhouse-store = "poolhouse.graph.store_cli:main"
 # an invented organised group -- company, community, university, open-source, nonprofit --
 # as a graph with people who could talk, and questions about it with known answers
-ml-stack-world = "ml_stack.world.cli:main"
+poolhouse-world = "poolhouse.world.cli:main"
 # documents read section by section into one graph, with what each cost
-ml-stack-ingest = "ml_stack.ingest:main"
+poolhouse-ingest = "poolhouse.ingest:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
-ml-stack-jobs = "ml_stack.jobs:main"
+poolhouse-jobs = "poolhouse.jobs:main"
 # the other devices of the pool that take tests (scripts/test TIER --on DEVICE): platform, free slots, last result
-ml-stack-test-devices = "ml_stack.testfarm.devices:command"
+poolhouse-test-devices = "poolhouse.testfarm.devices:command"
 # agents coordinating: messages, notes, scratch folders and claims, all data and no authority
-ml-stack-workspace = "ml_stack.workspace.cli:main"
-ml-stack-suite = "ml_stack.train.suite:main"
-ml-stack-claude = "ml_stack.claude:main"
-ml-stack-codex = "ml_stack.codex:launch"
-ml-stack-agent = "ml_stack.harness:main"
+poolhouse-workspace = "poolhouse.workspace.cli:main"
+poolhouse-suite = "poolhouse.train.suite:main"
+poolhouse-claude = "poolhouse.claude:main"
+poolhouse-codex = "poolhouse.codex:launch"
+poolhouse-agent = "poolhouse.harness:main"
 # a rendered graph page served on loopback, with the model behind it
-ml-stack-graph = "ml_stack.graph.serve:main"
+poolhouse-graph = "poolhouse.graph.serve:main"
 # a task in words: a served model asks what is open, plans, asks go, then runs the commands
-# a conversation with a served model that operates ml-stack, asking before it changes anything
-ml-stack-chat = "ml_stack.chat:main"
+# a conversation with a served model that operates poolhouse, asking before it changes anything
+poolhouse-chat = "poolhouse.chat:main"
 # what the chat agent remembers across sessions: list, add, forget, export
-ml-stack-memory = "ml_stack.memory.cli:main"
+poolhouse-memory = "poolhouse.memory.cli:main"
 # how every source (host, URL, peer, repository, hash) has behaved: list, show, forget, export
-ml-stack-reputation = "ml_stack.reputation.cli:main"
+poolhouse-reputation = "poolhouse.reputation.cli:main"
 # the activity log: what agents, people and the stack did, read-only
-ml-stack-log = "ml_stack.activity.cli:main"
-ml-stack-requests = "ml_stack.inbox.cli:main"
+poolhouse-log = "poolhouse.activity.cli:main"
+poolhouse-requests = "poolhouse.inbox.cli:main"
 # what a draft head is worth for one model: no head, then the head at each depth
-ml-stack-draft = "ml_stack.draft:main"
-ml-stack-help = "ml_stack.cli:help_main"
+poolhouse-draft = "poolhouse.draft:main"
+poolhouse-help = "poolhouse.cli:help_main"
 # every command's --help and every safe command's output, written down to be diffed
-ml-stack-surface = "ml_stack.surface.cli:main"
+poolhouse-surface = "poolhouse.surface.cli:main"
 # every tracked file read for a person's details, reported and never blocked
-ml-stack-audit = "ml_stack.redact.audit:main"
+poolhouse-audit = "poolhouse.redact.audit:main"
 # open a page, click through its screens, screenshot each one and read what came back
-ml-stack-walk = "ml_stack.walk.cli:main"
+poolhouse-walk = "poolhouse.walk.cli:main"
 # what sentinel has seen and holds: events, quarantine, pins, the log's hash chain; and what
 # came in from the internet: downloads, hosts, scanners
-ml-stack-security = "ml_stack.net.cli:command"
+poolhouse-security = "poolhouse.net.cli:command"
 
 # What the daemon reports about this box beyond what the standard library can see: the
 # card, its vendor and its memory. Without it every machine reports no accelerator.
-[project.entry-points."ml_stack.device_report"]
-accelerator = "ml_stack.train.accelerator:report"
+[project.entry-points."poolhouse.device_report"]
+accelerator = "poolhouse.train.accelerator:report"
 
 [tool.hatch.build.targets.sdist]
 exclude = [".claude", "CLAUDE.md", "HANDOFF.md"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ml_stack"]
+packages = ["src/poolhouse"]
 
 # The contracts are ONE file on disk (repo-root `contracts/`), pulled into the wheel at
 # build time. No copy is kept in the source tree, so there is nothing to drift.
 [tool.hatch.build.targets.wheel.force-include]
-"contracts" = "ml_stack/contracts/_data"
-"patches" = "ml_stack/serve/_patches"
+"contracts" = "poolhouse/contracts/_data"
+"patches" = "poolhouse/serve/_patches"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -259,8 +260,8 @@ addopts = "--strict-markers"
 markers = [
     "slow: needs a browser, a subprocess, a wheel build or a network timeout; left out unless --slow is given",
     "redteam: needs the redteam extra (PyRIT); left out unless --redteam is given",
-    "live_api: calls a paid or quota-limited remote API; runs only when ML_STACK_LIVE_API=1",
-    "live_net: reaches a public endpoint; runs only when ML_STACK_LIVE_NET=1",
+    "live_api: calls a paid or quota-limited remote API; runs only when POOLHOUSE_LIVE_API=1",
+    "live_net: reaches a public endpoint; runs only when POOLHOUSE_LIVE_NET=1",
     "seatbelt: runs sandbox-exec itself, so it cannot run under the real-state write denial; listed in tests/seatbelt-modules.txt",
     "gate: a scan of the whole tracked tree, the same one `scripts/test gate` makes; left out of fast and full unless --gate or --slow is given",
     "heavy: runs in the default tier and costs seconds a test; `scripts/test fast` leaves it out",
@@ -295,9 +296,9 @@ select = [
 ignore = ["S603", "S607"]
 
 [tool.ruff.lint.isort]
-# The pre-commit gate lints a temporary tree holding only the staged files, where ml_stack
+# The pre-commit gate lints a temporary tree holding only the staged files, where poolhouse
 # is not on any path; without this it reads as third-party and every import block moves.
-known-first-party = ["ml_stack"]
+known-first-party = ["poolhouse"]
 combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
@@ -309,7 +310,7 @@ combine-as-imports = true
     "S108",  # /tmp paths in fixtures
     "S311",  # a seeded generator makes a fixture repeat
 ]
-"src/ml_stack/decide/guards/*.py" = [
+"src/poolhouse/decide/guards/*.py" = [
     "S104",  # the benchmark's tool calls are the dangerous strings it labels
     "S108",
 ]
@@ -320,7 +321,7 @@ combine-as-imports = true
 # Checks that read the source alone. A check that reads a type out of an installed package
 # counts differently on every machine.
 [tool.pyright]
-include = ["src/ml_stack"]
+include = ["src/poolhouse"]
 typeCheckingMode = "off"
 reportAssertAlwaysTrue = "error"
 reportInvalidStringEscapeSequence = "error"
@@ -332,17 +333,17 @@ reportUnsupportedDunderAll = "error"
 reportUnusedCoroutine = "error"
 reportUnusedExcept = "error"
 
-[project.entry-points."ml_stack.peer_routes"]
-workspace = "ml_stack.workspace.coordinator:route"
+[project.entry-points."poolhouse.peer_routes"]
+workspace = "poolhouse.workspace.coordinator:route"
 
-[project.entry-points."ml_stack.ui_routes"]
-coordination = "ml_stack.workspace.coordinator_routes:route"
-agents = "ml_stack.workspace.agent_routes:route"
-tasks = "ml_stack.workspace.task_routes:route"
-board = "ml_stack.workspace.fleet_routes:route"
-coding = "ml_stack.workspace.coding_routes:route"
-history = "ml_stack.activity.fleet_routes:route"
-work-reputation = "ml_stack.workspace.work_reputation:fleet_route"
+[project.entry-points."poolhouse.ui_routes"]
+coordination = "poolhouse.workspace.coordinator_routes:route"
+agents = "poolhouse.workspace.agent_routes:route"
+tasks = "poolhouse.workspace.task_routes:route"
+board = "poolhouse.workspace.fleet_routes:route"
+coding = "poolhouse.workspace.coding_routes:route"
+history = "poolhouse.activity.fleet_routes:route"
+work-reputation = "poolhouse.workspace.work_reputation:fleet_route"
 
-[project.entry-points."ml_stack.workspace_hosts"]
-default = "ml_stack.workspace.remote_host:WorkspaceHost"
+[project.entry-points."poolhouse.workspace_hosts"]
+default = "poolhouse.workspace.remote_host:WorkspaceHost"

@@ -6,7 +6,7 @@ import pytest
 from rail import reach
 from test_fleet_ui import Serving
 
-from ml_stack.graph.store import GraphStore
+from poolhouse.graph.store import GraphStore
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ def test_inspector_pagination_filters_before_limit(daemon):
 def test_graph_browser_navigation_search_and_neighbor(daemon, tmp_path, playwright):
     from playwright.sync_api import expect
 
-    from ml_stack.scrape.browser import Window, browser
+    from poolhouse.scrape.browser import Window, browser
 
     daemon.ui.settings.setup_done = True
     with browser(Window(profile=tmp_path / 'browser', headless=True), play=playwright) as page:
@@ -97,16 +97,16 @@ def test_graph_browser_navigation_search_and_neighbor(daemon, tmp_path, playwrig
         expect(detail).to_contain_text('trained_for')
         palette = page.evaluate("""() => {
             const root = document.documentElement;
-            root.style.setProperty('--poolside-yellow', '#ffd166');
-            root.style.setProperty('--poolside-yellow-ink', '#000000');
+            root.style.setProperty('--poolhouse-yellow', '#ffd166');
+            root.style.setProperty('--poolhouse-yellow-ink', '#000000');
             const label = document.querySelector('knowledge-view .graph-node-label');
             const caption = document.querySelector('knowledge-view .graph-node-caption');
             const light = [getComputedStyle(label).fill, getComputedStyle(caption).fill];
-            root.style.setProperty('--poolside-yellow', '#101010');
-            root.style.setProperty('--poolside-yellow-ink', '#ffffff');
+            root.style.setProperty('--poolhouse-yellow', '#101010');
+            root.style.setProperty('--poolhouse-yellow-ink', '#ffffff');
             const custom = [getComputedStyle(label).fill, getComputedStyle(caption).fill];
-            root.style.removeProperty('--poolside-yellow');
-            root.style.removeProperty('--poolside-yellow-ink');
+            root.style.removeProperty('--poolhouse-yellow');
+            root.style.removeProperty('--poolhouse-yellow-ink');
             return {light, custom};
         }""")
         assert palette == {'light': ['rgb(0, 0, 0)', 'rgb(255, 209, 102)'],
@@ -150,7 +150,7 @@ def test_graph_browser_navigation_search_and_neighbor(daemon, tmp_path, playwrig
 
 
 def test_registered_conversation_graph_without_files_root(daemon, tmp_path):
-    from ml_stack.fleet.conversations import Conversations
+    from poolhouse.fleet.conversations import Conversations
 
     daemon.ui.conversations = Conversations(tmp_path / 'chat')
     chat = daemon.ui.conversations.start(model='local-model', title='Experiment notes')
@@ -175,7 +175,7 @@ def test_registered_project_graph_requires_local_person(daemon, tmp_path):
     import json
     from dataclasses import asdict
 
-    from ml_stack.fleet.projects import Project, ProjectRegistry
+    from poolhouse.fleet.projects import Project, ProjectRegistry
 
     project_id = 'a' * 32
     base = tmp_path / 'projects'
@@ -191,7 +191,7 @@ def test_registered_project_graph_requires_local_person(daemon, tmp_path):
     source = 'project:' + project_id + ':coordination'
     assert daemon.call('/ui/knowledge/nodes?' + urlencode({'store': source}))[0] == 403
     session = daemon.ui.sessions.open('', 'launch-ticket')
-    cookie = 'ml_stack_ui=' + session.sid
+    cookie = 'poolhouse_ui=' + session.sid
     code, data, _ = daemon.call('/ui/knowledge/stores', cookie=cookie)
     assert code == 200, data
     assert data['sources'] == [{'path': source, 'name': 'Experiment · tasks and coordination'}]

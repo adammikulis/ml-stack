@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.client.embed import TASK, VectorMismatch
-from ml_stack.client.select import Ranking, Selector, fingerprint
-from ml_stack.client.tools import (
+from poolhouse.client.embed import TASK, VectorMismatch
+from poolhouse.client.select import Ranking, Selector, fingerprint
+from poolhouse.client.tools import (
     NOTHING,
     ToolSpec,
     documents,
@@ -15,7 +15,7 @@ from ml_stack.client.tools import (
     runnable,
     spec_by_name,
 )
-from ml_stack.testing.embedding import bag_of_words_embedder
+from poolhouse.testing.embedding import bag_of_words_embedder
 
 DOCS = {
     "look_up": ("who fixes machines?", "who can sell things?"),

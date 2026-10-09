@@ -6,9 +6,9 @@ import math
 
 import pytest
 
-from ml_stack.decide import Rule, RulesDecider
-from ml_stack.decide.cases import Case
-from ml_stack.decide.eval import (
+from poolhouse.decide import Rule, RulesDecider
+from poolhouse.decide.cases import Case
+from poolhouse.decide.eval import (
     abstention_curve,
     brier,
     ece,
@@ -18,7 +18,7 @@ from ml_stack.decide.eval import (
     score,
     top_of,
 )
-from ml_stack.decide.types import DecideError, Decision, options_of
+from poolhouse.decide.types import DecideError, Decision, options_of
 
 
 def test_brier_is_zero_when_perfect_and_two_when_confidently_wrong():

@@ -11,10 +11,10 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from ml_stack.platform import start_process, terminate_process_group
-from ml_stack.sandbox.path_language import expressions
-from ml_stack.sandbox.policy import Net, checked_path
-from ml_stack.sandbox.seatbelt import Seatbelt, quote
+from poolhouse.platform import start_process, terminate_process_group
+from poolhouse.sandbox.path_language import expressions
+from poolhouse.sandbox.policy import Net, checked_path
+from poolhouse.sandbox.seatbelt import Seatbelt, quote
 
 NODE = "tests/test_test_kernel_isolation.py::test_native_regex_matches_only_complete_listed_paths"
 CHILD = '''import json,os,sys

@@ -46,7 +46,7 @@ class Entry:
 
 
 def describe() -> str:
-    return "functions under src/ml_stack with the same normalised body as another"
+    return "functions under src/poolhouse with the same normalised body as another"
 
 
 def module_imports(tree: ast.Module) -> set[str]:
@@ -221,13 +221,13 @@ def functions_in(text: str, path: str, *, floor: int = FLOOR,
 
 def python_files(root: Path) -> list[Path]:
     """Every library module under a checkout, tests excluded."""
-    src = root / "src" / "ml_stack"
+    src = root / "src" / "poolhouse"
     return sorted(p for p in src.rglob("*.py")
                   if not p.name.startswith("test_") and "tests" not in p.parts)
 
 
 def index(root: Path, *, floor: int = FLOOR, loose: bool = True) -> dict[str, list[Entry]]:
-    """`{signature: [entry, ...]}` for every function under src/ml_stack."""
+    """`{signature: [entry, ...]}` for every function under src/poolhouse."""
     paths = python_files(root)
 
     def rows(path: Path) -> list[list]:

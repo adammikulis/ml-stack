@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.serve import backend
-from ml_stack.serve.backend import (
+from poolhouse.serve import backend
+from poolhouse.serve.backend import (
     LlamaServerBackend,
     ServerSpec,
     UnknownFlag,
@@ -25,8 +25,8 @@ from ml_stack.serve.backend import (
     unknown_flags,
     values_of,
 )
-from ml_stack.serve.emitted import emitted_flags
-from ml_stack.testing.fakes import fake_binary
+from poolhouse.serve.emitted import emitted_flags
+from poolhouse.testing.fakes import fake_binary
 from tests.conftest import leased, write_gguf
 
 HELP = """\
@@ -458,7 +458,7 @@ class TestResolvedContext:
 
 class TestLaunchRefusal:
     def test_it_refuses_before_anything_is_started(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
+        monkeypatch.setattr("poolhouse.hub.machine_room", lambda: 1 << 40)
         """A refusal that comes after the load costs the load. Nothing may be started."""
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
@@ -496,13 +496,13 @@ class TestLaunchRefusal:
     def test_it_is_a_value_error_and_not_a_failed_server(self, tmp_path):
         """A ServerFailed puts the port in the negative cache; a wrong flag is a caller's
         mistake and must read as one."""
-        from ml_stack.serve import ServerFailed
+        from poolhouse.serve import ServerFailed
 
         assert issubclass(UnknownFlag, ValueError)
         assert not issubclass(UnknownFlag, ServerFailed)
 
     def test_the_check_can_be_skipped_for_a_stand_in_binary(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
+        monkeypatch.setattr("poolhouse.hub.machine_room", lambda: 1 << 40)
         reached: list[str] = []
 
         def popen(argv, *a, **k):
@@ -540,7 +540,7 @@ def test_an_hf_reference_keeps_the_file_under_its_directory():
     """A draft head lives under MTP/; a reference that kept only the last segment fetched
     nothing and llama-server was started with an empty draft path (measured 2026-09-01).
     Mutation: `parts[-1]` instead of the join."""
-    from ml_stack.serve.backend import ServerSpec
+    from poolhouse.serve.backend import ServerSpec
 
     repo, name = ServerSpec.hf_parts("hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf")
     assert (repo, name) == ("owner/repo-GGUF", "MTP/mtp-head-BF16.gguf")
@@ -553,12 +553,12 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
-    from ml_stack.serve import backend as be
+    from poolhouse.serve import backend as be
 
     head = tmp_path / "mtp-head-BF16.gguf"
     head.write_bytes(b"GGUF")
     asked = []
-    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: asked.append(ref) or head)
+    monkeypatch.setattr("poolhouse.hub.fetch", lambda ref: asked.append(ref) or head)
     spec = be.ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf")
     resolved = be.LlamaServerBackend.resolved_draft(spec)
     assert asked == ["hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf"]
@@ -576,12 +576,12 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
-    from ml_stack.serve import backend as be
+    from poolhouse.serve import backend as be
 
     weights = tmp_path / "thing-Q4_K_M.gguf"
     weights.write_bytes(b"GGUF")
     asked = []
-    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: asked.append(ref) or weights)
+    monkeypatch.setattr("poolhouse.hub.fetch", lambda ref: asked.append(ref) or weights)
     spec = be.ServerSpec(model="hf:owner/thing-GGUF/thing-Q4_K_M.gguf")
     resolved = be.LlamaServerBackend.resolved_model(spec)
     assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
@@ -589,7 +589,7 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     assert argv[argv.index("-m") + 1] == str(weights)
     assert "--hf-repo" not in argv
     pulled = []
-    monkeypatch.setattr("ml_stack.hub.pull", lambda ref: pulled.append(ref) or weights)
+    monkeypatch.setattr("poolhouse.hub.pull", lambda ref: pulled.append(ref) or weights)
     repo_only = be.ServerSpec(model="hf:owner/thing-GGUF")
     served = be.LlamaServerBackend.resolved_model(repo_only)
     assert pulled == ["hf:owner/thing-GGUF"] and served.model == str(weights)
@@ -601,11 +601,11 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
 def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):
     """Preflight reads the fetched file, not the reference. Mutation: drop resolved_model()
     from start."""
-    from ml_stack.serve import backend as be, preflight as pf
+    from poolhouse.serve import backend as be, preflight as pf
 
     weights = tmp_path / "thing-Q4_K_M.gguf"
     weights.write_bytes(b"GGUF")
-    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: weights)
+    monkeypatch.setattr("poolhouse.hub.fetch", lambda ref: weights)
     monkeypatch.setattr(be, "claim_port", lambda spec, lease: None)
     seen = []
 
@@ -671,7 +671,7 @@ class TestDraftCacheType:
         assert argv[argv.index("--spec-draft-type-v") + 1] == "q5_1"
 
     def test_a_cache_type_the_build_will_not_take_is_refused_before_the_load(self, tmp_path):
-        from ml_stack.serve.preflight import wrong_cache_types
+        from poolhouse.serve.preflight import wrong_cache_types
 
         binary = fake_binary(tmp_path, help_text=HELP)
         spec = ServerSpec(model=write_gguf(tmp_path / "model.gguf", {}),
@@ -682,7 +682,7 @@ class TestDraftCacheType:
         assert "q8_0" in said[0]
 
     def test_a_cache_type_the_build_takes_passes(self, tmp_path):
-        from ml_stack.serve.preflight import wrong_cache_types
+        from poolhouse.serve.preflight import wrong_cache_types
 
         spec = ServerSpec(model=write_gguf(tmp_path / "model.gguf", {}),
                           cache_type_k="q8_0", cache_type_v="q8_0",
@@ -692,14 +692,14 @@ class TestDraftCacheType:
 
 def test_start_fetches_the_projector_and_the_server_gets_a_path(monkeypatch, tmp_path):
     """Mutation: drop the mmproj fetch from start -- llama-server is given a URL to download."""
-    from ml_stack.serve import backend as be
+    from poolhouse.serve import backend as be
 
     weights = tmp_path / "thing-Q4_K_M.gguf"
     weights.write_bytes(b"GGUF")
     projector = tmp_path / "mmproj-thing-F16.gguf"
     projector.write_bytes(b"GGUF")
     fetched = []
-    monkeypatch.setattr("ml_stack.hub.fetch",
+    monkeypatch.setattr("poolhouse.hub.fetch",
                         lambda ref: fetched.append(ref) or (projector if "mmproj" in ref else weights))
     monkeypatch.setattr(be, "claim_port", lambda spec, lease: None)
     seen = []

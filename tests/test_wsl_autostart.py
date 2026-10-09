@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from ml_stack.fleet import autostart, wsl_startup
+from poolhouse.fleet import autostart, wsl_startup
 
 
 def request(**values):
@@ -53,4 +53,4 @@ def test_invalid_wire_never_mutates_tasks(monkeypatch):
 
 def test_windows_plan_launches_bridge_owner(monkeypatch):
     monkeypatch.setattr(autostart.sys, "platform", "win32")
-    assert autostart.plan("login")[1:4] == ["-m", "ml_stack.fleet.launch", "--no-browser"]
+    assert autostart.plan("login")[1:4] == ["-m", "poolhouse.fleet.launch", "--no-browser"]

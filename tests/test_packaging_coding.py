@@ -16,9 +16,9 @@ pytestmark = pytest.mark.slow
 
 
 def test_frozen_coding_worker_resumes_cancels_and_revokes_agent(tmp_path):
-    binary = os.environ.get("ML_STACK_FROZEN_CODING_BINARY", "")
+    binary = os.environ.get("POOLHOUSE_FROZEN_CODING_BINARY", "")
     if not binary:
-        pytest.skip("set ML_STACK_FROZEN_CODING_BINARY to the fixture-broker standalone build")
+        pytest.skip("set POOLHOUSE_FROZEN_CODING_BINARY to the fixture-broker standalone build")
     root = tmp_path / "daemon"
     root.mkdir()
     (root / "settings.json").write_text(json.dumps({"setup_done": True}))
@@ -30,7 +30,7 @@ def test_frozen_coding_worker_resumes_cancels_and_revokes_agent(tmp_path):
     codex.chmod(0o700)
     project = tmp_path / "project"
     project.mkdir()
-    from ml_stack.workspace import Workspace, tokens
+    from poolhouse.workspace import Workspace, tokens
 
     workspace_root = tmp_path / "workspace"
     workspace = Workspace(workspace_root)
@@ -39,9 +39,9 @@ def test_frozen_coding_worker_resumes_cancels_and_revokes_agent(tmp_path):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     environment = {**os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-                   "ML_STACK_HOME": str(tmp_path / "home"), "ML_STACK_WORKSPACE_HOME": str(workspace_root),
+                   "POOLHOUSE_HOME": str(tmp_path / "home"), "POOLHOUSE_WORKSPACE_HOME": str(workspace_root),
                    "PYTHONPATH": "", "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
-    blocked = subprocess.run([binary, "-m", "ml_stack.harnesshook", "pre", "--role", "read-only",
+    blocked = subprocess.run([binary, "-m", "poolhouse.harnesshook", "pre", "--role", "read-only",
                               "--label", "fixture", "--root", str(project)],
                              input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}),
                              capture_output=True, text=True, env=environment, timeout=10)

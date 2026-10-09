@@ -11,10 +11,10 @@ from keyring.backend import KeyringBackend
 from keyring.compat import properties
 from keyring.errors import PasswordDeleteError
 
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard.events import Bus, Event
-from ml_stack.fleet.onboard.pairing import Grant
-from ml_stack.fleet.onboard.requests import Limits, Requests
+from poolhouse.fleet import tls
+from poolhouse.fleet.onboard.events import Bus, Event
+from poolhouse.fleet.onboard.pairing import Grant
+from poolhouse.fleet.onboard.requests import Limits, Requests
 
 
 class Clock:
@@ -64,20 +64,20 @@ def grant_for(ident: tls.Identity) -> Grant:
 
 class FileKeyring(KeyringBackend):
     """A real keyring backend whose entries live in the JSON file named by
-    ``ML_STACK_TEST_KEYRING``: stands in for the Keychain so tests never touch it, and lets
+    ``POOLHOUSE_TEST_KEYRING``: stands in for the Keychain so tests never touch it, and lets
     separate processes share one keystore."""
 
     @properties.classproperty
     def priority(cls) -> float:
         """Not a candidate while no test names a file: keyring's chainer lists every backend
         class it has seen, and an unset variable must not make this one answer for the others."""
-        if "ML_STACK_TEST_KEYRING" not in os.environ:
+        if "POOLHOUSE_TEST_KEYRING" not in os.environ:
             return 0  # the chainer keeps only backends above zero
         return 5
 
     @staticmethod
     def _file() -> Path:
-        return Path(os.environ["ML_STACK_TEST_KEYRING"])
+        return Path(os.environ["POOLHOUSE_TEST_KEYRING"])
 
     def _all(self) -> dict:
         try:

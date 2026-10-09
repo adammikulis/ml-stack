@@ -5,13 +5,13 @@ from browser_expect import expect
 from rail import reach
 from test_fleet_ui import Serving
 
-from ml_stack import agent_dependency
-from ml_stack.fleet import runtime_repair
-from ml_stack.fleet.conversations import Conversations
-from ml_stack.fleet.serving import Serving as ModelsServing
-from ml_stack.fleet.setup_jobs import Jobs
-from ml_stack.scrape.browser import Window, browser
-from ml_stack.testing.fakes import FakeLlamaServer, Served
+from poolhouse import agent_dependency
+from poolhouse.fleet import runtime_repair
+from poolhouse.fleet.conversations import Conversations
+from poolhouse.fleet.serving import Serving as ModelsServing
+from poolhouse.fleet.setup_jobs import Jobs
+from poolhouse.scrape.browser import Window, browser
+from poolhouse.testing.fakes import FakeLlamaServer, Served
 
 
 @pytest.mark.slow

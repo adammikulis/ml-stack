@@ -11,18 +11,18 @@ import pytest
 from conftest import write_gguf
 from test_hub_discover import META, model
 
-from ml_stack import hub
-from ml_stack.decide import library, registry, router
-from ml_stack.decide.sources import CONFIG, FORMAT
-from ml_stack.decide.types import DecideError
-from ml_stack.hub import kinds
-from ml_stack.serve import models_cli
+from poolhouse import hub
+from poolhouse.decide import library, registry, router
+from poolhouse.decide.sources import CONFIG, FORMAT
+from poolhouse.decide.types import DecideError
+from poolhouse.hub import kinds
+from poolhouse.serve import models_cli
 
 _real_discover = hub.discover
 
 
 def decider_dir(root: Path, name: str = "mine") -> Path:
-    """What `ml_stack.train.decider` writes, as far as the registry reads it."""
+    """What `poolhouse.train.decider` writes, as far as the registry reads it."""
     root.mkdir(parents=True, exist_ok=True)
     (root / CONFIG).write_text(json.dumps({"format": FORMAT, "name": name,
                                            "base": {"repo": "maker/base"}}))

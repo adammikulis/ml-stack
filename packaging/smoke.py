@@ -18,11 +18,11 @@ def launch_url(page: Page, base: str) -> str:
     A page opened by hand is refused ("Open from its own window"); the daemon's own window and
     the owner's terminal ask for a ticket with the secret the daemon wrote under its root.
     """
-    record = json.loads((Path.home() / ".ml-stack" / "traind" / "launch" / "secret.json")
+    record = json.loads((Path.home() / ".poolhouse" / "traind" / "launch" / "secret.json")
                         .read_text(encoding="utf-8"))
     answer = page.request.post(
         f"{base}/ui/launch/ticket", data="{}",
-        headers={"X-ML-Stack-UI": "1", "X-ML-Stack-Launch": record["secret"],
+        headers={"X-Poolhouse-UI": "1", "X-Poolhouse-Launch": record["secret"],
                  "Content-Type": "application/json"})
     ticket = answer.json()["ticket"]
     return f"{base}/ui/?launch_ticket={ticket}"

@@ -9,16 +9,16 @@ import threading
 
 import pytest
 
-from ml_stack import http
-from ml_stack.fleet import discovery, projects, tls
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import ALL_INTERFACES, load_or_create_token
-from ml_stack.fleet.discovery import Beacon, primary_ip
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.projects import lan_host
-from ml_stack.fleet.remote import Peer
-from ml_stack.workspace.remote import RemoteWorkspace
+from poolhouse import http
+from poolhouse.fleet import discovery, projects, tls
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import ALL_INTERFACES, load_or_create_token
+from poolhouse.fleet.discovery import Beacon, primary_ip
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.projects import lan_host
+from poolhouse.fleet.remote import Peer
+from poolhouse.workspace.remote import RemoteWorkspace
 
 MARKER = b"PLANTED-MARKER-7f3a91c2e8b44d05"
 
@@ -140,8 +140,8 @@ def test_a_listener_beyond_this_machine_cannot_be_built_without_tls():
 
 
 def test_the_old_switch_changes_nothing(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_FLEET_TLS", "off")
-    monkeypatch.delenv("ML_STACK_WSL_NETWORK", raising=False)
+    monkeypatch.setenv("POOLHOUSE_FLEET_TLS", "off")
+    monkeypatch.delenv("POOLHOUSE_WSL_NETWORK", raising=False)
     monkeypatch.setattr(projects, "primary_ip", lambda: "192.168.40.2")
     assert not hasattr(tls, "disabled")
     assert lan_host(8770) == "https://192.168.40.2:8770"

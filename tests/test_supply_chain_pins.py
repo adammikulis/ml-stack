@@ -1,4 +1,4 @@
-"""A model ml-stack pulled is pinned at pull time (never first-use trusted), and a signed
+"""A model poolhouse pulled is pinned at pull time (never first-use trusted), and a signed
 manifest this machine accepted is checked at load. Real files, real sealed sentinel store under
 the test's state root, real Ed25519 signatures, a real local HTTP site / fake Hub."""
 
@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, http, hub, net, sentinel
-from ml_stack.fleet.onboard.manifest import Entry, ManifestError, Signer
-from ml_stack.fleet.onboard.trusted import TrustedLists
-from ml_stack.httpguard import Limits
-from ml_stack.net.download import accept
-from ml_stack.net.scan import Outcome, ScanPolicy, ScanResult
-from ml_stack.sentinel import State
-from ml_stack.serve import guarded
-from ml_stack.serve.guarded import SentinelRefused
-from ml_stack.testing.fakehub import fake_hub
+from poolhouse import home, http, hub, net, sentinel
+from poolhouse.fleet.onboard.manifest import Entry, ManifestError, Signer
+from poolhouse.fleet.onboard.trusted import TrustedLists
+from poolhouse.httpguard import Limits
+from poolhouse.net.download import accept
+from poolhouse.net.scan import Outcome, ScanPolicy, ScanResult
+from poolhouse.sentinel import State
+from poolhouse.serve import guarded
+from poolhouse.serve.guarded import SentinelRefused
+from poolhouse.testing.fakehub import fake_hub
 from tests.net_site import Site, gguf_bytes
 
 SHA = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
@@ -107,7 +107,7 @@ def test_a_pull_without_a_published_digest_pins_the_bytes_it_got_and_says_so(tmp
     assert pin.sha256 == SHA(body) and pin.digest_from == "computed" and pin.source == "pull"
 
 
-def test_a_model_ml_stack_did_not_pull_is_pinned_on_first_use_and_logged_distinctly(tmp_path):
+def test_a_model_poolhouse_did_not_pull_is_pinned_on_first_use_and_logged_distinctly(tmp_path):
     path = where("other.gguf")
     path.write_bytes(gguf_bytes(extra=512))
     load(path)

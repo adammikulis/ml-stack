@@ -23,8 +23,8 @@ DATA_DIRS = frozenset({
     "data", "datasets", "graphs", "state", "checkpoints", "weights", "runs", "var",
     "exports", "dumps", "_backups", "scrapes", "messages", "patients",
 })
-PACKAGE_DATA = ("src/ml_stack/data/", "src/ml_stack/spec/data/")
-SHIPPED = frozenset({"src/ml_stack/spec/data/draft_vocab.npy"})
+PACKAGE_DATA = ("src/poolhouse/data/", "src/poolhouse/spec/data/")
+SHIPPED = frozenset({"src/poolhouse/spec/data/draft_vocab.npy"})
 
 
 def _git(*args: str) -> str:

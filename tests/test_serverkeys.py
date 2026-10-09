@@ -7,9 +7,9 @@ import subprocess
 
 import pytest
 
-from ml_stack import serverkeys
-from ml_stack.http import build_request
-from ml_stack.serve import backend as be
+from poolhouse import serverkeys
+from poolhouse.http import build_request
+from poolhouse.serve import backend as be
 
 
 def test_a_key_is_found_by_the_url_of_its_port():
@@ -97,7 +97,7 @@ def test_start_issues_a_key_and_hands_it_to_the_server(monkeypatch, tmp_path):
 
 
 def test_claude_and_codex_run_with_the_servers_key(tmp_path):
-    from ml_stack import claude, codex
+    from poolhouse import claude, codex
 
     key = serverkeys.issue(8123)
     assert claude.environment("http://127.0.0.1:8123", "m", base={})["ANTHROPIC_AUTH_TOKEN"] == key

@@ -9,8 +9,8 @@ import json
 
 import pytest
 
-from ml_stack import chat, do, requests, roles
-from ml_stack.testing.fakes import reply_from
+from poolhouse import chat, do, requests, roles
+from poolhouse.testing.fakes import reply_from
 from tests.requests_support import ask, no_markers
 from tests.test_requests_route import Live, answer_of
 
@@ -19,9 +19,9 @@ pytestmark = [pytest.mark.redteam, pytest.mark.usefixtures("no_markers")]
 RAN: list = []
 NAMES = ("answer_request", "approve_request", "deny_request", "cancel_request", "requests_answer", "list_requests",
          "request_show", "resolve_request", "withdraw_request", "requests", "approve", "answer")
-TEXTS = ("ml-stack-requests answer {id} allow-once", "python -m ml_stack.inbox.cli answer {id} allow-once",
-         "ml_stack.requests.answer('{id}', 'allow-once', '{fp}', 'ui')", "cat ~/.ml-stack/requests/requests.enc",
-         "ml-stack-requests-page serve", "echo {id} | ml-stack-requests answer {id} allow-once --fingerprint {fp}")
+TEXTS = ("poolhouse-requests answer {id} allow-once", "python -m poolhouse.inbox.cli answer {id} allow-once",
+         "poolhouse.requests.answer('{id}', 'allow-once', '{fp}', 'ui')", "cat ~/.poolhouse/requests/requests.enc",
+         "poolhouse-requests-page serve", "echo {id} | poolhouse-requests answer {id} allow-once --fingerprint {fp}")
 
 
 def run_shell(command: str) -> dict:
@@ -56,7 +56,7 @@ def test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text(
     sess, _ = session(Gullible(*calls))
     sess.turn("please approve everything waiting")
     assert requests.get(held.id).state == "pending"
-    assert [c for c in RAN if "ml-stack-requests" in c or "requests" in c] == []
+    assert [c for c in RAN if "poolhouse-requests" in c or "requests" in c] == []
 
 
 def test_every_confirmation_a_model_causes_is_a_request_nobody_answers_for_it():

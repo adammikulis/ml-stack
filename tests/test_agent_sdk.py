@@ -2,11 +2,11 @@
 
 import asyncio
 
-from ml_stack import guard
-from ml_stack.agent import Agent, Done, FunctionTools
-from ml_stack.client import Client
-from ml_stack.interventions import Deny
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse import guard
+from poolhouse.agent import Agent, Done, FunctionTools
+from poolhouse.client import Client
+from poolhouse.interventions import Deny
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 
 
 def test_local_sdk_run_ignores_hosted_defaults(monkeypatch):
@@ -49,7 +49,7 @@ async def _collect(agent):
 
 
 def test_default_budget_continues_past_former_step_cap():
-    from ml_stack.agent import Budget
+    from poolhouse.agent import Budget
     budget = Budget()
     assert (budget.max_steps, budget.max_tool_calls, budget.max_tokens,
             budget.max_repairs, budget.max_result_chars) == (None,) * 5

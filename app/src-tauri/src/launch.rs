@@ -63,8 +63,8 @@ fn exchange(port: u16, secret: &str) -> Option<Vec<u8>> {
     let mut sock = TcpStream::connect_timeout(&addr, TIMEOUT).ok()?;
     sock.set_read_timeout(Some(TIMEOUT)).ok()?;
     let request = format!(
-        "POST /ui/launch/ticket HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nX-ML-Stack-UI: 1\r\n\
-         X-ML-Stack-Launch: {secret}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}"
+        "POST /ui/launch/ticket HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nX-Poolhouse-UI: 1\r\n\
+         X-Poolhouse-Launch: {secret}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}"
     );
     sock.write_all(request.as_bytes()).ok()?;
     let mut response = Vec::new();

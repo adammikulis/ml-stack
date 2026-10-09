@@ -11,16 +11,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.files import read_json, write_json
-from ml_stack.fleet import project_client, project_source as source
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.discovery import derive_token
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.project_client import catalogue, receive
-from ml_stack.fleet.projects import ProjectRegistry, bootstrap, lan_host
-from ml_stack.fleet.remote import Peer
-from ml_stack.http import Server, ServerError
-from ml_stack.net import git
+from poolhouse.files import read_json, write_json
+from poolhouse.fleet import project_client, project_source as source
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.discovery import derive_token
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.project_client import catalogue, receive
+from poolhouse.fleet.projects import ProjectRegistry, bootstrap, lan_host
+from poolhouse.fleet.remote import Peer
+from poolhouse.http import Server, ServerError
+from poolhouse.net import git
 
 IDENTIFIER = "a" * 32
 
@@ -110,8 +110,8 @@ def test_checkout_uses_verified_blobs_without_filters(repository, tmp_path):
     result = source.checkout(packed, IDENTIFIER, manifest["source_hash"], tmp_path / "checkout",
                              authority={"host": "https://pc:8770"})
     assert (result / "run.sh").read_bytes() == b"#!/bin/sh\necho hello\n"
-    assert read_json(result / ".ml-stack-project.json", {})["authority"]["host"] == "https://pc:8770"
-    assert git.run(["status", "--porcelain"], cwd=result).stdout.strip() == "?? .ml-stack-project.json"
+    assert read_json(result / ".poolhouse-project.json", {})["authority"]["host"] == "https://pc:8770"
+    assert git.run(["status", "--porcelain"], cwd=result).stdout.strip() == "?? .poolhouse-project.json"
 
 
 def test_registry_requires_explicit_selection_and_unshare_closes_source(repository, tmp_path):
@@ -131,7 +131,7 @@ def test_registry_requires_explicit_selection_and_unshare_closes_source(reposito
 
 
 def test_remote_checkout_cannot_create_another_authority(repository, tmp_path):
-    write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": IDENTIFIER,
+    write_json(repository / ".poolhouse-project.json", {"kind": "project-checkout", "project_id": IDENTIFIER,
                                                         "authority": {"host": "https://other:8770"}})
     registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), "https://pc:8770")
     project = registry.share(registry.candidates()[0]["id"])
@@ -192,7 +192,7 @@ def test_standalone_bootstrap_contains_verified_checkout_helpers(repository, tmp
 
 
 def test_wsl_board_host_uses_authenticated_bridge_lan_address(monkeypatch):
-    monkeypatch.setenv("ML_STACK_WSL_NETWORK", json.dumps({"address": ["192.168.2.59", 4321]}))
+    monkeypatch.setenv("POOLHOUSE_WSL_NETWORK", json.dumps({"address": ["192.168.2.59", 4321]}))
     assert lan_host(8770) == "https://192.168.2.59:8770"
-    monkeypatch.setenv("ML_STACK_WSL_NETWORK", json.dumps({"address": ["127.0.0.1", 4321]}))
+    monkeypatch.setenv("POOLHOUSE_WSL_NETWORK", json.dumps({"address": ["127.0.0.1", 4321]}))
     assert lan_host(8770) == ""

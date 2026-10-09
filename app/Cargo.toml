@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["poolside-node", "src-tauri"]
+members = ["poolhouse-node", "src-tauri"]
 
 [workspace.package]
 edition = "2021"

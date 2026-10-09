@@ -2,8 +2,8 @@
  "version": 1,
  "meta": {
   "date": "2026-10-02",
-  "command": "python -m ml_stack.redteam run --scenarios extraction,fleet,isolation,compaction,chat,loop --out /tmp/rt-base/baseline",
-  "ml_stack": "unknown @ 0d92de2",
+  "command": "python -m poolhouse.redteam run --scenarios extraction,fleet,isolation,compaction,chat,loop --out /tmp/rt-base/baseline",
+  "poolhouse": "unknown @ 0d92de2",
   "pyrit": "1.1.0",
   "python": "3.13.9",
   "platform": "macOS-26.6",

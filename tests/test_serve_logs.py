@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from ml_stack import home
-from ml_stack.serve import logs
-from ml_stack.serve.backend import server_log
+from poolhouse import home
+from poolhouse.serve import logs
+from poolhouse.serve.backend import server_log
 
 
 @pytest.fixture(autouse=True)
@@ -56,8 +56,8 @@ def test_a_log_past_the_age_limit_goes(monkeypatch):
 
 
 def test_a_log_a_recorded_server_is_still_writing_to_is_kept_whatever_its_age(monkeypatch):
-    from ml_stack.files import write_json
-    from ml_stack.serve.leases import lease_file
+    from poolhouse.files import write_json
+    from poolhouse.serve.leases import lease_file
 
     monkeypatch.setenv(logs.FILES_ENV, "3")
     made = _logs(10)

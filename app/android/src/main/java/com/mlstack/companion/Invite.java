@@ -48,11 +48,11 @@ final class Invite {
     static Invite parse(String text, long now) throws Exception {
         if (text == null || text.length() > 8192) throw new IllegalArgumentException("The invite is too large.");
         URI link = new URI(text.trim());
-        if (!"ml-stack".equals(link.getScheme()) || !"enroll".equals(link.getHost())
+        if (!"poolhouse".equals(link.getScheme()) || !"enroll".equals(link.getHost())
                 || link.getUserInfo() != null || link.getPort() != -1 || link.getFragment() != null
                 || !link.getRawPath().isEmpty() || link.getRawQuery() == null
                 || !link.getRawQuery().startsWith("data=") || link.getRawQuery().contains("&")) {
-            throw new IllegalArgumentException("Paste or scan an ml-stack Android enrollment invite.");
+            throw new IllegalArgumentException("Paste or scan a poolhouse Android enrollment invite.");
         }
         String encoded = URLDecoder.decode(link.getRawQuery().substring(5), "UTF-8");
         if (!encoded.matches("[A-Za-z0-9_-]+")) throw new IllegalArgumentException("The invite encoding is malformed.");

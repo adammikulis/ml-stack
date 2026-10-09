@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-import ml_stack.setup as stack_setup
-from ml_stack import sandbox, sentinel
-from ml_stack.sandbox.container import Container
-from ml_stack.sandbox.run import wrapped
-from ml_stack.serve import (
+import poolhouse.setup as stack_setup
+from poolhouse import sandbox, sentinel
+from poolhouse.sandbox.container import Container
+from poolhouse.sandbox.run import wrapped
+from poolhouse.serve import (
     binary,
     llamacpp_cli,
     llamacpp_compile,
@@ -26,8 +26,8 @@ from ml_stack.serve import (
     llamacpp_status,
     llamacpp_update,
 )
-from ml_stack.serve.build_paths import BuildFailed, builds_dir, current_link, root
-from ml_stack.serve.llamacpp_smoke import Result
+from poolhouse.serve.build_paths import BuildFailed, builds_dir, current_link, root
+from poolhouse.serve.llamacpp_smoke import Result
 from tests.llamacpp_site import UpstreamSite, toolchain
 from tests.sandbox_kit import require_native_sandbox
 
@@ -223,7 +223,7 @@ def test_a_host_that_needs_approval_ends_in_the_needs_approval_state_with_the_ex
     site.commit(100)
     refusing = site.pipeline(tmp_path, allowed=("github.com",))
     assert cli(site, refusing, "update") == llamacpp_cli.NEEDS_APPROVAL
-    assert "ml-stack-security approve-host 127.0.0.1" in capsys.readouterr().err
+    assert "poolhouse-security approve-host 127.0.0.1" in capsys.readouterr().err
     assert not builds_dir().exists() or not list(builds_dir().iterdir())
     assert llamacpp_status.gather(site.upstream, refusing)["newer"] == "unknown (source host not approved)"
 
@@ -318,7 +318,7 @@ def test_the_compile_has_no_network(site, pipe, tmp_path):
 
 
 def test_the_smoke_test_without_a_model_or_a_working_server_fails_instead_of_passing(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_SMOKE_GGUF", str(tmp_path / "missing.gguf"))
+    monkeypatch.setenv("POOLHOUSE_SMOKE_GGUF", str(tmp_path / "missing.gguf"))
     script = tmp_path / "llama-server"
     script.write_text("#!/bin/sh\nexit 1\n")
     script.chmod(0o755)

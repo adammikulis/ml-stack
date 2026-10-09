@@ -8,9 +8,9 @@ import pytest
 from test_workspace_local_agent import Rig, Script, done, kit, waited  # noqa: F401
 from workspace_kit import cli
 
-from ml_stack import roles
-from ml_stack.testing import injection_corpus as corpus
-from ml_stack.workspace import localagent as la, localtools
+from poolhouse import roles
+from poolhouse.testing import injection_corpus as corpus
+from poolhouse.workspace import localagent as la, localtools
 
 pytestmark = pytest.mark.redteam
 TEXTS = sorted({*corpus.INJECTIONS})[:12]

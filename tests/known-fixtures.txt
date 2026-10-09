@@ -277,7 +277,7 @@ node kind
 Slice 2
 Slice 4
 Open Projects
-keys ml-stack
+keys poolhouse
 
 # not a person: code phrases the recogniser reads as people
 worktree pointer
@@ -290,7 +290,7 @@ Poolhouse UI
 Install MetaDrive
 color .2s
 config pre
-Poolside Light
+Poolhouse Light
 Install Vision
 Hub Qwen
 mod node
@@ -313,11 +313,11 @@ Choose Dev
 Claude Code's
 Free Text Here
 Gym RGB
-Install Poolside
+Install Poolhouse
 Jailbroken How Does
 Not A Kind
 Not Found
-Open Poolside
+Open Poolhouse
 Output SHA256
 Package Outline
 Pin Functions
@@ -339,3 +339,7 @@ pi@kitchen.local
 pw@github.com
 Jailbroken How
 Poolhouse Local Signing
+Embedding Poolhouse
+Flash Next
+Not Active
+Returns None

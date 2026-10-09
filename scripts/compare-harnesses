@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Run one small bug-fix task through Claude Code, Codex and ml-stack's own agent on the same served model.
+"""Run one small bug-fix task through Claude Code, Codex and poolhouse's own agent on the same served model.
 
     scripts/compare-harnesses --model Qwen3.5-2B [--ctx 262144] [--out docs/experiments/harness-comparison.md]
     scripts/compare-harnesses --on http://127.0.0.1:8080 --dry-run
 
 The fixture is tests/fixtures/toy_bugfix (its test is stored as check_calc.py so the suite does not collect it), copied to a temporary git repository per run and scored
-by its own test. Every harness is the launcher this repository ships (`ml-stack-claude`,
-`ml-stack-codex`), pointed at one server, so the model, the slot and the cache are shared and the
+by its own test. Every harness is the launcher this repository ships (`poolhouse-claude`,
+`poolhouse-codex`), pointed at one server, so the model, the slot and the cache are shared and the
 rows are comparable. A first call per harness with a one-line prompt measures the prompt prefix
 (system prompt and tool list) the harness sends. The row records wall time, the tokens the server
 processed, the tokens the harness says it sent and how many came from the cache, tool calls and the
@@ -122,11 +122,11 @@ def passes(where: Path) -> bool:
 def harnesses(base_url: str, ctx: int) -> dict[str, tuple[list[str], list[str], object]]:
     """``name -> (probe command, task command, output parser)`` for each harness."""
     def claude(prompt: str) -> list[str]:
-        return [sys.executable, "-m", "ml_stack.claude", "--on", base_url, "--role", "plan-and-go", "--ctx", str(ctx), "--",
+        return [sys.executable, "-m", "poolhouse.claude", "--on", base_url, "--role", "plan-and-go", "--ctx", str(ctx), "--",
                 "-p", prompt, "--output-format", "stream-json", "--verbose"]
 
     def codex(prompt: str) -> list[str]:
-        return [sys.executable, "-m", "ml_stack.codex", "--on", base_url, "--role", "plan-and-go", "--ctx", str(ctx), "--",
+        return [sys.executable, "-m", "poolhouse.codex", "--on", base_url, "--role", "plan-and-go", "--ctx", str(ctx), "--",
                 "exec", "--json", "--skip-git-repo-check", prompt]
 
     return {"claude-code": (claude(PREFIX), claude(TASK), parse_claude),
@@ -134,8 +134,8 @@ def harnesses(base_url: str, ctx: int) -> dict[str, tuple[list[str], list[str], 
 
 
 def own_agent_present() -> bool:
-    """Whether ml-stack's own agent loop (`ml-stack-workspace agent`) is on this branch."""
-    exe = shutil.which("ml-stack-workspace")
+    """Whether poolhouse's own agent loop (`poolhouse-workspace agent`) is on this branch."""
+    exe = shutil.which("poolhouse-workspace")
     if not exe:
         return False
     done = subprocess.run([exe, "agent", "--help"], capture_output=True, text=True, check=False)
@@ -147,7 +147,7 @@ def measure(name: str, command: list[str], parser, base_url: str, where: Path) -
     before, began = scrape(base_url), time.monotonic()
     try:
         done = subprocess.run(command, cwd=where, capture_output=True, text=True, check=False,
-                              timeout=TIMEOUT_S, env={**os.environ, "ML_STACK_NO_REAL_KEYSTORE": "1", "PYTHONPATH": str(ROOT / "src")})
+                              timeout=TIMEOUT_S, env={**os.environ, "POOLHOUSE_NO_REAL_KEYSTORE": "1", "PYTHONPATH": str(ROOT / "src")})
         out, code = done.stdout, done.returncode
     except subprocess.TimeoutExpired:
         out, code = "", -1
@@ -208,7 +208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{name}: {' '.join(task)}")
         print(f"own agent loop: {'present' if own_agent_present() else 'absent on this branch, skipped'}")
         return 0
-    from ml_stack import harnessing
+    from poolhouse import harnessing
 
     def run(base_url: str, serving: str) -> int:
         rows: list[dict[str, object]] = []
@@ -220,7 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             row.update(probe(first, parser, base_url))
             rows.append(row)
         if not own_agent_present():
-            rows.append({"harness": "ml-stack agent", "note": "skipped: no agent loop on this branch"})
+            rows.append({"harness": "poolhouse agent", "note": "skipped: no agent loop on this branch"})
         meta = {"date": datetime.date.today().isoformat(), "command": "scripts/compare-harnesses " + " ".join(argv or sys.argv[1:]),
                 "model": args.model or args.on, "serving": serving}
         out = Path(args.out)

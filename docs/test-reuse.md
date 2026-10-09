@@ -33,8 +33,8 @@ Each file has a lookup key and a manifest. The lookup key is a sha256 over:
    values of `-c`, `--rootdir`, `--confcutdir` and `--ignore` stay);
 5. the values of the environment variables named in the test file or its conftests, plus a fixed list
    (`PATH` without temporary entries and with the checkout root masked, `CI`, `TZ`, `LANG`, `LC_ALL`,
-   `CLAUDECODE`, `ML_STACK_NOTIFY`, `ML_STACK_LIVE_API`, `ML_STACK_LIVE_NET`, `DEV_TEST_SLOTS`);
-6. the installed `ml-stack` distribution and how it was installed.
+   `CLAUDECODE`, `POOLHOUSE_NOTIFY`, `POOLHOUSE_LIVE_API`, `POOLHOUSE_LIVE_NET`, `DEV_TEST_SLOTS`);
+6. the installed `poolhouse` distribution and how it was installed.
 
 The manifest is what the run depended on: the first-party files in the static import closure of the
 test file, its conftests, their `pytest_plugins` and the `-p` modules (imports at any depth, including
@@ -75,14 +75,14 @@ checksums, so it cannot be compared across worktrees.
 A file is executed and no passing entry is written for it when any of the following holds:
 
 - the test file carries marker `live_api`, `live_net`, `redteam`, `gpu` or `model`, or names a model or
-  GPU lease (`Lease`, `llama-server`, `ml-stack-serve`), or the marker appears on any of its items at run
+  GPU lease (`Lease`, `llama-server`, `poolhouse-serve`), or the marker appears on any of its items at run
   time. A scheduling label never bars a file: `heavy`, listing in `tests/heavy-modules.txt` and `slow`
   decide only when and where a file runs, never whether its result is kept;
 - the run was red. A failure is written to the chain as a `fail` entry for attribution; it is never
   a hit, because a hit needs a `pass` entry;
 - its tests wrote under the checkout other than to cache directories (Python's `__pycache__` bytecode is
   regenerable: it is ignored wherever it is written, site-packages included, and is not in the key), wrote outside the temporary
-  root, or opened anything under the real `~/.ml-stack`, `~/.ssh`, `~/.gnupg`, `~/.config`,
+  root, or opened anything under the real `~/.poolhouse`, `~/.ssh`, `~/.gnupg`, `~/.config`,
   `~/.cache/huggingface` or `Library/Keychains` (the suite's own isolation guard in
   `tests/conftest.py` reads real state to check it is untouched; those reads are ignored);
 - the run emitted a warning that mentions an isolation violation;

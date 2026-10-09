@@ -1,7 +1,7 @@
 # The self-improving loop: the goal, and the rails it has to run on
 
 The owner's goal: a loop in which a local model (Qwen, a mixture-of-experts model, thinking off by
-default) working through ml-stack improves ml-stack, and the next round starts from the better
+default) working through Poolhouse improves Poolhouse, and the next round starts from the better
 stack. Nothing here is built as one piece yet; this note is the contract that each piece must
 meet, so that the loop can be started later without removing a safety rail to do it.
 
@@ -15,7 +15,7 @@ meet, so that the loop can be started later without removing a safety rail to do
    empty it falls back to behaviour-preserving refactors and bug fixes (what the mutation and
    complexity tools point at), still inside the rails below. It claims the target on the workspace
    so two rounds never take the same one.
-2. **Work in its own worktree and branch** (`ml-stack-workspace agent start`, role
+2. **Work in its own worktree and branch** (`poolhouse-workspace agent start`, role
    `approve-first` or `plan-and-go`), announcing on the workspace.
 3. **Change code and tests**, run only the tier that matches (`quick`, the files' own tests).
 4. **Measure against a fixed judge**: the gates, the budgets ratchet, the red-team coverage

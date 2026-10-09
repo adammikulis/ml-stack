@@ -25,7 +25,7 @@ Slice 1b-i (`delegate` removed from the CLI, `mint` person-only) is implemented;
 
 Paths relative to the repository root.
 
-- `src/ml_stack/workspace/identity.py`: roles `human`, `lead`, `agent`. `MINTS` lets a human
+- `src/poolhouse/workspace/identity.py`: roles `human`, `lead`, `agent`. `MINTS` lets a human
   mint any role, a lead mint `agent`, an agent nothing. `Identity.trust` is `"human"` for
   role `human`, else `"agent-claimed"`. `delegate()` mints a child token `parent/name`.
 - `notes.py`: trust rank `agent-claimed < test-verified < human` comes from the author's
@@ -34,13 +34,13 @@ Paths relative to the repository root.
 - `agent_display.py`: display names from registry metadata; `session_kind` is `person` for
   role `human`.
 - `authority.py` registry: a `delegated` gate passes a lead agent when `CLAUDECODE` or
-  `ML_STACK_AGENT` is set. `runtime.deploy` (group `runtime`) is the gate for `ml-stack runtime
+  `POOLHOUSE_AGENT` is set. `runtime.deploy` (group `runtime`) is the gate for `Poolhouse runtime
   ensure`, `rollback` and `restart-host`: Dev delegates it, Prod keeps it with the person. That is an environment test, not evidence the owner said
   anything.
 - `sentinel/human.py`: `HumanGrant` (action, subject, 120 s) minted after a terminal
   confirmation; `_FORBIDDEN` keeps agent tool arguments off sentinel, authority and log
   state. `sealed.py` is an HMAC-sealed JSON file. `rails.py`: `reads_like_instruction`.
-- `scripts/hooks`: `claude-bash-guard` (regex refusals; `ML_STACK_PUSH_MAIN=yes` is read off
+- `scripts/hooks`: `claude-bash-guard` (regex refusals; `POOLHOUSE_PUSH_MAIN=yes` is read off
   the command text), `claude-edit-guard`, `claude-session-start`, `claude-subagent-start`,
   `claude-subagent-stop`, `pre-push` (keyed on `CLAUDECODE`), `workspace_hook.py`.
   `.claude/settings.json` wires PreToolUse, SubagentStart/Stop and SessionStart. No
@@ -48,7 +48,7 @@ Paths relative to the repository root.
 - `tests/test_redteam_human_floor.py`, `test_authority.py`, `test_onboard_human.py`: the
   floor, attacked through real child processes.
 
-Gap: `ML_STACK_PUSH_MAIN=yes` and every delegated gate are authorised by text or environment
+Gap: `POOLHOUSE_PUSH_MAIN=yes` and every delegated gate are authorised by text or environment
 the model controls, not by anything the person said.
 
 ## 2. Threat model
@@ -64,7 +64,7 @@ the model controls, not by anything the person said.
 Honest limits. A same-user process can read the sealing key and forge records, and an
 agent's Bash tool runs as the same user. The design does not prevent this. It detects it
 after the fact: the log is hash-chained and sealed, and verification shows tampering on the
-board and in `ml-stack-doctor`; guards refuse to act on a log that fails verification. The
+board and in `poolhouse-doctor`; guards refuse to act on a log that fails verification. The
 Bash and edit guards add the person store and key to `_FORBIDDEN`, which is a checkpoint, not
 a sandbox. No separate OS account, no Secure Enclave. The harness is trusted: a tool result
 mislabelled by the harness as a user prompt would be believed.
@@ -75,7 +75,7 @@ A `UserPromptSubmit` hook, `scripts/hooks/claude-user-prompt`, receives `session
 `transcript_path`, `cwd` and `prompt` for what the person typed. The hook:
 
 1. Ignores events with an `agent_id` (subagent turns) and sessions with
-   `ML_STACK_NONINTERACTIVE` set.
+   `POOLHOUSE_NONINTERACTIVE` set.
 2. Appends a `PersonStatement` to the log: sequence, time, session id, project, cwd,
    `sha256(prompt)`, a redacted excerpt (`sentinel/redaction.py`), source
    `harness-hook:UserPromptSubmit`. No raw secrets are stored.
@@ -88,7 +88,7 @@ through `PostToolUse` with matcher `AskUserQuestion`, which carries the structur
 same recorder stores a `PersonAnswer`. Verify both events' fields against the installed
 Claude Code before slice 1 depends on them.
 
-Other harnesses: Codex and local-model launchers (`ml-stack-agent`, `ml-stack-chat`) write the
+Other harnesses: Codex and local-model launchers (`poolhouse-agent`, `poolhouse-chat`) write the
 same `PersonStatement` rows from their own process when the human types, never from the model
 loop. A harness without such an event produces no statements; the action then needs the
 person's terminal. Nothing is fabricated from model output.
@@ -99,7 +99,7 @@ Model-relayed text ("the owner said yes") is never evidence.
 
 ## 4. The authorization object
 
-The statement log is `~/.ml-stack/person/statements.log`, a `ChainLog` with a seal key beside
+The statement log is `~/.poolhouse/person/statements.log`, a `ChainLog` with a seal key beside
 it. Records:
 
 ```
@@ -253,7 +253,7 @@ Paths where an agent could pose as a human today, and the check that closes each
 | `chat.run` | requires `HUMAN` token | unchanged; test |
 | Handoff and notes text | free text | rendered as agent data; a fake statement block is inert for `consume`; test |
 | Display (`agent_display.py`) | `person` kind from role | derived only from registry role; names reserved; test |
-| `CLAUDECODE` / `ML_STACK_AGENT` | delegated gates test the environment | gates move to `consume` (slice 4) |
+| `CLAUDECODE` / `POOLHOUSE_AGENT` | delegated gates test the environment | gates move to `consume` (slice 4) |
 | Statement log files | plain files | `_FORBIDDEN` plus seal verification; tamper shows on the board |
 
 Red-team tests that must go red if a path opens (real child processes, `CLAUDECODE=1`, fresh
@@ -274,7 +274,7 @@ is indistinguishable from the page, so none of them opens a session or selects t
   `<root>/launch/secret.json` (`version`, `secret`, `port`) owner-only, not a symlink, with the
   directory registered with sentinel so no agent tool call may name it. Nothing the caller sends
   chooses the host, the port or the file.
-* **Ticket.** The daemon's own window and the owner's terminal (`ml-stack peers open`) present the
+* **Ticket.** The daemon's own window and the owner's terminal (`poolhouse peers open`) present the
   secret to `POST /ui/launch/ticket` (no `Origin`, no `Sec-Fetch-Site`, loopback `Host`) and get a
   ticket valid for 60 seconds and one redemption, at most eight waiting at once. The page opens as
   `/ui/?launch_ticket=...`, redeems it with `POST /ui/session`, and removes it from the address bar.
@@ -288,10 +288,10 @@ is indistinguishable from the page, so none of them opens a session or selects t
   credential changes, coordinator selection, the wiring limit and handing a session to a browser
   (`/ui/launch-ticket`) refuse a session that is not credentialed.
 * **Hand-typed address.** A page opened without a ticket, or whose session ended, shows how to open
-  it from the Poolside window or with `ml-stack peers open`, which refuses a process an agent
+  it from the Poolhouse window or with `poolhouse peers open`, which refuses a process an agent
   started and a process with no terminal. Inside the app's window the page offers a Reopen button
   that asks the app for a fresh ticket.
-* **Board page.** `ml-stack-workspace board-serve` makes its own session secret and prints the
+* **Board page.** `poolhouse-workspace board-serve` makes its own session secret and prints the
   address that carries it; the Board route answers only a browser holding the cookie that address
   sets, as the Agents routes already did.
 * **Throttle and audit.** Wrong launch secrets and wrong tickets back off per source. Every ticket
@@ -331,7 +331,7 @@ saved rules, the review screen, `init`); raising a budget; tags, forced pushes, 
 `--all` and `--mirror` pushes; creating, widening or reading authorizations. `main` is coverable only as
 `release-main`, through the structured approval question and never through typed words, `/allow` or a
 reply. A sentence naming one of the others is answered with a refusal that says the owner runs it.
-`ML_STACK_PUSH_MAIN=yes` opens nothing for an agent; the owner's own terminal push meets no hook.
+`POOLHOUSE_PUSH_MAIN=yes` opens nothing for an agent; the owner's own terminal push meets no hook.
 
 ### release-main on a pull request
 
@@ -401,10 +401,10 @@ Slice 1 (days). Goal: the person says "yes, push it" and `pre-push` consumes the
 authorization; `delegate` is gone.
 
 - `scripts/hooks/claude-user-prompt` (new), `.claude/settings.json` (add the hook),
-  `src/ml_stack/workspace/person_record.py` (new: log, `consume`),
-  `src/ml_stack/workspace/person_intent.py` (new: closed tables and the interpreter),
+  `src/poolhouse/workspace/person_record.py` (new: log, `consume`),
+  `src/poolhouse/workspace/person_intent.py` (new: closed tables and the interpreter),
   `scripts/hooks/pre-push`, `scripts/hooks/claude-bash-guard` (call `consume`),
-  `src/ml_stack/sentinel/human.py` (`_FORBIDDEN`), `workspace/boards.py` (refuse the kind),
+  `src/poolhouse/sentinel/human.py` (`_FORBIDDEN`), `workspace/boards.py` (refuse the kind),
   `workspace/identity.py` (reserved names, `label`, delete `delegate`), `workspace/service.py`,
   `remote.py`, `remote_host.py`, `person_session.py`, `harnessid.py`, `localstart.py`,
   `automatic_connection.py`, `child_renewal.py` (delete), `task_scheduler.py`,
@@ -420,7 +420,7 @@ authorization; `delegate` is gone.
 
 Later, in order: 2) `AskUserQuestion` echo path and `PostToolUse` recorder; 3) `daemon-restart`,
 `restore-launcher`, `runtime-deploy` consumers; 4) move `delegated` authority gates from the
-environment test to `consume`; 5) Codex and `ml-stack-chat` statement writers; 6) board view
+environment test to `consume`; 5) Codex and `poolhouse-chat` statement writers; 6) board view
 with person-session revocation.
 
 ## 10a. Verified on Claude Code 2.1.293 (2026-10-08)
@@ -477,13 +477,13 @@ Library decisions:
 
 ## 12. Slice 1a as built
 
-- Modules in `src/ml_stack/workspace/`: `person_store` (paths, verified reads, authorization state, the lock),
+- Modules in `src/poolhouse/workspace/`: `person_store` (paths, verified reads, authorization state, the lock),
   `person_record` (the writers), `person_auth` (`consume`), `person_release` (facts, question, push check, the
   `person-consume` commands), `person_intent` (revoke, refuse, ask), `person_transcript`, `person_targets`,
   `person_ancestry`, `person_hook`, `person_view`. Only `person_hook` and `person_auth` import `person_record`;
   `tests/test_person_guards.py` pins that.
 - One chain: the log is a `sentinel/events.py` `EventLog` (keyed HMAC, sealed head) at
-  `~/.ml-stack/person/statements.log`.
+  `~/.poolhouse/person/statements.log`.
 - Hooks: `scripts/hooks/claude-user-prompt` serves `UserPromptSubmit`, `PostToolUse` on `AskUserQuestion` and
   `SessionEnd`; `claude-session-start` closes a session's authorizations when it starts again and records the
   harness process as that session's binding.
@@ -501,19 +501,19 @@ Library decisions:
   push checks pass. Tags, forced pushes and deletions are refused. The Bash guard refuses the same pushes by
   command text (through `env`, `sudo`, `sh -c` and `unset` prefixes) and lets a push of main through only while
   the session holds an approval.
-- The session of a guard is the one whose recorded harness process is its ancestor; `ML_STACK_SESSION_ID` is not
+- The session of a guard is the one whose recorded harness process is its ancestor; `POOLHOUSE_SESSION_ID` is not
   trusted.
-- The hard rules of both guards ignore `MLSTACK_GUARD=off`: the guards run only for an agent's tool calls. The
+- The hard rules of both guards ignore `POOLHOUSE_GUARD=off`: the guards run only for an agent's tool calls. The
   edit guard refuses edits to the person-record modules, the hook scripts, the guards, `pre-push`, `rules_loader.py`
   and `.claude/settings*.json`; edits through the shell are not covered and stay a same-user matter.
 - Forgeable by the same user: the hook entry points can be run by an agent, and a same-user process can write
   the store, its key or a transcript. Detection, not prevention: the chain and seal are verified before every
   use, the transcript path is validated, each statement records its transcript folder and the Claude Code
   version, and the guards refuse commands that name the store, the hooks or the writers. `CLAUDE_CONFIG_DIR`
-  and `ML_STACK_HOME` still move the transcript folder and the store; a store an agent creates elsewhere holds
+  and `POOLHOUSE_HOME` still move the transcript folder and the store; a store an agent creates elsewhere holds
   no binding for the real harness process unless the agent forges one.
 - Privacy: a statement keeps the SHA-256 of the prompt, an excerpt of at most 80 characters with secrets
-  redacted, the working directory and the session id. To purge, the person deletes `~/.ml-stack/person/` at a
+  redacted, the working directory and the session id. To purge, the person deletes `~/.poolhouse/person/` at a
   terminal; a new chain starts and every authorization ends.
 - Manual acceptance (the person): a typed "yes" or "/allow" after a release proposal does not authorize; the
   approval answer to the AskUserQuestion does, and `git push origin main` then goes through once; a message posted

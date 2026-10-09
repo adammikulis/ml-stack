@@ -102,7 +102,7 @@ def timed_locks(waits: list[float], holds: list[float]) -> None:
     """Wrap the workspace's file lock so the bus log's wait and hold times are recorded."""
     from contextlib import contextmanager
 
-    from ml_stack.workspace import board_graph, chain, claims, rates
+    from poolhouse.workspace import board_graph, chain, claims, rates
 
     original = chain.held
 
@@ -126,7 +126,7 @@ class Agent:
     """One agent process: its identity, its measurements and the steps of its day."""
 
     def __init__(self, spec: dict[str, Any]) -> None:
-        from ml_stack.workspace import Workspace
+        from poolhouse.workspace import Workspace
 
         self.spec, self.name, self.token = spec, spec["name"], spec["token"]
         self.ws = Workspace(Path(spec["base"]))
@@ -164,7 +164,7 @@ class Agent:
 
     def keystore(self) -> None:
         """Read the master once, as a new process would."""
-        from ml_stack import keystore
+        from poolhouse import keystore
 
         def read() -> None:
             keystore.Keystore(wires=keystore.Wires(interactive=lambda: True, say=lambda _m: None)).subkey(
@@ -215,7 +215,7 @@ class Agent:
 
 def child(spec: dict[str, Any]) -> dict[str, Any]:
     """One agent process: returns its measurements."""
-    os.environ["ML_STACK_HOME"] = spec["home"]
+    os.environ["POOLHOUSE_HOME"] = spec["home"]
     install_ring(Path(spec["ring"]))
     return Agent(spec).run()
 
@@ -226,14 +226,14 @@ def child(spec: dict[str, Any]) -> dict[str, Any]:
 def run(agents: int = 30, messages: int = 20, *, default_limits: bool = False,
         drain_s: float = 60.0, workdir: Path | None = None) -> dict[str, Any]:
     """Run the load and return the report, including ``pass`` and ``missed``."""
-    root = Path(workdir or tempfile.mkdtemp(prefix="ml-stack-load-"))
+    root = Path(workdir or tempfile.mkdtemp(prefix="poolhouse-load-"))
     home, base, ring, go = root / "home", root / "ws", root / "ring.json", root / "go"
-    os.environ["ML_STACK_HOME"] = str(home)
-    for marker in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_TOKEN"):
+    os.environ["POOLHOUSE_HOME"] = str(home)
+    for marker in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE", "POOLHOUSE_WORKSPACE_TOKEN"):
         os.environ.pop(marker, None)
     install_ring(ring)
-    from ml_stack import keystore
-    from ml_stack.workspace import Workspace
+    from poolhouse import keystore
+    from poolhouse.workspace import Workspace
 
     keystore.Keystore(wires=keystore.Wires(interactive=lambda: True, say=lambda _m: None)).subkey("load", "seed")
     base.mkdir(parents=True, exist_ok=True)
@@ -244,7 +244,7 @@ def run(agents: int = 30, messages: int = 20, *, default_limits: bool = False,
     owner = ws.init("owner")
     names = [f"agent{i:03d}" for i in range(agents)]
     tokens = {n: ws.mint(owner, n) for n in names}
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "ML_STACK_NOTIFY": "off"}
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "POOLHOUSE_NOTIFY": "off"}
     kids = []
     for i, n in enumerate(names):
         spec = {"index": i, "name": n, "token": tokens[n], "peer": names[(i + 1) % agents],

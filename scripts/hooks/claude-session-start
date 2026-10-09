@@ -26,8 +26,8 @@ def main() -> int:
         return 0
     workspace_hook.persist_session(environment)
     if not event.get("agent_id"):
-        workspace_hook.refresh_runtime("SessionStart", agent=environment["ML_STACK_WORKSPACE_AGENT"])
-    command = ["ml-stack-workspace", "whoami"]
+        workspace_hook.refresh_runtime("SessionStart", agent=environment["POOLHOUSE_WORKSPACE_AGENT"])
+    command = ["poolhouse-workspace", "whoami"]
     if isinstance(model, str) and model and len(model) <= 256 and model.isprintable():
         command.extend(["--model", model])
     else:
@@ -38,7 +38,7 @@ def main() -> int:
     if registered and not event.get("agent_id"):
         parts.append(print_board(environment))
         parts.append(tree_watch.check("SessionStart", str(event.get("cwd") or ""), environment,
-                                      lead=environment.get("ML_STACK_WORKSPACE_AGENT", "")))
+                                      lead=environment.get("POOLHOUSE_WORKSPACE_AGENT", "")))
     parts.append(workspace_hook.hook_notice(environment))
     text = "\n\n".join(part for part in parts if part)
     if text:
@@ -48,9 +48,9 @@ def main() -> int:
 
 def print_board(environment: dict) -> str:
     """Announces the session and returns the inbox as additional context."""
-    if os.environ.get("ML_STACK_NONINTERACTIVE"):
+    if os.environ.get("POOLHOUSE_NONINTERACTIVE"):
         return ""
-    base = ["ml-stack-workspace"]
+    base = ["poolhouse-workspace"]
     tail: list[str] = []
     workspace_hook.run([*base, "announce", "joined", "main session started", *tail], "SessionStart",
                        environment=environment)

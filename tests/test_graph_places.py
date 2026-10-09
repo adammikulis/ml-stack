@@ -9,8 +9,8 @@ import json
 
 import pytest
 
-from ml_stack.geo import CACHE_VERSION
-from ml_stack.graph.places import geocode, kilometres, places_in, points
+from poolhouse.geo import CACHE_VERSION
+from poolhouse.graph.places import geocode, kilometres, places_in, points
 
 # invented coordinates for real places, so no test depends on a gazetteer answering
 WHERE = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84), "Oslo": (59.91, 10.75),
@@ -20,7 +20,7 @@ WHERE = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84), "Oslo": (59.91, 10.75),
 @pytest.fixture(autouse=True)
 def _no_pause(monkeypatch):
     """Nobody here asks Nominatim, so there is no rate limit to wait out between places."""
-    monkeypatch.setattr("ml_stack.geo.PAUSE", 0)
+    monkeypatch.setattr("poolhouse.geo.PAUSE", 0)
 
 
 def a_lookup(asked: list[str] | None = None):
@@ -151,7 +151,7 @@ def test_kilometres_is_the_distance_over_the_ground():
 class TestCommand:
     def test_geocode_writes_the_points_and_the_near_edges_back(self, tmp_path, monkeypatch,
                                                                capsys):
-        from ml_stack.graph import places, serve
+        from poolhouse.graph import places, serve
 
         monkeypatch.setattr(places.geo, "lookup", a_lookup())
         source = tmp_path / "graph.json"
@@ -167,7 +167,7 @@ class TestCommand:
         assert json.loads(source.read_text(encoding="utf-8")) == a_graph()
 
     def test_without_an_out_the_graph_is_written_over(self, tmp_path, monkeypatch):
-        from ml_stack.graph import places, serve
+        from poolhouse.graph import places, serve
 
         monkeypatch.setattr(places.geo, "lookup", a_lookup())
         source = tmp_path / "graph.json"

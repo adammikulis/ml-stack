@@ -12,24 +12,24 @@ from pathlib import Path
 
 import pytest
 
-mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
+mx = pytest.importorskip("mlx.core", reason="poolhouse[spec]")
 pytest.importorskip("tokenizers", reason="pip install tokenizers")
 pytest.importorskip("mlx_lm.models.qwen3_5",
-                    reason="qwen3_5 arrived in mlx-lm 0.31.3: pip install 'ml-stack[spec]'")
+                    reason="qwen3_5 arrived in mlx-lm 0.31.3: pip install 'poolhouse[spec]'")
 
 from mlx.utils import tree_flatten  # noqa: E402
 from mlx_lm import load  # noqa: E402
 from test_spec_decode import plain_greedy, tiny_hybrid  # noqa: E402
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers  # noqa: E402
 
-from ml_stack.client import Client, Request  # noqa: E402
-from ml_stack.graph.serve import Handler  # noqa: E402
-from ml_stack.http import Server, ServerError  # noqa: E402
-from ml_stack.serve.backend import ServerSpec  # noqa: E402
-from ml_stack.serve.manager import ServerManager  # noqa: E402
-from ml_stack.serve.mlx_tree_server import TreeCompleter  # noqa: E402
-from ml_stack.serve.ports import free_port  # noqa: E402
-from ml_stack.spec.engine import Engine, EngineConfig  # noqa: E402
+from poolhouse.client import Client, Request  # noqa: E402
+from poolhouse.graph.serve import Handler  # noqa: E402
+from poolhouse.http import Server, ServerError  # noqa: E402
+from poolhouse.serve.backend import ServerSpec  # noqa: E402
+from poolhouse.serve.manager import ServerManager  # noqa: E402
+from poolhouse.serve.mlx_tree_server import TreeCompleter  # noqa: E402
+from poolhouse.serve.ports import free_port  # noqa: E402
+from poolhouse.spec.engine import Engine, EngineConfig  # noqa: E402
 
 TEMPLATE = ("{% for m in messages %}<|im_start|> {{ m['content'] }} <|im_end|> {% endfor %}"
             "{% if add_generation_prompt %}<|im_start|>{% endif %}")
@@ -59,8 +59,8 @@ def weights(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture
 def cache_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     return tmp_path
 
 

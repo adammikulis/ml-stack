@@ -1,7 +1,7 @@
 # The test suite
 
 Nothing here serves a model, touches a GPU, reaches the Hub, or reads anything under
-`~/.ml-stack`, `~/.cache` or a real home directory — see *Nothing reads the machine* below for
+`~/.poolhouse`, `~/.cache` or a real home directory — see *Nothing reads the machine* below for
 how that is enforced rather than remembered. Every person, company, place and model file is
 invented.
 
@@ -62,7 +62,7 @@ takes the union of two selections:
   ones that failed last time.
 - **The import graph** (`scripts/affected.py`): every test file that imports a changed
   module directly, counting imports inside functions and a module named in a string
-  (`-m ml_stack.x`, `import_module`). It exists for what testmon cannot see, such as code that
+  (`-m poolhouse.x`, `import_module`). It exists for what testmon cannot see, such as code that
   only a child process runs. `--explain` prints each file and what selected it.
 
 It runs the full tier, and says why, when the change touches `pyproject.toml`,
@@ -112,7 +112,7 @@ clock from about 145 s to about 109 s on four workers.
 | `test_packaging.py`, `test_fleet_environment.py` | builds a wheel |
 | `test_bench_selfcheck.py` (four of them) | runs the whole self-check path |
 
-`test_packaging_install_runs.py` (slow) builds what it needs from the checkout: the ml-stack wheel through
+`test_packaging_install_runs.py` (slow) builds what it needs from the checkout: the Poolhouse wheel through
 `packaging/build.py` (hatchling, from the local pip cache or the index) and a stand-in wheelhouse of the
 extras plus every unconditional requirement read from the built wheel's metadata, then installs with
 `--no-index`. The Windows-installer tests need `pwsh` (skipped with that reason when it is absent). Nothing
@@ -131,16 +131,16 @@ Two costs are *not* marked, because marking them would move the cost rather than
 `conftest.py` has one autouse, suite-wide fixture, `_no_machine_state`. Every test gets it, so
 a test that forgets cannot reach any of these:
 
-- `ML_STACK_HOME` points the whole state root at an empty directory under the test's own
+- `POOLHOUSE_HOME` points the whole state root at an empty directory under the test's own
   `tmp_path`, which moves the runs store, the fit and profile records, the job files and
   every other home at once. The runs store is where an evening of measuring lives; a test
   that read it would pass or fail on what the laptop had been doing.
 - `bench.progress.serving_lines` and `bench.progress.results_since` — what is serving on this machine
   right now, and what the last job kept — answer empty.
 - Every variable that moves one corner back out of the state root
-  (`MLSTACK_BENCH_HOME`, `MLSTACK_INGEST_HOME`, `MLSTACK_FIT_FILE`, `MLSTACK_PROFILES_FILE`
-  and the rest) is *deleted*, along with `MLSTACK_BENCH_CEILING`, `MLSTACK_BENCH_TRACE`,
-  `MLSTACK_LLAMA_BUILD`, `MLSTACK_SEARCH` and `MLSTACK_TRAIN_CEILING`, so a shell that
+  (`POOLHOUSE_BENCH_HOME`, `POOLHOUSE_INGEST_HOME`, `POOLHOUSE_FIT_FILE`, `POOLHOUSE_PROFILES_FILE`
+  and the rest) is *deleted*, along with `POOLHOUSE_BENCH_CEILING`, `POOLHOUSE_BENCH_TRACE`,
+  `POOLHOUSE_LLAMA_BUILD`, `POOLHOUSE_SEARCH` and `POOLHOUSE_TRAIN_CEILING`, so a shell that
   exports one cannot change a result.
 
 A test that means to exercise one of these overrides it with its own `monkeypatch.setenv`
@@ -150,7 +150,7 @@ What still reads the real machine, on purpose:
 
 - `test_gguf.py` compares the shipped `source_dirs()` against `Path.home() / ".unsloth"`, which
   is the value under test — it asserts what the default *is*, and never opens the path.
-- `test_web.py`'s one live search is marked `live_net` and skipped unless `ML_STACK_LIVE_NET=1`.
+- `test_web.py`'s one live search is marked `live_net` and skipped unless `POOLHOUSE_LIVE_NET=1`.
 - `test_fleet_install.py` asserts the `HF_HOME` an installer *writes* into a plist or unit
   file. It composes a path from a home directory; it does not read one.
 - `test_serve_build.py` runs a real (tiny, hand-written) executable and real `strings` against
@@ -161,7 +161,7 @@ What still reads the real machine, on purpose:
 
 No test reaches a paid or quota-limited API (Anthropic, OpenAI, any cloud model) or a public
 endpoint on its own. A test that has to is marked `live_api` or `live_net`, and conftest skips it
-unless `ML_STACK_LIVE_API=1` or `ML_STACK_LIVE_NET=1` is set. A key or login in the environment
+unless `POOLHOUSE_LIVE_API=1` or `POOLHOUSE_LIVE_NET=1` is set. A key or login in the environment
 switches nothing on, and `conftest.py` deletes the credential variables (`live.CREDENTIALS`) from
 every test's environment. An autouse fixture refuses every other test a connection or a name
 lookup beyond loopback, the LAN and link-local addresses; the test fails and names the call site.
@@ -171,11 +171,11 @@ the broker are not remote services and are untouched by all of this.
 
 ## Attack runs against a served model
 
-`ml_stack.testing.verdicts` is what a model-backed red-team, canary or guard-eval run uses to
+`poolhouse.testing.verdicts` is what a model-backed red-team, canary or guard-eval run uses to
 avoid repeating itself. Attacks still go to the model one at a time through the broker.
 
 - **`run(attacks, execute, Subject(model_hash, guard_version))`** serves a *passing* verdict from
-  `$ML_STACK_CACHE/verdicts/attacks/` while its key is unchanged: the hash of the model file
+  `$POOLHOUSE_CACHE/verdicts/attacks/` while its key is unchanged: the hash of the model file
   (`model_hash`, read once per file version), the attack id, the guard or prompt version, and the
   bytes of every module or file in `Attack.surfaces`. Editing a guard, a prompt, a surface or
   swapping the model changes the key, so the attack runs again and a regression shows. A failing
@@ -204,12 +204,12 @@ Import them like the tests already do: `from conftest import write_gguf`.
 | `LLAMA_SERVER_HELP`, `fake_binary` | llama-server's `--help`, and an executable that answers it |
 | `fake_process`, `fake_memory` | one row of `psutil.process_iter`, and what `virtual_memory()` answers |
 | `a_row`, `scored_rows` | one measured bench question, and *n* of them with *h* hits over *s* seconds — so a run's F1 is `hits / questions` exactly |
-| `fit_files` (fixture) | points both halves of the fit source of truth (`package_file` and `$MLSTACK_FIT_FILE`) at `tmp_path`, fills them, and optionally fixes `hub.room` |
+| `fit_files` (fixture) | points both halves of the fit source of truth (`package_file` and `$POOLHOUSE_FIT_FILE`) at `tmp_path`, fills them, and optionally fixes `hub.room` |
 | `on_a_fresh_loop` | awaits a coroutine on an event loop in a thread of its own, so `asyncio.run` cannot trip over a loop a neighbouring test left running |
 
 ## The rules
 
-- A test builds its own fixtures in `tmp_path`. It never reads `data/`, `~/.ml-stack`,
+- A test builds its own fixtures in `tmp_path`. It never reads `data/`, `~/.poolhouse`,
   `~/.cache` or anything scraped.
 - Every name is invented. Reproduce a real value's *shape* when that is what revealed a bug,
   never its content. `tests/known-fixtures.txt` lists the invented names already in use.
@@ -221,17 +221,17 @@ Import them like the tests already do: `from conftest import write_gguf`.
 
 ## Writes under the real state root
 
-Tests run with `HOME`, `ML_STACK_HOME` and `ML_STACK_CACHE` moved to a temporary directory, so a
-write under the real `~/.ml-stack` can only come from a bug that bypasses home resolution. The
+Tests run with `HOME`, `POOLHOUSE_HOME` and `POOLHOUSE_CACHE` moved to a temporary directory, so a
+write under the real `~/.poolhouse` can only come from a bug that bypasses home resolution. The
 session fixture `_real_home` snapshots that tree before the run and judges it after
-(`tests/state_attribution.py`). Brokers, the keystore, `ml-stack-bench prepare` and the sentinel of
+(`tests/state_attribution.py`). Brokers, the keystore, `poolhouse-bench prepare` and the sentinel of
 other sessions write there too, so the rule is:
 
 1. Ignored: zero-byte `*.lock` files (an mtime change on one is not a state write), the
    top-level `LIVE_WRITERS`, the `LIVE_PATHS` logs, and files a live outside process is proven to
    own (`_external_state_write`).
-2. A remaining changed file **fails** the run when no other live ml-stack process (a console
-   script `ml-stack-*` or `python -m ml_stack...` outside this pytest session's own process tree)
+2. A remaining changed file **fails** the run when no other live Poolhouse process (a console
+   script `poolhouse-*` or `python -m poolhouse...` outside this pytest session's own process tree)
    was seen at the start or at the end of the run: CI, a calibration run, a quiet machine.
 3. When one was seen, the same files are a **warning**, printed once at teardown with the files
    and the writers seen, because the run cannot tell its own write from theirs.

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from test_kernel_isolation import check_selectors
 
-from ml_stack.activity.source_snapshot import SourceSnapshot, private_namespace
+from poolhouse.activity.source_snapshot import SourceSnapshot, private_namespace
 
 ROOT = Path(__file__).resolve().parent.parent
 GUEST_TMP = Path("/tmp")  # noqa: S108 - supervisor-created private container tmpfs
@@ -40,11 +40,11 @@ class ContainerRun:
         self.arguments = command[3:]
         account = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
         self.environment = {"PATH": os.defpath, "HOME": str(account), "LC_ALL": "C"}
-        self.image = environment.get("ML_STACK_LINUX_IMAGE", "python:3.13")
-        self.volume = environment.get("ML_STACK_LINUX_VOLUME", "ml-stack-linux-suite")
-        self.platform = environment.get("ML_STACK_LINUX_PLATFORM", "")
-        self.single = environment.get("ML_STACK_LINUX_SINGLE", "")
-        self.rebuild = environment.get("ML_STACK_LINUX_REBUILD", "")
+        self.image = environment.get("POOLHOUSE_LINUX_IMAGE", "python:3.13")
+        self.volume = environment.get("POOLHOUSE_LINUX_VOLUME", "poolhouse-linux-suite")
+        self.platform = environment.get("POOLHOUSE_LINUX_PLATFORM", "")
+        self.single = environment.get("POOLHOUSE_LINUX_SINGLE", "")
+        self.rebuild = environment.get("POOLHOUSE_LINUX_REBUILD", "")
         if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,255}", self.image)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", self.volume)
                 or self.platform not in ("", "linux/amd64", "linux/arm64")
@@ -65,7 +65,7 @@ class ContainerRun:
         self.socket_proof = asset_identity(socket)
         self.binary_proof = asset_identity(Path(self.binary), content=True)
         self.daemon = "unix://" + str(socket)
-        self.control = private_namespace(environment, "ml-stack-container-")
+        self.control = private_namespace(environment, "poolhouse-container-")
         self.config = self.control / "docker"
         self.config.mkdir(mode=0o700)
         (self.config / "config.json").write_text('{"auths":{}}')
@@ -118,7 +118,7 @@ class ContainerRun:
         validate_base_image(base)
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.base_image):
             raise RuntimeError("container admission: immutable image identity unavailable")
-        result = self.call("run", "-d", "--init", "--no-healthcheck", "--label", "ml-stack.test-run=" + self.owner,
+        result = self.call("run", "-d", "--init", "--no-healthcheck", "--label", "poolhouse.test-run=" + self.owner,
                            "-v", str(source) + ":/src:ro", "-v", self.volume + ":/venv",
                            "-e", "PIP_DISABLE_PIP_VERSION_CHECK=1", "-e", "PIP_CACHE_DIR=/venv/pipcache",
                            "-e", "IMAGE=" + self.base_image, "-e", "REBUILD=" + self.rebuild,
@@ -138,7 +138,7 @@ class ContainerRun:
         self.call("rm", "-f", self.setup)
         self.setup = None
         result = self.call("run", "-d", "--init", "--user", "1000:1000", "--no-healthcheck", "--read-only", "--network", "none", "--cap-drop", "ALL",
-                           "--security-opt", "no-new-privileges", "--label", "ml-stack.test-run=" + self.owner,
+                           "--security-opt", "no-new-privileges", "--label", "poolhouse.test-run=" + self.owner,
                            "--tmpfs", str(GUEST_TMP) + ":" + TMP_OPTIONS, "-w", "/work",
                            self.runtime_image, "sleep", "infinity")
         self.runtime = container_id(result.stdout)
@@ -242,7 +242,7 @@ def validate_container(row, proof, *, running=True):
     source, volume, runtime = proof.source, proof.volume, proof.runtime
     host, config = row.get("HostConfig", {}), row.get("Config", {})
     if (row.get("Id") != identifier or (running and not row.get("State", {}).get("Running"))
-            or row.get("Image") != image or config.get("Labels", {}).get("ml-stack.test-run") != owner
+            or row.get("Image") != image or config.get("Labels", {}).get("poolhouse.test-run") != owner
             or config.get("WorkingDir") != "/work" or config.get("Cmd") != ["sleep", "infinity"]
             or config.get("Entrypoint") or config.get("User", "") != ("1000:1000" if runtime else "") or config.get("Volumes")
             or config.get("Healthcheck", {}).get("Test", ["NONE"]) != ["NONE"]):
@@ -295,7 +295,7 @@ def asset_identity(path, content=False):
 
 
 def pinned_source(path, info, snapshot):
-    from ml_stack.activity.source_snapshot import FILE_LIMIT, TOTAL_LIMIT
+    from poolhouse.activity.source_snapshot import FILE_LIMIT, TOTAL_LIMIT
     if info.st_size > FILE_LIMIT or snapshot.total + info.st_size > TOTAL_LIMIT:
         raise RuntimeError("container admission: source bytes exceed bounds")
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)

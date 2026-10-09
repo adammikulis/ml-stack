@@ -10,15 +10,15 @@ from ._perfile import finder
 from ._util import calls, dotted, exempt, parse
 
 NAME = "file-locks"
-OWNER = "ml_stack.lock"
+OWNER = "poolhouse.lock"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/lock.py",)
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/lock.py",)
 MODULES = {"fcntl", "msvcrt"}
 
 
 def describe() -> str:
-    return "A lock taken on a file by hand; ml_stack.lock holds one across both platforms."
+    return "A lock taken on a file by hand; poolhouse.lock holds one across both platforms."
 
 
 def _handle_transfer_only(tree: ast.Module, binding: str) -> bool:

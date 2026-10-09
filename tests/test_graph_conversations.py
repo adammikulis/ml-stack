@@ -12,10 +12,10 @@ import json
 import pytest
 from conftest import threaded_server
 
-from ml_stack.graph.answers import Answer
-from ml_stack.graph.serve import Handler, bind
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.thread import conversation_store, follow
+from poolhouse.graph.answers import Answer
+from poolhouse.graph.serve import Handler, bind
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.thread import conversation_store, follow
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person"},

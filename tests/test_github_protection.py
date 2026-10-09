@@ -208,12 +208,12 @@ def test_signed_commits_are_required_only_when_asked(gp, tmp_path, monkeypatch, 
 def test_codeowners_rules_cover_the_paths_that_decide_what_the_gates_accept(gp):
     rules = gp.owners_rules((SCRIPT.parent.parent / ".github" / "CODEOWNERS").read_text())
     for path in ("scripts/hooks/pre-push", "scripts/gates/ruff.py", "budgets.json",
-                 "src/ml_stack/fleet/signing.py", "src/ml_stack/guard/x.py",
-                 "src/ml_stack/workspace/person_session.py", ".github/workflows/ci.yml",
+                 "src/poolhouse/fleet/signing.py", "src/poolhouse/guard/x.py",
+                 "src/poolhouse/workspace/person_session.py", ".github/workflows/ci.yml",
                  "scripts/land_run.py", "scripts/test", "pyproject.toml", ".claude/settings.json"):
         rule, owners = gp.owners_of(path, rules)
         assert rule != "*" and owners, path
-    assert gp.owners_of("src/ml_stack/serve/x.py", rules)[0] == "*"
+    assert gp.owners_of("src/poolhouse/serve/x.py", rules)[0] == "*"
 
 
 def test_codeowners_coverage_names_each_path_left_to_the_default_rule(gp, tmp_path, monkeypatch):

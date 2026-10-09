@@ -4,7 +4,7 @@ import pytest
 import test_fleet_chat_browser as chat_fixtures
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import tokens
+from poolhouse.workspace import tokens
 
 chat_browser = chat_fixtures.chat_browser
 pytestmark = pytest.mark.slow
@@ -98,7 +98,7 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     expect(board.get_by_role('button', name='Back to #experiments')).to_be_visible()
     expect(editor).to_be_in_viewport()
     expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
-    from ml_stack.workspace.agent_display import metadata
+    from poolhouse.workspace.agent_display import metadata
 
     worker_id = kit.ws.auth(worker).id
     worker_label = metadata(kit.ws.registry, worker_id)['display_name']
@@ -116,7 +116,7 @@ def test_shared_sidebar_routes_channels_dms_threads_and_saved_model_chats(chat_b
     expect(page.locator('#conversation-model').get_by_role('textbox', name='Message', exact=True)).to_be_in_viewport()
     expect(page.locator('#chat-send')).to_be_in_viewport()
     expect(sidebar).to_be_visible()
-    page.screenshot(path='/private/tmp/poolside-unified-conversations.png', full_page=True)
+    page.screenshot(path='/private/tmp/poolhouse-unified-conversations.png', full_page=True)
 
 
 def test_project_selection_never_falls_back_to_local_board(chat_browser):
@@ -198,8 +198,8 @@ def test_conversation_surfaces_consume_resolved_theme_tokens(chat_browser, monke
     }''', {'theme': theme, 'tokens': {
         '--ml-bg': surface, '--ml-surface': surface, '--ml-sunken': surface,
         '--ml-text': ink, '--ml-muted': ink, '--ml-accent': pink, '--ml-accent-ink': ink,
-        '--ml-on-accent': pink_ink, '--poolside-pink': pink, '--poolside-cyan': '#2de2e6',
-        '--poolside-pink-ink': pink_ink, '--ui-density': str(density), '--ml-font': 'Georgia, serif',
+        '--ml-on-accent': pink_ink, '--poolhouse-pink': pink, '--poolhouse-cyan': '#2de2e6',
+        '--poolhouse-pink-ink': pink_ink, '--ui-density': str(density), '--ml-font': 'Georgia, serif',
     }})
     expected = page.evaluate('''values => {
       const sample = document.createElement('span'); document.body.append(sample);
@@ -229,16 +229,16 @@ def test_conversation_surfaces_consume_resolved_theme_tokens(chat_browser, monke
     assert board.locator('main header').evaluate('node => getComputedStyle(node).backgroundColor') == expected[0]
     assert board.locator('.composer').evaluate('node => getComputedStyle(node).backgroundColor') == expected[0]
     assert board.get_by_label('Message', exact=True).evaluate('node => getComputedStyle(node).color') == expected[1]
-    page.screenshot(path=f'/private/tmp/poolside-conversations-theme-{theme}.png', full_page=True)
+    page.screenshot(path=f'/private/tmp/poolhouse-conversations-theme-{theme}.png', full_page=True)
 
 
 def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, monkeypatch, tmp_path):
     from playwright.sync_api import expect
 
-    from ml_stack.fleet import project_client, project_source
-    from ml_stack.fleet.projects import ProjectRegistry, identity
-    from ml_stack.net import git
-    from ml_stack.workspace.remote_host import WorkspaceHost
+    from poolhouse.fleet import project_client, project_source
+    from poolhouse.fleet.projects import ProjectRegistry, identity
+    from poolhouse.net import git
+    from poolhouse.workspace.remote_host import WorkspaceHost
 
     checkout = tmp_path / 'experiment-workspace'
     checkout.mkdir()
@@ -257,7 +257,7 @@ def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, m
     served, page = chat_browser
     served.ui.projects, served.ui.workspaces = registry, host
     session = served.ui.sessions.open('fixture-person', 'launch-ticket')
-    page.context.add_cookies([{'name': 'ml_stack_ui', 'value': session.sid,
+    page.context.add_cookies([{'name': 'poolhouse_ui', 'value': session.sid,
                               'url': f'http://127.0.0.1:{served.port}/ui', 'httpOnly': True}])
     assert registry.get(project).shared is False
     assert registry.list() == []
@@ -278,7 +278,7 @@ def test_unshared_workspace_is_selected_and_team_messages_render(chat_browser, m
 
 
 def _existing_dm_directory(monkeypatch, tmp_path):
-    from ml_stack.workspace.agent_display import metadata
+    from poolhouse.workspace.agent_display import metadata
 
     kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
     kit.limits(sends_per_window=1000)
@@ -308,7 +308,7 @@ def test_sidebar_keeps_agent_directory_in_new_dm_and_searches_existing_conversat
     expect(direct.locator('[aria-label="1 unread messages"]')).to_be_visible()
     expect(page.locator('#chat-list').get_by_role('link', name='Experiment plan', exact=True)).to_be_visible()
     expect(page.locator('#conversation-models').get_by_role('button', name='● model-a', exact=True)).to_be_in_viewport()
-    page.screenshot(path='/private/tmp/poolside-sidebar-existing-dms.png', full_page=True)
+    page.screenshot(path='/private/tmp/poolhouse-sidebar-existing-dms.png', full_page=True)
     search = page.get_by_label('Search conversations and channels', exact=True)
     expect(search).to_have_attribute('placeholder', 'Search chats & channels')
     search.fill('Experiment')
@@ -373,7 +373,7 @@ def test_channel_history_scrolls_with_composer_visible_at_all_viewport_sizes(cha
         expect(board.locator('.msg pre').last).to_be_in_viewport()
         expect(composer).to_be_in_viewport()
         composer.fill('Unsent channel draft')
-        page.screenshot(path=f'/private/tmp/poolside-channel-fixed-{width}-{height}.png')
+        page.screenshot(path=f'/private/tmp/poolhouse-channel-fixed-{width}-{height}.png')
         composer.fill('')
 
     page.get_by_role('button', name='Channels and model chats ▾').click()
@@ -381,12 +381,12 @@ def test_channel_history_scrolls_with_composer_visible_at_all_viewport_sizes(cha
     expect(composer).to_be_in_viewport()
     expect(board.get_by_role('button', name='Send', exact=True)).to_be_in_viewport()
     assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
-    page.screenshot(path='/private/tmp/poolside-channel-fixed-mobile-expanded.png')
+    page.screenshot(path='/private/tmp/poolhouse-channel-fixed-mobile-expanded.png')
 
 def test_bounded_history_navigation_keeps_message_nodes_scroll_and_draft(chat_browser, monkeypatch, tmp_path):
     from playwright.sync_api import expect
 
-    from ml_stack.workspace.board_pages import page as message_page
+    from poolhouse.workspace.board_pages import page as message_page
 
     kit = Kit(clean_env(monkeypatch, tmp_path / 'workspace'))
     tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)

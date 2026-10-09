@@ -11,7 +11,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 pub const SECRET_FILE: &str = "app-identity";
-pub const HEADER: &str = "X-ML-Stack-Challenge";
+pub const HEADER: &str = "X-Poolhouse-Challenge";
 const BLOCK: usize = 64;
 const SECRET_BYTES: usize = 32;
 const CHALLENGE_BYTES: usize = 16;

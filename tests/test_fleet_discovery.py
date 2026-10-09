@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.discovery import (
+from poolhouse.fleet.discovery import (
     PROTOCOL,
     Advertiser,
     Beacon,
@@ -39,7 +39,7 @@ from ml_stack.fleet.discovery import (
     load_cluster_key,
     named_apart,
 )
-from ml_stack.fleet.remote import Peer, PeerError
+from poolhouse.fleet.remote import Peer, PeerError
 
 #: Real UDP on a real interface and a real daemon subprocess, per the docstring
 #: above -- so every test here waits out a network timeout at least once.
@@ -65,7 +65,7 @@ def _heard_by_two(dest: str, via: str = "") -> str:
     out of the interface at ``via`` when given, or why it was not sent."""
     import struct
 
-    from ml_stack.fleet.discovery import _socket, default_group
+    from poolhouse.fleet.discovery import _socket, default_group
 
     port = _free_udp_port()
     both = [_socket(broadcast=True, bind=("", port), group=default_group())
@@ -97,7 +97,7 @@ def _heard_by_two(dest: str, via: str = "") -> str:
 
 def _reach(port: int) -> dict[str, str]:
     """Each way a query goes out, and how many of two listeners on one port heard it."""
-    from ml_stack.fleet.discovery import default_group, primary_ip
+    from poolhouse.fleet.discovery import default_group, primary_ip
 
     return {"primary": primary_ip(), "group": _heard_by_two(default_group()),
             "group on loopback": _heard_by_two(default_group(), "127.0.0.1"),
@@ -107,7 +107,7 @@ def _reach(port: int) -> dict[str, str]:
 
 @pytest.fixture
 def key(tmp_path) -> bytes:
-    create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
+    create_cluster_key(tmp_path / "cluster.key", group="poolhouse")
     return load_cluster_key(tmp_path / "cluster.key")
 
 
@@ -119,16 +119,16 @@ def port() -> int:
 # -- the key -------------------------------------------------------------
 def test_key_is_created_once_and_not_silently_rotated(tmp_path):
     p = tmp_path / "cluster.key"
-    first = create_cluster_key(p, group="ml-stack")
-    assert create_cluster_key(p, group="ml-stack") == first, "re-running init must not evict the cluster"
-    assert create_cluster_key(p, overwrite=True, group="ml-stack") != first
+    first = create_cluster_key(p, group="poolhouse")
+    assert create_cluster_key(p, group="poolhouse") == first, "re-running init must not evict the cluster"
+    assert create_cluster_key(p, overwrite=True, group="poolhouse") != first
 
 
 def test_the_file_holding_the_keys_is_not_world_readable(tmp_path):
-    from ml_stack.fleet.discovery import clusters_path
+    from poolhouse.fleet.discovery import clusters_path
 
     p = tmp_path / "cluster.key"
-    create_cluster_key(p, group="ml-stack")
+    create_cluster_key(p, group="poolhouse")
     assert oct(clusters_path(p).stat().st_mode)[-3:] == "600"
 
 
@@ -137,8 +137,8 @@ def test_missing_key_reads_as_none(tmp_path):
 
 
 def test_token_is_a_pure_function_of_the_key(tmp_path):
-    a = create_cluster_key(tmp_path / "a.key", group="ml-stack").encode()
-    b = create_cluster_key(tmp_path / "b.key", group="ml-stack").encode()
+    a = create_cluster_key(tmp_path / "a.key", group="poolhouse").encode()
+    b = create_cluster_key(tmp_path / "b.key", group="poolhouse").encode()
     assert derive_token(a) == derive_token(a), "both ends must compute the same token"
     assert derive_token(a) != derive_token(b)
     assert a.decode() not in derive_token(a), "the token must not leak the key"
@@ -163,7 +163,7 @@ def test_nothing_is_found_when_nothing_is_advertising(key, port):
 
 
 def test_a_peer_with_a_different_key_is_invisible(key, port, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="poolhouse").encode()
     with Advertiser(Beacon(name="stranger", port=8770), other, port=port,
                     interval_s=0.2):
         assert discover(key, timeout_s=1.0, port=port) == [], \
@@ -187,7 +187,7 @@ def test_two_peers_on_one_port_are_both_found_when_the_lan_refuses_multicast(
         key, port, monkeypatch):
     """A LAN that refuses every multicast and broadcast (EHOSTUNREACH on a macOS runner)
     leaves loopback, where a unicast reaches one of two sockets sharing a port."""
-    from ml_stack.fleet import discovery
+    from poolhouse.fleet import discovery
 
     real = discovery._destinations
     monkeypatch.setattr(discovery, "_destinations", lambda group, port: [
@@ -274,12 +274,12 @@ def test_a_beacon_is_neither_readable_nor_guessable_from(key):
                       "beacon": {"name": "rtx-box", "port": 8770}})
     assert b"rtx-box" not in raw and b"8770" not in raw and b"mac" not in raw
     assert _verify(key, raw, kind="who") is None, "a beacon is not accepted as another kind"
-    for words in ("correct horse battery staple", "ml-stack", "password"):
+    for words in ("correct horse battery staple", "poolhouse", "password"):
         assert _verify(words.encode(), raw, kind="beacon") is None
 
 
 def test_a_beacon_signed_with_another_key_is_refused(key, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="poolhouse").encode()
     raw = _pack(other, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
                         "beacon": {"name": "evil", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is None
@@ -325,11 +325,11 @@ def _booted(tmp_path, *extra: str):
     """Boot the actual daemon the way a machine would, rooted in ``tmp_path/traind``
     with ``extra`` flags, and yield ``(keyfile, disco_port, http_port, log)``."""
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile, group="ml-stack")
+    create_cluster_key(keyfile, group="poolhouse")
     disco_port = _free_udp_port()
     http_port = _free_tcp_port()
     env = {**os.environ,
-           "ML_STACK_DISCOVERY_PORT": str(disco_port),
+           "POOLHOUSE_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": str(REPO / "src"),
            "PYTHONFAULTHANDLER": "1",
            "PYTHONUNBUFFERED": "1"}
@@ -339,7 +339,7 @@ def _booted(tmp_path, *extra: str):
     log = tmp_path / "traind.out"
     fh = log.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "ml_stack.fleet.daemon",
+        [sys.executable, "-m", "poolhouse.fleet.daemon",
          "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", "testbox",
          "--cluster-key", str(keyfile), *extra],
@@ -389,12 +389,12 @@ def _driver(keyfile: Path, http_port: int) -> Peer:
 
 def _probe(rtx: Peer) -> dict:
     """The one command a daemon is asked to run in these tests: its own short calibration."""
-    return rtx.submit(["python3", "-m", "ml_stack.fleet.calibration", "--budget", "0.05"],
+    return rtx.submit(["python3", "-m", "poolhouse.fleet.calibration", "--budget", "0.05"],
                       name="probe")
 
 
 def test_a_restarted_daemon_keeps_its_machine_id(tmp_path):
-    from ml_stack.home import machine_id
+    from poolhouse.home import machine_id
 
     seen = []
     for _ in range(2):
@@ -432,12 +432,12 @@ def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, 
 
 # -- the measuring gate reads the daemon's own bench home, not this machine's ----
 def test_a_daemon_in_its_own_root_runs_training_while_some_other_home_is_measuring(tmp_path):
-    """The failure this reproduces: the daemon's bench gate read ``~/.ml-stack/bench``
+    """The failure this reproduces: the daemon's bench gate read ``~/.poolhouse/bench``
     whatever ``--root`` said, so on a developer's box with a real benchmark running, a
     daemon booted in a test's directory held every training job queued -- the gate told
     the truth about the wrong machine. Here the "real" home is another tmp dir with its
     lock held, and the daemon, pointed nowhere near it, must not care."""
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
 
     elsewhere = tmp_path / "somebody-elses-home" / "bench"
     with (only_one(elsewhere / "measuring.lock", announce=lambda *a, **k: None),
@@ -457,7 +457,7 @@ def test_a_daemon_pointed_at_a_held_bench_home_keeps_training_queued_and_says_so
     """The gate still works once it reads the right home: a daemon told its bench home
     is the held one queues training, says why in its log, and runs the job the moment
     the lock goes."""
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
 
     home = tmp_path / "bench-of-this-box"
     with _booted(tmp_path, "--bench-home", str(home)) as (keyfile, _disco, http_port, log):
@@ -517,9 +517,9 @@ def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
 
 def test_peers_ls_reports_the_running_daemon(traind):
     keyfile, disco_port, http_port, _log = traind
-    env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
+    env = {**os.environ, "POOLHOUSE_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": str(REPO / "src")}
-    r = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers",
+    r = subprocess.run([sys.executable, "-m", "poolhouse.fleet.peers",
                         "--cluster-key", str(keyfile), "ls", "--json",
                         "--timeout", "3"],
                        env=env, capture_output=True, text=True)
@@ -553,7 +553,7 @@ def test_a_busy_daemon_stops_advertising_itself_as_idle(key, port):
 
 def test_a_machine_holding_hundreds_of_models_is_still_found(key, port):
     """The models go on the beacon, and a beacon is one datagram. Past 65,507 bytes
-    `sendto` refuses it and the daemon is in no `ml-stack-peers ls` at all."""
+    `sendto` refuses it and the daemon is in no `poolhouse-peers ls` at all."""
     held = [{"name": f"a-model-with-a-long-enough-name-{n:04d}.gguf", "size": n}
             for n in range(900)]
     beacon = Beacon(name="hoarder", port=8770,
@@ -572,8 +572,8 @@ def test_a_machine_holding_hundreds_of_models_is_still_found(key, port):
 def test_a_beacon_too_big_to_leave_the_machine_is_said_out_loud(key, port):
     """Vanishing from the fleet with nothing written anywhere is the failure nobody can
     diagnose: every other machine simply stops listing this one."""
-    from ml_stack import log
-    from ml_stack.fleet.discovery import MAX_DATAGRAM
+    from poolhouse import log
+    from poolhouse.fleet.discovery import MAX_DATAGRAM
 
     lines: list[str] = []
     beacon = Beacon(name="x" * (MAX_DATAGRAM + 1000), port=8770)
@@ -626,19 +626,19 @@ class TestPassphrase:
 
     @pytest.mark.parametrize("bad", ["", "abc", "1234", "    abcd   "])
     def test_a_passphrase_under_five_characters_is_refused(self, bad):
-        from ml_stack.fleet.discovery import check_length
+        from poolhouse.fleet.discovery import check_length
 
         with pytest.raises(DiscoveryError, match=r"The passphrase needs at least 5 characters\."):
             check_length(bad)
 
     def test_five_characters_and_surrounding_whitespace_are_accepted(self):
-        from ml_stack.fleet.discovery import MIN_JOIN_LENGTH, check_length
+        from poolhouse.fleet.discovery import MIN_JOIN_LENGTH, check_length
 
         assert MIN_JOIN_LENGTH == 5
         assert check_length(f"  {'a' * 5}\n") == "aaaaa"
 
     def test_joining_writes_a_key_only_this_user_can_read(self, tmp_path):
-        from ml_stack.fleet.discovery import clusters_path
+        from poolhouse.fleet.discovery import clusters_path
         from tests.cluster_support import join_cluster
 
         keyfile = tmp_path / "cluster.key"
@@ -650,7 +650,7 @@ class TestPassphrase:
     def test_a_cluster_key_is_random_and_256_bits(self, tmp_path):
         import base64
 
-        from ml_stack.fleet.discovery import mint_cluster
+        from poolhouse.fleet.discovery import mint_cluster
 
         one = mint_cluster("home", tmp_path / "a.key").key
         two = mint_cluster("home", tmp_path / "b.key").key
@@ -678,7 +678,7 @@ def test_two_passphrase_groups_share_a_network_without_seeing_each_other(port, t
 
 class TestTheGroupIsRemembered:
     def test_joining_records_which_cluster_it_joined(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group
+        from poolhouse.fleet.discovery import cluster_group
         from tests.cluster_support import join_cluster
 
         join_cluster("correct horse battery", group="garage",
@@ -686,7 +686,7 @@ class TestTheGroupIsRemembered:
         assert cluster_group(tmp_path / "cluster.key") == "garage"
 
     def test_the_keys_are_not_left_where_anyone_can_read_them(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group, clusters_path
+        from poolhouse.fleet.discovery import cluster_group, clusters_path
         from tests.cluster_support import join_cluster
 
         keyfile = tmp_path / "cluster.key"
@@ -696,7 +696,7 @@ class TestTheGroupIsRemembered:
         assert cluster_group(keyfile) == "garage"
 
     def test_a_machine_never_joined_is_in_no_group(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group
+        from poolhouse.fleet.discovery import cluster_group
 
         assert cluster_group(tmp_path / "nothing.key") is None
 
@@ -708,7 +708,7 @@ class TestBelongingToSeveralClusters:
     OTHER = "a completely different set of words"
 
     def test_it_joins_more_than_one_and_keeps_both(self, tmp_path):
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet.discovery import memberships
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
@@ -719,7 +719,7 @@ class TestBelongingToSeveralClusters:
         assert len({m.key for m in memberships(anchor)}) == 2
 
     def test_leaving_one_leaves_the_others_alone(self, tmp_path):
-        from ml_stack.fleet.discovery import leave, memberships
+        from poolhouse.fleet.discovery import leave, memberships
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
@@ -730,7 +730,7 @@ class TestBelongingToSeveralClusters:
         assert [m.group for m in memberships(anchor)] == ["work"]
 
     def test_leaving_the_last_one_leaves_no_cluster(self, tmp_path):
-        from ml_stack.fleet.discovery import in_cluster, leave
+        from poolhouse.fleet.discovery import in_cluster, leave
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
@@ -740,7 +740,7 @@ class TestBelongingToSeveralClusters:
         assert in_cluster(anchor) is False
 
     def test_the_machine_answers_as_the_first_one(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group, leave, load_cluster_key, memberships
+        from poolhouse.fleet.discovery import cluster_group, leave, load_cluster_key, memberships
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
@@ -754,7 +754,7 @@ class TestBelongingToSeveralClusters:
         assert cluster_group(anchor) == "work", "it did not promote the one left"
 
     def test_joining_the_same_cluster_twice_does_not_double_it(self, tmp_path):
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet.discovery import memberships
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
@@ -763,7 +763,7 @@ class TestBelongingToSeveralClusters:
         assert [m.group for m in memberships(anchor)] == ["home"]
 
     def test_a_new_passphrase_for_a_cluster_replaces_the_old_key(self, tmp_path):
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet.discovery import memberships
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
@@ -776,11 +776,11 @@ class TestBelongingToSeveralClusters:
 
     def test_a_key_without_current_membership_does_not_join_a_cluster(
             self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group, in_cluster, load_cluster_key
+        from poolhouse.fleet.discovery import cluster_group, in_cluster, load_cluster_key
         from tests.cluster_support import key_for
 
         anchor = tmp_path / "cluster.key"
-        key = key_for(self.WORDS, "ml-stack")
+        key = key_for(self.WORDS, "poolhouse")
         anchor.write_text(key.decode() + "\n")
 
         assert not in_cluster(anchor)
@@ -788,7 +788,7 @@ class TestBelongingToSeveralClusters:
         assert cluster_group(anchor) is None
 
     def test_a_legacy_group_file_does_not_restore_membership(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group
+        from poolhouse.fleet.discovery import cluster_group
         from tests.cluster_support import key_for
 
         anchor = tmp_path / "cluster.key"
@@ -798,18 +798,18 @@ class TestBelongingToSeveralClusters:
         assert cluster_group(anchor) is None
 
     def test_current_memberships_never_adopt_an_old_key(self, tmp_path):
-        from ml_stack.fleet.discovery import leave, memberships
+        from poolhouse.fleet.discovery import leave, memberships
         from tests.cluster_support import join, key_for
 
         anchor = tmp_path / "cluster.key"
-        anchor.write_text(key_for(self.WORDS, "ml-stack").decode())
+        anchor.write_text(key_for(self.WORDS, "poolhouse").decode())
         assert memberships(anchor) == []
         assert not (tmp_path / "cluster.json").exists()
 
         join(self.WORDS, group="lab", path=anchor)
         assert {m.group for m in memberships(anchor)} == {"lab"}
 
-        leave("ml-stack", path=anchor)
+        leave("poolhouse", path=anchor)
         leave("lab", path=anchor)
         assert memberships(anchor) == [], "leaving must not be undone by the old file"
 
@@ -828,7 +828,7 @@ class TestBelongingToSeveralClusters:
         assert home[0].key != work[0].key
 
     def test_a_corrupt_list_reads_as_no_clusters(self, tmp_path):
-        from ml_stack.fleet.discovery import clusters_path, memberships
+        from poolhouse.fleet.discovery import clusters_path, memberships
 
         anchor = tmp_path / "cluster.key"
         clusters_path(anchor).parent.mkdir(parents=True, exist_ok=True)
@@ -838,7 +838,7 @@ class TestBelongingToSeveralClusters:
 
 def test_failed_discovery_reply_does_not_claim_global_fleet_absence(key, port):
     """A single unreachable query socket says nothing about other discovery routes."""
-    from ml_stack import log
+    from poolhouse import log
 
     lines: list[str] = []
     with log.to(lambda stream, text: lines.append(text)), \

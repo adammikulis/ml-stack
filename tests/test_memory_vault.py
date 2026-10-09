@@ -12,10 +12,10 @@ import keyring
 import pytest
 from keyring.backends import null
 
-import ml_stack
-from ml_stack import files, home, keystore, memory
-from ml_stack.memory import vault
-from ml_stack.memory.store import Setup, Tampered
+import poolhouse
+from poolhouse import files, home, keystore, memory
+from poolhouse.memory import vault
+from poolhouse.memory.store import Setup, Tampered
 from tests import memory_keys
 
 ring = memory_keys.ring
@@ -69,7 +69,7 @@ def test_the_default_store_in_the_state_directory_holds_no_plaintext():
     fill(store)
     store.forget(store.facts()[0].id)
     assert_no_plaintext(home.state())
-    assert "ml-stack-memory" not in "".join(p.read_text(errors="ignore") for p in every_file(home.state()))
+    assert "poolhouse-memory" not in "".join(p.read_text(errors="ignore") for p in every_file(home.state()))
 
 
 def test_a_write_that_dies_midway_leaves_only_ciphertext(tmp_path, monkeypatch):
@@ -93,12 +93,12 @@ def test_a_write_that_dies_midway_leaves_only_ciphertext(tmp_path, monkeypatch):
 
 
 def test_a_killed_process_leaves_only_ciphertext(tmp_path):
-    code = ("import os\nfrom ml_stack import memory\n"
+    code = ("import os\nfrom poolhouse import memory\n"
             f"s = memory.Store({str(tmp_path / 'graph.enc')!r}, scope=lambda: {{}})\n"
             f"s.add({CANARY!r} + ' dies', 'note', entities=['topic:{ENTITY}'])\n"
             f"s.add({CANARY!r} + ' dies again', 'note')\nos._exit(9)\n")
     env = {**os.environ, vault.KEYS_ENV: "passphrase", vault.PASSPHRASE_ENV: "correct horse",
-           "PYTHONPATH": str(Path(ml_stack.__file__).parent.parent), "ML_STACK_HOME": str(tmp_path / "h")}
+           "PYTHONPATH": str(Path(poolhouse.__file__).parent.parent), "POOLHOUSE_HOME": str(tmp_path / "h")}
     done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True,
                           cwd=tmp_path, check=False)
     assert done.returncode == 9, done.stderr
@@ -262,7 +262,7 @@ def test_rekey_interrupted_before_the_write_still_opens_under_the_old_key(tmp_pa
 
 
 def test_the_cli_rekey_is_for_a_person_only(monkeypatch, capsys):
-    from ml_stack.memory import cli
+    from poolhouse.memory import cli
 
     monkeypatch.setenv("CLAUDECODE", "1")
     assert cli.main(["rekey"]) == cli.DENIED

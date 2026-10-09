@@ -11,13 +11,13 @@ import threading
 import pytest
 from onboard_support import Recorder, identity, info, requests
 
-from ml_stack.fleet import tailnet, tls
-from ml_stack.fleet.onboard import cli
-from ml_stack.fleet.onboard.lan import NotLocal, in_tailnet, require_local
-from ml_stack.fleet.onboard.nearby import decode
-from ml_stack.fleet.onboard.pairing import fingerprint_of
-from ml_stack.fleet.onboard.requests import Devices
-from ml_stack.fleet.onboard.routes import Route, learn, pinned_probe, reach, resolve
+from poolhouse.fleet import tailnet, tls
+from poolhouse.fleet.onboard import cli
+from poolhouse.fleet.onboard.lan import NotLocal, in_tailnet, require_local
+from poolhouse.fleet.onboard.nearby import decode
+from poolhouse.fleet.onboard.pairing import fingerprint_of
+from poolhouse.fleet.onboard.requests import Devices
+from poolhouse.fleet.onboard.routes import Route, learn, pinned_probe, reach, resolve
 
 ME, PEER = "100.64.0.1", "100.100.5.7"
 FP = "ab" * 32

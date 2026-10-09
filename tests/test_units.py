@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.units import human_bytes
+from poolhouse.units import human_bytes
 
 K, M, G, T = 1024, 1024**2, 1024**3, 1024**4
 
@@ -40,7 +40,7 @@ def test_a_float_is_taken_as_readily_as_an_int():
 def test_a_long_run_of_digits_without_a_unit_is_read_quickly():
     import time
 
-    from ml_stack.units import parse_duration
+    from poolhouse.units import parse_duration
 
     start = time.monotonic()
     parse_duration("0" * 50_000 + "x")

@@ -13,11 +13,11 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import runtime, runtime_board, runtime_cli, runtime_deploy, runtime_store
-from ml_stack.fleet import runtime_wheel
-from ml_stack.lock import only_one
-from ml_stack.workspace.claims import Claims
-from ml_stack.workspace.identity import AGENT, Identity
+from poolhouse import runtime, runtime_board, runtime_cli, runtime_deploy, runtime_store
+from poolhouse.fleet import runtime_wheel
+from poolhouse.lock import only_one
+from poolhouse.workspace.claims import Claims
+from poolhouse.workspace.identity import AGENT, Identity
 
 pytestmark = pytest.mark.slow
 
@@ -38,31 +38,31 @@ def commit(repo, name, text="x"):
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     clean_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("PIP_NO_INDEX", "1")
-    monkeypatch.delenv("ML_STACK_RUNTIME_ENSURE", raising=False)
-    monkeypatch.setenv("ML_STACK_WORKSPACE_AGENT", "runtime-agent")
+    monkeypatch.delenv("POOLHOUSE_RUNTIME_ENSURE", raising=False)
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_AGENT", "runtime-agent")
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "dev")
-    (repo / "src" / "ml_stack").mkdir(parents=True)
-    (repo / "src" / "ml_stack" / "__init__.py").write_text("")
+    (repo / "src" / "poolhouse").mkdir(parents=True)
+    (repo / "src" / "poolhouse" / "__init__.py").write_text("")
     launchers = tmp_path / "bin"
     launchers.mkdir(mode=0o700)
     return repo, launchers, tmp_path
 
 
 def wheel(stage, commit_id):
-    path = stage / commit_id / "ml_stack-0.1.0-py3-none-any.whl"
+    path = stage / commit_id / "poolhouse-0.1.0-py3-none-any.whl"
     path.parent.mkdir(parents=True)
     contents = {
-        "ml_stack/__init__.py": b"",
-        "ml_stack/workspace/__init__.py": b"",
-        "ml_stack/workspace/cli.py": f"def main():\n    print('help {commit_id[:7]}')\n    return 0\n".encode(),
-        "ml_stack-0.1.0.dist-info/METADATA": b"Metadata-Version: 2.1\nName: ml-stack\nVersion: 0.1.0\n",
-        "ml_stack-0.1.0.dist-info/WHEEL": b"Wheel-Version: 1.0\nGenerator: t\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
-        "ml_stack-0.1.0.dist-info/entry_points.txt": b"[console_scripts]\nml-stack-workspace = ml_stack.workspace.cli:main\n",
-        "ml_stack-0.1.0.dist-info/RECORD": b"",
+        "poolhouse/__init__.py": b"",
+        "poolhouse/workspace/__init__.py": b"",
+        "poolhouse/workspace/cli.py": f"def main():\n    print('help {commit_id[:7]}')\n    return 0\n".encode(),
+        "poolhouse-0.1.0.dist-info/METADATA": b"Metadata-Version: 2.1\nName: poolhouse\nVersion: 0.1.0\n",
+        "poolhouse-0.1.0.dist-info/WHEEL": b"Wheel-Version: 1.0\nGenerator: t\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        "poolhouse-0.1.0.dist-info/entry_points.txt": b"[console_scripts]\npoolhouse-workspace = poolhouse.workspace.cli:main\n",
+        "poolhouse-0.1.0.dist-info/RECORD": b"",
     }
     with zipfile.ZipFile(path, "w") as archive:
         for name, data in contents.items():
@@ -92,7 +92,7 @@ def plan_for(repo, launchers, **kw):
 
 
 def launcher_output(launchers):
-    done = subprocess.run([sys.executable, str(launchers / "ml-stack-workspace")], capture_output=True, text=True,
+    done = subprocess.run([sys.executable, str(launchers / "poolhouse-workspace")], capture_output=True, text=True,
                           timeout=60, env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"})
     return done.stdout.strip()
 
@@ -117,12 +117,12 @@ def test_a_failed_smoke_leaves_the_selection_and_launchers_and_records_the_failu
     repo, launchers, _ = world
     first = commit(repo, "a")
     runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
-    before = (launchers / "ml-stack-workspace").read_bytes()
+    before = (launchers / "poolhouse-workspace").read_bytes()
     second = commit(repo, "b")
     outcome = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(hook_code=3))
     assert outcome.action == "failed" and "claude-session-start" in outcome.detail
     assert runtime_store.selection()["commit"] == first
-    assert (launchers / "ml-stack-workspace").read_bytes() == before
+    assert (launchers / "poolhouse-workspace").read_bytes() == before
     assert not (runtime.directory() / second).exists() or not list((runtime.directory() / second).iterdir())
     assert runtime_store.read_state()["last_failure"]["commit"] == second
 
@@ -272,8 +272,8 @@ def test_status_reports_selection_and_build_state(world, capsys):
 def test_outcomes_reach_the_board_as_announcements_and_failures_as_incidents(world, monkeypatch, tmp_path):
     repo, launchers, _ = world
     commit(repo, "a")
-    kit = Kit(Path(os.environ["ML_STACK_WORKSPACE_HOME"]))
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    kit = Kit(Path(os.environ["POOLHOUSE_WORKSPACE_HOME"]))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     first = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
     assert runtime_board.announce(first, "", agent="runtime-agent")
     second_commit = commit(repo, "b")
@@ -289,7 +289,7 @@ def test_outcomes_reach_the_board_as_announcements_and_failures_as_incidents(wor
 
 
 def test_the_device_profile_carries_the_runtime_commit(world):
-    from ml_stack.workspace import device_metadata
+    from poolhouse.workspace import device_metadata
     assert device_metadata.normalize({"runtime_commit": "a" * 40})["runtime_commit"] == "a" * 40
     assert device_metadata.normalize({})["runtime_commit"] == ""
     with pytest.raises(ValueError):
@@ -297,7 +297,7 @@ def test_the_device_profile_carries_the_runtime_commit(world):
 
 
 def test_the_daemon_follows_the_selected_runtime_only_when_idle(world, monkeypatch):
-    from ml_stack.fleet import updates
+    from poolhouse.fleet import updates
     assert updates.follow_runtime(idle=lambda: True) is None
     repo, launchers, _ = world
     head = commit(repo, "a")
@@ -332,15 +332,15 @@ def test_a_launcher_with_no_usable_runtime_says_so_and_exits(world):
     import shutil
     shutil.rmtree(runtime.directory())
     runtime.directory().mkdir(parents=True)
-    done = subprocess.run([sys.executable, str(launchers / "ml-stack-workspace")], capture_output=True, text=True, timeout=60)
-    assert done.returncode != 0 and "no usable ml-stack runtime" in done.stderr
+    done = subprocess.run([sys.executable, str(launchers / "poolhouse-workspace")], capture_output=True, text=True, timeout=60)
+    assert done.returncode != 0 and "no usable poolhouse runtime" in done.stderr
 
 
 def test_a_command_with_an_invalid_checkout_writes_nothing(world, capsys, tmp_path):
     repo, launchers, _ = world
     commit(repo, "a")
     assert runtime_cli.main(["ensure", "--checkout", str(tmp_path), "--launchers", str(launchers)]) == 1
-    assert "not an ml-stack source checkout" in capsys.readouterr().err
+    assert "not a poolhouse source checkout" in capsys.readouterr().err
     assert not list(launchers.iterdir()) and not runtime.directory().exists()
 
 
@@ -360,17 +360,17 @@ def tree_at(root, commit_id, verified_at, name, **options):
     python.write_text(f"#!/bin/sh\necho {name}\n")
     python.chmod(0o700)
     if importable:
-        (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack").mkdir(parents=True)
-        (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack" / "__init__.py").write_text("")
+        (prefix / "lib" / "python3.13" / "site-packages" / "poolhouse").mkdir(parents=True)
+        (prefix / "lib" / "python3.13" / "site-packages" / "poolhouse" / "__init__.py").write_text("")
     (prefix / "verified.json").write_text(json.dumps({"commit": commit_id, "version": "0", "identity": "x",
                                                       "verified_at": verified_at}))
     if created:
-        (prefix / "created.json").write_text(json.dumps({"tool": "ml-stack-runtime", "agent": "a"}))
+        (prefix / "created.json").write_text(json.dumps({"tool": "poolhouse-runtime", "agent": "a"}))
     return prefix
 
 
 def render_launcher(tmp_path, root, python="/nonexistent/bin/python"):
-    path = tmp_path / "ml-stack-probe"
+    path = tmp_path / "poolhouse-probe"
     path.write_text(runtime.LAUNCHER.format(root=str(root), python=python, arguments="['-c', 'pass']", name=path.name))
     path.chmod(0o700)
     return path
@@ -398,12 +398,12 @@ def test_launcher_recovery_spawn_is_validated_logged_rate_limited_and_ignores_th
     root = tmp_path / "root"
     root.mkdir()
     source = tmp_path / "source"
-    (source / "src" / "ml_stack").mkdir(parents=True)
-    (source / "src" / "ml_stack" / "__init__.py").write_text("")
+    (source / "src" / "poolhouse").mkdir(parents=True)
+    (source / "src" / "poolhouse" / "__init__.py").write_text("")
     marker, shadow_marker = tmp_path / "marker", tmp_path / "shadow"
-    (source / "src" / "ml_stack" / "runtime_cli.py").write_text(
+    (source / "src" / "poolhouse" / "runtime_cli.py").write_text(
         f"import pathlib\npathlib.Path({str(marker)!r}).open('a').write('ran\\n')\nprint('recovery output')\n")
-    shadow = tmp_path / "shadow-cwd" / "ml_stack"
+    shadow = tmp_path / "shadow-cwd" / "poolhouse"
     shadow.mkdir(parents=True)
     (shadow / "__init__.py").write_text("")
     (shadow / "runtime_cli.py").write_text(f"import pathlib\npathlib.Path({str(shadow_marker)!r}).write_text('x')\n")
@@ -435,13 +435,13 @@ def test_launcher_directories_are_absolute_and_a_relative_recorded_one_is_refuse
     assert runtime_cli._launchers("bin") == tmp_path.resolve() / "bin"
 
 
-def test_a_checkout_comes_only_from_the_flag_or_the_record_and_must_be_an_ml_stack_source(world, monkeypatch, tmp_path):
+def test_a_checkout_comes_only_from_the_flag_or_the_record_and_must_be_an_poolhouse_source(world, monkeypatch, tmp_path):
     repo, _, _ = world
     commit(repo, "a")
     monkeypatch.chdir(repo)
     with pytest.raises(runtime_deploy.DeployError):
         runtime_cli._checkout("")
-    with pytest.raises(runtime_deploy.DeployError, match="ml-stack"):
+    with pytest.raises(runtime_deploy.DeployError, match="poolhouse"):
         runtime_cli._checkout(str(tmp_path))
     assert runtime_cli._checkout(str(repo)) == repo.resolve()
     runtime_deploy.prepare_root()
@@ -479,7 +479,7 @@ def test_a_failure_before_the_selection_restores_the_previous_launchers_and_disc
 
 
 def test_an_unusable_selection_never_stops_the_callers_that_would_forward_to_it(world, tmp_path):
-    from ml_stack import jobs
+    from poolhouse import jobs
     runtime_deploy.prepare_root()
     (runtime.directory() / "selected.json").write_text("{not json")
     assert runtime.available() is None
@@ -542,17 +542,17 @@ def test_the_session_start_refresh_is_bounded_and_the_smoke_environment_disables
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     seen = []
-    monkeypatch.delenv("ML_STACK_RUNTIME_ENSURE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_RUNTIME_ENSURE", raising=False)
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: seen.append(k.get("timeout")) or subprocess.CompletedProcess(a, 0, "", ""))
     module.refresh_runtime("SessionStart")
     assert seen and all(t is not None and t <= 6 for t in seen) and len(seen) == 1
     env = runtime_deploy._clean_environment(Path("/tmp/x"), Path("/tmp/y"))
-    assert env["ML_STACK_RUNTIME_ENSURE"] == "off"
+    assert env["POOLHOUSE_RUNTIME_ENSURE"] == "off"
 
 
 def test_a_claim_is_released_only_when_its_pid_started_after_the_claim_was_taken(tmp_path, monkeypatch):
-    from ml_stack.workspace import claims as claims_module
-    from ml_stack.workspace.claims import Claims
+    from poolhouse.workspace import claims as claims_module
+    from poolhouse.workspace.claims import Claims
     store = Claims(tmp_path, 600)
     target = tmp_path / "t"
     target.mkdir()
@@ -575,12 +575,12 @@ def test_status_and_a_tracker_ensure_need_no_recorded_launcher_directory(world, 
 
 
 def test_tests_cannot_write_launchers_outside_the_state_root_or_the_temporary_directory(world):
-    from ml_stack import runtime_launchers
+    from poolhouse import runtime_launchers
     fake = runtime.Runtime(Path("/nonexistent"), "a" * 40, "0", runtime.identity())
     import sysconfig
-    real = Path(sysconfig.get_path("scripts", vars={"base": sys.base_prefix, "platbase": sys.base_prefix})) / "ml-stack-never"
+    real = Path(sysconfig.get_path("scripts", vars={"base": sys.base_prefix, "platbase": sys.base_prefix})) / "poolhouse-never"
     with pytest.raises(OSError, match="test"):
-        runtime.write_launcher(real, "ml_stack.cli", "main", fake)
+        runtime.write_launcher(real, "poolhouse.cli", "main", fake)
     with pytest.raises(OSError, match="test"):
         runtime_launchers.install(real.parent, fake)
     assert not real.exists()
@@ -601,7 +601,7 @@ def test_the_install_claim_is_held_by_the_acting_agent_and_rollback_needs_one(wo
     assert seen and all(owner.startswith("runtime-agent") for owner in seen)
     commit(repo, "b")
     runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
-    monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
+    monkeypatch.delenv("POOLHOUSE_WORKSPACE_AGENT")
     with pytest.raises(runtime_deploy.DeployError, match="authenticated agent"):
         runtime_deploy.rollback(plan_for(repo, launchers))
 
@@ -611,7 +611,7 @@ def test_without_an_agent_ensure_and_recovery_run_unclaimed_and_post_nothing(wor
     commit(repo, "a")
     runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
     second = commit(repo, "b")
-    monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
+    monkeypatch.delenv("POOLHOUSE_WORKSPACE_AGENT")
     seen = []
     real = runtime_deploy.owning
 
@@ -629,7 +629,7 @@ def test_without_an_agent_ensure_and_recovery_run_unclaimed_and_post_nothing(wor
 
 
 def test_the_acting_identity_is_the_workspace_agent_and_collides_with_its_harness_claim(world):
-    from ml_stack.workspace import limits
+    from poolhouse.workspace import limits
     repo, launchers, _ = world
     commit(repo, "a")
     who = runtime_deploy.acting(plan_for(repo, launchers))
@@ -648,7 +648,7 @@ def test_the_acting_identity_is_the_workspace_agent_and_collides_with_its_harnes
 def test_the_acting_identity_is_the_physical_owner_and_needs_the_claim_capability(world, monkeypatch):
     from types import SimpleNamespace
 
-    from ml_stack.workspace import harness_remote, project_connection
+    from poolhouse.workspace import harness_remote, project_connection
     repo, launchers, _ = world
     commit(repo, "a")
     info = {"id": "runtime-agent", "role": "agent", "can": ["claim", "send"], "project": {"key": "pk"}}
@@ -708,13 +708,13 @@ def test_status_lists_trees_it_does_not_manage_and_never_collects_them(world, ca
 
 def test_a_failed_first_switch_restores_the_original_launcher_bytes_and_removes_new_ones(world, monkeypatch):
     repo, launchers, _ = world
-    (launchers / "ml-stack-workspace").write_text("original")
-    (launchers / "ml-stack-workspace").chmod(0o700)
+    (launchers / "poolhouse-workspace").write_text("original")
+    (launchers / "poolhouse-workspace").chmod(0o700)
     commit(repo, "a")
     monkeypatch.setattr(runtime, "publish", lambda chosen: (_ for _ in ()).throw(OSError("cannot publish")))
     assert runtime_deploy.ensure(plan_for(repo, launchers), builder=builder()).action == "failed"
-    assert (launchers / "ml-stack-workspace").read_text() == "original"
-    assert [p.name for p in launchers.iterdir()] == ["ml-stack-workspace"]
+    assert (launchers / "poolhouse-workspace").read_text() == "original"
+    assert [p.name for p in launchers.iterdir()] == ["poolhouse-workspace"]
 
 
 def test_a_commit_that_failed_is_not_rebuilt_for_ten_minutes_unless_forced_by_an_agent(world, monkeypatch):
@@ -727,14 +727,14 @@ def test_a_commit_that_failed_is_not_rebuilt_for_ten_minutes_unless_forced_by_an
     assert runtime_deploy.ensure(plan_for(repo, launchers), force_build=True, builder=builder(log=built)).action == "switched"
     runtime_store.write_state({"last_failure": {"commit": "f" * 40, "at": time.time(), "detail": "x"}})
     commit(repo, "b")
-    monkeypatch.delenv("ML_STACK_WORKSPACE_AGENT")
+    monkeypatch.delenv("POOLHOUSE_WORKSPACE_AGENT")
     with pytest.raises(runtime_deploy.DeployError, match="authenticated agent"):
         runtime_deploy.ensure(plan_for(repo, launchers), force_build=True, builder=builder())
 
 
 def test_an_unset_state_root_is_refused_while_a_test_runs(world, monkeypatch, tmp_path):
-    monkeypatch.delenv("ML_STACK_HOME")
-    with pytest.raises(OSError, match="ML_STACK_HOME"):
+    monkeypatch.delenv("POOLHOUSE_HOME")
+    with pytest.raises(OSError, match="POOLHOUSE_HOME"):
         runtime.confine_tests(tmp_path / "bin")
 
 
@@ -766,8 +766,8 @@ def foreign_trees(root):
         prefix = root / f"{index + 1:040x}" / f"{index + 1:032x}"
         (prefix / "bin").mkdir(parents=True)
         (prefix / "bin" / "python").write_text("#!/bin/sh\n")
-        (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack").mkdir(parents=True)
-        (prefix / "lib" / "python3.13" / "site-packages" / "ml_stack" / "__init__.py").write_text("")
+        (prefix / "lib" / "python3.13" / "site-packages" / "poolhouse").mkdir(parents=True)
+        (prefix / "lib" / "python3.13" / "site-packages" / "poolhouse" / "__init__.py").write_text("")
         if marker:
             (prefix / "created.json").write_text(json.dumps(marker))
         os.utime(prefix, (1000.0, 1000.0))
@@ -815,7 +815,7 @@ def test_a_tree_this_tool_created_is_marked_before_anything_else_and_stale_unver
     runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
     prefix = Path(runtime_store.selection()["prefix"])
     marker = json.loads((prefix / "created.json").read_text())
-    assert marker["tool"] == "ml-stack-runtime" and marker["command"] == "ensure" and marker["agent"] == "runtime-agent"
+    assert marker["tool"] == "poolhouse-runtime" and marker["command"] == "ensure" and marker["agent"] == "runtime-agent"
     assert marker["pid"] == os.getpid()
     ours = runtime.directory() / head / ("e" * 32)
     ours.mkdir(parents=True)

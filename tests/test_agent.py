@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import guard
-from ml_stack.agent import (
+from poolhouse import guard
+from poolhouse.agent import (
     Agent as GuardedAgent,
     Budget,
     Done,
@@ -27,8 +27,8 @@ from ml_stack.agent import (
     parse_arguments,
     validate,
 )
-from ml_stack.client import Client
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse.client import Client
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 from tests.sandbox_kit import no_sandbox_here
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -272,7 +272,7 @@ def test_an_http_server_that_wants_a_bearer_token(served) -> None:
     pytest.importorskip("mcp")
     import toy_mcp_http
 
-    from ml_stack.agent import McpAuthError
+    from poolhouse.agent import McpAuthError
 
     secret = "tok-7f3a9c"
     fake = served(Turn(calls=(call("echo", text="hi"),)), Turn(text=("done",)))
@@ -308,7 +308,7 @@ def test_a_question_from_the_server_reaches_the_confirm_handler(served, answer, 
     pytest.importorskip("mcp")
     import toy_mcp_http
 
-    from ml_stack.agent import ConfirmRequest
+    from poolhouse.agent import ConfirmRequest
 
     fake = served(Turn(calls=(call("delete", path="/tmp/x"),)), Turn(text=("done",)))
     asked: list = []
@@ -333,11 +333,11 @@ def test_a_question_from_the_server_reaches_the_confirm_handler(served, answer, 
 
 
 def test_an_agent_turn_asks_for_no_thinking_unless_the_person_set_it(served, monkeypatch) -> None:
-    monkeypatch.delenv("ML_STACK_THINK", raising=False)
+    monkeypatch.delenv("POOLHOUSE_THINK", raising=False)
     fake = served(Turn(text=("done",)))
     collect(agent_for(fake))
     assert fake.bodies[0]["chat_template_kwargs"] == {"enable_thinking": False}
-    monkeypatch.setenv("ML_STACK_THINK", "on")
+    monkeypatch.setenv("POOLHOUSE_THINK", "on")
     again = served(Turn(text=("done",)))
     collect(agent_for(again))
     assert again.bodies[0]["chat_template_kwargs"] == {"enable_thinking": True}

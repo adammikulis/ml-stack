@@ -48,35 +48,35 @@ def _no_shadowing_tests_package() -> None:
 
 
 _no_shadowing_tests_package()
-os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
+os.environ.setdefault("POOLHOUSE_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
 os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["ML_STACK_RUNTIME_ENSURE"] = "off"
+os.environ["POOLHOUSE_RUNTIME_ENSURE"] = "off"
 sys.path.insert(0, str(REPO / "scripts"))
 
 
 def _no_desktop_notifications() -> None:
-    """A test never raises a real desktop notification or dialog. ``ML_STACK_NOTIFY=console``
+    """A test never raises a real desktop notification or dialog. ``POOLHOUSE_NOTIFY=console``
     makes the code under test choose the console, and shims named like the desktop's tools sit
     first on PATH (so child processes inherit them): a shim records the attempt in
-    ``ML_STACK_SHIM_LOG`` and fails, and the session fails if anything was recorded."""
-    os.environ["ML_STACK_NOTIFY"] = "console"
+    ``POOLHOUSE_SHIM_LOG`` and fails, and the session fails if anything was recorded."""
+    os.environ["POOLHOUSE_NOTIFY"] = "console"
     if os.name == "nt":
         return
     import tempfile
 
-    shims = Path(tempfile.mkdtemp(prefix="mlstack-shims-"))
+    shims = Path(tempfile.mkdtemp(prefix="poolhouse-shims-"))
     for name in ("osascript", "notify-send", "zenity", "kdialog", "open", "xdg-open",
                  "x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
         shim = shims / name
-        shim.write_text('#!/bin/sh\necho "$0 $*" >> "$ML_STACK_SHIM_LOG"\nexit 97\n')
+        shim.write_text('#!/bin/sh\necho "$0 $*" >> "$POOLHOUSE_SHIM_LOG"\nexit 97\n')
         shim.chmod(0o755)
-    os.environ["ML_STACK_SHIM_LOG"] = str(shims / "attempts.log")
+    os.environ["POOLHOUSE_SHIM_LOG"] = str(shims / "attempts.log")
     os.environ["PATH"] = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 _no_desktop_notifications()
-os.environ["ML_STACK_AUTHORITY_FLOOR"] = "person"
+os.environ["POOLHOUSE_AUTHORITY_FLOOR"] = "person"
 """Every gate reads as a person's in the suite and its children; a test of delegation clears it."""
 os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
 """A child process a test starts has no keyring that works, so it can never reach the person's own keystore."""
@@ -84,7 +84,7 @@ os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     """Fail the run if any process of it reached for a desktop notifier."""
-    log = Path(os.environ.get("ML_STACK_SHIM_LOG", ""))
+    log = Path(os.environ.get("POOLHOUSE_SHIM_LOG", ""))
     if log.is_file() and log.read_text().strip():
         print(f"\nDESKTOP NOTIFIER CALLED BY THE TESTS:\n{log.read_text()}")
         session.exitstatus = 1
@@ -125,9 +125,9 @@ import testslots  # noqa: E402  (``scripts`` is on the path above)
 import walkbound  # noqa: E402
 from environ_guard import environment_is_restored  # noqa: E402,F401  (an autouse fixture)
 
-from ml_stack.http import Server  # noqa: E402
-from ml_stack.testing import live  # noqa: E402
-from ml_stack.testing.fakes import (  # noqa: E402
+from poolhouse.http import Server  # noqa: E402
+from poolhouse.testing import live  # noqa: E402
+from poolhouse.testing.fakes import (  # noqa: E402
     LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
     fake_binary as fake_binary,
 )
@@ -236,13 +236,13 @@ def json_reply(payload: object, status: int = 200) -> tuple[int, bytes]:
 #: Environment a developer's shell may carry that would otherwise steer a test: the
 #: variables that move one corner of the state root, and the ones that pick a model or a
 #: ceiling.
-_STEERING = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE",
-             "MLSTACK_FIT_FILE", "MLSTACK_INGEST_HOME", "MLSTACK_JOBS_HOME",
-             "MLSTACK_KOKORO_MODEL", "MLSTACK_KOKORO_VOICES", "MLSTACK_LIMITS_FILE",
-             "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE", "MLSTACK_PROFILES_FILE",
-             "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_TRAIN_HOME",
-             "MLSTACK_WEB_PROFILE", "MLSTACK_WHISPER_CPP_MODEL", "ML_STACK_CHECKOUTS",
-             "ML_STACK_RATES", *live.CREDENTIALS)
+_STEERING = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "POOLHOUSE_BENCH_CEILING", "POOLHOUSE_BENCH_HOME", "POOLHOUSE_BENCH_TRACE",
+             "POOLHOUSE_FIT_FILE", "POOLHOUSE_INGEST_HOME", "POOLHOUSE_JOBS_HOME",
+             "POOLHOUSE_KOKORO_MODEL", "POOLHOUSE_KOKORO_VOICES", "POOLHOUSE_LIMITS_FILE",
+             "POOLHOUSE_LLAMA_BUILD", "POOLHOUSE_PIPER_VOICE", "POOLHOUSE_PROFILES_FILE",
+             "POOLHOUSE_SEARCH", "POOLHOUSE_TRAIN_CEILING", "POOLHOUSE_TRAIN_HOME",
+             "POOLHOUSE_WEB_PROFILE", "POOLHOUSE_WHISPER_CPP_MODEL", "POOLHOUSE_CHECKOUTS",
+             "POOLHOUSE_RATES", *live.CREDENTIALS)
 
 
 #: What a store in the suite may hold in memory. Left to the engine it is a share of the
@@ -255,25 +255,25 @@ STORE_MEMORY = 512 * 2**20
 def _no_machine_state(monkeypatch, tmp_path):
     """Point the whole state root at an empty temporary directory, and stop machine reads.
 
-    ``ML_STACK_HOME`` moves every home and record file at once, so the runs store a whole
+    ``POOLHOUSE_HOME`` moves every home and record file at once, so the runs store a whole
     evening of measuring sits in, the fit and profile records and the job files are all in
     ``tmp_path``. ``serving_lines``, ``beside_on_the_card`` and ``results_since`` read
     what is serving on this machine right now and what the last job kept; the speech registries probe for whisper
-    and speak out loud. The `MLSTACK_*` variables are deleted rather than set, so a shell
+    and speak out loud. The `POOLHOUSE_*` variables are deleted rather than set, so a shell
     that exports one cannot move a corner back out.
     """
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "machine-state"))
-    monkeypatch.setenv("MLSTACK_STORE_MEMORY", str(STORE_MEMORY))
-    monkeypatch.setenv("ML_STACK_BROKER_LOCAL", "1")
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "machine-state"))
+    monkeypatch.setenv("POOLHOUSE_STORE_MEMORY", str(STORE_MEMORY))
+    monkeypatch.setenv("POOLHOUSE_BROKER_LOCAL", "1")
     for name in _STEERING:
         monkeypatch.delenv(name, raising=False)
 
     import importlib
 
-    progress = sys.modules.get("ml_stack.bench.progress") or importlib.import_module(
-        "ml_stack.bench.progress")
-    unmanaged = sys.modules.get("ml_stack.serve.unmanaged") or importlib.import_module(
-        "ml_stack.serve.unmanaged")
+    progress = sys.modules.get("poolhouse.bench.progress") or importlib.import_module(
+        "poolhouse.bench.progress")
+    unmanaged = sys.modules.get("poolhouse.serve.unmanaged") or importlib.import_module(
+        "poolhouse.serve.unmanaged")
     monkeypatch.setattr(unmanaged, "every_server", lambda: [])
     monkeypatch.setattr(progress, "serving_lines", lambda: [])
     monkeypatch.setattr(progress, "beside_on_the_card", lambda: [])
@@ -281,7 +281,7 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     # An empty speech registry per test: probing the real ones loads whisper and runs the
     # machine's own voice. A test that wants a provider registers its own.
-    speech = sys.modules.get("ml_stack.speech") or importlib.import_module("ml_stack.speech")
+    speech = sys.modules.get("poolhouse.speech") or importlib.import_module("poolhouse.speech")
     for attr in ("ASR", "TTS", "VAD"):
         monkeypatch.setattr(speech, attr, speech.Registry(kind=attr.lower()))
 
@@ -291,7 +291,7 @@ def _no_reputation_observer_leaks():
     """The process-wide reputation observer a test installs does not outlive it. One that did made
     ``127.0.0.1`` a "watch" host for whichever test ran next on the same xdist worker, so a
     llama.cpp test failed or passed by which neighbours it was scheduled beside."""
-    from ml_stack.sentinel import observers
+    from poolhouse.sentinel import observers
 
     before = observers.installed()
     yield
@@ -305,8 +305,8 @@ def _no_reputation_observer_leaks():
 def _no_broker_left(_no_machine_state):
     """Fails a test that leaves a broker running under its temporary state root, and stops it."""
     yield
-    from ml_stack.home import state
-    from ml_stack.serve.process import kill_process_tree, pid_exists
+    from poolhouse.home import state
+    from poolhouse.serve.process import kill_process_tree, pid_exists
 
     record = state("broker.json")
     try:
@@ -452,7 +452,7 @@ def fake_memory(*, total: int, available: int, wired: int):
 
 def a_row(question: str, *, expected: list[str], shown: list[str], label: str = "tried", **measurement):
     """One measured question: what was wanted, what the answer showed, what it cost."""
-    from ml_stack.bench import Row
+    from poolhouse.bench import Row
 
     return Row(label=label, question=question, expected=expected, shown=shown,
                calls=measurement.get("calls", 3), answer_chars=measurement.get("chars", 200), error=measurement.get("error", ""))
@@ -483,12 +483,12 @@ def fit_files(tmp_path, monkeypatch):
     """Point both halves of the fit source of truth at ``tmp_path``, and fill them.
 
     ``package_file`` is a function for exactly this reason; the machine's own half moves
-    with ``$MLSTACK_FIT_FILE``. Without both, a test would read the measurements this
+    with ``$POOLHOUSE_FIT_FILE``. Without both, a test would read the measurements this
     repository ships and a ``--measure`` test would write into it. Call it with the records
     the shipped half should hold, ``mine=`` for the machine's own half, and ``room=`` to fix
     what ``hub.room`` answers so no test depends on the machine it runs on.
     """
-    from ml_stack.serve import fit as fit_mod
+    from poolhouse.serve import fit as fit_mod
 
     def point(records=(), *, mine=(), room: int | None = None):
         shipped = tmp_path / "ssot" / "fit.json"
@@ -501,9 +501,9 @@ def fit_files(tmp_path, monkeypatch):
             local.write_text(json.dumps([f.as_dict() for f in mine]), encoding="utf-8")
         monkeypatch.setattr(fit_mod, "package_file", lambda: shipped)
         monkeypatch.setattr(fit_mod, "writable_file", lambda: shipped)
-        monkeypatch.setenv("MLSTACK_FIT_FILE", str(local))
+        monkeypatch.setenv("POOLHOUSE_FIT_FILE", str(local))
         if room is not None:
-            monkeypatch.setattr("ml_stack.hub.room", lambda: room)
+            monkeypatch.setattr("poolhouse.hub.room", lambda: room)
         return types.SimpleNamespace(shipped=shipped, mine=local)
 
     return point
@@ -511,7 +511,7 @@ def fit_files(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_real_cache_or_ports(monkeypatch, tmp_path):
-    """No test writes into ~/.cache/ml_stack or reaches a real model server's port.
+    """No test writes into ~/.cache/poolhouse or reaches a real model server's port.
 
     2026-09-03: a test started a fake server on the default port through the real backend;
     the port was busy with the Flash-Next that had been reading textbooks for twelve
@@ -519,10 +519,10 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     directory was truncated. The backend no longer kills a server it did not record; this
     keeps the cache and logs in tmp_path as well, so a test that reaches them fails here.
     """
-    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
 
 
-from ml_stack.keystore import ENV_NO_REAL  # noqa: E402
+from poolhouse.keystore import ENV_NO_REAL  # noqa: E402
 
 os.environ[ENV_NO_REAL] = "1"
 """Every process a test starts inherits this: the machine's own keystore reads as absent to it."""
@@ -578,7 +578,7 @@ def _activity_log_is_quiet(request, monkeypatch):
     a test about something else never asks the keystore for the log's key."""
     if request.module.__name__.rpartition(".")[2].startswith(("test_activity", "test_redteam_activity")):
         return
-    from ml_stack.activity import writer
+    from poolhouse.activity import writer
 
     monkeypatch.setattr(writer, "_put", lambda *_a, **_k: None)
 
@@ -586,7 +586,7 @@ def _activity_log_is_quiet(request, monkeypatch):
 @pytest.fixture(autouse=True)
 def _keystore_has_a_person(monkeypatch):
     """The keystore treats a test as a session with a person present, whatever the host has."""
-    from ml_stack import keystore
+    from poolhouse import keystore
 
     monkeypatch.setattr(keystore, "interactive", lambda: True)
 
@@ -599,11 +599,11 @@ def _no_internet(monkeypatch, tmp_path):
     refusal naming the host. A test that serves from a local server installs its own with
     ``net.use``; ``HF_ENDPOINT`` and the host variables are cleared so a shell cannot steer one.
     """
-    from ml_stack import net
-    from ml_stack.httpguard import Limits, Refused
+    from poolhouse import net
+    from poolhouse.httpguard import Limits, Refused
 
-    for name in ("HF_ENDPOINT", "ML_STACK_NET_ALLOW_HOSTS", "ML_STACK_FETCH_ALLOW_HOSTS",
-                 "ML_STACK_NET_UNSCANNED", "ML_STACK_NET_SCAN_MODELS", "ML_STACK_NET_HASH_LOOKUP"):
+    for name in ("HF_ENDPOINT", "POOLHOUSE_NET_ALLOW_HOSTS", "POOLHOUSE_FETCH_ALLOW_HOSTS",
+                 "POOLHOUSE_NET_UNSCANNED", "POOLHOUSE_NET_SCAN_MODELS", "POOLHOUSE_NET_HASH_LOOKUP"):
         monkeypatch.delenv(name, raising=False)
 
     def nowhere(host, port):
@@ -618,8 +618,8 @@ def _no_internet(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def origins():
     """A fresh record of where each URL a web tool may fetch was seen, for one test."""
-    from ml_stack.net import untrusted
-    from ml_stack.net.policy import default
+    from poolhouse.net import untrusted
+    from poolhouse.net.policy import default
 
     with untrusted.using(untrusted.Origins(default())) as fresh:
         yield fresh
@@ -629,7 +629,7 @@ def origins():
 def loopback_net():
     """The net pipeline allowed to reach 127.0.0.1 (a local test server), scanning with a clean
     fake, for the block of one test."""
-    from ml_stack import net
+    from poolhouse import net
     from tests.web_site import loopback_pipeline
 
     with net.use(loopback_pipeline()) as pipeline:
@@ -649,7 +649,7 @@ def _no_machine_binary(monkeypatch):
     """
     import tempfile
 
-    from ml_stack.serve import binary as binary_module
+    from poolhouse.serve import binary as binary_module
 
     real = binary_module.machine_binary
     temp = Path(tempfile.gettempdir()).resolve()
@@ -717,7 +717,7 @@ def pytest_configure(config):
         "real_port: exempt from _no_real_ports -- binds or connects to a real port on "
         "purpose, using its own socket",
     )
-    from ml_stack.testing.cores import pytest_workers
+    from poolhouse.testing.cores import pytest_workers
 
     workers = pytest_workers(config)
     if workers is not None:
@@ -1086,9 +1086,9 @@ def _public_suffix_list_is_the_bundled_one():
 @pytest.fixture(scope="session", autouse=True)
 def _real_home(tmp_path_factory):
     """The real state and cache roots, captured before the session moves ``HOME``,
-    ``ML_STACK_HOME`` and ``ML_STACK_CACHE`` into a temporary directory; fails the run when
+    ``POOLHOUSE_HOME`` and ``POOLHOUSE_CACHE`` into a temporary directory; fails the run when
     a file under the real state root was written, created or removed."""
-    from ml_stack import home
+    from poolhouse import home
 
     real = types.SimpleNamespace(state=home.home(), cache=home.cache())
     from state_attribution import Watch
@@ -1105,8 +1105,8 @@ def _real_home(tmp_path_factory):
         # matplotlib rebuilds its font list in an empty HOME, once per worker
         mp.setenv("MPLCONFIGDIR", os.environ.get("MPLCONFIGDIR") or str(browsers / "matplotlib"))
         mp.setenv("HOME", str(away))
-        mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
-        mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
+        mp.setenv("POOLHOUSE_HOME", str(away / ".poolhouse"))
+        mp.setenv("POOLHOUSE_CACHE", str(away / ".cache" / "poolhouse"))
         yield real
     if failure := watch.settle():
         pytest.fail(failure, pytrace=False)
@@ -1114,7 +1114,7 @@ def _real_home(tmp_path_factory):
 
 @pytest.fixture(scope="session", autouse=True)
 def _real_cache_and_state_untouched(_real_home):
-    """Fails the run if a test wrote into the real ml_stack cache or server state.
+    """Fails the run if a test wrote into the real poolhouse cache or server state.
 
     Snapshots the log directory, the lease file, the two settings files and the link
     naming the managed llama.cpp build under the real roots `_real_home` captured, and
@@ -1189,7 +1189,7 @@ def _real_cache_and_state_untouched(_real_home):
     if made:
         problems.append(f"{builds_dir}: fetched or compiled {', '.join(made)}")
     if problems:
-        pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
+        pytest.fail("real poolhouse state changed during the run: " + "; ".join(problems),
                     pytrace=False)
 
 
@@ -1203,8 +1203,8 @@ def leased(backend, spec, **starting):
     from dataclasses import replace
     from pathlib import Path
 
-    from ml_stack.serve.manager import ServerManager
-    from ml_stack.serve.ports import free_port
+    from poolhouse.serve.manager import ServerManager
+    from poolhouse.serve.ports import free_port
 
     if spec.port == 8080:
         spec = replace(spec, port=free_port())
@@ -1215,7 +1215,7 @@ def leased(backend, spec, **starting):
 @pytest.fixture(scope="module")
 def playwright():
     """The shared Playwright context for this test module."""
-    pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    pw = pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
     with pw.sync_playwright() as play:
         yield play
 

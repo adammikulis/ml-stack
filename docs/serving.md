@@ -6,17 +6,17 @@ The Hub has models newer than anything written down here, and newer than anythin
 was trained on. Look rather than remember:
 
 ```
-$ ml-stack-models find gemma-4 E4B
+$ poolhouse-models find gemma-4 E4B
     588135  unsloth/gemma-4-E4B-it-qat-GGUF
     563542  unsloth/gemma-4-E4B-it-GGUF
     307153  ggml-org/gemma-4-E4B-it-GGUF
-$ ml-stack-models files unsloth/gemma-4-E4B-it-qat-GGUF
+$ poolhouse-models files unsloth/gemma-4-E4B-it-qat-GGUF
     4.1G  hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
 ```
 
 Publishers in `PREFER` are ranked first — the Hub's own ordering puts whatever is popular
 at the top, which for a model released last week is somebody's remix rather than the
-release. The printed reference is what `ml-stack-serve up` takes; llama-server downloads and
+release. The printed reference is what `poolhouse-serve up` takes; llama-server downloads and
 caches it on first use, so there is no separate fetching step.
 
 ## Serving a model
@@ -42,17 +42,17 @@ lease that asks for others is refused with the field that differs named, a serve
 serving what was asked for is adopted rather than started again, a server the record does
 not know is reported as somebody else's and never killed, and the backend launches nothing
 without the manager's lease in hand -- so an untracked server cannot come out of the
-library at all. What each model scored best with (`ml-stack-serve profile`) is what a
+library at all. What each model scored best with (`poolhouse-serve profile`) is what a
 lease is built from, so serving and asking use the numbers that were measured rather than
 remembered. The commands below are the surface of that.
 
 From a shell:
 
 ```
-ml-stack-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0
-ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
-ml-stack-serve status
-ml-stack-serve down Qwen3.8-27B
+poolhouse-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0
+poolhouse-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
+poolhouse-serve status
+poolhouse-serve down Qwen3.8-27B
 ```
 
 **`up` is a lease from the broker, and nothing else starts a server.** The command resolves
@@ -64,7 +64,7 @@ head, runtime), **queues** the lease behind the others when memory is short (`up
 `queued, #N of M: ...` and waits; `--no-wait` returns with the lease queued, `--patience`
 bounds the wait), **refuses** a shape that cannot fit even on an empty machine with one
 line (what it needs, what a model may use here, the longest context that does fit, and the
-command a *person* runs to raise the limit, `ml-stack-serve memory --for MODEL --ctx N
+command a *person* runs to raise the limit, `poolhouse-serve memory --for MODEL --ctx N
 --apply`; nothing ever raises it for you), and **picks the port**. `--port` is a request:
 the broker uses it when it is free and picks another when it is not; a port held by another
 process is never killed or fought over.
@@ -73,11 +73,11 @@ process is never killed or fought over.
 the leases (id, model, context, port or queued, holder pid, memory, since) above the
 servers, `--json` gives a script the same, and it exits non-zero when nothing is serving.
 `down [LEASE|PORT|MODEL]` releases the lease; the server is stopped only when no other
-lease uses it, and says when one still does. `--idle 10m` (default: `ml-stack-serve limits
+lease uses it, and says when one still does. `--idle 10m` (default: `poolhouse-serve limits
 --idle`, else held until `down`) releases the lease once the server has been unused that
-long. `ml-stack-claude`, `ml-stack-agent` and `agent start` take their servers through the
+long. `poolhouse-claude`, `poolhouse-agent` and `agent start` take their servers through the
 same broker. The low-level start (`ServerManager`, `LlamaServerBackend.start`) needs a
-`Lease`, and a `Lease` cannot be made outside the broker's grant (`ml_stack.serve.grant`):
+`Lease`, and a `Lease` cannot be made outside the broker's grant (`poolhouse.serve.grant`):
 calling it by hand raises `NoGrant`. `tests/test_serve_no_bypass.py`, the hard
 `server-starts` gate in `scripts/budgets` and the bash guard (`scripts/hooks/claude-bash-guard`
 refuses `llama-server` by hand and any `up` flag that would skip the lease) keep it that way.
@@ -85,8 +85,8 @@ refuses `llama-server` by hand and any `up` flag that would skip the lease) keep
 From Python:
 
 ```python
-from ml_stack.serve import serve
-from ml_stack.client import Client
+from poolhouse.serve import serve
+from poolhouse.client import Client
 
 with serve("model.gguf", port=8899) as server:
     client = Client(server.base_url)
@@ -97,11 +97,11 @@ with serve("model.gguf", port=8899) as server:
 `serve` adopts a healthy server that is already running rather than starting a second one,
 and leaves an adopted server alone on exit. It only stops what it started.
 
-**Embedding it in another program.** Importing `ml_stack.serve`, `ml_stack.client` or
-`ml_stack.fleet` prints nothing, opens no socket and writes no file. State goes under
-`ML_STACK_HOME` (default `~/.ml-stack`) and the cache under `ML_STACK_CACHE`; set both
+**Embedding it in another program.** Importing `poolhouse.serve`, `poolhouse.client` or
+`poolhouse.fleet` prints nothing, opens no socket and writes no file. State goes under
+`POOLHOUSE_HOME` (default `~/.poolhouse`) and the cache under `POOLHOUSE_CACHE`; set both
 before the first call to keep everything inside a directory the program owns. `ServerManager`
-reports through the `ml_stack.serve` loggers, or through the `say=` callback `lease` takes. A
+reports through the `poolhouse.serve` loggers, or through the `say=` callback `lease` takes. A
 `ServerManager` is a context manager: `with ServerManager() as manager:` stops every server
 it started when the block ends and leaves adopted ones running, and `manager.close()` does
 the same. A manager is safe
@@ -112,11 +112,11 @@ SIGTERM, SIGINT and SIGHUP (the handler a program already had still runs first),
 program is killed outright, through a small watchdog process that stops the server's tree once
 its host is gone. Nothing is registered at import; the first server a process starts installs
 the exit hook and the handlers. `ServerManager(stop_on_exit=False)` leaves the servers running,
-and `ml-stack-serve up` does that itself, since it exits and the server is meant to stay. The
+and `poolhouse-serve up` does that itself, since it exits and the server is meant to stay. The
 first lease a manager makes also stops every server on the machine whose leasing process has
 gone, but only one whose record proves the pid is still that server (its start time and a
-digest of its command line). Server logs under `ML_STACK_HOME/logs` are kept to 60 files, 256 MB
-and 30 days across every port (`ML_STACK_LOG_FILES`, `ML_STACK_LOG_MB`, `ML_STACK_LOG_DAYS`;
+digest of its command line). Server logs under `POOLHOUSE_HOME/logs` are kept to 60 files, 256 MB
+and 30 days across every port (`POOLHOUSE_LOG_FILES`, `POOLHOUSE_LOG_MB`, `POOLHOUSE_LOG_DAYS`;
 0 is no limit). A server is started without this process's tokens and keys in its
 environment; one that downloads weights is given the Hugging Face token the credentials
 resolve to and nothing else (`docs/credentials.md`).
@@ -132,7 +132,7 @@ its own -- so several conversations at once do not reprocess each other's contex
 ```python
 from dataclasses import replace
 
-from ml_stack.serve import Serving, slot, draft_for, projector_for
+from poolhouse.serve import Serving, slot, draft_for, projector_for
 
 model = "hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
 serving = Serving(model=model, port=8080, slot_context=131072, cache_type="q8_0",
@@ -151,11 +151,11 @@ A serving holds one slot unless it is asked for more, and that slot gets the who
 lone slot is given the model's own trained window when the room allows it, read off the
 GGUF header; a context asked for past the trained window turns on YaRN position scaling by
 itself and says so, because past the trained length the positions are the part that goes
-wrong first. `ml-stack-serve escalate --port 8080 --add 2` grows a running server's slots
+wrong first. `poolhouse-serve escalate --port 8080 --add 2` grows a running server's slots
 in place and carries its conversations across, so the next person does not cost the ones
 already talking a cold reload.
 
-`draft_for` and `projector_for` answer 'auto' the way `ml-stack-serve up` does -- a lease
+`draft_for` and `projector_for` answer 'auto' the way `poolhouse-serve up` does -- a lease
 built by hand has to resolve what the CLI resolves for itself -- and each says out loud why
 it found nothing rather than serving undrafted or blind in silence. `release_all()` lets go
 of every held server; `on_disk()` says which ports are up.
@@ -172,8 +172,8 @@ says:
 
 | recorded | from |
 |---|---|
-| reason | `ml-stack-serve up MODEL --for 'text'`; the `--for` of `ml-stack-claude`, `ml-stack-codex`, `ml-stack-chat` and `ml-stack-workspace agent start`; `$ML_STACK_LEASE_FOR` (which leads the reason when the caller also gives one); the reason an in-repo caller passes (`broker_wire.lease(..., reason=)`, `ServerManager.lease(..., reason=)`, `serve(..., reason=)`). A lease with none reads `(no reason given)`. |
-| requester | the workspace agent name (`$ML_STACK_WORKSPACE_AGENT`) when one is set, else the program that took the lease |
+| reason | `poolhouse-serve up MODEL --for 'text'`; the `--for` of `poolhouse-claude`, `poolhouse-codex`, `poolhouse-chat` and `poolhouse-workspace agent start`; `$POOLHOUSE_LEASE_FOR` (which leads the reason when the caller also gives one); the reason an in-repo caller passes (`broker_wire.lease(..., reason=)`, `ServerManager.lease(..., reason=)`, `serve(..., reason=)`). A lease with none reads `(no reason given)`. |
+| requester | the workspace agent name (`$POOLHOUSE_WORKSPACE_AGENT`) when one is set, else the program that took the lease |
 | process | the connecting pid and its start time, and the command lines of it and up to three parents, with tokens, keys and `--password`-style values masked |
 | place | the working directory and the git worktree and branch it sits in |
 | time | when the lease was taken |
@@ -182,10 +182,10 @@ A holder that joins a server already up (a second `up` for the same shape, or an
 for the same model) is recorded with its own reason, so every holder of a server is listed.
 
 ```
-ml-stack-serve status            each lease with why, who, where, and the others using its server
-ml-stack-serve leases [--json]   every server the broker holds, each holder with the above
-ml-stack-serve queue             holders and waiting asks, with reason and requester
-ml-stack-serve history [--model NAME] [--since 2026-10-01|3d|2h] [--json]
+poolhouse-serve status            each lease with why, who, where, and the others using its server
+poolhouse-serve leases [--json]   every server the broker holds, each holder with the above
+poolhouse-serve queue             holders and waiting asks, with reason and requester
+poolhouse-serve history [--model NAME] [--since 2026-10-01|3d|2h] [--json]
 ```
 
 When a lease ends (released, dropped, or its process gone) a row goes into a graph kept beside
@@ -196,11 +196,11 @@ to a `model` node and a `branch` node. `history` reads it back.
 ### Making room for a model (Apple silicon)
 
 A model, its KV cache and its compute buffers must fit under `iogpu.wired_limit_mb`, which is
-about 75% of installed memory until it is raised. `ml-stack-serve memory --for MODEL` works out
+about 75% of installed memory until it is raised. `poolhouse-serve memory --for MODEL` works out
 the limit one model needs and what that leaves for the rest of the machine:
 
 ```
-ml-stack-serve memory --for Qwen3.8-Flash-Next-UD-Q4_K_XL --ctx 262144 --kv q8_0
+poolhouse-serve memory --for Qwen3.8-Flash-Next-UD-Q4_K_XL --ctx 262144 --kv q8_0
 ```
 
 * `--for MODEL` takes an installed model's id, name or path; `--ctx N` is the context in
@@ -239,11 +239,11 @@ A lease for an IQ-family GGUF (IQ1_S, IQ1_M, IQ2_XXS/XS/S/M, IQ3_XXS/XS/S/M, IQ4
 on a Mac with an arm64 CPU goes ahead with one warning per process: it MAY be slower and less
 accurate than a K-quant of the same model on Metal, the evidence is thin, and the K-quant
 builds of the same model found on disk are listed. Each such lease also emits a sentinel event
-`serve.iq_warning` (model, quant, who) and marks its lease record, and `ml-stack-serve status`
+`serve.iq_warning` (model, quant, who) and marks its lease record, and `poolhouse-serve status`
 shows a `WARNING` line for the server while it runs. Linux, Windows, CPU-only leases
 (`n_gpu_layers` 0) and engines other than llama.cpp are never affected.
 
-`ML_STACK_IQ=block|warn|off` (default `warn`) and `ml-stack-serve up --iq block|warn|off`
+`POOLHOUSE_IQ=block|warn|off` (default `warn`) and `poolhouse-serve up --iq block|warn|off`
 set the mode, and `iq=` on `ServerManager.lease` and `serve` does the same for one lease.
 `block` refuses with `BlockedQuant` (`up` exits 3); `off` gives no warning and records nothing.
 
@@ -260,7 +260,7 @@ IQ against K-quant speed measurement exists in `docs/model-ranking.md`, `docs/fi
 bench store code. `docs/experiments/iq-vs-kquant-metal.md` is the pre-registered protocol
 that settles it.
 
-**How a file is judged IQ** (`ml_stack.serve.quant_guard.iq_quant`, header only): its
+**How a file is judged IQ** (`poolhouse.serve.quant_guard.iq_quant`, header only): its
 `general.file_type` is an IQ type, or IQ tensors hold more than half of the weight bytes over
 all shards. One IQ tensor does not make a file IQ: an unsloth `UD-Q4_K_XL` carries an IQ4_NL
 lookup table of about a quarter of its bytes. The file name decides only for a model that is
@@ -271,7 +271,7 @@ ingest, the guard judge).
 **The mode is the person's.** No tool, request or model can change it. `serve_up` (MCP and
 chat) rejects an `--iq` word in `extra`, reports a strict refusal instead of starting a
 process, and `up` takes no abbreviation of its flags. The Broker wire drops an `iq` option, so
-a broker uses its own `ML_STACK_IQ`; a client's strict mode is applied in the client before the
+a broker uses its own `POOLHOUSE_IQ`; a client's strict mode is applied in the client before the
 call, and a client's `off` or `warn` never reaches a broker. A spec or ask carrying `iq` is
 refused. `suggest`, `recommend` and the chat default rank an IQ build after an otherwise equal
 build on Apple silicon (a tie-break, never an exclusion) and its note says it may be slower on
@@ -279,14 +279,14 @@ Metal.
 
 ### Thinking, per use
 
-`ml_stack.client.thinking` decides whether a request asks the model to think, from the
-person's `ML_STACK_THINK=off|on|auto` (default `auto`). Decisions (the decide, judge and guard
+`poolhouse.client.thinking` decides whether a request asks the model to think, from the
+person's `POOLHOUSE_THINK=off|on|auto` (default `auto`). Decisions (the decide, judge and guard
 logprob paths) never think. Agent turns and short answers think only when the person sets
 `on`; under `auto` a prompt thinks only when it contains a phrase that asks for reasoning
 ("think step by step", "show your reasoning") or the use is `reasoning`. The agent loop and
 the logprob decider send the family's template flag (`enable_thinking` for Qwen and Gemma,
-`reasoning_effort` for gpt-oss) accordingly, and `ml-stack-serve up` prints the policy.
-`ml-stack-chat` sends `think=False` on every turn itself; a `/think` command and `--think`
+`reasoning_effort` for gpt-oss) accordingly, and `poolhouse-serve up` prints the policy.
+`poolhouse-chat` sends `think=False` on every turn itself; a `/think` command and `--think`
 there, and the policy's header line, are not wired (chat.py was out of bounds for this
 change). A bench run's thinking is recorded as its thinking column (`--reasoning-budget`).
 
@@ -295,8 +295,8 @@ change). A bench run's thinking is recorded as its thinking column (`--reasoning
 The `Serving` above was typed out by hand, and every value in it came from a bench run
 somebody remembered. A **profile** is those settings written down instead: one record per model
 file **and workload** of the serving and the asking that measured best, and the row of the
-store that set it. `ml_stack/data/profiles.json` ships them and `~/.ml-stack/profiles.json`
-(`$MLSTACK_PROFILES_FILE`) layers this machine's own over them, exactly as `fit.json` does.
+store that set it. `poolhouse/data/profiles.json` ships them and `~/.poolhouse/profiles.json`
+(`$POOLHOUSE_PROFILES_FILE`) layers this machine's own over them, exactly as `fit.json` does.
 
 There are three workloads, because the best settings depend on what the model is doing:
 `ask` (tool-calling over a graph), `ingest` (documents into JSON under a schema) and `chat`
@@ -306,11 +306,11 @@ guess costs a verification pass. `--for` says which record is wanted, and the gr
 is what it means when nothing is said.
 
 ```
-ml-stack-serve profile
-ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
-ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --for ingest
-ml-stack-serve up model.gguf --profile --workload ingest
-ml-stack-bench report --profile
+poolhouse-serve profile
+poolhouse-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+poolhouse-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --for ingest
+poolhouse-serve up model.gguf --profile --workload ingest
+poolhouse-bench report --profile
 ```
 
 ```
@@ -356,8 +356,8 @@ a measurement from a habit.
 From Python, both ends read the same record:
 
 ```python
-from ml_stack.serve import profile_for, slot
-from ml_stack.graph.conversation import converse
+from poolhouse.serve import profile_for, slot
+from poolhouse.graph.conversation import converse
 
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf",
                     workload="ask")
@@ -387,7 +387,7 @@ another quantisation) comes back with `note` saying so. A rewrite from a run tha
 asking records keeps the asking of the record for the same file, never another
 quantisation's.
 
-Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model **and
+Nothing writes a record by hand. `poolhouse-bench report --profile` takes, per model **and
 workload**, **the fastest row whose F1 the questions could not tell apart from the best** — among that model's
 longest runs, held is `score.held_up`, the two 95% bands overlapping — and writes the build,
 head, cache, thinking, context, asking and sampling it was served and asked with, saying in
@@ -404,17 +404,17 @@ workload, and every one of them a number somebody paid for.
 
 **Every load preflights first.** Before a process starts, `LlamaServerBackend.start` checks
 that every shard of the GGUF is present and complete (an `hf:` reference is resolved through
-the Hub cache the way `ml-stack-models files` reports what is already on this machine), that
+the Hub cache the way `poolhouse-models files` reports what is already on this machine), that
 `general.architecture` is one this build reads, that the weights plus an estimated KV cache
-fit what `ml-stack-setup` says this machine may use, and that every flag the spec would emit
+fit what `poolhouse-setup` says this machine may use, and that every flag the spec would emit
 is one the build accepts — one fast read of a GGUF's own header, never the tensors, so a
 fault that used to surface at the far end of an 87G load surfaces before anything is
-spawned. `ml-stack-serve up --preflight-only` runs the same report and exits 0 or 1 without
-starting or adopting anything; `ml-stack-models fetch hf:owner/repo/file.gguf` downloads
+spawned. `poolhouse-serve up --preflight-only` runs the same report and exits 0 or 1 without
+starting or adopting anything; `poolhouse-models fetch hf:owner/repo/file.gguf` downloads
 every shard of a build into the same cache ahead of time, so a benchmark's timed window never
 pays for the download. A lease also records `load_s` (and `warmup_s`, from one short
 completion sent right after the health check, so the first *measured* question is not the
-one paying for shader compilation) — both show up in `ml-stack-serve status --json`, and the
+one paying for shader compilation) — both show up in `poolhouse-serve status --json`, and the
 load timeout itself scales with the weights on disk (`60s + 1.5s/GB`, floor 300s) rather than
 racing a fixed clock against whichever model is biggest.
 
@@ -427,9 +427,9 @@ layer as full attention is wrong by a different multiple for each of them. llama
 exactly what it allocated at load, and that is what is recorded:
 
 ```
-ml-stack-serve fit model.gguf --measure --context 32768
-ml-stack-serve fit --room 24G --per-user 8192 --per-user 65536
-ml-stack-serve fit --room 110G --room 24G --plot docs/fit.png --write docs/fit.md
+poolhouse-serve fit model.gguf --measure --context 32768
+poolhouse-serve fit --room 24G --per-user 8192 --per-user 65536
+poolhouse-serve fit --room 110G --room 24G --plot docs/fit.png --write docs/fit.md
 ```
 
 `--measure` serves the model once with `-lv 4` (the library's own load lines are
@@ -452,7 +452,7 @@ drawn faintly behind, and each `--room` in force is drawn across it, so the char
 solid, the second dashed. `--at N` sets the context the second panel charges at (default
 32768). The legend carries each model's arithmetic in full: `87.2G + 0.14G/user at 32k`,
 which is `Fit.line(context)`, the pair of numbers every line is drawn from. Drawing needs
-matplotlib (`pip install 'ml-stack[plot]'`); nothing else here does, and `ml-stack-bench
+matplotlib (`pip install 'poolhouse[plot]'`); nothing else here does, and `poolhouse-bench
 show --plot` deliberately still writes hand-built SVG with no library so it opens on a
 machine with no packages. With `--write` alongside, the page embeds the picture beside it.
 
@@ -468,21 +468,21 @@ Hovering either panel lights the model's row and says its exact numbers at the c
 serves on loopback and opens a browser at it:
 
 ```
-ml-stack-serve fit --ui
+poolhouse-serve fit --ui
 ```
 
 The fleet app shows the same view under **Fit**, at `/ui/fit`, from the same two routes --
 `/ui/fit.json` hands over the records worked out for the room and the head count the sliders
-stand at, so every number on the screen is the one `ml-stack-serve fit` prints. A sibling
+stand at, so every number on the screen is the one `poolhouse-serve fit` prints. A sibling
 tab, **What it cost to be
-right**, draws `ml-stack-bench show --rates` the same way: accuracy against wall clock,
+right**, draws `poolhouse-bench show --rates` the same way: accuracy against wall clock,
 tokens paid for, or KV and runtime, with the Pareto frontier joined -- nothing on it is both
 more accurate and cheaper, so choosing among those points is choosing a budget. Both pages
 are hand-drawn SVG with no library and no CDN, so they open on a machine that has never been
 online.
 
-The records are the single source of truth, in `src/ml_stack/data/fit.json`, keyed by the
-model file's basename, the cache type and the guessing-ahead kind; `~/.ml-stack/fit.json`
+The records are the single source of truth, in `src/poolhouse/data/fit.json`, keyed by the
+model file's basename, the cache type and the guessing-ahead kind; `~/.poolhouse/fit.json`
 layers a machine's own measurements over the shipped ones, and `--measure` says which of the
 two it wrote to. Without `--measure`, `fit` only reads -- nothing is served and no GPU is
 touched.
@@ -503,9 +503,9 @@ it generates, so what was learnt answering one question can speculate the next.
 
 A model is served with multi-token prediction (`--spec-type draft-mtp`) whenever it has a
 prediction layer and the build can use it, through `ServerManager.lease`, `serve()`, the
-Broker and `ml-stack-serve up` alike. The lease says what it did: `ServerInfo.mtp` is
+Broker and `poolhouse-serve up` alike. The lease says what it did: `ServerInfo.mtp` is
 `embedded`, a head's file name, or empty, `ServerInfo.mtp_note` is the one-line reason, the
-lease record keeps both, and `ml-stack-serve status` prints the head with the share of
+lease record keeps both, and `poolhouse-serve status` prints the head with the share of
 drafted tokens the model kept (read from the server's `/metrics`).
 
 Where the layer comes from, in order:
@@ -528,7 +528,7 @@ Served without, with the reason in `mtp_note` and the log, never as a failure:
 
 | reason | why |
 | --- | --- |
-| `ML_STACK_MTP=off` (also `0`, `no`, `false`, `none`) | the machine-wide opt-out |
+| `POOLHOUSE_MTP=off` (also `0`, `no`, `false`, `none`) | the machine-wide opt-out |
 | `ServerSpec(mtp=False)`, `Serving(mtp=False)`, `up --no-mtp`, `up --draft none`, `up --spec none` | the per-lease opt-out |
 | `--spec-type` has no `draft-mtp` in this build's `--help` | the build cannot |
 | `draft`, `spec_type` or tree decoding already chosen by the caller | the caller's choice stands |
@@ -540,7 +540,7 @@ The guard's judge lease (`guard/native.py`) asks for `mtp=False`: it reads the p
 of one token (`max_tokens=1`), so there is nothing to draft, and in the build checked
 (`b11380`) tokens accepted from a draft carry no `logprobs` (`TODO: set result.probs` in
 `server-context.cpp`), so any scoring that reads more than the first token must not be
-served drafted. The bench's no-head arms and `ml-stack-draft`'s `none` arm set `mtp=False` too, so
+served drafted. The bench's no-head arms and `poolhouse-draft`'s `none` arm set `mtp=False` too, so
 a baseline is a baseline.
 
 #### What has been measured
@@ -549,7 +549,7 @@ Draft depth: a model whose architecture is in `serve.mtp.DEPTH` is started at th
 unless the lease names one; every other model gets the server's own default (3). The table
 is `gemma4: 2` only.
 
-Measured on this repo's own runs (`ml-stack-bench` store, 2026-09-01 to 2026-09-06, Mac;
+Measured on this repo's own runs (`poolhouse-bench` store, 2026-09-01 to 2026-09-06, Mac;
 `docs/report-2026-09-23.md`, "Draft heads, per model", and `docs/llama-cpp-per-request-speculative.md`).
 Speed is the head's seconds-per-question against the same model's undrafted run on the same
 build; accept is the share of drafted tokens kept. A head cannot change an answer, so the F1
@@ -602,33 +602,33 @@ target's embeddings: the default offers it the non-shared `mtp-...-Q8_0.gguf` on
 loads that head-only file as `-md` is not known without loading it. The one check, on a quiet
 machine (loads the 87G model once per arm):
 
-    ml-stack-draft Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf --depth 2 --depth 3 --depth 4
+    poolhouse-draft Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf --depth 2 --depth 3 --depth 4
 
 An arm that cannot load prints the server's error; a loading head prints accept and speed
 against the no-head arm, which are the first numbers for this build.
 
 **A release lags master by an architecture or two.** Checked on this machine: the newest
 homebrew bottle (`brew outdated` empty) reads `gemma4` and `qwen3moe` but not `qwen4exp`, so
-Qwen3.8-Flash-Next exits with "unknown model architecture" on it. `ml-stack-serve build`
+Qwen3.8-Flash-Next exits with "unknown model architecture" on it. `poolhouse-serve build`
 fixes that permanently rather than once: it clones or fast-forwards llama.cpp's own master
 and builds it (`--from source`, Metal on macOS, CUDA or Vulkan on Windows/Linux when a
 compiler is on PATH), or downloads the newest GitHub release with an asset for this machine
 (`--from release`, the default with no compiler — most Windows installs). Either way the new
 binary is trusted only once it answers `--help` and reads every architecture the build it is
-about to replace did; only then does `~/.ml-stack/llama.cpp/current` — which `find_binary`
+about to replace did; only then does `~/.poolhouse/llama.cpp/current` — which `find_binary`
 checks ahead of PATH and a login shell's `/opt/homebrew/bin`, though never ahead of
-`--binary` or `$LLAMA_CPP_SERVER` — point at it. `ml-stack-serve build --check` reports the
+`--binary` or `$LLAMA_CPP_SERVER` — point at it. `poolhouse-serve build --check` reports the
 installed build's commit and age without building anything; `--rollback` points `current`
 back; `--persist` installs a weekly refresh (a LaunchAgent on macOS, a Scheduled Task on
 Windows) that reruns it unattended — safe because a refresh that fails verification changes
 nothing. `--adopt DIR` registers a flat build that already exists — a hand-built binary, or
 a release someone unpacked by hand — as a managed build through the same verification,
 without compiling or downloading anything; a compile already running keeps going regardless,
-and only switches `current` itself once it goes on to verify. `ml-stack-setup` names the fix
+and only switches `current` itself once it goes on to verify. `poolhouse-setup` names the fix
 directly when an architecture or a flag is missing. A one-off binary from somewhere else
-still works: `ml-stack-serve up --binary /path/to/llama-server`.
+still works: `poolhouse-serve up --binary /path/to/llama-server`.
 
-`ml-stack-serve llama-cpp status|update|rollback|pin|list|prune` is the flow that follows upstream
+`poolhouse-serve llama-cpp status|update|rollback|pin|list|prune` is the flow that follows upstream
 with a pinned commit, a sandboxed compile, a smoke test before a build is trusted, and a pin
 sentinel verifies every time the binary is found; see [llama-cpp-tracking.md](llama-cpp-tracking.md).
 
@@ -645,8 +645,8 @@ of the load: `--draft-max` became `--spec-draft-n-max`, and llama.cpp 0.3.0 keep
 name only to say it was removed. So `up` asks the build what it accepts (`flags_of` reads
 `--help`, cached per binary and mtime) and refuses before loading, one line per flag with
 the nearest the build has — `this llama-server has no --draft-max; it has
---spec-draft-n-max`. `ml-stack-setup` lists every flag `ServerSpec` can emit that the
-installed build lacks, and offers `ml-stack-serve build` as the fix; it says nothing when
+--spec-draft-n-max`. `poolhouse-setup` lists every flag `ServerSpec` can emit that the
+installed build lacks, and offers `poolhouse-serve build` as the fix; it says nothing when
 the build answers them all. A build that prints no help is unknown, not empty, and is given
 no opinion.
 
@@ -660,7 +660,7 @@ Qwen3.6-35B-A3B it is the whole model rebuilt with the prediction layers in it, 
 weights for `--spec draft-mtp`, and `auto` correctly reports no draft rather than
 offering it as one. `hub.draft_note(repo)` reads the head's own `MTP/README.md` (or
 `README.md`) for the sentence that says why a head needs something more than the model
-itself — `ml-stack-models files` prints it under the draft line it already reports, so a
+itself — `poolhouse-models files` prints it under the draft line it already reports, so a
 publisher's warning is read before a load, not guessed at after one fails.
 
 **Some heads need a fork, and one chooser — told which binary will serve — decides.**
@@ -679,30 +679,30 @@ with the build read off the binary itself (`serve.binary.borrows`: a build under
 cannot). A fork build is given unsloth's recommended `shared-Q8_0` head; mainline avoids a
 `shared` head altogether. The model may be an `hf:` reference, a path (the repository is
 read off the Hub cache's directory name), or a bare filename; offline, the head already
-beside the weights on disk is the answer. `ml-stack-serve up --draft auto` prints the
-reason and the README's sentence under it, and `ml-stack-models files` prints the head,
+beside the weights on disk is the answer. `poolhouse-serve up --draft auto` prints the
+reason and the README's sentence under it, and `poolhouse-models files` prints the head,
 the warning, and what `this build` and each `--build NAME` on this machine would serve —
 which build a head needs, before a load rather than after one fails.
 
 **A named build keeps a fork beside `current` instead of replacing it.**
-`ml-stack-serve build --repo OWNER/REPO [--ref TAG|BRANCH|SHA] --name NAME` builds a fork
+`poolhouse-serve build --repo OWNER/REPO [--ref TAG|BRANCH|SHA] --name NAME` builds a fork
 from source the same way `--from source` builds master; `--from release --tag TAG`
 downloads a matching release asset instead — and does not need a compiler, or a compile
 that would perturb whatever else is on the GPU or the CPU right now. Either way the result
-lands at `~/.ml-stack/llama.cpp/builds/<name>-<commit>/`, verified the same way `current`
+lands at `~/.poolhouse/llama.cpp/builds/<name>-<commit>/`, verified the same way `current`
 is (answers `--help`) — except a named build is not required to be a superset of `current`'s
 architectures; a fork may read fewer on purpose, or be younger, and that is reported rather
-than refused. `~/.ml-stack/llama.cpp/named/<name>` points at it once verified; `current`
-is never touched. Select it with `ml-stack-serve up --build NAME` (which resolves the
+than refused. `~/.poolhouse/llama.cpp/named/<name>` points at it once verified; `current`
+is never touched. Select it with `poolhouse-serve up --build NAME` (which resolves the
 binary through the named link), `find_binary(build=NAME)` for a direct library caller, or
-`$MLSTACK_LLAMA_BUILD=NAME` for one with no `build=` to pass — all three outrank `current`
-but never an explicit path or `$LLAMA_CPP_SERVER`. `ml-stack-serve build --list` shows
-`current` and every named build with commit, age and repo; `ml-stack-doctor` (or
-`ml-stack-setup --checkouts`) lists them too, beside `current`'s own age.
+`$POOLHOUSE_LLAMA_BUILD=NAME` for one with no `build=` to pass — all three outrank `current`
+but never an explicit path or `$LLAMA_CPP_SERVER`. `poolhouse-serve build --list` shows
+`current` and every named build with commit, age and repo; `poolhouse-doctor` (or
+`poolhouse-setup --checkouts`) lists them too, beside `current`'s own age.
 
 Measured on this machine 2026-09-01, from the newest unsloth release
 (`b10715-mix-86bd2d3`, a macOS arm64 asset, `--from release` — no compile):
-`ml-stack-serve build --repo unslothai/llama.cpp --from release --tag b10715-mix-86bd2d3
+`poolhouse-serve build --repo unslothai/llama.cpp --from release --tag b10715-mix-86bd2d3
 --name unsloth`. `--build unsloth` then preflights Qwen3.8-Flash-Next
 (`UD-IQ4_XS`) with `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`, `--spec draft-mtp
 --spec-draft-n-max 2` cleanly — architecture, shards and every flag check pass — without
@@ -717,7 +717,7 @@ identical just because sampling is greedy.
 
 ### Broker runtime provenance
 
-`ml-stack-serve queue --json` includes a `runtime` object. A newly started broker
+`poolhouse-serve queue --json` includes a `runtime` object. A newly started broker
 records the same object in its private registration and returns it through ping and
 status: wire protocol, actual PID and process birth, OS owner, claimed requester,
 loaded package location/version, Python interpreter/prefix, source commit and dirty

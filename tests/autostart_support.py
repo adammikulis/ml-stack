@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ml_stack import home
-from ml_stack.files import writing
-from ml_stack.fleet.autostart_apply import Seams
-from ml_stack.fleet.autostart_backends import backend_for
-from ml_stack.fleet.autostart_manifest import LAUNCHER_HEAD, ROLE_INFO
-from ml_stack.fleet.autostart_prepare import Spec, prepare
+from poolhouse import home
+from poolhouse.files import writing
+from poolhouse.fleet.autostart_apply import Seams
+from poolhouse.fleet.autostart_backends import backend_for
+from poolhouse.fleet.autostart_manifest import LAUNCHER_HEAD, ROLE_INFO
+from poolhouse.fleet.autostart_prepare import Spec, prepare
 
 PERSON = {"terminal": (True, True), "env": {}}
 
@@ -75,7 +75,7 @@ def environment(tmp_path: Path, monkeypatch) -> Path:
     user = tmp_path / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
-    for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "HF_HOME", "ML_STACK_CACHE"):
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
+    for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE", "HF_HOME", "POOLHOUSE_CACHE"):
         monkeypatch.delenv(name, raising=False)
     return user

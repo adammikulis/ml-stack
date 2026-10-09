@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.redact import hook
+from poolhouse.redact import hook
 
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "no-real-names"
 
@@ -82,9 +82,9 @@ def check_wrapper(where: Path, tmp_path: Path, script: str = str(HOOK),
                   python: str = sys.executable, **files: str) -> tuple[int, str]:
     """Stage those files and run the shell wrapper the way git does."""
     stage(where, files)
-    source = where / "src" / "ml_stack"
+    source = where / "src" / "poolhouse"
     if not source.exists():
-        shutil.copytree(HOOK.parents[2] / "src" / "ml_stack", source)
+        shutil.copytree(HOOK.parents[2] / "src" / "poolhouse", source)
         shutil.copytree(HOOK.parents[2] / "contracts", where / "contracts")
     done = subprocess.run([shell_path(), script], cwd=where, capture_output=True, text=True,
                           env={**wiring(tmp_path), "PYTHON": python})
@@ -211,7 +211,7 @@ def test_a_data_file_full_of_proper_nouns_still_commits(tmp_path):
 
 
 def test_the_bench_export_shape_commits(tmp_path):
-    """What `ml-stack-bench show --export` actually writes: totals and server settings, no
+    """What `poolhouse-bench show --export` actually writes: totals and server settings, no
     question, no entry, no answer."""
     where = repo(tmp_path, graph={"nodes": [{"kind": "person", "label": "Marta Quillon"}]})
     code, said = check(where, tmp_path, **{"bench-runs.json": json.dumps([{
@@ -400,7 +400,7 @@ def test_the_shell_wrapper_runs_the_hook_end_to_end(tmp_path):
 @pytest.mark.slow
 
 
-def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_path):
+def test_the_wrapper_finds_the_source_tree_when_poolhouse_is_not_installed(tmp_path):
     """The copied hook loads checkout source with no installed site packages."""
     where = repo(tmp_path, PEOPLE)
     bare = tmp_path / "bare-python"
@@ -418,9 +418,9 @@ def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_pa
 
 def test_the_wrapper_prefers_the_current_checkout_to_an_installed_package(tmp_path):
     where = repo(tmp_path, graph={"nodes": []})
-    source = where / "src" / "ml_stack" / "redact"
+    source = where / "src" / "poolhouse" / "redact"
     source.mkdir(parents=True)
-    (where / "src" / "ml_stack" / "__init__.py").write_text("")
+    (where / "src" / "poolhouse" / "__init__.py").write_text("")
     (source / "__init__.py").write_text("")
     (source / "hook.py").write_text(
         "from pathlib import Path\n"
@@ -428,9 +428,9 @@ def test_the_wrapper_prefers_the_current_checkout_to_an_installed_package(tmp_pa
         "    print(Path(__file__).resolve())\n"
         "    return 0\n"
     )
-    stale = tmp_path / "installed" / "ml_stack" / "redact"
+    stale = tmp_path / "installed" / "poolhouse" / "redact"
     stale.mkdir(parents=True)
-    (tmp_path / "installed" / "ml_stack" / "__init__.py").write_text("")
+    (tmp_path / "installed" / "poolhouse" / "__init__.py").write_text("")
     (stale / "__init__.py").write_text("")
     (stale / "hook.py").write_text("def main(argv=None):\n    return 1\n")
 
@@ -471,7 +471,7 @@ def test_the_shape_rules_are_data_and_every_section_the_code_reads_exists():
     """`contracts/name-shapes.json` is well-formed, carries every section `hook.SECTIONS`
     names, both patterns, and a `why` for each section saying what it is for -- so the next
     exception is a data change with a known section, not a code change."""
-    from ml_stack.contracts import contracts_dir
+    from poolhouse.contracts import contracts_dir
     data = json.loads((contracts_dir() / hook.CONTRACT).read_text(encoding="utf-8"))
     for section in hook.SECTIONS:
         assert section in data, f"{hook.CONTRACT} lacks {section}"
@@ -487,7 +487,7 @@ def test_the_shape_rules_are_data_and_every_section_the_code_reads_exists():
 
 
 def test_a_rules_file_missing_a_section_is_refused_not_guessed_at(tmp_path):
-    from ml_stack.contracts import ContractError
+    from poolhouse.contracts import ContractError
     partial = tmp_path / "partial.json"
     partial.write_text(json.dumps({"place_first": []}))
     with pytest.raises(ContractError, match="place_last"):
@@ -499,7 +499,7 @@ def test_a_word_added_to_the_data_changes_the_verdict_without_a_code_change(tmp_
     does not trip the hook itself. Copy the contract, add `knight` to `role_last`, point
     `NAMES_SHAPES` at the copy: the same file commits. The shipped rules are untouched, so
     the same file is still refused without the variable."""
-    from ml_stack.contracts import contracts_dir
+    from poolhouse.contracts import contracts_dir
     data = json.loads((contracts_dir() / hook.CONTRACT).read_text(encoding="utf-8"))
     data["role_last"].append("knight")
     copy = tmp_path / "shapes.json"
@@ -565,7 +565,7 @@ def test_only_the_lines_a_commit_adds_are_judged_not_what_the_file_already_said(
 def test_a_revision_that_is_an_option_is_refused_and_a_hostile_path_reaches_git_as_one_argument(tmp_path):
     import subprocess
 
-    from ml_stack.redact.added import added_lines
+    from poolhouse.redact.added import added_lines
 
     def git(*args):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
@@ -615,7 +615,7 @@ def test_real_contacts_are_still_refused_beside_the_friction_lines(tmp_path):
 
 
 def test_a_phrase_the_documents_already_carry_is_the_repositorys_vocabulary(tmp_path):
-    from ml_stack.redact.benign import documented
+    from poolhouse.redact.benign import documented
     where = repo(tmp_path, graph={"nodes": []})
     commit(where, {"glossary.md": "Quartz" + " Lantern is a term.\n"}, "chore: glossary")
     assert documented(str(where), "Quartz" + " Lantern")
@@ -624,7 +624,7 @@ def test_a_phrase_the_documents_already_carry_is_the_repositorys_vocabulary(tmp_
 
 
 def test_a_phrase_shaped_like_a_git_option_or_a_pathspec_is_only_searched_for(tmp_path):
-    from ml_stack.redact.benign import documented
+    from poolhouse.redact.benign import documented
     where = repo(tmp_path, graph={"nodes": []})
     commit(where, {"glossary.md": "Quartz" + " Lantern is a term.\n"}, "chore: glossary")
     for hostile in ("--output=leak.txt Of", "Quartz --open-files-in-pager=sh", "Quartz; touch leak"):

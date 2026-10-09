@@ -1,14 +1,14 @@
-"""``ml-stack security``: every listing is JSON on request and nothing prints a secret."""
+"""``poolhouse security``: every listing is JSON on request and nothing prints a secret."""
 
 from __future__ import annotations
 
 import json
 import os
 
-from ml_stack import home, sentinel
-from ml_stack.sentinel import Mode, State
-from ml_stack.sentinel.cli import command
-from ml_stack.sentinel.store import Holding
+from poolhouse import home, sentinel
+from poolhouse.sentinel import Mode, State
+from poolhouse.sentinel.cli import command
+from poolhouse.sentinel.store import Holding
 
 
 def run(capsys, *argv):

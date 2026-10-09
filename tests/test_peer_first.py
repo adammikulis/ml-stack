@@ -21,16 +21,16 @@ import pytest
 from onboard_support import Recorder
 from test_hub_pull import blob
 
-from ml_stack import hub, macauth, sentinel
-from ml_stack.fleet import tailnet as tn, tls
-from ml_stack.fleet.onboard import lan, manifest as mf, peerfirst, routes
-from ml_stack.fleet.onboard.human import mint
-from ml_stack.fleet.onboard.peers_cli import cmd_peers
-from ml_stack.fleet.onboard.requests import Device, Devices
-from ml_stack.fleet.onboard.sharing import Licences
-from ml_stack.hub import origins, peers as hub_peers, transfer as pulling
-from ml_stack.sentinel.store import Holding
-from ml_stack.testing.fakehub import fake_hub
+from poolhouse import hub, macauth, sentinel
+from poolhouse.fleet import tailnet as tn, tls
+from poolhouse.fleet.onboard import lan, manifest as mf, peerfirst, routes
+from poolhouse.fleet.onboard.human import mint
+from poolhouse.fleet.onboard.peers_cli import cmd_peers
+from poolhouse.fleet.onboard.requests import Device, Devices
+from poolhouse.fleet.onboard.sharing import Licences
+from poolhouse.hub import origins, peers as hub_peers, transfer as pulling
+from poolhouse.sentinel.store import Holding
+from poolhouse.testing.fakehub import fake_hub
 
 MIB = 1 << 20
 CHUNK = 256 * 1024
@@ -51,7 +51,7 @@ def needs_cryptography():
 def stand_in(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
-    monkeypatch.delenv("ML_STACK_NO_PEERS", raising=False)
+    monkeypatch.delenv("POOLHOUSE_NO_PEERS", raising=False)
     monkeypatch.setenv("HF_HOME", "/nonexistent-hf-home")
     with fake_hub({"maker/thing-GGUF": {NAME: GOOD}}) as hub_:
         hub_.point(monkeypatch)
@@ -102,7 +102,7 @@ class Fleet:
         proc = subprocess.Popen(
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
             env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "PEER_LOG": str(log),
-                 "ML_STACK_HOME": str(home), **(env or {})})
+                 "POOLHOUSE_HOME": str(home), **(env or {})})
         self.procs.append(proc)
         port = int(proc.stdout.readline())
         row = {"name": name, "url": f"https://127.0.0.1:{port}", "certificate": ident.beacon,
@@ -365,7 +365,7 @@ def test_the_machine_setting_skips_them(stand_in, fleet, tmp_path):
 
 
 def test_the_fetch_command_has_the_flag(stand_in, fleet, tmp_path):
-    from ml_stack.hub import cli
+    from poolhouse.hub import cli
 
     peer = fleet.peer("kitchen")
     assert cli.main(["fetch", "--no-peers", REF]) == 0
@@ -389,12 +389,12 @@ def test_the_peers_command_turns_it_off_and_refuses_a_public_address(tmp_path, c
 def test_a_copy_sentinel_holds_in_quarantine_is_not_served(
         stand_in, fleet, tmp_path, monkeypatch):
     peer = fleet.peer("kitchen")
-    here = os.environ["ML_STACK_HOME"]
-    monkeypatch.setenv("ML_STACK_HOME", str(peer["home"]))        # the serving device's sentinel
+    here = os.environ["POOLHOUSE_HOME"]
+    monkeypatch.setenv("POOLHOUSE_HOME", str(peer["home"]))        # the serving device's sentinel
     held = _write(tmp_path / "held" / NAME, b"the copy")
     sentinel.default().store.quarantine(("artifact", f"download:{SHA}"), "flagged later",
                                         {"sha256": SHA}, Holding(path=held), actor="test")
-    monkeypatch.setenv("ML_STACK_HOME", here)
+    monkeypatch.setenv("POOLHOUSE_HOME", here)
     assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
     assert file_requests(stand_in) > 0               # asked, refused, so the Hub was needed
 
@@ -689,7 +689,7 @@ def test_the_record_is_append_only_and_lists_every_download(tmp_path):
 
 # (n) the limit command --------------------------------------------------------------------------
 def test_peers_limit_sets_a_rate_streams_and_metered_for_one_device_or_all(tmp_path):
-    from ml_stack.fleet.onboard.peers_cli import parse_rate
+    from poolhouse.fleet.onboard.peers_cli import parse_rate
     assert parse_rate("20MiB/s") == 20 * MIB and parse_rate("512k") == 512 * 1024
     assert parse_rate("1.5 MB/s") == 1.5 * MIB and parse_rate("off") == 0.0 and parse_rate("fast") is None
     book = peerfirst.PeerBook(tmp_path / "s" / "peers.json")

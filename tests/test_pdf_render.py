@@ -1,7 +1,7 @@
 """Page rendering and outline-page detection without MuPDF (AGPL-3.0).
 
 Pages are rendered by PDFium (pypdfium2: Apache-2.0 / BSD-3-Clause) in a bounded child
-(`ml_stack.net.pdfrender`). Every PDF is written by the test from bytes (`ml_stack.redteam.minipdf`
+(`poolhouse.net.pdfrender`). Every PDF is written by the test from bytes (`poolhouse.redteam.minipdf`
 and raw objects); hostile ones are built the same way, and each bound has a test that fails when
 the bound is removed.
 """
@@ -19,23 +19,23 @@ from pathlib import Path
 import pytest
 from test_pdf_engine import one_page, raw_pdf
 
-from ml_stack.net import pdfrender
-from ml_stack.net.pdfread import PdfRefused
-from ml_stack.net.pdfrender import RenderLimits, render_pages
-from ml_stack.redteam.minipdf import Doc
-from ml_stack.sources import datasheet
+from poolhouse.net import pdfrender
+from poolhouse.net.pdfread import PdfRefused
+from poolhouse.net.pdfrender import RenderLimits, render_pages
+from poolhouse.redteam.minipdf import Doc
+from poolhouse.sources import datasheet
 
 PNG = b"\x89PNG\r\n\x1a\n"
 
 
 @pytest.fixture(autouse=True)
 def default_engine(monkeypatch):
-    monkeypatch.delenv("ML_STACK_PDF_ENGINE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_PDF_ENGINE", raising=False)
 
 
 @pytest.fixture
 def pdfium():
-    return pytest.importorskip("pypdfium2", reason="pip install 'ml-stack[pdf-render]'")
+    return pytest.importorskip("pypdfium2", reason="pip install 'poolhouse[pdf-render]'")
 
 
 def png_size(png: bytes) -> tuple[int, int]:
@@ -96,7 +96,7 @@ def test_the_width_and_the_pixel_bound_lower_the_resolution_instead_of_failing(p
 
 def test_the_default_engine_renders_a_datasheet_page_with_pdfium_and_crops_it(pdfium, tmp_path):
     where = a_drawn_page(tmp_path / "drawn.pdf")
-    code = ("import sys\nfrom ml_stack.sources import datasheet\n"
+    code = ("import sys\nfrom poolhouse.sources import datasheet\n"
             f"full, crop = datasheet.render({where!r}, 1, crop=False), datasheet.render({where!r}, 1)\n"
             "assert full[:8] == crop[:8] == b'\\x89PNG\\r\\n\\x1a\\n'\n"
             "w = lambda p: int.from_bytes(p[16:20], 'big')\n"
@@ -124,12 +124,12 @@ def test_the_render_child_runs_by_path_with_dash_P_in_a_scrubbed_environment(
         seen.update(argv=argv, env=kw["env"], cwd=kw["cwd"])
         return real(argv, **kw)
 
-    monkeypatch.setenv("ML_STACK_TEST_SECRET", "hunter2")
+    monkeypatch.setenv("POOLHOUSE_TEST_SECRET", "hunter2")
     monkeypatch.setattr(subprocess, "run", watch)
     (page,) = render_pages(a_drawn_page(tmp_path / "d.pdf"), [1])
     assert page.width > 0
     assert seen["argv"][1:] == ["-P", str(pdfrender.CHILD)] and "-m" not in seen["argv"]
-    assert "ML_STACK_TEST_SECRET" not in seen["env"] and set(seen["env"]) <= {
+    assert "POOLHOUSE_TEST_SECRET" not in seen["env"] and set(seen["env"]) <= {
         "PATH", "SYSTEMROOT", "TMPDIR", "TEMP", "PYTHONDONTWRITEBYTECODE"}
     assert seen["cwd"] != str(tmp_path)
 

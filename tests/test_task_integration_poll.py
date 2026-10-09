@@ -5,9 +5,9 @@ import threading
 import pytest
 from taskboard_kit import accepted, board, proposed
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_scheduler
-from ml_stack.workspace.identity import Denied
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import task_scheduler
+from poolhouse.workspace.identity import Denied
 
 __all__ = ['board']
 
@@ -87,7 +87,7 @@ def test_concurrent_pollers_reserve_review_before_running_helper(board, monkeypa
 def test_dead_integration_owner_becomes_visible_recovery_without_blind_retry(board, monkeypatch):
     complete(board)
     review = board.board.get(board.parent, board.task['id'])['review']
-    from ml_stack.workspace.task_graph import save
+    from poolhouse.workspace.task_graph import save
     with GraphStore(board.base / 'coordination.db') as graph:
         save(graph, 'integration-attempt', {'id': 'integration-attempt:' + review['review_hash'],
             'task': board.task['id'], 'worker': board.worker_id, 'owner': 'lead',
@@ -105,7 +105,7 @@ def test_dead_integration_owner_becomes_visible_recovery_without_blind_retry(boa
 def test_chat_assignment_review_finishes_without_git_scope(board):
     from dataclasses import replace
 
-    from ml_stack.workspace import localagent
+    from poolhouse.workspace import localagent
     complete(board)
     runner = localagent.load(board.ws, 'native-worker')
     localagent.save(board.ws, replace(runner, profile='chat'))

@@ -7,12 +7,12 @@ import time
 
 import pytest
 
-from ml_stack import macauth, sealing
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.remote import Peer
+from poolhouse import macauth, sealing
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.remote import Peer
 
 
 @pytest.fixture
@@ -120,7 +120,7 @@ def test_a_signed_request_cannot_be_altered(served):
 
 
 def test_an_address_that_keeps_guessing_is_locked_out(served):
-    wrong = b"GET /jobs HTTP/1.0\r\nAuthorization: ML-Stack-MAC k=00000000,t=1,n=" + b"n" * 24 + b",s=" + b"0" * 64 + b"\r\n\r\n"
+    wrong = b"GET /jobs HTTP/1.0\r\nAuthorization: Poolhouse-MAC k=00000000,t=1,n=" + b"n" * 24 + b",s=" + b"0" * 64 + b"\r\n\r\n"
     codes = [talk(served["port"], wrong)[0] for _ in range(14)]
     assert 429 in codes and codes[0] == 401
     assert talk(served["port"], signed(served, "GET", "/jobs"))[0] == 429
@@ -205,7 +205,7 @@ def test_a_range_that_cannot_be_served_is_refused(served):
 
 
 def test_query_numbers_that_are_not_numbers_fall_back(served):
-    job = served["peer"].submit(["python3", "-m", "ml_stack.fleet.calibration", "--budget", "0.05"])
+    job = served["peer"].submit(["python3", "-m", "poolhouse.fleet.calibration", "--budget", "0.05"])
     time.sleep(0.5)
     status, _ = talk(served["port"], signed(served, "GET", f"/jobs/{job['id']}/log?tail=abc"))
     assert status == 200

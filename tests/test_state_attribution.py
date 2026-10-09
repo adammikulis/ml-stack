@@ -9,9 +9,9 @@ import warnings
 
 import pytest
 from conftest import changed_files, file_mtimes
-from state_attribution import Watch, _is_ml_stack, live_ml_stack_processes
+from state_attribution import Watch, _is_poolhouse, live_poolhouse_processes
 
-OTHER = [(4242, "ml-stack-bench prepare")]
+OTHER = [(4242, "poolhouse-bench prepare")]
 WRITE = "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text('escaped')"
 
 
@@ -37,7 +37,7 @@ def test_a_write_by_the_session_on_an_idle_machine_fails(tmp_path):
 def test_the_same_write_with_another_live_writer_is_a_warning(tmp_path):
     seen = watch(tmp_path, OTHER)
     escape(tmp_path)
-    with pytest.warns(UserWarning, match=r"4242 ml-stack-bench prepare.*bench/graph\.ladybug"):
+    with pytest.warns(UserWarning, match=r"4242 poolhouse-bench prepare.*bench/graph\.ladybug"):
         assert seen.settle() == ""
 
 
@@ -75,13 +75,13 @@ def test_nothing_changed_is_quiet(tmp_path):
 
 
 @pytest.mark.parametrize("argv,expected", [
-    (["/venv/bin/ml-stack-bench", "prepare"], True),
-    (["/venv/bin/python", "-m", "ml_stack.broker"], True),
+    (["/venv/bin/poolhouse-bench", "prepare"], True),
+    (["/venv/bin/python", "-m", "poolhouse.broker"], True),
     (["python3", "/repos/ml-stack/scripts/test", "all"], False),
-    (["vim", "ml-stack/README.md"], False)])
-def test_ml_stack_processes_are_recognised_by_how_they_were_started(argv, expected):
-    assert _is_ml_stack(argv) is expected
+    (["vim", "poolhouse/README.md"], False)])
+def test_poolhouse_processes_are_recognised_by_how_they_were_started(argv, expected):
+    assert _is_poolhouse(argv) is expected
 
 
 def test_this_session_is_not_its_own_other_writer():
-    assert os.getpid() not in {pid for pid, _ in live_ml_stack_processes()}
+    assert os.getpid() not in {pid for pid, _ in live_poolhouse_processes()}

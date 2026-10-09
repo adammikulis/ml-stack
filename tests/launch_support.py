@@ -6,7 +6,7 @@ import contextlib
 import urllib.parse
 from collections.abc import Iterator
 
-from ml_stack.fleet.launch_secret import HEADER, LaunchSecret
+from poolhouse.fleet.launch_secret import HEADER, LaunchSecret
 
 ARMED: dict[int, object] = {}
 """Test daemons by port, for the pages that open them."""

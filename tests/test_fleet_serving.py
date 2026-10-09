@@ -14,12 +14,12 @@ from http.server import BaseHTTPRequestHandler
 
 import pytest
 
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.serving import Endpoint, ServeSettings, Serving, answers
-from ml_stack.http import Server, build_request
-from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.serving import Endpoint, ServeSettings, Serving, answers
+from poolhouse.http import Server, build_request
+from poolhouse.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 
 def free_port() -> int:
@@ -77,7 +77,7 @@ def wired(tmp_path, model):
 
 
 def test_live_registry_records_embedding_mode_and_preserves_it(tmp_path, model, monkeypatch):
-    from ml_stack.fleet import serving as serving_module
+    from poolhouse.fleet import serving as serving_module
 
     registry = Serving(tmp_path / 'serving.json')
     registry.register(model.port, ['qwen3-4b.gguf'])
@@ -125,7 +125,7 @@ class TestRegistry:
     def test_reconciliation_preserves_registration_changed_after_probe(self, tmp_path, model, monkeypatch):
         from dataclasses import replace
 
-        from ml_stack.fleet import serving as module
+        from poolhouse.fleet import serving as module
 
         registry = Serving(tmp_path / "serving.json")
         original = registry.register(model.port, ["stale-claim.gguf"])
@@ -245,7 +245,7 @@ class TestProxy:
         assert exc.value.code == 401
 
     def test_it_sends_the_leased_servers_key_upstream(self, wired):
-        from ml_stack import serverkeys
+        from poolhouse import serverkeys
 
         daemon, _, model = wired
         model.api_key = serverkeys.issue(model.port)
@@ -306,7 +306,7 @@ class TestProxy:
         """Only the daemon's port is exposed. llama.cpp has no authentication, so a
         model server on the LAN is an open inference endpoint."""
         _, _, model = wired
-        from ml_stack.fleet.discovery import primary_ip
+        from poolhouse.fleet.discovery import primary_ip
 
         with socket.socket() as s:
             s.settimeout(2)
@@ -354,7 +354,7 @@ class TestEndpoint:
         """If this needs a change in Client, the design is wrong."""
         import inspect
 
-        from ml_stack.client import Client, Transport
+        from poolhouse.client import Client, Transport
 
         kwargs = Endpoint(peer="gpubox", base_url="http://box:8770",
                           token="abc").client_kwargs()
@@ -364,7 +364,7 @@ class TestEndpoint:
         assert set(kwargs) <= set(accepted)
 
     def test_an_unmodified_client_talks_through_the_proxy(self, wired):
-        from ml_stack.client import Client
+        from poolhouse.client import Client
 
         daemon, _, _ = wired
         endpoint = Endpoint(peer="box", base_url=f"http://127.0.0.1:{daemon.port}",
@@ -389,7 +389,7 @@ def test_a_probe_takes_a_server_that_only_lists_models(server):
 @pytest.fixture
 def llama_binary(tmp_path, monkeypatch):
     """A llama-server that really launches, binds the port it was given and answers."""
-    from ml_stack.serve import backend as backend_module
+    from poolhouse.serve import backend as backend_module
 
     monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
     return fake_llama_binary(tmp_path)
@@ -397,7 +397,7 @@ def llama_binary(tmp_path, monkeypatch):
 
 @pytest.fixture
 def manager(tmp_path, llama_binary):
-    from ml_stack.serve import LlamaServerBackend, ServerManager
+    from poolhouse.serve import LlamaServerBackend, ServerManager
 
     return ServerManager(LlamaServerBackend(binary=llama_binary),
                          state_file=tmp_path / "servers.json")
@@ -413,7 +413,7 @@ def gguf(tmp_path):
 class TestStartingAModelWithoutTheInterface:
     @pytest.mark.parametrize('scenario', [(False, None, False), (True, None, True), (True, False, False)])
     def test_escalation_defaults_and_explicit_opt_out(self, tmp_path, manager, gguf, monkeypatch, scenario):
-        from ml_stack.fleet.serving import Hosting, start_model, stop_model
+        from poolhouse.fleet.serving import Hosting, start_model, stop_model
 
         observed = []
         hosted, escalate, expected = scenario
@@ -435,7 +435,7 @@ class TestStartingAModelWithoutTheInterface:
         assert observed == [expected]
 
     def test_it_leases_a_server_that_answers(self, tmp_path, manager, gguf):
-        from ml_stack.fleet.serving import start_model, stop_model
+        from poolhouse.fleet.serving import start_model, stop_model
 
         started = start_model(tmp_path, gguf, manager=manager)
         try:
@@ -445,14 +445,14 @@ class TestStartingAModelWithoutTheInterface:
             stop_model(started)
 
     def test_stopping_it_leaves_nothing_on_the_port(self, tmp_path, manager, gguf):
-        from ml_stack.fleet.serving import start_model, stop_model
+        from poolhouse.fleet.serving import start_model, stop_model
 
         started = start_model(tmp_path, gguf, manager=manager)
         stop_model(started)
         assert not answers(started.port, timeout=1.0)
 
     def test_the_registry_gains_and_loses_the_port(self, tmp_path, manager, gguf):
-        from ml_stack.fleet.serving import start_model, stop_model
+        from poolhouse.fleet.serving import start_model, stop_model
 
         registry = Serving(tmp_path / "serving.json")
         started = start_model(tmp_path, gguf, manager=manager, serving=registry)
@@ -465,7 +465,7 @@ class TestStartingAModelWithoutTheInterface:
         assert registry.all() == []
 
     def test_the_name_it_registers_can_be_given(self, tmp_path, manager, gguf):
-        from ml_stack.fleet.serving import start_model, stop_model
+        from poolhouse.fleet.serving import start_model, stop_model
 
         registry = Serving(tmp_path / "serving.json")
         started = start_model(tmp_path, gguf, settings=ServeSettings(name="something else.gguf"),
@@ -476,7 +476,7 @@ class TestStartingAModelWithoutTheInterface:
             stop_model(started, serving=registry)
 
     def test_the_context_length_reaches_the_server(self, tmp_path, manager, gguf):
-        from ml_stack.fleet.serving import start_model, stop_model
+        from poolhouse.fleet.serving import start_model, stop_model
 
         started = start_model(tmp_path, gguf, settings=ServeSettings(context=2048), manager=manager)
         stop_model(started)
@@ -485,8 +485,8 @@ class TestStartingAModelWithoutTheInterface:
 
     def test_a_draft_beside_the_model_is_served_with_it(self, tmp_path, manager, gguf):
         """A machine that fetched the draft and does not pass it paid for nothing."""
-        from ml_stack.fleet.serving import start_model, stop_model
-        from ml_stack.hub import DRAFT_MARK
+        from poolhouse.fleet.serving import start_model, stop_model
+        from poolhouse.hub import DRAFT_MARK
 
         draft = gguf.with_suffix(DRAFT_MARK + gguf.suffix)
         draft.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
@@ -498,7 +498,7 @@ class TestStartingAModelWithoutTheInterface:
         assert argv[argv.index("--spec-draft-ngl") + 1] == "99"
 
     def test_a_given_port_is_the_one_used(self, tmp_path, manager, gguf):
-        from ml_stack.fleet.serving import start_model, stop_model
+        from poolhouse.fleet.serving import start_model, stop_model
 
         port = free_port()
         started = start_model(tmp_path, gguf, manager=manager, settings=ServeSettings(port=port))

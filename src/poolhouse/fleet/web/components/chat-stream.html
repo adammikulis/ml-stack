@@ -1,0 +1,47 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  M.readChatStream = async function (response, show) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    let content = "";
+    let reasoning = "";
+    const frame = (line) => {
+      if (!line.startsWith("data:")) return;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") return;
+      let parsed;
+      try { parsed = JSON.parse(data); } catch { return; }
+      if (parsed.error) throw new Error(parsed.error.message || parsed.error);
+      if (parsed.poolhouse) show({ activity: {
+        queued: "Waiting for model…", loading: "Loading model…", rebuilding: "Restoring conversation…",
+      }[parsed.poolhouse.state] || "Waiting for model…" });
+      for (const choice of parsed.choices || []) {
+        const delta = choice.delta || choice.message || {};
+        if (delta.reasoning_content) {
+          reasoning += delta.reasoning_content;
+          show({ reasoning: delta.reasoning_content, activity: "Thinking…" });
+        }
+        if (delta.content) {
+          content += delta.content;
+          show({ content: delta.content, activity: "Responding…" });
+        }
+      }
+    };
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split("\n");
+        pending = lines.pop();
+        for (const line of lines) frame(line);
+      }
+      pending += decoder.decode();
+      if (pending.trim()) frame(pending);
+    } finally { reader.releaseLock(); }
+    return { content, reasoning };
+  };
+})();
+</script>

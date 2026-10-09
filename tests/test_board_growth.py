@@ -2,7 +2,7 @@
 
 import json
 
-from ml_stack.workspace.board_pages import PAGE_BYTES, page
+from poolhouse.workspace.board_pages import PAGE_BYTES, page
 
 
 def test_large_history_pages_preserve_contiguous_forward_and_older_windows():

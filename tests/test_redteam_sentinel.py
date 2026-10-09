@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.redteam.report import Report, gate, scenario_table
-from ml_stack.redteam.scenarios import Options, sentinel
+from poolhouse.redteam.report import Report, gate, scenario_table
+from poolhouse.redteam.scenarios import Options, sentinel
 
 BASELINE = Path(__file__).resolve().parents[1] / "docs" / "redteam" / "baseline-deterministic-2026-10-03.json"
 

@@ -1,11 +1,11 @@
-"""`ml_stack.graph.requests`: a request becomes a proposal, and nothing edits the graph."""
+"""`poolhouse.graph.requests`: a request becomes a proposal, and nothing edits the graph."""
 
 from __future__ import annotations
 
 import json
 
-from ml_stack.graph.conversation import draft
-from ml_stack.graph.requests import (
+from poolhouse.graph.conversation import draft
+from poolhouse.graph.requests import (
     CHAT_KIND,
     as_prompt,
     edge_id,

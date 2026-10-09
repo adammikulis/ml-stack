@@ -17,9 +17,9 @@ sys.path.insert(0, str(REPO / "scripts"))
 import gatescope  # noqa: E402
 
 TREE = {
-    "src/ml_stack/__init__.py": "",
-    "src/ml_stack/mod.py": "VALUE = 1\n",
-    "tests/test_mod.py": "from ml_stack import mod\n\n\ndef test_it():\n    assert mod.VALUE\n",
+    "src/poolhouse/__init__.py": "",
+    "src/poolhouse/mod.py": "VALUE = 1\n",
+    "tests/test_mod.py": "from poolhouse import mod\n\n\ndef test_it():\n    assert mod.VALUE\n",
     "HANDOFF.md": "# Handoff\n",
     "docs/guide.md": "A guide nothing tests.\n",
     "docs/commands.md": "generated\n",
@@ -57,13 +57,13 @@ def test_a_change_to_prose_no_test_names_does_not_reach_the_gate(repo):
 
 
 def test_a_source_change_reaches_the_gate(repo):
-    edit(repo, "src/ml_stack/mod.py", "VALUE = 2\n")
+    edit(repo, "src/poolhouse/mod.py", "VALUE = 2\n")
     assert gatescope.unreached(repo, "0.2dev") == ""
 
 
 def test_prose_next_to_a_source_change_still_runs_the_gate(repo):
     edit(repo, "HANDOFF.md", "# Handoff\nmore\n")
-    edit(repo, "src/ml_stack/mod.py", "VALUE = 2\n")
+    edit(repo, "src/poolhouse/mod.py", "VALUE = 2\n")
     assert gatescope.unreached(repo, "0.2dev") == ""
 
 

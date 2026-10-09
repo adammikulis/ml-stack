@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from ml_stack import home, person  # noqa: E402
+from poolhouse import home, person  # noqa: E402
 
 ENV = "release"
 SIGNER = "RELEASE_SIGNING_KEY"

@@ -1,10 +1,10 @@
 # The keystore
 
-ml-stack keeps one secret in the operating system's keystore (macOS Keychain, Windows
+Poolhouse keeps one secret in the operating system's keystore (macOS Keychain, Windows
 Credential Manager, Linux Secret Service): a random 32-byte master key, one item per OS user
-(service `ml-stack`, account `master/<uid>:<login>`). Everything else that needs a key gets a
+(service `poolhouse`, account `master/<uid>:<login>`). Everything else that needs a key gets a
 subkey cut from it, so a machine shows one item and one prompt instead of one per feature.
-`ml_stack/keystore.py` is the only module that imports `keyring` (`tests/test_keystore_gate.py`
+`poolhouse/keystore.py` is the only module that imports `keyring` (`tests/test_keystore_gate.py`
 fails on any other).
 
 ## What uses it
@@ -13,7 +13,7 @@ fails on any other).
 |---|---|---|
 | `memory` | user / profile / store directory, plus the file's salt | the encrypted memory store (`docs/memory.md`) |
 | `fleet-signing` | the state directory | the Ed25519 signing key, kept in `signing.key.wrapped` (`docs/onboarding.md`) |
-| `credentials` | the credential name | values stored with `ml-stack credentials set NAME --keychain` (`docs/credentials.md`) |
+| `credentials` | the credential name | values stored with `poolhouse credentials set NAME --keychain` (`docs/credentials.md`) |
 
 A subkey is `HKDF-SHA256(master, info = purpose, owner, context)` with every field
 length-prefixed. `wrap` and `unwrap` seal with AES-256-GCM under that subkey and bind purpose and
@@ -21,9 +21,9 @@ owner as AAD, so a value wrapped for one purpose or owner does not open for anot
 
 ## What a person sees
 
-- Nothing at import, startup, `ml-stack credentials list`, an empty memory store, or
-  `ml-stack-security keystore`.
-- The first time a key is needed: one sentence ("ml-stack will ask your computer to store one
+- Nothing at import, startup, `poolhouse credentials list`, an empty memory store, or
+  `poolhouse-security keystore`.
+- The first time a key is needed: one sentence ("Poolhouse will ask your computer to store one
   encryption key so your memory and fleet identity stay private. You will see one Keychain
   prompt.") and then the one OS prompt, which creates the master. A chat or tool reply gets the
   same sentence from `Keystore.pending_notice()`.
@@ -40,7 +40,7 @@ authorised, so they are counted in two classes (`rate.json`, a list of times per
 | Creates and deletes per user per hour, plus every read made after an earlier refusal (a retry) | 5 (`WRITE_CEILING`); the next one raises `KeystoreBusy` |
 | After the OS refuses or the person declines | the process stops asking for good; other processes wait 10 minutes (`denied.json`); `KeystoreDenied` with one plain message. A read that succeeds again removes the mark |
 | Processes starting together | one lock (`flight.lock`): each process reads the OS keystore itself, one at a time, polling the lock every 20 ms and backing off to 0.5 s. The master is never written to a file or shared between processes, so a swarm costs one backend read per process, not one per use |
-| Background process (no terminal and no desktop session, a Windows session 0, or any agent marker: `ML_STACK_NONINTERACTIVE`, `ML_STACK_AGENT`, `CLAUDECODE`) | never creates the master; reads it only after `ml-stack-security unlock`; otherwise `KeystoreLocked` naming that command |
+| Background process (no terminal and no desktop session, a Windows session 0, or any agent marker: `POOLHOUSE_NONINTERACTIVE`, `POOLHOUSE_AGENT`, `CLAUDECODE`) | never creates the master; reads it only after `poolhouse-security unlock`; otherwise `KeystoreLocked` naming that command |
 
 Why two classes: a swarm of subagents starts dozens of processes in an hour and each reads the
 master once. One shared ceiling of 20 refused the twenty-first process (measured: 40 agents
@@ -55,47 +55,47 @@ Every backend call is a sentinel event `keystore.read`, `keystore.create` or `ke
 `keystore.refused`. No value is ever in an event, a log line or a state file.
 
 | A backend call that does not return | bounded: 300 s for a person, 20 s for a background process (which on macOS also tells the Security framework to fail rather than show a dialog); the timeout latches the same ten-minute refusal |
-| A master that vanished after it was made | not replaced by the next process; `KeystoreMissing`. Only `ml-stack-security unlock` starts over |
+| A master that vanished after it was made | not replaced by the next process; `KeystoreMissing`. Only `poolhouse-security unlock` starts over |
 | A plaintext or null keyring backend (`keyrings.alt`) | refused: `KeystoreUnavailable` |
 
 Platform findings and what is unverified: `docs/keystore-platform-audit-2026-10-08.md`.
 
 ## Commands
 
-All are `ml-stack-security` subcommands; an agent's tool call naming them is refused.
+All are `poolhouse-security` subcommands; an agent's tool call naming them is refused.
 
 ```
-ml-stack-security unlock          # a person at a terminal: make the master if missing, clear a refusal,
+poolhouse-security unlock          # a person at a terminal: make the master if missing, clear a refusal,
                                   # let background processes (daemons, jobs) read it from now on
-ml-stack-security keystore        # provisioned? refused for how long? reads and writes this hour (no keystore call)
-ml-stack-security keystore-reset  # delete the master after typing the account name back
+poolhouse-security keystore        # provisioned? refused for how long? reads and writes this hour (no keystore call)
+poolhouse-security keystore-reset  # delete the master after typing the account name back
 ```
 
 ## Reset
 
 `keystore-reset` deletes the master item and the state files. Everything wrapped under it is
 unreadable afterwards: memory stores, wrapped signing keys, wrapped credentials. Restore from the
-passphrase fallback or start those stores again (`ml-stack-memory forget --all`, a new fleet key).
+passphrase fallback or start those stores again (`poolhouse-memory forget --all`, a new fleet key).
 There is no way to rotate the master and keep the data.
 
 ## Items older versions kept
 
 | Old item | Moved by | How |
 |---|---|---|
-| service `ml-stack-memory`, one JSON key per user/profile/directory | the first open of that memory store | every file of the store is re-sealed under the new subkey and read back; then the item is deleted. A file that does not verify keeps the item |
-| service `ml-stack`, account `onboard-signing-<hash>` (the signing seed) | the first signing call | wrapped into `signing.key.wrapped` and unwrapped to the same key id; the item is deleted, then the record's `store` changes to `keystore`. Cut off at either point, the next call finishes |
-| service `ml-stack`, account `<NAME>` (a credential) | the first `ml-stack-credentials` command a person runs that names it | wrapped into `credentials.json`, read back equal, then the item is deleted. Library code asking for a credential never probes the keystore for an old item |
+| service `poolhouse-memory`, one JSON key per user/profile/directory | the first open of that memory store | every file of the store is re-sealed under the new subkey and read back; then the item is deleted. A file that does not verify keeps the item |
+| service `poolhouse`, account `onboard-signing-<hash>` (the signing seed) | the first signing call | wrapped into `signing.key.wrapped` and unwrapped to the same key id; the item is deleted, then the record's `store` changes to `keystore`. Cut off at either point, the next call finishes |
+| service `poolhouse`, account `<NAME>` (a credential) | the first `poolhouse-credentials` command a person runs that names it | wrapped into `credentials.json`, read back equal, then the item is deleted. Library code asking for a credential never probes the keystore for an old item |
 
 ## Passphrase fallback
 
-With no usable keystore, `ML_STACK_MEMORY_KEYS=passphrase` and the signing key's encrypted file
+With no usable keystore, `POOLHOUSE_MEMORY_KEYS=passphrase` and the signing key's encrypted file
 keep working; their scrypt derivation is `keystore.scrypt_key`. A person chooses it; the keystore
 never falls back to it by itself.
 
 ### Passphrases in the environment
 
-`ML_STACK_SIGNING_PASSPHRASE` (unlocks `signing.key.enc`) and `ML_STACK_MEMORY_PASSPHRASE` (with
-`ML_STACK_MEMORY_KEYS=passphrase`) exist for a machine with no keystore, such as a headless box or a
+`POOLHOUSE_SIGNING_PASSPHRASE` (unlocks `signing.key.enc`) and `POOLHOUSE_MEMORY_PASSPHRASE` (with
+`POOLHOUSE_MEMORY_KEYS=passphrase`) exist for a machine with no keystore, such as a headless box or a
 container. They stay, as an explicit choice, and the exposure is this: an environment variable is
 readable by every process of the same user (`/proc/<pid>/environ` on Linux, `ps eww` or process
 inspection elsewhere), it is inherited by every child the process starts (a hook, a build, an agent's
@@ -108,8 +108,8 @@ keystore master is never put in the environment.
 ## Where the files live, and who may change them at once
 
 - The state root must be on a filesystem with working permissions and locks. A root on a Windows
-  drive mounted into WSL (`ML_STACK_HOME=/mnt/c/...`) has neither, so the keystore refuses it with
-  `KeystoreUnavailable` naming `ML_STACK_HOME` before it creates anything; use a path under the Linux
+  drive mounted into WSL (`POOLHOUSE_HOME=/mnt/c/...`) has neither, so the keystore refuses it with
+  `KeystoreUnavailable` naming `POOLHOUSE_HOME` before it creates anything; use a path under the Linux
   home.
 - On Windows the keystore directory is cut to the owner when it is made: `icacls /inheritance:r
   /grant:r <user>:(OI)(CI)F`, so SYSTEM, Administrators and Users inherit nothing. If `icacls` fails
@@ -147,9 +147,9 @@ real item: the owner's login keychain was not touched.
 
 ## A boot-time service with no unlocked keystore
 
-`python -m ml_stack.fleet.autostart system` (a LaunchDaemon, a systemd unit with `User=`, a Windows task at
+`python -m poolhouse.fleet.autostart system` (a LaunchDaemon, a systemd unit with `User=`, a Windows task at
 startup) prints a warning and carries on when the service's user has not run
-`ml-stack-security unlock`, and on macOS always notes that the login keychain is locked until that
+`poolhouse-security unlock`, and on macOS always notes that the login keychain is locked until that
 user logs in. It does not refuse, because the service does not run unprotected without the key: it is
 a background process, so it never creates the master, every sealed store (memory, the request inbox,
 the activity log, the reputation ledger, wrapped credentials) stays locked and the fleet signing key
@@ -160,7 +160,7 @@ service restart.
 
 The PyInstaller spec names `keyring.backends.macOS`, `.Windows` and `.SecretService` as hidden
 imports. A frozen build (`packaging/build.py --bundle --no-window`) bundled them already through the
-PyInstaller contrib hook, and `ml-stack-headless -m ml_stack.net.cli keystore` printed
+PyInstaller contrib hook, and `poolhouse-headless -m poolhouse.net.cli keystore` printed
 `backend: keyring.backends.macOS.Keyring`. Naming them stops a change to that hook from taking the
 keystore out of the app. The Windows and Secret Service backends were bundled but not run (this was
 checked on a Mac).

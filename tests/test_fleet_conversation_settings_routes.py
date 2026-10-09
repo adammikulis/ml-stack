@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from test_fleet_ui import Serving
 
-from ml_stack.fleet.conversations import Conversations
+from poolhouse.fleet.conversations import Conversations
 
 
 @pytest.fixture

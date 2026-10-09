@@ -1,4 +1,4 @@
-"""Every name `docs/verify_release.py` imports from ml_stack still exists; a check that
+"""Every name `docs/verify_release.py` imports from poolhouse still exists; a check that
 cannot import its subject reports FAIL for a feature that works."""
 
 from __future__ import annotations
@@ -14,20 +14,20 @@ VERIFIER = Path(__file__).resolve().parents[1] / "docs" / "verify_release.py"
 
 
 def imported() -> list[tuple[int, str, str]]:
-    """``(line, module, name)`` for every ml_stack name the verifier imports."""
+    """``(line, module, name)`` for every poolhouse name the verifier imports."""
     tree = ast.parse(VERIFIER.read_text(encoding="utf-8"), filename=str(VERIFIER))
     out = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("ml_stack"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("poolhouse"):
             out.extend((node.lineno, node.module or "", alias.name) for alias in node.names)
         elif isinstance(node, ast.Import):
             out.extend((node.lineno, alias.name, "") for alias in node.names
-                       if alias.name.startswith("ml_stack"))
+                       if alias.name.startswith("poolhouse"))
     return out
 
 
 def test_the_verifier_imports_something_from_the_library():
-    assert len(imported()) > 20, "the verifier stopped reaching into ml_stack"
+    assert len(imported()) > 20, "the verifier stopped reaching into poolhouse"
 
 
 @pytest.mark.parametrize("line,module,name",
@@ -36,7 +36,7 @@ def test_a_name_the_verifier_imports_still_exists(line, module, name):
     try:
         held = importlib.import_module(module)
     except ModuleNotFoundError as exc:
-        if (exc.name or "").startswith("ml_stack"):
+        if (exc.name or "").startswith("poolhouse"):
             pytest.fail(f"verify_release.py:{line} imports {module}, which is gone")
         pytest.skip(f"{module} needs {exc.name}, which is not installed here")
     if name:

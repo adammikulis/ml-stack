@@ -12,7 +12,7 @@ import pytest
 from conftest import json_reply
 from PIL import Image
 
-from ml_stack.gym import models, vision_process
+from poolhouse.gym import models, vision_process
 
 pytestmark = pytest.mark.redteam
 

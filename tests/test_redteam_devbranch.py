@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.devbranch import DEFAULT, development_branch
+from poolhouse.devbranch import DEFAULT, development_branch
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -16,7 +16,7 @@ def _git(cwd: Path, *args: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ML_STACK_DEV_BRANCH", raising=False)
+    monkeypatch.delenv("POOLHOUSE_DEV_BRANCH", raising=False)
 
 
 def _primary(tmp_path: Path, name: str, branch: str) -> Path:
@@ -29,14 +29,14 @@ def _primary(tmp_path: Path, name: str, branch: str) -> Path:
 
 @pytest.mark.parametrize("hostile", ["main", "master", " main ", "\nmain\n"])
 def test_the_environment_cannot_name_a_protected_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hostile: str) -> None:
-    monkeypatch.setenv("ML_STACK_DEV_BRANCH", hostile)
+    monkeypatch.setenv("POOLHOUSE_DEV_BRANCH", hostile)
     assert development_branch(tmp_path) == DEFAULT
 
 
 @pytest.mark.parametrize("hostile", ["--upload-pack=touch pwned", "$(touch pwned)", "a;touch pwned", "`touch pwned`"])
 def test_an_environment_value_is_returned_as_text_and_never_run(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hostile: str) -> None:
-    monkeypatch.setenv("ML_STACK_DEV_BRANCH", hostile)
+    monkeypatch.setenv("POOLHOUSE_DEV_BRANCH", hostile)
     assert development_branch(tmp_path) == hostile
     assert not (tmp_path / "pwned").exists()
 

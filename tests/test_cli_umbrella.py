@@ -1,4 +1,4 @@
-"""``ml-stack <word>`` runs ``ml-stack-<word>``: the ``git foo`` -> ``git-foo`` pattern."""
+"""``poolhouse <word>`` runs ``poolhouse-<word>``: the ``git foo`` -> ``git-foo`` pattern."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import cli
+from poolhouse import cli
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -23,7 +23,7 @@ def _fake_target(monkeypatch, name: str, calls: list, *, returns: int = 0,
     def main(argv=None):
         argv = list(argv or [])
         if argv == ["--help"]:
-            print(f"usage: ml-stack-{name} [-h]\n\n{about}\n\noptions:\n  -h, --help")
+            print(f"usage: poolhouse-{name} [-h]\n\n{about}\n\noptions:\n  -h, --help")
             raise SystemExit(0)
         calls.append((name, argv))
         return returns
@@ -37,19 +37,19 @@ def _fake_target(monkeypatch, name: str, calls: list, *, returns: int = 0,
 def fake(monkeypatch, tmp_path):
     """Three invented commands registered as entry points, and no pyproject to fall back on.
 
-    None is in `ml_stack.cli.reference`, so each is imported and asked for its help -- what
+    None is in `poolhouse.cli.reference`, so each is imported and asked for its help -- what
     happens to a command another package installs.
     """
     calls: list = []
     points = [
-        EntryPoint("ml-stack-quince", _fake_target(monkeypatch, "quince", calls, returns=3),
+        EntryPoint("poolhouse-quince", _fake_target(monkeypatch, "quince", calls, returns=3),
                    "console_scripts"),
-        EntryPoint("ml-stack-medlar", _fake_target(monkeypatch, "medlar", calls, about="Trains."),
+        EntryPoint("poolhouse-medlar", _fake_target(monkeypatch, "medlar", calls, about="Trains."),
                    "console_scripts"),
-        EntryPoint("ml-stack-medlar-run",
+        EntryPoint("poolhouse-medlar-run",
                    _fake_target(monkeypatch, "medlar_run", calls, about="Runs one."),
                    "console_scripts"),
-        EntryPoint("ml-stack", "ml_stack.cli:main", "console_scripts"),
+        EntryPoint("poolhouse", "poolhouse.cli:main", "console_scripts"),
         EntryPoint("unrelated-tool", "quince:main", "console_scripts"),
     ]
     monkeypatch.setattr(cli, "entry_points", lambda group: points)
@@ -72,7 +72,7 @@ def test_the_targets_help_is_returned_unchanged(fake, capsys):
     with pytest.raises(SystemExit) as left:
         cli.main(["quince", "--help"])
     assert left.value.code == 0
-    assert capsys.readouterr().out.startswith("usage: ml-stack-quince")
+    assert capsys.readouterr().out.startswith("usage: poolhouse-quince")
 
 
 def test_an_unknown_word_exits_2_naming_the_nearest(fake, capsys):
@@ -103,13 +103,13 @@ def test_help_lists_the_subcommands(fake, capsys):
 
 def test_bare_and_its_flags_reach_the_app(fake, monkeypatch):
     seen: list = []
-    from ml_stack.cli.daemon import main as daemon_main
+    from poolhouse.cli.daemon import main as daemon_main
 
     def app(argv, **services):
         assert services["daemon_main"] is daemon_main
         return seen.append(argv) or 0
 
-    monkeypatch.setattr("ml_stack.fleet.launch.main", app)
+    monkeypatch.setattr("poolhouse.fleet.launch.main", app)
     assert cli.main([]) == 0
     assert cli.main(["--port", "8771", "--no-browser"]) == 0
     assert seen == [[], ["--port", "8771", "--no-browser"]]
@@ -120,7 +120,7 @@ def test_an_uninstalled_checkout_dispatches_from_its_pyproject(monkeypatch, tmp_
     calls: list = []
     target = _fake_target(monkeypatch, "quince", calls)
     (tmp_path / "pyproject.toml").write_text(
-        f'[project.scripts]\nml-stack = "ml_stack.cli:main"\nml-stack-quince = "{target}"\n')
+        f'[project.scripts]\npoolhouse = "poolhouse.cli:main"\npoolhouse-quince = "{target}"\n')
     monkeypatch.setattr(cli, "entry_points", lambda group: [])
     monkeypatch.setattr(cli, "PYPROJECT", tmp_path / "pyproject.toml")
     assert cli.main(["quince", "x"]) == 0
@@ -131,9 +131,9 @@ def test_a_checkout_beats_a_stale_installed_entry_point(monkeypatch, tmp_path):
     calls: list = []
     target = _fake_target(monkeypatch, "quince", calls)
     (tmp_path / "pyproject.toml").write_text(
-        f'[project.scripts]\nml-stack-quince = "{target}"\n')
+        f'[project.scripts]\npoolhouse-quince = "{target}"\n')
     monkeypatch.setattr(cli, "entry_points", lambda group: [
-        EntryPoint("ml-stack-quince", "ml_stack.gone.quince:main", "console_scripts")])
+        EntryPoint("poolhouse-quince", "poolhouse.gone.quince:main", "console_scripts")])
     monkeypatch.setattr(cli, "PYPROJECT", tmp_path / "pyproject.toml")
     assert cli.commands()["quince"] == target
     assert cli.main(["quince", "x"]) == 0
@@ -147,21 +147,21 @@ def test_every_command_in_pyproject_resolves_to_a_main():
         if not name.startswith(cli.PREFIX):
             continue
         word = name[len(cli.PREFIX):]
-        assert word in words, f"{name} is not a subcommand of ml-stack"
+        assert word in words, f"{name} is not a subcommand of poolhouse"
         assert callable(cli.load(words[word])), f"{name} -> {target} has no main"
     assert "serve" in words and "bench" in words and "train-run" in words
 
 
 def test_help_lists_every_command_and_hands_a_named_one_its_own_help(capsys):
-    from ml_stack import cli
+    from poolhouse import cli
 
     assert cli.help_main([]) == 0
     out = capsys.readouterr().out
-    assert "bench" in out and "chat" in out and "usage: ml-stack help" in out and "asks itself" not in out
+    assert "bench" in out and "chat" in out and "usage: poolhouse help" in out and "asks itself" not in out
     code = cli.help_main(["bench"])
-    assert code == 0 and "usage: ml-stack-bench" in capsys.readouterr().out
+    assert code == 0 and "usage: poolhouse-bench" in capsys.readouterr().out
     assert cli.main(["help", "chat"]) == 0
-    assert "usage: ml-stack-chat" in capsys.readouterr().out
+    assert "usage: poolhouse-chat" in capsys.readouterr().out
     assert cli.help_main(["benc"]) == 2
     assert "not a command" in capsys.readouterr().err
     with pytest.raises(SystemExit):
@@ -171,5 +171,5 @@ def test_help_lists_every_command_and_hands_a_named_one_its_own_help(capsys):
 def test_cluster_is_the_public_device_group_command(monkeypatch):
     monkeypatch.setattr(cli, "PYPROJECT", REPO / "pyproject.toml")
     registered = cli.commands()
-    assert registered["cluster"] == "ml_stack.fleet.join:main"
+    assert registered["cluster"] == "poolhouse.fleet.join:main"
     assert "fleet" not in registered

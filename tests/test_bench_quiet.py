@@ -7,8 +7,8 @@ survived, because token counts do not care about load; seconds did not.
 
 from __future__ import annotations
 
-from ml_stack.bench import quiet
-from ml_stack.bench.quiet import BUSY_LOAD, BUSY_PERCENT, Quiet, look
+from poolhouse.bench import quiet
+from poolhouse.bench.quiet import BUSY_LOAD, BUSY_PERCENT, Quiet, look
 
 
 def _idle(monkeypatch, *, servers=(), measuring=None, load=0.05, busy=4.0):
@@ -46,15 +46,15 @@ class TestWhatItRefuses:
         said = "\n".join(found.reasons)
         assert "port 8080" in said and "marrowgate-Q4.gguf" in said
         assert "61.0G" in said and "pid 4242" in said
-        assert "ml-stack-serve down --port 8080" in said
+        assert "poolhouse-serve down --port 8080" in said
 
     def test_a_measurement_holding_the_lock_is_named_by_its_command(self, monkeypatch):
         held = {"pid": 99, "argv": ["drafts", "--sample", "40"], "started": "2026-01-01"}
         _idle(monkeypatch, measuring=held)
         said = "\n".join(look().reasons)
-        assert "ml-stack-bench drafts --sample 40" in said
+        assert "poolhouse-bench drafts --sample 40" in said
         assert "pid 99" in said
-        assert "ml-stack-bench stop" in said
+        assert "poolhouse-bench stop" in said
 
     def test_a_loaded_machine_is_refused_even_with_nothing_serving(self, monkeypatch):
         _idle(monkeypatch, load=BUSY_LOAD + 0.1, busy=5.0)

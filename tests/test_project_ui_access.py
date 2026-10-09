@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import routes
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.ui import UI
-from ml_stack.http import Server
+from poolhouse.fleet import routes
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.ui import UI
+from poolhouse.http import Server
 
 
 @pytest.mark.parametrize("ui_header,cookie", [(False, ""), (False, "forged"), (True, ""), (True, "forged")])
@@ -27,9 +27,9 @@ def test_project_ui_refuses_forged_browser_access(tmp_path, monkeypatch, ui_head
     worker.start()
     headers = {"Content-Type": "application/json", "Origin": "https://hostile.invalid"}
     if ui_header:
-        headers["X-ML-Stack-UI"] = "1"
+        headers["X-Poolhouse-UI"] = "1"
     if cookie:
-        headers["Cookie"] = "ml-stack=" + cookie
+        headers["Cookie"] = "poolhouse=" + cookie
     connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
     try:
         connection.request("POST", path, body=json.dumps({"action": "share", "candidate_id": "../../private"}), headers=headers)

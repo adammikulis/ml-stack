@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import pytest
 from taskboard_kit import accepted, board as _board_fixture
 
-from ml_stack import harness_claims
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import (
+from poolhouse import harness_claims
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import (
     claim_handoff,
     integration_git as repo,
     integration_staging,
@@ -22,8 +22,8 @@ from ml_stack.workspace import (
     task_scheduler,
     task_worktrees,
 )
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.project import describe
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.project import describe
 
 board = _board_fixture
 
@@ -290,7 +290,7 @@ def test_standard_nested_harness_worktrees_do_not_dirty_or_delete_primary(board,
 
 
 def test_task_integrate_interfaces_use_native_token_and_exact_task_id(board, project, monkeypatch):
-    from ml_stack.workspace import cli, tools
+    from poolhouse.workspace import cli, tools
 
     board.board.review(board.parent, board.task['id'], accepted())
     monkeypatch.setattr(tools, 'Workspace', lambda: board.ws)

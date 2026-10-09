@@ -44,12 +44,12 @@ def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_pa
                   if line.startswith("host: "))
     binaries = project / "src-tauri" / "binaries"
     binaries.mkdir()
-    (binaries / f"ml-stack-headless-{target}").write_bytes(b"")
+    (binaries / f"poolhouse-headless-{target}").write_bytes(b"")
     done = subprocess.run(
         [cargo, "test", "--manifest-path", str(project / "src-tauri" / "Cargo.toml"),
          "--offline", selector, "--", "--nocapture"],
         env={**native_env, "CARGO_TARGET_DIR": os.environ.get(
-            "ML_STACK_TAURI_TEST_TARGET", str(tmp_path / "target"))},
+            "POOLHOUSE_TAURI_TEST_TARGET", str(tmp_path / "target"))},
         capture_output=True, text=True, timeout=600,
     )
     assert done.returncode == 0, done.stdout + done.stderr

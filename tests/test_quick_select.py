@@ -18,17 +18,17 @@ sys.path.insert(0, str(REPO / "scripts"))
 import affected  # noqa: E402
 
 FILES = {
-    "src/ml_stack/alpha.py": "def one():\n    return 1\n",
-    "src/ml_stack/beta.py": "from ml_stack import alpha\n\n\ndef two():\n    return alpha.one()\n",
-    "src/ml_stack/gamma.py": "def three():\n    from ml_stack.beta import two\n    return two()\n",
-    "src/ml_stack/delta.py": "def four():\n    return 4\n",
-    "src/ml_stack/pack/__init__.py": "",
-    "src/ml_stack/pack/leaf.py": "VALUE = 1\n",
-    "src/ml_stack/pack/table.json": "{}\n",
-    "tests/test_alpha.py": "from ml_stack.alpha import one\n\n\ndef test_one():\n    assert one()\n",
-    "tests/test_gamma.py": "from ml_stack import gamma\n\n\ndef test_three():\n    assert gamma.three()\n",
-    "tests/test_delta.py": "def test_run(): ...\n\n\nARGS = ['-m', 'ml_stack.delta']\n",
-    "tests/test_leaf.py": "from ml_stack.pack import leaf\n\n\ndef test_v():\n    assert leaf.VALUE\n",
+    "src/poolhouse/alpha.py": "def one():\n    return 1\n",
+    "src/poolhouse/beta.py": "from poolhouse import alpha\n\n\ndef two():\n    return alpha.one()\n",
+    "src/poolhouse/gamma.py": "def three():\n    from poolhouse.beta import two\n    return two()\n",
+    "src/poolhouse/delta.py": "def four():\n    return 4\n",
+    "src/poolhouse/pack/__init__.py": "",
+    "src/poolhouse/pack/leaf.py": "VALUE = 1\n",
+    "src/poolhouse/pack/table.json": "{}\n",
+    "tests/test_alpha.py": "from poolhouse.alpha import one\n\n\ndef test_one():\n    assert one()\n",
+    "tests/test_gamma.py": "from poolhouse import gamma\n\n\ndef test_three():\n    assert gamma.three()\n",
+    "tests/test_delta.py": "def test_run(): ...\n\n\nARGS = ['-m', 'poolhouse.delta']\n",
+    "tests/test_leaf.py": "from poolhouse.pack import leaf\n\n\ndef test_v():\n    assert leaf.VALUE\n",
     "tests/test_conftest_guard.py": "def test_nothing(): ...\n",
     "tests/test_dynamic.py": "import importlib\n\n\ndef test_each(name='x'):\n    importlib.import_module(name)\n",
     "tests/test_table.py": "import tomllib\nSCRIPTS = tomllib.loads('')['project']['scripts']\n",
@@ -58,34 +58,34 @@ def chosen(root: Path, *changed: str, **kw) -> set[str]:
 
 
 def test_a_change_selects_the_tests_that_import_it(toy) -> None:
-    assert chosen(toy, "src/ml_stack/alpha.py") >= {"tests/test_alpha.py"}
+    assert chosen(toy, "src/poolhouse/alpha.py") >= {"tests/test_alpha.py"}
 
 
 def test_a_lazy_import_inside_a_function_counts_and_the_walk_stops_at_the_depth(toy) -> None:
-    assert "tests/test_gamma.py" not in chosen(toy, "src/ml_stack/beta.py")
-    assert "tests/test_gamma.py" in chosen(toy, "src/ml_stack/beta.py", depth=2)
-    assert "tests/test_gamma.py" not in chosen(toy, "src/ml_stack/alpha.py", depth=2)
-    assert "tests/test_gamma.py" in chosen(toy, "src/ml_stack/alpha.py", depth=3)
+    assert "tests/test_gamma.py" not in chosen(toy, "src/poolhouse/beta.py")
+    assert "tests/test_gamma.py" in chosen(toy, "src/poolhouse/beta.py", depth=2)
+    assert "tests/test_gamma.py" not in chosen(toy, "src/poolhouse/alpha.py", depth=2)
+    assert "tests/test_gamma.py" in chosen(toy, "src/poolhouse/alpha.py", depth=3)
 
 
 def test_a_test_that_imports_by_a_computed_name_or_reads_the_script_table_follows_any_source_change(
         toy) -> None:
-    got = chosen(toy, "src/ml_stack/delta.py")
+    got = chosen(toy, "src/poolhouse/delta.py")
     assert {"tests/test_dynamic.py", "tests/test_table.py"} <= got
     assert "tests/test_literal.py" not in got
     assert "tests/test_dynamic.py" not in chosen(toy, "docs/notes.md")
 
 
 def test_a_module_named_only_in_a_string_selects_the_test_that_names_it(toy) -> None:
-    assert "tests/test_delta.py" in chosen(toy, "src/ml_stack/delta.py")
+    assert "tests/test_delta.py" in chosen(toy, "src/poolhouse/delta.py")
 
 
 def test_a_change_selects_nothing_it_cannot_reach(toy) -> None:
-    assert "tests/test_leaf.py" not in chosen(toy, "src/ml_stack/alpha.py", depth=3)
+    assert "tests/test_leaf.py" not in chosen(toy, "src/poolhouse/alpha.py", depth=3)
 
 
 def test_a_data_file_selects_the_tests_of_its_package(toy) -> None:
-    assert "tests/test_leaf.py" in chosen(toy, "src/ml_stack/pack/table.json")
+    assert "tests/test_leaf.py" in chosen(toy, "src/poolhouse/pack/table.json")
 
 
 def test_a_changed_test_selects_itself(toy) -> None:
@@ -112,8 +112,8 @@ def test_ci_config_no_test_names_cannot_change_a_result_and_one_a_test_names_sel
 
 
 def test_a_deleted_module_is_unmapped(toy) -> None:
-    out = affected.select(toy, ["src/ml_stack/alpha.py"], frozenset({"src/ml_stack/alpha.py"}))
-    assert out.unmapped == ["src/ml_stack/alpha.py"]
+    out = affected.select(toy, ["src/poolhouse/alpha.py"], frozenset({"src/poolhouse/alpha.py"}))
+    assert out.unmapped == ["src/poolhouse/alpha.py"]
 
 
 def run_git(root: Path, *args: str) -> None:
@@ -126,12 +126,12 @@ def test_changed_since_sees_commits_the_working_tree_and_new_files(toy) -> None:
     run_git(toy, "add", ".")
     run_git(toy, "commit", "-q", "-m", "base")
     run_git(toy, "checkout", "-q", "-b", "work")
-    (toy / "src/ml_stack/alpha.py").write_text("def one():\n    return 2\n", encoding="utf-8")
+    (toy / "src/poolhouse/alpha.py").write_text("def one():\n    return 2\n", encoding="utf-8")
     run_git(toy, "commit", "-qam", "edit")
-    (toy / "src/ml_stack/delta.py").write_text("def four():\n    return 5\n", encoding="utf-8")
-    (toy / "src/ml_stack/fresh.py").write_text("X = 1\n", encoding="utf-8")
+    (toy / "src/poolhouse/delta.py").write_text("def four():\n    return 5\n", encoding="utf-8")
+    (toy / "src/poolhouse/fresh.py").write_text("X = 1\n", encoding="utf-8")
     (toy / "README.md").unlink()
     changed, gone = affected.changed_since(toy, "base")
-    assert changed == ["README.md", "src/ml_stack/alpha.py", "src/ml_stack/delta.py",
-                       "src/ml_stack/fresh.py"]
+    assert changed == ["README.md", "src/poolhouse/alpha.py", "src/poolhouse/delta.py",
+                       "src/poolhouse/fresh.py"]
     assert gone == {"README.md"}

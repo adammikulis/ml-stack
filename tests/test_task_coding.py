@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.workspace import localagent, task_coding
+from poolhouse.workspace import localagent, task_coding
 
 
 @pytest.fixture
 def native(tmp_path):
     settings = tmp_path / 'settings.json'
     settings.write_text(json.dumps({'hooks': {'PreToolUse': [{'matcher': '*', 'hooks': [
-        {'type': 'command', 'command': 'python -m ml_stack.harnesshook pre --role read-only'}]}]}}))
+        {'type': 'command', 'command': 'python -m poolhouse.harnesshook pre --role read-only'}]}]}}))
     return ['claude', '--settings', str(settings)], (tmp_path, 'claude', 'prompt', None)
 
 
@@ -34,7 +34,7 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch, native):
     settings = json.loads(context[0].joinpath('task-settings.json').read_text())
     hooks = settings['hooks']['PreToolUse']
     assert '--protect' in hooks[0]['hooks'][0]['command']
-    assert 'ml_stack.workspace.task_caps' in hooks[1]['hooks'][0]['command']
+    assert 'poolhouse.workspace.task_caps' in hooks[1]['hooks'][0]['command']
     assert seen['command'][seen['command'].index('--system-prompt') + 1] == task_coding.BOOTSTRAP
     assert seen['command'][seen['command'].index('--tools') + 1] == 'Read,Edit,Write,Bash,Glob,Grep,Agent'
     assert '--dangerously-skip-permissions' not in seen['command']
@@ -145,8 +145,8 @@ def test_proposal_binds_committed_files_and_deletions(tmp_path):
 
 
 def test_pi_launcher_receives_independent_budget_and_clamped_effort(tmp_path, monkeypatch):
-    from ml_stack import coding
-    from ml_stack.fleet.conversations import Conversations
+    from poolhouse import coding
+    from poolhouse.fleet.conversations import Conversations
 
     project = tmp_path / 'project'
     project.mkdir()
@@ -168,7 +168,7 @@ def test_pi_launcher_receives_independent_budget_and_clamped_effort(tmp_path, mo
 
 
 def test_unlimited_native_tool_counter_preserves_parser_bounds(tmp_path):
-    from ml_stack.workspace import task_caps
+    from poolhouse.workspace import task_caps
     path = tmp_path / "counter.json"
     path.write_text(json.dumps({'version': 1, 'calls': 10000, 'limit': None}))
     assert task_caps.admit(path)

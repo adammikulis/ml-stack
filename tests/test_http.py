@@ -1,4 +1,4 @@
-"""The URL policy guard: which addresses `ml_stack.http.check` will fetch.
+"""The URL policy guard: which addresses `poolhouse.http.check` will fetch.
 
 DNS is faked throughout, so nothing here resolves a real host.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.http import Refused, Server, check
+from poolhouse.http import Refused, Server, check
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def public_dns(monkeypatch):
     """Every invented host resolves somewhere public, except *.internal, a LAN."""
     def addresses(host):
         return ["10.0.0.5"] if host.endswith(".internal") else ["1.2.3.4"]
-    monkeypatch.setattr("ml_stack.http._addresses", addresses)
+    monkeypatch.setattr("poolhouse.http._addresses", addresses)
 
 
 def test_a_public_url_passes_the_check(public_dns):
@@ -46,7 +46,7 @@ def test_a_host_dns_cannot_resolve_is_refused(monkeypatch):
 
     def gone(host, port):
         raise socket.gaierror("not found")
-    monkeypatch.setattr("ml_stack.http.socket.getaddrinfo", gone)
+    monkeypatch.setattr("poolhouse.http.socket.getaddrinfo", gone)
     with pytest.raises(Refused, match="cannot resolve"):
         check("https://nowhere.example/")
 
@@ -83,7 +83,7 @@ def test_a_server_binds_without_a_reverse_lookup_and_answers(monkeypatch):
 
 
 def test_a_message_about_a_url_carries_no_password_and_no_secret_parameter():
-    from ml_stack.http import shown
+    from poolhouse.http import shown
 
     got = shown("https://user:pw@example.com:8443/v1/x?token=abc&model=m&api_key=k&x=1#frag")
     assert "abc" not in got and "pw" not in got and "user" not in got and "api_key=k" not in got
@@ -91,7 +91,7 @@ def test_a_message_about_a_url_carries_no_password_and_no_secret_parameter():
 
 
 def test_an_unreachable_url_is_reported_without_its_secrets():
-    from ml_stack.http import ServerUnreachable, request_json
+    from poolhouse.http import ServerUnreachable, request_json
 
     with pytest.raises(ServerUnreachable) as caught:
         request_json("http://127.0.0.1:9/x?access_token=SUPERSECRET&a=1", timeout=1)
@@ -101,7 +101,7 @@ def test_an_unreachable_url_is_reported_without_its_secrets():
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x", "data:text/plain,hi",
                                  "jar:file:///x!/y", "/etc/passwd"])
 def test_only_http_and_https_are_opened(url):
-    from ml_stack.http import ServerError, open_stream, request_bytes
+    from poolhouse.http import ServerError, open_stream, request_bytes
 
     with pytest.raises(ServerError, match="only http"):
         open_stream(url)

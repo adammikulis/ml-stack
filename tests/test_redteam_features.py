@@ -8,12 +8,12 @@ import pytest
 from test_features_routes import daemon, the_passphrase_is_kept  # noqa: F401
 from test_fleet_ui import a_keystore, counting  # noqa: F401
 
-from ml_stack import features, features_cli
+from poolhouse import features, features_cli
 
 
 @pytest.fixture
 def machine(monkeypatch, tmp_path):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     return tmp_path / "state" / "traind" / "settings.json"
 
 

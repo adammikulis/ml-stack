@@ -19,7 +19,7 @@ from random import Random
 
 from ._perfile import each
 
-SOURCE_ROOT = "src/ml_stack"
+SOURCE_ROOT = "src/poolhouse"
 TEST_ROOT = "tests"
 COPY_SKIP = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", "dist", "build",
              "node_modules", ".venv", "venv"}
@@ -163,7 +163,7 @@ def _parses(source: str) -> bool:
 
 
 def candidates(root: Path) -> list[Target]:
-    """Every function under src/ml_stack that at least one mutation operator reaches."""
+    """Every function under src/poolhouse that at least one mutation operator reaches."""
     paths = [p for p in sorted((root / SOURCE_ROOT).rglob("*.py"))
              if not any(part in COPY_SKIP for part in p.parts)]
 
@@ -225,7 +225,7 @@ class Tree:
 
     def __init__(self, root: Path) -> None:
         self.root = root
-        self.where = Path(tempfile.mkdtemp(prefix="ml-stack-mutation-"))
+        self.where = Path(tempfile.mkdtemp(prefix="poolhouse-mutation-"))
         self._copy()
 
     def _tracked(self) -> list[str] | None:
@@ -250,9 +250,9 @@ class Tree:
             shutil.copyfile(source, target)
 
     def imports_the_copy(self) -> bool:
-        """True when a test run resolves ml_stack to the copied source directory."""
-        done = self.python("-c", "import ml_stack, sys; sys.stdout.write(ml_stack.__path__[0])")
-        return done.returncode == 0 and Path(done.stdout.strip()).resolve() == (self.where / "src" / "ml_stack").resolve()
+        """True when a test run resolves poolhouse to the copied source directory."""
+        done = self.python("-c", "import poolhouse, sys; sys.stdout.write(poolhouse.__path__[0])")
+        return done.returncode == 0 and Path(done.stdout.strip()).resolve() == (self.where / "src" / "poolhouse").resolve()
 
     def python(self, *args: str, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
         """Run the interpreter in the copy with the copy's src first on the path."""
@@ -261,7 +261,7 @@ class Tree:
             check=False, timeout=timeout,
             env={"PYTHONPATH": str(self.where / "src"), "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
                  "HOME": os.environ.get("HOME", tempfile.gettempdir()),
-                 "PYTHONDONTWRITEBYTECODE": "1", "ML_STACK_MUTATION": "1"})
+                 "PYTHONDONTWRITEBYTECODE": "1", "POOLHOUSE_MUTATION": "1"})
 
     def write(self, relpath: str, source: str) -> None:
         (self.where / relpath).write_text(source, encoding="utf-8")

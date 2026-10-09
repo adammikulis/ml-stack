@@ -2,7 +2,7 @@
 
 Read off the GGUF header (`unsloth/Qwen3.8-Flash-Next-GGUF`, UD-Q4_K_XL, 2026-09-02) and
 measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is the header.
-Memory figures are `ml-stack-serve fit` records from 2026-09-02; answering and draft figures
+Memory figures are `poolhouse-serve fit` records from 2026-09-02; answering and draft figures
 are the runs in [`docs/report-2026-09-23.md`](../report-2026-09-23.md), which names its
 command and store.
 
@@ -35,10 +35,10 @@ command and store.
   2026-09-02 peaked at 99G resident. That split is llama.cpp's own placement, not a flag of ours: an
   input-side table gathered per token stays host-mapped the way token embeddings do. On
   unified memory the two halves are one pool of RAM and nothing is gained by forcing it
-  either way, so ml-stack passes no override on a Mac; `--on-cpu per_layer_token_embd=CPU`
+  either way, so Poolhouse passes no override on a Mac; `--on-cpu per_layer_token_embd=CPU`
   is for a discrete GPU whose VRAM the table would not fit beside the weights. Capacity
   planning starts from the GPU-mapped weights plus a measured resident peak, never the
-  file size (`ml-stack-serve fit --tensors`, `fit --measure`).
+  file size (`poolhouse-serve fit --tensors`, `fit --measure`).
 - **The cache is tiny**: 48K bytes a token at f16 (26K at q8_0), measured. The 12 attention
   layers' K/V come to 24K of that (2 KV heads x 256 x K+V x 2 bytes, x12); the other 24K
   is the sparse indexer's cache, one per attention layer and the same size, which the
@@ -65,12 +65,12 @@ command and store.
   labelled `ub2048` took 25.5 s/q against 29.2-29.4 for the same serving without it; the run
   records no `-ub`, so only its label says what differed. 16k a slot answered as 32k did on
   nine questions (81% F1). On UD-IQ4_XS a q8_0 cache answered as f16 did (85% F1 on nine
-  questions, 31.5 against 36.6 s/q). Its serving shape is `ml-stack-serve profile`'s record.
+  questions, 31.5 against 36.6 s/q). Its serving shape is `poolhouse-serve profile`'s record.
 - **Recall runs 77-95% across its runs of nine questions or more; precision is lower**, 43-83%
   depending on the asking.
 
 ## What to check when a new build appears
 
-`ml-stack-models files <repo>` for the quant types per build, `ml-stack-serve fit --tensors`
-for the table's size in that build, `ml-stack-bench drafts` for the head, and whether
+`poolhouse-models files <repo>` for the quant types per build, `poolhouse-serve fit --tensors`
+for the table's size in that build, `poolhouse-bench drafts` for the head, and whether
 mainline has merged the MTP graph (`gh pr view 27836 -R ggml-org/llama.cpp`).

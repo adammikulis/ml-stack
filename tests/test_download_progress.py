@@ -2,13 +2,13 @@
 
 from unittest.mock import patch
 
-from ml_stack.fleet.download_progress import Transfer
-from ml_stack.fleet.models import Downloads, Getting, Model
+from poolhouse.fleet.download_progress import Transfer
+from poolhouse.fleet.models import Downloads, Getting, Model
 
 
 def test_transfer_excludes_resumed_bytes_and_estimates_only_known_totals():
     progress = Transfer()
-    with patch('ml_stack.fleet.download_progress.time.monotonic', side_effect=[10, 12, 14]):
+    with patch('poolhouse.fleet.download_progress.time.monotonic', side_effect=[10, 12, 14]):
         progress.update(100, 1000)
         assert progress.eta is None
         progress.update(300, 1000)
@@ -39,7 +39,7 @@ def test_model_and_mtp_bytes_accumulate_and_each_phase_is_identified(tmp_path):
             phases.append(row.public())
             return Model(name, tmp_path / 'model.gguf', 100, 0)
 
-    with patch('ml_stack.fleet.model_components.link'):
+    with patch('poolhouse.fleet.model_components.link'):
         Downloads(Store())._run(row, None, True)
     assert phases[0]['phase'] == 'model'
     assert phases[0]['eta_s'] is None

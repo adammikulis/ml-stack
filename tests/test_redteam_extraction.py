@@ -6,10 +6,10 @@ import asyncio
 
 import pytest
 
-from ml_stack.redteam import pages
-from ml_stack.redteam.lab import lab as make_lab
-from ml_stack.redteam.report import Report
-from ml_stack.redteam.scenarios import Options, extraction
+from poolhouse.redteam import pages
+from poolhouse.redteam.lab import lab as make_lab
+from poolhouse.redteam.report import Report
+from poolhouse.redteam.scenarios import Options, extraction
 
 
 @pytest.fixture(scope="module")

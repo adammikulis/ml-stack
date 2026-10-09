@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.activity import writer
-from ml_stack.sentinel.human import AGENT_MARKERS
+from poolhouse.activity import writer
+from poolhouse.sentinel.human import AGENT_MARKERS
 from tests import memory_keys
 
 ring = memory_keys.ring
@@ -30,6 +30,6 @@ def person(monkeypatch, ring):
 
 
 def entries(log=None):
-    from ml_stack.activity.schema import Entry
+    from poolhouse.activity.schema import Entry
     held = log or writer.log()
     return [e for e in held.entries() if isinstance(e, Entry)]

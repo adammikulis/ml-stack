@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import land_board
 
-from ml_stack.workspace import landing
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import landing
+from poolhouse.workspace.identity import Denied
 
 PERSON = {"terminal": (True, True), "env": {}}
 SLOW_TEST = "import time\ntime.sleep(60)\n"
@@ -24,7 +24,7 @@ class World:
     """A board with a lead runner, a requester, a reviewer and a repository with a bare origin."""
 
     def __init__(self, monkeypatch, tmp_path: Path) -> None:
-        monkeypatch.setenv("ML_STACK_DEV_BRANCH", DEV)
+        monkeypatch.setenv("POOLHOUSE_DEV_BRANCH", DEV)
         self.kit = Kit(clean_env(monkeypatch, tmp_path))
         self.ws = self.kit.ws
         (tmp_path / "git").mkdir()
@@ -74,7 +74,7 @@ def world(monkeypatch, tmp_path):
 
 
 def mod(n: int, extra: str = "") -> dict[str, str]:
-    return {f"src/ml_stack/m{n}.py": f"VALUE = {n}\n", f"tests/test_m{n}.py": f"import ml_stack.m{n}\n{extra}"}
+    return {f"src/poolhouse/m{n}.py": f"VALUE = {n}\n", f"tests/test_m{n}.py": f"import poolhouse.m{n}\n{extra}"}
 
 
 def test_two_requests_land_in_queue_order_as_one_batch_and_push_only_origin_development(world):
@@ -93,8 +93,8 @@ def test_two_requests_land_in_queue_order_as_one_batch_and_push_only_origin_deve
 
 
 def test_conflicting_pair_reports_needs_human_and_lands_the_other(world):
-    one, _ = world.ready("x", {"src/ml_stack/mod.py": "VALUE = 2\n"})
-    two, _ = world.ready("y", {"src/ml_stack/mod.py": "VALUE = 3\n"}, who="bob")
+    one, _ = world.ready("x", {"src/poolhouse/mod.py": "VALUE = 2\n"})
+    two, _ = world.ready("y", {"src/poolhouse/mod.py": "VALUE = 3\n"}, who="bob")
     result = world.runner.once()
     states = {world.status(one), world.status(two)}
     assert states == {"landed", "needs-human"}, result
@@ -118,7 +118,7 @@ def test_red_gate_does_not_push_and_names_the_failing_test(world):
 
 def test_moved_branch_tip_is_refused_not_landed(world):
     rid, _ = world.ready("moving", mod(4))
-    Project.write(world.proj.base / "moving", "src/ml_stack/extra.py", "X = 1\n")
+    Project.write(world.proj.base / "moving", "src/poolhouse/extra.py", "X = 1\n")
     Project.commit(world.proj.base / "moving", "feat: more")
     before = world.origin_head()
     world.runner.once()
@@ -194,7 +194,7 @@ def test_cancel_by_requester_or_controller_only(world):
 
 def test_new_request_for_a_branch_supersedes_the_old_one(world):
     old, _ = world.ready("s", mod(10))
-    Project.write(world.proj.base / "s", "src/ml_stack/more.py", "Y = 1\n")
+    Project.write(world.proj.base / "s", "src/poolhouse/more.py", "Y = 1\n")
     new_sha = Project.commit(world.proj.base / "s", "feat: more")
     new = world.ask("alice", "s", new_sha)
     assert world.status(old) == "superseded"
@@ -247,7 +247,7 @@ def test_cli_request_and_queue(world):
 
 
 def test_unset_development_branch_is_the_branch_the_primary_checkout_is_on(world, monkeypatch):
-    monkeypatch.delenv("ML_STACK_DEV_BRANCH")
+    monkeypatch.delenv("POOLHOUSE_DEV_BRANCH")
     git(world.proj.root, "checkout", "-q", "-b", "9.9dev")
     runner = land_board.Runner(world.ws, world.lead, world.proj.root, env=world.proj.env)
     assert runner.target == "9.9dev"

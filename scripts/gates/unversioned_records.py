@@ -10,9 +10,9 @@ from ._perfile import finder
 from ._util import calls, parse
 
 NAME = "unversioned-records"
-OWNER = "ml_stack.files.write_json"
+OWNER = "poolhouse.files.write_json"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 SINKS = ("write_text", "write_json", "write_bytes")
 
 

@@ -1,11 +1,11 @@
-"""``ml-stack-ingest forget``: the reads files beside a store deleted, the store left alone."""
+"""``poolhouse-ingest forget``: the reads files beside a store deleted, the store left alone."""
 
 from __future__ import annotations
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.ingest import main
-from ml_stack.ingest.reads import _keep_reads, reads_path
-from ml_stack.ingest.sources import Sources
+from poolhouse.graph.store import GraphStore
+from poolhouse.ingest import main
+from poolhouse.ingest.reads import _keep_reads, reads_path
+from poolhouse.ingest.sources import Sources
 
 ROW = {"unit": "u1", "source": "Field Notes", "chapter": "1", "section": "1.1",
        "title": "Levels", "extracted": {"concepts": [{"name": "benchmark",

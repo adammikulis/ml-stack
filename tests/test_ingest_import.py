@@ -12,9 +12,9 @@ import json
 
 import pytest
 
-from ml_stack import ingest
+from poolhouse import ingest
 
-pytest.importorskip("ladybug", reason="ml-stack[store]")
+pytest.importorskip("ladybug", reason="poolhouse[store]")
 
 
 NODE_COLUMNS = ["node_id", "label", "category", "definition", "aliases", "source_text",

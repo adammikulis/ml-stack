@@ -54,21 +54,21 @@ class Project:
         git(self.root, "config", "commit.gpgsign", "false")
         self.write(self.root, "scripts/test", FAKE_TEST)
         self.write(self.root, "scripts/budgets", "import sys\nsys.exit(0)\n")
-        self.write(self.root, "src/ml_stack/mod.py", "VALUE = 1\n")
-        self.write(self.root, "tests/test_mod.py", "import ml_stack.mod\n")
+        self.write(self.root, "src/poolhouse/mod.py", "VALUE = 1\n")
+        self.write(self.root, "tests/test_mod.py", "import poolhouse.mod\n")
         self.write(self.root, "docs/a.md", "a\n")
         self.commit(self.root, "chore: seed")
         self.log = base / "calls.log"
-        self.env = {**os.environ, "ML_STACK_HOME": str(base / "home"), "DEV_TEST_SLOTS_DIR": str(base / "slots"),
-                    "LAND_FAKE_LOG": str(self.log), "ML_STACK_DEV_BRANCH": DEV, "ML_STACK_NO_REAL_KEYSTORE": "1",
+        self.env = {**os.environ, "POOLHOUSE_HOME": str(base / "home"), "DEV_TEST_SLOTS_DIR": str(base / "slots"),
+                    "LAND_FAKE_LOG": str(self.log), "POOLHOUSE_DEV_BRANCH": DEV, "POOLHOUSE_NO_REAL_KEYSTORE": "1",
                     "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
-                    "ML_STACK_TEST_KEYRING": str(base / "keyring.json"),
+                    "POOLHOUSE_TEST_KEYRING": str(base / "keyring.json"),
                     "PYTHONPATH": os.pathsep.join((str(ROOT / "tests"), os.environ.get("PYTHONPATH", "")))}
 
         # The runner records its passes in the activity log, which a background process may write
         # only once a person has provisioned the keystore; a headless runner has no person to ask.
         subprocess.run([sys.executable, "-c",
-                        "from ml_stack import keystore\nkeystore.interactive = lambda: True\n"
+                        "from poolhouse import keystore\nkeystore.interactive = lambda: True\n"
                         "keystore.default().provision()\n"],
                        env=self.env, check=True, capture_output=True)
 

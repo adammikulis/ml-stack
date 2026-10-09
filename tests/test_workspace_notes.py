@@ -8,7 +8,7 @@ import sys
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import Denied, Refused, Workspace
+from poolhouse.workspace import Denied, Refused, Workspace
 
 
 @pytest.fixture

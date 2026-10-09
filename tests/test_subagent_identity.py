@@ -8,10 +8,10 @@ import pytest
 from test_workspace_remote import call, joined
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack import authority
-from ml_stack.sentinel.human import HumanRequired
-from ml_stack.workspace import agent_display, session_name, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse import authority
+from poolhouse.sentinel.human import HumanRequired
+from poolhouse.workspace import agent_display, session_name, tokens
+from poolhouse.workspace.identity import Denied
 
 pytest_plugins = ["test_workspace_remote"]
 
@@ -124,12 +124,12 @@ def test_retire_ends_the_identity_and_releases_its_claims(kit):
 
 def test_a_delegated_gate_refuses_a_spawned_subagent_but_not_its_lead(kit, monkeypatch, tmp_path):
     first, _ = spawn(kit, kit.lead, "agent-a")
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv(authority.FLOOR_ENV, raising=False)
-    lead = {"CLAUDECODE": "1", "ML_STACK_WORKSPACE_AGENT": kit.lead_name}
+    lead = {"CLAUDECODE": "1", "POOLHOUSE_WORKSPACE_AGENT": kit.lead_name}
     assert authority.require("sentinel.policy", "mode", (False, False), lead) == authority.DELEGATED
     with pytest.raises(HumanRequired, match="not a helper"):
-        authority.require("sentinel.policy", "mode", (False, False), {**lead, "ML_STACK_WORKSPACE_AGENT": first})
+        authority.require("sentinel.policy", "mode", (False, False), {**lead, "POOLHOUSE_WORKSPACE_AGENT": first})
 
 
 
@@ -155,10 +155,10 @@ def test_a_board_call_with_a_sender_parent_name_or_label_is_refused_by_the_host(
 def test_the_project_route_refuses_a_header_that_names_a_sender(host):
     from types import SimpleNamespace
 
-    from ml_stack.fleet import project_workers
+    from poolhouse.fleet import project_workers
 
     sent = []
-    handler = SimpleNamespace(path="/workspace/v1/projects/" + "a" * 32 + "/board", headers={"X-ML-Stack-Sender": "mac"},
+    handler = SimpleNamespace(path="/workspace/v1/projects/" + "a" * 32 + "/board", headers={"X-Poolhouse-Sender": "mac"},
                               _sealing=lambda: None, _send=lambda code, body: sent.append((code, body)))
     assert project_workers.answer(handler, host, b"{}", None) is True
     assert sent[0][0] == 400 and "attributed to its token" in sent[0][1]["error"]

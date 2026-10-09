@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
-from ml_stack.sentinel.redaction import MASK, redact, redact_value
+from poolhouse.sentinel.events import Bus, Event, EventLog, Severity
+from poolhouse.sentinel.redaction import MASK, redact, redact_value
 
 
 def _log(tmp_path, **kw) -> EventLog:

@@ -237,7 +237,7 @@ weights and outputs, and can return wrong answers. So, **[plan]**:
 
 ### 4.2 Untrusted consumer
 
-- **Sandbox escape.** All foreign work runs in `ml_stack.sandbox`, which is deny-by-default
+- **Sandbox escape.** All foreign work runs in `poolhouse.sandbox`, which is deny-by-default
   [docs `docs/sandbox.md`]. Backends: macOS seatbelt, bubblewrap, a Linux container runner
   [code `sandbox/`; the container runner is on `b1a12013`, check it has landed before relying on it].
 - **Network egress.** Default `Net.deny()`; no consumer job gets the network unless the policy
@@ -289,7 +289,7 @@ plain terms, to be confirmed by counsel: it permits commercial use, modification
 running as a hosted service; it grants a patent licence from contributors; it requires keeping the
 licence and `NOTICE`, stating changes, and does not grant trademark rights (so a product name and
 brand are separate decisions). `NOTICE` records a port of a third-party project under the MIT
-licence (`src/ml_stack/spec/` and its data files), which carries its own copyright-notice
+licence (`src/poolhouse/spec/` and its data files), which carries its own copyright-notice
 requirement; `pyproject.toml` also lists `THIRD_PARTY_NOTICES.md` [code]. Model weights served on
 the pool have their own licences (some restrict commercial use or hosting) and are not covered by
 this repo's licence; that needs a per-model check. Closed operator code on top of Apache-2.0 code is
@@ -352,7 +352,7 @@ touched, without its own task.
 | 6 | No host or central authority in the data path; an operator is optional and replaceable | Complies by design intent (`docs/mesh-board.md`, design only). Violates: workspace state is one `coordination.db` behind a file lock on one machine (`resource_allocations.py`) | L | No |
 | 7 | Verified-work accounting is independent of who ran it | Complies: awards bind proposal and review hashes and refuse a self-review (`task_credit.py`); `work_dimensions` (unlanded) keeps views derived | S | Yes |
 | 8 | Egress and sandbox policy default-deny for foreign work | Complies: `Net.deny()` is the policy default (`sandbox/policy.py`, `docs/sandbox.md`). Not checked: whether every launcher routes through it | S to M | Yes, route a launcher through it when touched |
-| 9 | Secrets never in logs or on the board | Complies in part: `src/ml_stack/redact/` exists, keystore holds keys. Not audited across all log sites | M to audit; S per site | Yes |
+| 9 | Secrets never in logs or on the board | Complies in part: `src/poolhouse/redact/` exists, keystore holds keys. Not audited across all log sites | M to audit; S per site | Yes |
 | 10 | Clocks and ordering do not assume one machine | Violates: `held(.../coordination.lock)` is a same-machine file lock; `verified_at` is a local time. Design intent is a hybrid logical clock (`docs/mesh-board.md`, not built) | L | Only new code; avoid new wall-clock ordering |
 
 ## 9. Owner-only decisions
@@ -375,7 +375,7 @@ Each is one question; the cost is what choosing it commits.
    operator (accounts, payments, abuse tooling); (c) close all new commercial code. Cost: (b)
    needs a clean repo boundary now; (c) changes the owner's stated relationship to this repo.
 5. **Name and brand.** (a) Keep the working name; (b) rename (the existing
-   `docs/poolside-refactor-plan.md` already plans a product rename); (c) a separate service brand
+   `docs/poolhouse-refactor-plan.md` already plans a product rename); (c) a separate service brand
    over the open pool. Cost: the licence gives no trademark right, so a trademark search precedes
    any public use; a rename later touches every public surface.
 

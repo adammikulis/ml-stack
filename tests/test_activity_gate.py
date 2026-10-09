@@ -13,7 +13,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from ml_stack.activity import gate
+from poolhouse.activity import gate
 from tests.activity_support import entries, person, ring
 
 __all__ = ["person", "ring"]
@@ -124,7 +124,7 @@ def test_runner_writes_local_evidence_without_user_activity(repo, monkeypatch, c
         if os.name == "nt":
             import win32security
 
-            from ml_stack.windows_private import _user
+            from poolhouse.windows_private import _user
 
             descriptor = win32security.GetNamedSecurityInfo(
                 str(artifact), win32security.SE_FILE_OBJECT, win32security.OWNER_SECURITY_INFORMATION)

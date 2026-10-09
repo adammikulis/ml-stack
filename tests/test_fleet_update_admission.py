@@ -3,10 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import updates
-from ml_stack.fleet.daemon import DaemonRuntime
-from ml_stack.fleet.setup_jobs import Jobs
-from ml_stack.lock import only_one
+from poolhouse.fleet import updates
+from poolhouse.fleet.daemon import DaemonRuntime
+from poolhouse.fleet.setup_jobs import Jobs
+from poolhouse.lock import only_one
 
 
 @pytest.mark.parametrize('kind', ['release', 'branch'])
@@ -140,9 +140,9 @@ def test_update_defers_when_admission_is_held(tmp_path, monkeypatch, kind):
 
 @pytest.mark.parametrize("announce", [False, True])
 def test_leaving_last_cluster_stops_discovery_and_rotates_auth(tmp_path, monkeypatch, announce):
-    from ml_stack import macauth
-    from ml_stack.fleet import daemon as module
-    from ml_stack.fleet.discovery import derive_token
+    from poolhouse import macauth
+    from poolhouse.fleet import daemon as module
+    from poolhouse.fleet.discovery import derive_token
 
     runtime = object.__new__(DaemonRuntime)
     old_key = b'k' * 32
@@ -178,8 +178,8 @@ def test_leaving_last_cluster_stops_discovery_and_rotates_auth(tmp_path, monkeyp
 
 
 def test_unannounced_cluster_change_updates_machine_auth(tmp_path, monkeypatch):
-    from ml_stack.fleet import daemon as module
-    from ml_stack.fleet.discovery import derive_token
+    from poolhouse.fleet import daemon as module
+    from poolhouse.fleet.discovery import derive_token
 
     runtime = object.__new__(DaemonRuntime)
     runtime.root = tmp_path

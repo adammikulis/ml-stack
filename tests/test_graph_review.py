@@ -1,16 +1,16 @@
-"""`ml_stack.graph.review.Queue`: proposals listed, accepted into a real store, refused and
+"""`poolhouse.graph.review.Queue`: proposals listed, accepted into a real store, refused and
 undone. Everything is invented and lives in tmp_path."""
 
 from __future__ import annotations
 
 import pytest
 
-from ml_stack.files import read_json, write_json
-from ml_stack.graph.review import Queue, as_change, listed
+from poolhouse.files import read_json, write_json
+from poolhouse.graph.review import Queue, as_change, listed
 
-pytest.importorskip("ladybug", reason="ml-stack[store]")
+pytest.importorskip("ladybug", reason="poolhouse[store]")
 
-from ml_stack.graph.store import GraphStore
+from poolhouse.graph.store import GraphStore
 
 GRAPH = {
     "meta": {"model": "m"},

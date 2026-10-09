@@ -1,5 +1,5 @@
-"""``ml-stack-jobs``: what this machine has recorded, waiting on one, stopping one --
-against a real sleeping child, in ``tmp_path``, never ``~/.ml-stack``."""
+"""``poolhouse-jobs``: what this machine has recorded, waiting on one, stopping one --
+against a real sleeping child, in ``tmp_path``, never ``~/.poolhouse``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from ml_stack import jobs
+from poolhouse import jobs
 
 
 def test_status_lists_what_is_recorded_under_the_home_it_is_given(tmp_path, capsys):

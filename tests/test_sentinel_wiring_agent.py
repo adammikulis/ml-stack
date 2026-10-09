@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import guard, sentinel
-from ml_stack.agent import Agent, Denied, Done, FunctionTools, unwatched
-from ml_stack.agent.watched import Watch
-from ml_stack.client import Client
-from ml_stack.sentinel import State, human
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse import guard, sentinel
+from poolhouse.agent import Agent, Denied, Done, FunctionTools, unwatched
+from poolhouse.agent.watched import Watch
+from poolhouse.client import Client
+from poolhouse.sentinel import State, human
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 
 FETCH = {"name": "web_fetch", "description": "Read a page.", "inputSchema": {
     "type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},

@@ -33,7 +33,7 @@ assignees is claimable by any registered non-human worker in its project, assign
 need only be registered in the task's project, and any registered project member other than the
 worker may review. In `strict` mode an unassigned task is open only when a person created it,
 assignees and reviewers must belong to the task's project, and a reviewer must be a person, a
-designated reviewer or the creator of the worker's parent. `ml-stack-workspace enforcement`
+designated reviewer or the creator of the worker's parent. `poolhouse-workspace enforcement`
 shows the mode (`show`, readable by anyone) and a lead identity changes it: `check` lists the
 tasks that strict mode would strand, `promote` switches to strict and `demote` to open in one
 step, and `set open|strict` does the same by name. A helper identity cannot change it. The mode
@@ -74,7 +74,7 @@ allocation. Review uses the same independent-review and idempotent outcome adapt
 person UI; a locked credit store leaves the saved review intact and reports pending credit.
 
 Reviewed native work can land through `task_integration.integrate(workspace, token, task_id)`.
-The same authenticated operation is available as `ml-stack-workspace task-integrate ID`
+The same authenticated operation is available as `poolhouse-workspace task-integrate ID`
 and the `workspace_task_integrate` tool. It needs existing development-branch claim authority;
 an accepted review does not grant publication rights. A foreign live development claim
 blocks integration before any candidate or source-claim changes.
@@ -132,7 +132,7 @@ A registered worker's authenticated parent can relocate its pending source bindi
 stopping the worker and dematerializing every affected task checkout:
 
 ```sh
-ml-stack-workspace task-rebind-source WORKER CHECKOUT "Source checkout recovery" --agent PARENT
+poolhouse-workspace task-rebind-source WORKER CHECKOUT "Source checkout recovery" --agent PARENT
 ```
 
 The replacement must belong to the same physical Git repository and contain every original

@@ -9,8 +9,8 @@ import sys
 
 import pytest
 
-from ml_stack import credentials, keystore
-from ml_stack.credentials import CredentialError, Secret, cli as credentials_cli
+from poolhouse import credentials, keystore
+from poolhouse.credentials import CredentialError, Secret, cli as credentials_cli
 from tests import memory_keys
 
 SECRET = "tok-4f9a1c7e2b8d6035a1c97e"
@@ -21,10 +21,10 @@ ring = memory_keys.ring
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_TOKEN_PATH", "HF_TOKEN_FILE",
-                 "WIDGET_KEY", "WIDGET_KEY_FILE", "ML_STACK_CREDENTIALS_FILE",
+                 "WIDGET_KEY", "WIDGET_KEY_FILE", "POOLHOUSE_CREDENTIALS_FILE",
                  credentials.INSECURE_ENV):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
     return tmp_path
 
@@ -58,7 +58,7 @@ def test_each_source_is_found_when_it_is_the_only_one(isolated, monkeypatch):
 
 def test_the_order_is_argument_then_environment_then_named_file_then_file_then_keychain(
         isolated, monkeypatch, ring):
-    ring.set_password("ml-stack", "WIDGET_KEY", "from-keychain")
+    ring.set_password("poolhouse", "WIDGET_KEY", "from-keychain")
     with credentials.probing_legacy():
         assert credentials.get("WIDGET_KEY") == "from-keychain"
     _stored(isolated, 'WIDGET_KEY = "from-file"\n')
@@ -77,7 +77,7 @@ def test_an_empty_environment_variable_falls_through(isolated, monkeypatch):
 
 
 def test_a_missing_required_credential_says_where_to_put_it_and_nothing_else(isolated):
-    with pytest.raises(CredentialError, match=r"WIDGET_KEY_FILE.*ml-stack credentials set"):
+    with pytest.raises(CredentialError, match=r"WIDGET_KEY_FILE.*poolhouse credentials set"):
         credentials.get("WIDGET_KEY", required=True)
 
 
@@ -106,10 +106,10 @@ def test_the_legacy_hub_variable_is_an_alias(monkeypatch):
     assert credentials.get("HF_TOKEN") == SECRET
 
 
-def test_the_ml_stack_file_wins_over_the_huggingface_file(isolated):
+def test_the_poolhouse_file_wins_over_the_huggingface_file(isolated):
     _file(isolated / "hf" / "token", "from-hf", 0o644)
-    _stored(isolated, 'HF_TOKEN = "from-ml-stack"\n')
-    assert credentials.get("HF_TOKEN") == "from-ml-stack"
+    _stored(isolated, 'HF_TOKEN = "from-poolhouse"\n')
+    assert credentials.get("HF_TOKEN") == "from-poolhouse"
 
 
 def test_the_huggingface_file_is_only_for_hf_names(isolated):
@@ -168,7 +168,7 @@ def test_a_symlink_inside_the_config_directory_is_followed(isolated):
 
 def test_the_override_variable_moves_the_file(isolated, monkeypatch):
     moved = _file(isolated / "mine" / "keys.toml", 'WIDGET_KEY = "moved"\n')
-    monkeypatch.setenv("ML_STACK_CREDENTIALS_FILE", str(moved))
+    monkeypatch.setenv("POOLHOUSE_CREDENTIALS_FILE", str(moved))
     assert credentials.file_path() == moved
     assert credentials.get("WIDGET_KEY") == "moved"
 
@@ -253,7 +253,7 @@ def test_a_write_that_fails_leaves_the_old_file_whole(isolated, monkeypatch):
     credentials.set("ONE", "1")
     path = isolated / "home" / "credentials.toml"
     before = path.read_text()
-    monkeypatch.setattr("ml_stack.credentials.writing.render",
+    monkeypatch.setattr("poolhouse.credentials.writing.render",
                         lambda entries: (_ for _ in ()).throw(OSError("disk full")))
     with pytest.raises(OSError):
         credentials.set("TWO", "2")
@@ -290,7 +290,7 @@ def test_the_keychain_is_used_only_when_asked_for(isolated, ring):
     assert credentials.set("WIDGET_KEY", SECRET, keychain=True) == "keychain"
     assert not (isolated / "home" / "credentials.toml").exists()
     assert credentials.get("WIDGET_KEY") == SECRET
-    assert list(ring.held) == [("ml-stack", keystore.default().account)]
+    assert list(ring.held) == [("poolhouse", keystore.default().account)]
     for each in (isolated / "home").rglob("*"):
         assert not each.is_file() or SECRET.encode() not in each.read_bytes(), each
     assert credentials.unset("WIDGET_KEY", keychain=True) is True
@@ -298,10 +298,10 @@ def test_the_keychain_is_used_only_when_asked_for(isolated, ring):
 
 
 def test_an_item_an_older_version_kept_moves_into_the_wrapped_file_and_is_deleted(isolated, ring):
-    ring.set_password("ml-stack", "WIDGET_KEY", SECRET)
+    ring.set_password("poolhouse", "WIDGET_KEY", SECRET)
     with credentials.probing_legacy():
         assert credentials.get("WIDGET_KEY") == SECRET
-    assert ("ml-stack", "WIDGET_KEY") not in ring.held
+    assert ("poolhouse", "WIDGET_KEY") not in ring.held
     assert credentials.get("WIDGET_KEY") == SECRET
     for each in (isolated / "home").rglob("*"):
         assert not each.is_file() or SECRET.encode() not in each.read_bytes(), each
@@ -310,14 +310,14 @@ def test_an_item_an_older_version_kept_moves_into_the_wrapped_file_and_is_delete
 def test_an_ordinary_lookup_never_reads_the_keystore_for_an_old_item(isolated, ring):
     """Library code asking for a credential must not probe the OS keystore (each probe is a real call,
     a prompt on some machines); only a person's own command (`probing_legacy`) looks for an old item."""
-    ring.set_password("ml-stack", "WIDGET_KEY", SECRET)
+    ring.set_password("poolhouse", "WIDGET_KEY", SECRET)
     calls = []
     for name in ("get_password", "set_password", "delete_password"):
         original = getattr(ring, name)
         setattr(ring, name, lambda *a, _o=original, _n=name, **k: calls.append(_n) or _o(*a, **k))
     assert credentials.get("WIDGET_KEY") is None and credentials.get("OTHER_KEY") is None
     assert calls == []
-    assert ("ml-stack", "WIDGET_KEY") in ring.held
+    assert ("poolhouse", "WIDGET_KEY") in ring.held
 
 
 def test_status_and_list_never_touch_the_keystore(isolated, ring):
@@ -429,7 +429,7 @@ def test_a_refusal_is_a_message_and_status_1(isolated, monkeypatch, capsys):
 
 SECRETS = {"HF_TOKEN": "t1", "ANTHROPIC_API_KEY": "t2", "GITHUB_TOKEN": "t3",
            "AWS_SECRET_ACCESS_KEY": "t4", "DB_PASSWORD": "t5", "MY_SERVICE_CREDENTIALS": "t6",
-           "SESSION_COOKIE": "t7", "ML_STACK_CREDENTIALS_FILE": "/x", "WIDGET_KEY_FILE": "/y"}
+           "SESSION_COOKIE": "t7", "POOLHOUSE_CREDENTIALS_FILE": "/x", "WIDGET_KEY_FILE": "/y"}
 
 
 def test_a_child_gets_this_environment_without_anything_that_looks_like_a_secret(monkeypatch):
@@ -451,7 +451,7 @@ def test_a_child_is_handed_exactly_the_credential_it_needs():
 
 def test_llama_server_gets_no_secret_but_the_hugging_face_token_it_downloads_with(
         monkeypatch, isolated):
-    from ml_stack.serve.binary import child_env, hub_environment
+    from poolhouse.serve.binary import child_env, hub_environment
 
     monkeypatch.setenv("HF_TOKEN", SECRET)
     monkeypatch.setenv("GITHUB_TOKEN", "other")
@@ -461,7 +461,7 @@ def test_llama_server_gets_no_secret_but_the_hugging_face_token_it_downloads_wit
 
 
 def test_the_token_comes_from_the_credentials_file_when_the_environment_has_none(isolated):
-    from ml_stack.serve.binary import hub_environment
+    from poolhouse.serve.binary import hub_environment
 
     _stored(isolated, f'HF_TOKEN = "{SECRET}"\n')
     assert hub_environment()["HF_TOKEN"] == SECRET

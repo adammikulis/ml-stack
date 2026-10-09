@@ -9,8 +9,8 @@ import conftest
 import psutil
 import pytest
 
-from ml_stack.activity import writer
-from ml_stack.keystore import os_user
+from poolhouse.activity import writer
+from poolhouse.keystore import os_user
 
 
 def test_activity_drop_records_actual_process_identity_and_write_time(tmp_path, monkeypatch):

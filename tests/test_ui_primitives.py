@@ -7,8 +7,8 @@ import re
 
 import pytest
 
-from ml_stack.ui import assets, assets_dir
-from ml_stack.ui.verdict import LABELS, THRESHOLDS, verdict_of
+from poolhouse.ui import assets, assets_dir
+from poolhouse.ui.verdict import LABELS, THRESHOLDS, verdict_of
 
 
 # -- the verdict definition -----------------------------------------------------------------
@@ -92,7 +92,7 @@ def daemon(tmp_path):
 
 @pytest.fixture(scope="module")
 def browser(request):
-    pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    pw = pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
     try:
         b = request.getfixturevalue("playwright").chromium.launch(headless=True)
     except pw.Error as exc:
@@ -201,8 +201,8 @@ class TestGallery:
         from conftest import write_gguf
         from test_serve_estimate import dense
 
-        from ml_stack.hub.probe import GIB, MachineMemory
-        from ml_stack.serve import estimate as est
+        from poolhouse.hub.probe import GIB, MachineMemory
+        from poolhouse.serve import estimate as est
 
         path = write_gguf(tmp_path / "m.gguf", dense(layers=16, train=65536))
         got = est.estimate(path, est.Setup(context=8192, flash_attn=True))

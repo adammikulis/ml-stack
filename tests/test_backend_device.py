@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 
-from ml_stack.backend import device
-from ml_stack.backend.device import DeviceProfile, Vendor
+from poolhouse.backend import device
+from poolhouse.backend.device import DeviceProfile, Vendor
 
 
 def test_apple_fingerprint_is_the_chip_and_its_cores_whatever_the_memory():

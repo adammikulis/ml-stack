@@ -28,12 +28,12 @@ def test_setup_selects_one_built_wheel_and_refuses_missing_artifacts(tmp_path):
     command = 'set -euo pipefail\n' + selection + '\nprintf "%s" "$WHEEL"'
     missing = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
     assert missing.returncode != 0
-    wheel = tmp_path / "ml_stack-0.0.0-py3-none-any.whl"
+    wheel = tmp_path / "poolhouse-0.0.0-py3-none-any.whl"
     wheel.touch()
     selected = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
     assert selected.returncode == 0, selected.stderr
     assert selected.stdout == str(wheel)
-    (tmp_path / "ml_stack-0.0.1-py3-none-any.whl").touch()
+    (tmp_path / "poolhouse-0.0.1-py3-none-any.whl").touch()
     ambiguous = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
     assert ambiguous.returncode != 0
 
@@ -52,14 +52,14 @@ def test_container_installed_distribution_and_child_import_provenance():
         pytest.skip("requires the maintained Linux container environment")
     from importlib.metadata import distribution
 
-    installed = distribution("ml-stack")
+    installed = distribution("poolhouse")
     direct = json.loads(installed.read_text("direct_url.json"))
-    assert direct["url"].startswith("file:///wheel/ml_stack-")
+    assert direct["url"].startswith("file:///wheel/poolhouse-")
     assert direct["url"].endswith(".whl")
     assert not direct.get("dir_info", {}).get("editable", False)
-    assert Path(installed.locate_file("ml_stack/__init__.py")).is_file()
+    assert Path(installed.locate_file("poolhouse/__init__.py")).is_file()
     child = subprocess.run(
-        [sys.executable, "-c", "import ml_stack; print(ml_stack.__file__)"],
+        [sys.executable, "-c", "import poolhouse; print(poolhouse.__file__)"],
         capture_output=True, text=True, check=True,
     )
-    assert Path(child.stdout.strip()) == ROOT / "src/ml_stack/__init__.py"
+    assert Path(child.stdout.strip()) == ROOT / "src/poolhouse/__init__.py"

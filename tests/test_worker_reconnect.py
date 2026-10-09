@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.http import ServerError
-from ml_stack.workspace import worker_reconnect as recovery
-from ml_stack.workspace.identity import Denied
+from poolhouse.http import ServerError
+from poolhouse.workspace import worker_reconnect as recovery
+from poolhouse.workspace.identity import Denied
 
 
 def outage(status):

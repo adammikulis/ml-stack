@@ -3,8 +3,8 @@
 import pytest
 import test_project_board_ui as board_ui
 
-from ml_stack.workspace import tokens
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.workspace import tokens
+from poolhouse.workspace.taskboard import TaskBoard
 
 project_board = board_ui.project_board
 PROJECT = board_ui.PROJECT
@@ -18,7 +18,7 @@ def task_call(project_board, project=PROJECT, **options):
 
 
 def test_tasks_preserve_records_and_ignore_unrelated_default_coordinator(project_board, monkeypatch):
-    from ml_stack.workspace import coordinator_config
+    from poolhouse.workspace import coordinator_config
 
     monkeypatch.setattr(coordinator_config, 'load', lambda _: {'mode': 'remote'})
     _, workspaces, _ = project_board

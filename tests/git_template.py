@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from ml_stack.net import git
+from poolhouse.net import git
 
 _BUILT: dict[str, Path] = {}
 

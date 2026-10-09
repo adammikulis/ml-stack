@@ -1,4 +1,4 @@
-"""ml-stack-train-tools: a project's tool schemas, turned into a model that calls them.
+"""poolhouse-train-tools: a project's tool schemas, turned into a model that calls them.
 
 Everything here runs on the CPU over models built in ``tmp_path`` -- a Gemma3 of two layers
 and a tokenizer trained on the synthetic questions -- and nothing is downloaded. The chat
@@ -14,8 +14,8 @@ import stat
 
 import pytest
 
-from ml_stack.graph import looking, prompts
-from ml_stack.train.tools import (
+from poolhouse.graph import looking, prompts
+from poolhouse.train.tools import (
     CHAT,
     Example,
     examples_in,
@@ -83,7 +83,7 @@ class TestExamplesIn:
             assert any(not e.question and e.arguments for e in by_tool[tool]), tool
 
     def test_the_web_tools_arrow_examples_are_read(self):
-        from ml_stack import web
+        from poolhouse import web
 
         found = examples_in(web.SCHEMAS)
         by_tool = {}
@@ -226,8 +226,8 @@ SPECIAL = ["<pad>", "<bos>", "<eos>", "<unk>", "<start_of_turn>", "<end_of_turn>
 
 def make_tiny_base(path, texts):
     """A two-layer Gemma3 with tied embeddings and a BPE tokenizer over ``texts``."""
-    torch = pytest.importorskip("torch", reason="ml-stack[torch]")
-    pytest.importorskip("transformers", reason="ml-stack[train-lora]")
+    torch = pytest.importorskip("torch", reason="poolhouse[torch]")
+    pytest.importorskip("transformers", reason="poolhouse[train-lora]")
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
     from transformers import Gemma3ForCausalLM, Gemma3TextConfig, PreTrainedTokenizerFast
 
@@ -268,12 +268,12 @@ def dataset(tmp_path):
 
 @pytest.fixture(autouse=True)
 def on_the_cpu(monkeypatch):
-    monkeypatch.setenv("ML_STACK_DEVICE", "cpu")
+    monkeypatch.setenv("POOLHOUSE_DEVICE", "cpu")
 
 
 class TestRecipe:
     def test_the_recipe_is_known_and_validates(self):
-        from ml_stack.train.recipes import known, validate
+        from poolhouse.train.recipes import known, validate
 
         assert "tool-calls" in known()
         got = validate("tool-calls", {"steps": 40})
@@ -282,7 +282,7 @@ class TestRecipe:
     def test_the_loss_is_on_the_assistant_turn_only(self, dataset):
         from transformers import AutoTokenizer
 
-        from ml_stack.train.recipes.conversations import IGNORE, render
+        from poolhouse.train.recipes.conversations import IGNORE, render
 
         data, base = dataset
         tokenizer = AutoTokenizer.from_pretrained(base)
@@ -302,7 +302,7 @@ class TestRecipe:
     def test_a_row_the_context_cuts_off_entirely_is_dropped_not_taught(self, dataset):
         from transformers import AutoTokenizer
 
-        from ml_stack.train.recipes.conversations import render
+        from poolhouse.train.recipes.conversations import render
 
         data, base = dataset
         tokenizer = AutoTokenizer.from_pretrained(base)
@@ -310,7 +310,7 @@ class TestRecipe:
         assert render(tokenizer, row["messages"], row["tools"], context=8) is None
 
     def test_configured_local_base_trains_despite_different_manifest(self, dataset, tmp_path):
-        from ml_stack.train.run import _base_of, run
+        from poolhouse.train.run import _base_of, run
 
         data, base = dataset
         manifest_path = data / "manifest.json"
@@ -328,8 +328,8 @@ class TestRecipe:
         """Tied embeddings are the case: safetensors refuses a state dict that names one
         storage twice, and a Gemma checkpoint does. The trainer names each storage once
         on the way out and re-ties on the way back, so this model needs no wrapper."""
-        from ml_stack.train import read
-        from ml_stack.train.run import run
+        from poolhouse.train import read
+        from poolhouse.train.run import run
 
         data, base = dataset
         out = tmp_path / "run"
@@ -353,8 +353,8 @@ class TestRecipe:
         from safetensors.torch import load_file
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        from ml_stack.train.recipes.tool_calls import save_pretrained
-        from ml_stack.train.run import run
+        from poolhouse.train.recipes.tool_calls import save_pretrained
+        from poolhouse.train.run import run
 
         data, base = dataset
         run("tool-calls", {"steps": 20, "context": 256, "batch_size": 2,
@@ -368,7 +368,7 @@ class TestRecipe:
         assert reloaded.config.num_hidden_layers == 2
 
     def test_an_empty_data_directory_says_what_it_wanted(self, tmp_path):
-        from ml_stack.train.recipes import build
+        from poolhouse.train.recipes import build
 
         empty = tmp_path / "nothing"
         empty.mkdir()
@@ -416,8 +416,8 @@ class TestCommandLine:
         assert "skipping" in capsys.readouterr().out
 
     def test_the_graph_tools_are_imported_live(self, tmp_path, capsys):
-        code = main(["--tools", "python:ml_stack.graph.prompts:TOOLS",
-                     "--prompts", "python:ml_stack.graph.prompts:TOOL_PROMPTS",
+        code = main(["--tools", "python:poolhouse.graph.prompts:TOOLS",
+                     "--prompts", "python:poolhouse.graph.prompts:TOOL_PROMPTS",
                      "--out", str(tmp_path / "out"), "--per-tool", "8", "--dry-run"])
         printed = capsys.readouterr().out
         assert code == 0, printed
@@ -431,7 +431,7 @@ class TestCommandLine:
         assert "absent.json" in capsys.readouterr().err
 
     def test_training_without_data_says_to_synthesise_first(self, tmp_path, capsys):
-        code = main(["--tools", "python:ml_stack.graph.prompts:TOOLS", "--out", str(tmp_path / "o"),
+        code = main(["--tools", "python:poolhouse.graph.prompts:TOOLS", "--out", str(tmp_path / "o"),
                      "--only", "train"])
         assert code == 2
         assert "synth stage first" in capsys.readouterr().err
@@ -476,7 +476,7 @@ class TestCommandLine:
         assert code == 0 and "already exists, skipping" in capsys.readouterr().out
 
     def test_export_without_a_converter_names_it(self, dataset, tmp_path, monkeypatch, capsys):
-        from ml_stack.gguf import tools as gguf_tools
+        from poolhouse.gguf import tools as gguf_tools
 
         data, base = dataset
         out = tmp_path / "out"
@@ -544,7 +544,7 @@ def _kept_run(rows, *, label="e4b-shortlist", model="invented-e4b.gguf"):
 
 
 class TestFromBench:
-    """`ml-stack-train-tools from-bench`: a bench run's traces into training examples.
+    """`poolhouse-train-tools from-bench`: a bench run's traces into training examples.
 
     The synthesiser teaches the *shape* of a call from the descriptions; this teaches the
     calls that actually scored, on a real graph, with real ids -- which is the only source
@@ -552,7 +552,7 @@ class TestFromBench:
     """
 
     def test_one_example_per_model_turn_with_the_conversation_up_to_it(self):
-        from ml_stack.train.tools import from_bench
+        from poolhouse.train.tools import from_bench
 
         rows = from_bench(_kept_run([_traced_row()]), min_f1=0.8)
         assert [r["tool"] for r in rows] == ["look_up", "show", CHAT]
@@ -579,7 +579,7 @@ class TestFromBench:
         """The whole point of scoring the run first. A question that showed the wrong
         entries made its tool calls in some particular wrong way, and that is exactly what
         must not be learned."""
-        from ml_stack.train.tools import from_bench, traced_rows
+        from poolhouse.train.tools import from_bench, traced_rows
 
         kept = _kept_run([_traced_row(),
                           _traced_row("who welds?", shown=["topic:compiler"],
@@ -592,7 +592,7 @@ class TestFromBench:
         """Two models' turns in one dataset teach the average of two callers. A run is
         named for how it was asked and the server says which file was loaded; either
         identifies it."""
-        from ml_stack.train.tools import from_bench
+        from poolhouse.train.tools import from_bench
 
         kept = (_kept_run([_traced_row()], label="e4b-shortlist")
                 + _kept_run([_traced_row()], label="flash-plain", model="flash-next.gguf"))
@@ -603,7 +603,7 @@ class TestFromBench:
     def test_a_turn_the_ceiling_cut_off_is_dropped(self):
         """A truncated call is the one thing a tool caller must never learn: a
         `finish_reason` of length means the arguments stop mid-word."""
-        from ml_stack.train.tools import from_bench
+        from poolhouse.train.tools import from_bench
 
         row = _traced_row()
         row["trace"][-1]["finish"] = "length"
@@ -615,7 +615,7 @@ class TestFromBench:
         """What every run kept before today is: hundreds of scored questions and not one
         transcript. The number beside the zero is the point -- those turns are recoverable
         only by spending the GPU again."""
-        from ml_stack.train.tools import main, would_yield
+        from poolhouse.train.tools import main, would_yield
 
         untraced = {k: v for k, v in _traced_row().items() if k != "trace"}
         kept = _kept_run([untraced, _traced_row("who welds?", shown=["topic:welding"],
@@ -623,8 +623,8 @@ class TestFromBench:
         assert would_yield(kept) == {"questions": 2, "turns": 8, "traced": 1}
 
         store = tmp_path / "runs.ladybug"
-        pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-        from ml_stack.graph.store import GraphStore
+        pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
+        from poolhouse.graph.store import GraphStore
 
         with GraphStore(store) as writer:
             writer.put_doc(kept[0]["key"], {k: v for k, v in kept[0].items() if k != "key"})
@@ -637,9 +637,9 @@ class TestFromBench:
 
     def test_a_directory_out_is_a_dataset_the_recipe_reads(self, tmp_path):
         """The same rows the synthesiser writes, so the two sources mix in one directory
-        and `ml-stack-train-run --recipe tool-calls --data` reads either."""
-        from ml_stack.train.recipes.conversations import read_conversations
-        from ml_stack.train.tools import from_bench, write_dataset
+        and `poolhouse-train-run --recipe tool-calls --data` reads either."""
+        from poolhouse.train.recipes.conversations import read_conversations
+        from poolhouse.train.tools import from_bench, write_dataset
 
         rows = from_bench(_kept_run([_traced_row(q) for q in
                                      ("who works on compilers?", "who else?", "and who?")]))

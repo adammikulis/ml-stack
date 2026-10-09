@@ -36,7 +36,7 @@ NAMESPACE = uuid.UUID("5d1c6a3e-0d7e-4a52-9a0b-6a4f2b1f5f10")
 
 
 def _notices():
-    spec = importlib.util.spec_from_file_location("ml_stack_notices", ROOT / "scripts" / "notices.py")
+    spec = importlib.util.spec_from_file_location("poolhouse_notices", ROOT / "scripts" / "notices.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -90,10 +90,10 @@ def build() -> dict:
     for c in components:                       # one component per package url
         seen.setdefault(c["bom-ref"], c)
     components = list(seen.values())
-    metadata: dict = {"component": {"type": "application", "bom-ref": f"pkg:pypi/ml-stack@{version}",
-                                    "name": "ml-stack", "version": version,
+    metadata: dict = {"component": {"type": "application", "bom-ref": f"pkg:pypi/poolhouse@{version}",
+                                    "name": "poolhouse", "version": version,
                                     "licenses": [{"license": {"id": "Apache-2.0"}}],
-                                    "purl": f"pkg:pypi/ml-stack@{version}"},
+                                    "purl": f"pkg:pypi/poolhouse@{version}"},
                       "tools": {"components": [{"type": "application", "name": "scripts/sbom.py"}]}}
     if epoch := os.environ.get("SOURCE_DATE_EPOCH", "").strip():
         metadata["timestamp"] = datetime.fromtimestamp(int(epoch), UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

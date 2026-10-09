@@ -5,7 +5,7 @@ import multiprocessing
 import pytest
 from onboard_support import Clock, Recorder, info, requests
 
-from ml_stack.fleet.onboard.requests import Limits, Refused, Requests, State, clean
+from poolhouse.fleet.onboard.requests import Limits, Refused, Requests, State, clean
 
 FP1, FP2, FP3 = "1" * 64, "2" * 64, "3" * 64
 
@@ -191,7 +191,7 @@ def test_state_survives_a_second_process_on_the_same_file(tmp_path):
 def _accept_elsewhere(root, request_id, out):
     from pathlib import Path
 
-    from ml_stack.fleet.onboard.requests import Requests
+    from poolhouse.fleet.onboard.requests import Requests
     out.put(Requests(Path(root) / "requests.json").accept(request_id, mine=True).code)
 
 

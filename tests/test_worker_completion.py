@@ -6,10 +6,10 @@ from types import SimpleNamespace
 import pytest
 from test_workspace_remote import PROJECT, joined
 
-from ml_stack.http import ServerError
-from ml_stack.workspace import localagent, localloop, worker_completion, worker_reconnect
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.project_connection import BoardWorkspace
+from poolhouse.http import ServerError
+from poolhouse.workspace import localagent, localloop, worker_completion, worker_reconnect
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.project_connection import BoardWorkspace
 
 pytest_plugins = ['test_workspace_remote']
 

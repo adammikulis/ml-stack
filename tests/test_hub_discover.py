@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from conftest import write_gguf
 
-from ml_stack import hub
-from ml_stack.hub import header, places, scan
+from poolhouse import hub
+from poolhouse.hub import header, places, scan
 
 META = {"general.architecture": "llama", "general.name": "Tiny", "general.size_label": "7B",
         "general.file_type": 15, "llama.context_length": 4096, "llama.block_count": 32,
@@ -266,11 +266,11 @@ def test_an_hf_reference_finds_its_installed_copy(tmp_path):
 def test_the_standard_folders_find_a_model_in_each_location(tmp_path, monkeypatch, system):
     for var in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_HOME", "TRANSFORMERS_CACHE",
                 "XDG_CACHE_HOME", "LLAMA_CACHE", "OLLAMA_MODELS", "MODELSCOPE_CACHE",
-                "KAGGLEHUB_CACHE", "ML_STACK_SCAN_VOLUMES"):
+                "KAGGLEHUB_CACHE", "POOLHOUSE_SCAN_VOLUMES"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(places, "system", lambda: system)
-    monkeypatch.setattr("ml_stack.home.user_home", lambda: tmp_path)
+    monkeypatch.setattr("poolhouse.home.user_home", lambda: tmp_path)
     extra = tmp_path / "extra-models"
     monkeypatch.setenv(places.EXTRA_ENV, str(extra))
     at = {

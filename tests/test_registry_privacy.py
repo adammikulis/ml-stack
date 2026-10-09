@@ -5,8 +5,8 @@ import sys
 
 import pytest
 
-from ml_stack import private_path
-from ml_stack.workspace.identity import AGENT, Denied, Registry
+from poolhouse import private_path
+from poolhouse.workspace.identity import AGENT, Denied, Registry
 
 
 def test_registry_creation_and_replacement_are_private_and_hash_only(tmp_path):
@@ -33,7 +33,7 @@ def test_failed_registry_serialization_preserves_private_file(tmp_path):
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='native Windows DACL')
 def test_owned_registry_with_inherited_windows_access_is_restricted_on_save(tmp_path):
-    from ml_stack import windows_private
+    from poolhouse import windows_private
     registry = Registry(tmp_path / 'workspace')
     registry.path.parent.mkdir()
     registry.path.write_text(json.dumps({'version': 2, 'agents': {}}))
@@ -66,7 +66,7 @@ def test_foreign_owned_registry_is_refused_before_replacement(tmp_path):
     import pywintypes
     import win32security
 
-    from ml_stack import windows_private
+    from poolhouse import windows_private
     registry = Registry(tmp_path / 'workspace')
     registry._save({})
     before = registry.path.read_bytes()

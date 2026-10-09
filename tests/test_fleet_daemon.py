@@ -22,15 +22,15 @@ from typing import ClassVar
 
 import pytest
 
-from ml_stack.files import sha256_file
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.device import device_report, resolve_report, stdlib_device_report
-from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
-from ml_stack.fleet.jobs import DaemonError, JobRunner
-from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.fleet.settings import Settings
-from ml_stack.http import Server, ServerError, request_bytes
+from poolhouse.files import sha256_file
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.device import device_report, resolve_report, stdlib_device_report
+from poolhouse.fleet.files import DIGEST_HEADER, safe_relpath
+from poolhouse.fleet.jobs import DaemonError, JobRunner
+from poolhouse.fleet.remote import Peer, PeerError
+from poolhouse.fleet.settings import Settings
+from poolhouse.http import Server, ServerError, request_bytes
 from tests.cluster_support import any_command, join_cluster
 
 
@@ -401,8 +401,8 @@ def test_an_upload_that_does_not_match_its_digest_is_discarded(daemon, tmp_path)
     with pytest.raises(PeerError, match="checksum mismatch"):
         client._request("PUT", "/files/bad.bin", data=payload, headers={
             "Content-Range": f"bytes 0-{len(payload)-1}/{len(payload)}",
-            "X-ML-Stack-Complete": "1",
-            "X-ML-Stack-SHA256": "00" * 32,
+            "X-Poolhouse-Complete": "1",
+            "X-Poolhouse-SHA256": "00" * 32,
         })
     assert not (files / "bad.bin").exists(), "a rejected upload must leave nothing"
     assert not (files / "bad.bin.part").exists(), \
@@ -414,8 +414,8 @@ def test_a_correct_digest_on_upload_is_accepted(daemon, tmp_path):
     payload = b"the real payload" * 64
     status, body, _ = client._request("PUT", "/files/good.bin", data=payload, headers={
         "Content-Range": f"bytes 0-{len(payload)-1}/{len(payload)}",
-        "X-ML-Stack-Complete": "1",
-        "X-ML-Stack-SHA256": hashlib.sha256(payload).hexdigest().upper(),
+        "X-Poolhouse-Complete": "1",
+        "X-Poolhouse-SHA256": hashlib.sha256(payload).hexdigest().upper(),
     })
     assert status == 200, body
     assert (files / "good.bin").read_bytes() == payload
@@ -589,7 +589,7 @@ def test_resuming_an_upload_whose_part_vanished_is_refused(daemon, tmp_path):
     with pytest.raises(PeerError) as exc:
         client._request("PUT", "/files/gap.bin", data=b"tail",
                         headers={"Content-Range": "bytes 4096-4099/4100",
-                                 "X-ML-Stack-Complete": "1"})
+                                 "X-Poolhouse-Complete": "1"})
     assert "416" in str(exc.value)
     assert "resume" in str(exc.value)
     assert not (files / "gap.bin.part").exists()
@@ -642,7 +642,7 @@ def test_a_probe_that_raises_costs_detail_not_the_daemon():
 def _fake_metal_smi(monkeypatch, gpu_power):
     import types
 
-    from ml_stack.train import accelerator
+    from poolhouse.train import accelerator
 
     fake = types.ModuleType("metal_smi")
     fake.gpu_power = gpu_power
@@ -684,14 +684,14 @@ def test_a_kept_power_sample_cannot_be_edited_by_its_caller(monkeypatch):
 
 
 def test_a_report_spec_resolves_to_its_callable():
-    fn = resolve_report("ml_stack.fleet.device:stdlib_device_report")
+    fn = resolve_report("poolhouse.fleet.device:stdlib_device_report")
     assert fn is stdlib_device_report
 
 
 @pytest.mark.parametrize("spec, why", [
     ("no_colon_here", "expected"),
-    ("ml_stack.fleet.device:nope", "cannot load"),
-    ("ml_stack.nonexistent:report", "cannot load"),
+    ("poolhouse.fleet.device:nope", "cannot load"),
+    ("poolhouse.nonexistent:report", "cannot load"),
 ])
 def test_a_bad_report_spec_says_what_is_wrong(spec, why):
     """A typo in a systemd unit must fail at boot with the reason, not silently leave a
@@ -732,9 +732,9 @@ def test_the_package_registers_a_probe_that_can_see_the_card():
 
     repo = Path(__file__).resolve().parent.parent
     table = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))
-    spec = table["project"]["entry-points"]["ml_stack.device_report"]["accelerator"]
+    spec = table["project"]["entry-points"]["poolhouse.device_report"]["accelerator"]
 
-    assert spec == "ml_stack.train.accelerator:report"
+    assert spec == "poolhouse.train.accelerator:report"
     assert "accelerator" in resolve_report(spec)()
 
 
@@ -779,7 +779,7 @@ def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
     log = tmp_path / "traind.out"
     fh = log.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "ml_stack.fleet.daemon",
+        [sys.executable, "-m", "poolhouse.fleet.daemon",
          "--root", str(root), "--host", "127.0.0.1", "--port", str(port),
          "--no-web", "--no-announce"],
         env=env, stdout=fh, stderr=subprocess.STDOUT)
@@ -817,7 +817,7 @@ def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):
     client, _root, _files, _ = daemon
     job = client.submit([sys.executable, "-c",
                          "import os, pathlib; "
-                         "d = pathlib.Path(os.environ['ML_STACK_JOB_DIR']) / 'ckpt'; "
+                         "d = pathlib.Path(os.environ['POOLHOUSE_JOB_DIR']) / 'ckpt'; "
                          "d.mkdir(parents=True, exist_ok=True); "
                          "(d / 'model.safetensors').write_bytes(b'weights')"])
     client.wait(job["id"], poll_s=0.1, timeout_s=30)
@@ -829,14 +829,14 @@ def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):
 
 
 def test_a_job_is_told_where_fetchable_is(daemon):
-    """Without ML_STACK_FILES_ROOT a job has to guess, and a caller who passes cwd
+    """Without POOLHOUSE_FILES_ROOT a job has to guess, and a caller who passes cwd
     makes the guess wrong -- landing the artifact where nothing can see it."""
     client, _root, files, _ = daemon
     job = client.submit([sys.executable, "-c",
                          "import os, pathlib; "
-                         "pathlib.Path(os.environ['ML_STACK_OUT']).mkdir(parents=True, exist_ok=True); "
-                         "(pathlib.Path(os.environ['ML_STACK_OUT']) / 'where.txt')"
-                         ".write_text(os.environ['ML_STACK_FILES_ROOT'])"])
+                         "pathlib.Path(os.environ['POOLHOUSE_OUT']).mkdir(parents=True, exist_ok=True); "
+                         "(pathlib.Path(os.environ['POOLHOUSE_OUT']) / 'where.txt')"
+                         ".write_text(os.environ['POOLHOUSE_FILES_ROOT'])"])
     client.wait(job["id"], poll_s=0.1, timeout_s=30)
 
     said = (files / "jobs" / job["id"] / "out" / "where.txt").read_text()
@@ -850,8 +850,8 @@ def test_a_job_runs_in_the_file_root_by_default(daemon):
     (files / "pushed.txt").write_text("here")
     job = client.submit([sys.executable, "-c",
                          "import pathlib,os; "
-                         "pathlib.Path(os.environ['ML_STACK_OUT']).mkdir(parents=True, exist_ok=True); "
-                         "(pathlib.Path(os.environ['ML_STACK_OUT'])/'saw.txt')"
+                         "pathlib.Path(os.environ['POOLHOUSE_OUT']).mkdir(parents=True, exist_ok=True); "
+                         "(pathlib.Path(os.environ['POOLHOUSE_OUT'])/'saw.txt')"
                          ".write_text(pathlib.Path('pushed.txt').read_text())"])
     client.wait(job["id"], poll_s=0.1, timeout_s=30)
 
@@ -864,7 +864,7 @@ class TestWhatAMachineIsDoing:
     """The card showed what a machine is, never what it was doing."""
 
     def test_the_report_carries_memory_in_use_and_how_busy_it_is(self):
-        from ml_stack.fleet.device import stdlib_device_report
+        from poolhouse.fleet.device import stdlib_device_report
 
         got = stdlib_device_report()
         assert got["ram_gb"] > 0
@@ -878,7 +878,7 @@ class TestWhatAMachineIsDoing:
         0.0, which would report a working machine as asleep."""
         import sys
 
-        import ml_stack.fleet.device as mod
+        import poolhouse.fleet.device as mod
 
         psutil = sys.modules.get("psutil")
         if psutil is None:
@@ -898,10 +898,10 @@ class TestWhatAMachineIsDoing:
         assert second == 0.0, "after priming it should be psutil's own number"
 
     def test_it_still_answers_without_psutil(self, monkeypatch):
-        """ml-stack-cluster does not ask for psutil; it is a bonus."""
+        """poolhouse-cluster does not ask for psutil; it is a bonus."""
         import builtins
 
-        import ml_stack.fleet.device as mod
+        import poolhouse.fleet.device as mod
 
         real = builtins.__import__
 
@@ -919,8 +919,8 @@ class TestWhatAMachineIsDoing:
     def test_windows_gets_its_memory_from_the_system_call(self, monkeypatch):
         """os.sysconf does not exist there, so a Windows machine reported no memory
         at all -- not just no usage, no total either."""
-        import ml_stack.fleet.device as mod
-        from ml_stack.hub import memory
+        import poolhouse.fleet.device as mod
+        from poolhouse.hub import memory
 
         def no_sysconf(*a, **k):
             raise AttributeError("no sysconf on this platform")
@@ -945,13 +945,13 @@ class TestWhatAMachineIsDoing:
     def test_the_windows_call_is_not_made_on_anything_else(self):
         import sys
 
-        from ml_stack.hub import memory
+        from poolhouse.hub import memory
 
         if sys.platform != "win32":
             assert memory._windows_memory() is None
 
     def test_memory_in_use_is_never_more_than_there_is(self):
-        from ml_stack.fleet.device import stdlib_device_report
+        from poolhouse.fleet.device import stdlib_device_report
 
         got = stdlib_device_report()
         assert got["ram_used_gb"] <= got["ram_gb"]
@@ -959,7 +959,7 @@ class TestWhatAMachineIsDoing:
 
 def test_every_cluster_advertiser_is_stopped_at_shutdown():
     """A machine in three clusters runs three advertisers; leaving stops all of them."""
-    from ml_stack.fleet.daemon import _stop_advertisers
+    from poolhouse.fleet.daemon import _stop_advertisers
 
     class Fake:
         def __init__(self) -> None:
@@ -977,7 +977,7 @@ def test_every_cluster_advertiser_is_stopped_at_shutdown():
 
 
 def test_an_advertiser_that_raises_does_not_leave_the_others_running():
-    from ml_stack.fleet.daemon import _stop_advertisers
+    from poolhouse.fleet.daemon import _stop_advertisers
 
     class Angry:
         def stop(self) -> None:
@@ -1003,8 +1003,8 @@ class TestSpeechOverTheNetwork:
 
     @pytest.fixture(autouse=True)
     def registered(self, monkeypatch):
-        from ml_stack import speech as package
-        from ml_stack.speech import ProviderHealth, Registry, Segment, Transcript
+        from poolhouse import speech as package
+        from poolhouse.speech import ProviderHealth, Registry, Segment, Transcript
 
         class Ears:
             name = "fake"
@@ -1032,7 +1032,7 @@ class TestSpeechOverTheNetwork:
         self.ears = Ears
 
     def a_clip(self) -> bytes:
-        from ml_stack.media import wav
+        from poolhouse.media import wav
 
         return wav.encode(b"\x00\x00" * 1600, sample_rate=16000)
 
@@ -1067,8 +1067,8 @@ class TestSpeechOverTheNetwork:
             Peer(client.base_url, "not-the-token").speech()
 
     def test_a_peer_with_no_engine_answers_503_rather_than_hanging_up(self, daemon, monkeypatch):
-        from ml_stack import speech as package
-        from ml_stack.speech import Registry
+        from poolhouse import speech as package
+        from poolhouse.speech import Registry
 
         monkeypatch.setattr(package, "ASR", Registry(kind="asr"))
         client, *_ = daemon

@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import claude, harnessing
-from ml_stack.workspace import profilehook, tokens
-from ml_stack.workspace.harness_seat import Seat
+from poolhouse import claude, harnessing
+from poolhouse.workspace import profilehook, tokens
+from poolhouse.workspace.harness_seat import Seat
 
 
 def payload(event='PreToolUse', **values):
@@ -59,7 +59,7 @@ def test_helper_sessions_have_separate_stable_namespace_without_actor_selection(
 
 def test_notification_failure_never_blocks_and_redacts_credentials(monkeypatch, capsys):
     secret = 'private-fixture-credential-value'
-    monkeypatch.setenv('ML_STACK_WORKSPACE_TOKEN', secret)
+    monkeypatch.setenv('POOLHOUSE_WORKSPACE_TOKEN', secret)
 
     def unavailable(*_args):
         raise RuntimeError(f'daemon unavailable {secret}')
@@ -123,7 +123,7 @@ def test_claude_metadata_hooks_use_supported_command_schema_and_keep_auth_hooks(
         metadata = hooks[event][-1]['hooks'][0]
         assert metadata == {'type': 'command', 'command': 'observe', 'timeout': 2, 'async': True}
     command = harnessing.hook_command('observe', role='read-only', agent='alice', root=Path('/tmp'), protect=[])
-    assert 'ml_stack.workspace.profilehook' in command and '--agent alice' in command
+    assert 'poolhouse.workspace.profilehook' in command and '--agent alice' in command
 
 
 @pytest.mark.slow
@@ -134,7 +134,7 @@ def test_standalone_metadata_hook_command_records_actual_fixture_session(monkeyp
     root = tmp_path / 'project'
     root.mkdir()
     command = harnessing.hook_command('observe', role='read-only', agent='alice', root=root, protect=[])
-    environment = {**os.environ, 'ML_STACK_WORKSPACE_HOME': str(kit.base),
+    environment = {**os.environ, 'POOLHOUSE_WORKSPACE_HOME': str(kit.base),
                    'PYTHONPATH': str(Path(__file__).resolve().parents[1] / 'src')}
     completed = subprocess.run(shlex.split(command), input=json.dumps(payload(effort={'level': 'high'})),
                                env=environment, capture_output=True, text=True, timeout=10, check=False)
@@ -163,7 +163,7 @@ def test_launcher_metadata_outage_has_an_independent_bounded_deadline(monkeypatc
     import threading
     import time
 
-    from ml_stack.workspace import harness_seat
+    from poolhouse.workspace import harness_seat
 
     release = threading.Event()
     finished = threading.Event()

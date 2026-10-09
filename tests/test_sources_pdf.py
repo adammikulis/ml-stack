@@ -12,7 +12,7 @@ import pytest
 
 pymupdf = pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
 
-from ml_stack.sources import pdf  # noqa: E402
+from poolhouse.sources import pdf  # noqa: E402
 
 BODY = 9.0
 SECTION = 13.0
@@ -247,7 +247,7 @@ def test_reading_the_same_book_twice_gives_the_same_units(tmp_path):
 def test_a_chapter_end_question_bank_is_not_a_unit():
     """An AP book's section 5.4 had a part with 66 lettered answers; the extractor ran to
     the ceiling on it twice. It is questions restating the prose, not prose."""
-    from ml_stack.sources.pdf import is_question_bank
+    from poolhouse.sources.pdf import is_question_bank
 
     prose = "\n\n".join(f"Glimmer nodes sit inside vaults and hum, paragraph {i}." for i in range(20))
     assert not is_question_bank(prose)
@@ -262,7 +262,7 @@ def test_a_chapter_end_question_bank_is_not_a_unit():
 
 
 def test_units_leave_question_banks_out_and_count_them(tmp_path):
-    from ml_stack.sources import pdf
+    from poolhouse.sources import pdf
 
     bank = "\n".join(
         f"{n}. Which current feeds a glimmer node?\na. the vault current\nb. the lattice "

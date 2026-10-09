@@ -17,7 +17,7 @@ public final class CompanionProtocolTest {
         if (!expected.equals(actual)) throw new AssertionError("Unexpected protocol result.");
     }
     static String link(JSONObject data) {
-        return "ml-stack://enroll?data=" + Base64.getUrlEncoder().withoutPadding()
+        return "poolhouse://enroll?data=" + Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(data.toString().getBytes(StandardCharsets.UTF_8));
     }
     static JSONObject invite() throws Exception {

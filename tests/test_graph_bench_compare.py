@@ -1,4 +1,4 @@
-"""``ml-stack-bench compare``: three configurations of one model as one document.
+"""``poolhouse-bench compare``: three configurations of one model as one document.
 
 Every fixture here is invented. Nothing reads a real store, a real graph, or a real server.
 """
@@ -10,9 +10,9 @@ import json
 import pytest
 from conftest import scored_rows
 
-from ml_stack.bench import invented_digest, runs, save
-from ml_stack.bench.comparison import assemble, read_standards, write
-from ml_stack.bench.speed import KIND as SPEED
+from poolhouse.bench import invented_digest, runs, save
+from poolhouse.bench.comparison import assemble, read_standards, write
+from poolhouse.bench.speed import KIND as SPEED
 
 G = 2**30
 
@@ -76,7 +76,7 @@ def test_a_speed_run_is_found_by_what_served_it_and_not_by_its_label(store):
     """The label said `flash-plain` and the speed grid said `flash-speed`, and the way the
     two were joined was a suffix. What joins them is the model, the build, the head and the
     serve shape, all of which both runs record."""
-    from ml_stack.bench.comparison import _speed_runs
+    from poolhouse.bench.comparison import _speed_runs
 
     kept = runs(store)
     drafted = next(one for one in kept if one.get("label") == "flash-plain"
@@ -90,7 +90,7 @@ def test_a_speed_run_is_found_by_what_served_it_and_not_by_its_label(store):
 
 
 def test_a_speed_run_that_cannot_say_what_served_it_is_found_by_its_label(store):
-    from ml_stack.bench.comparison import _speed_runs
+    from poolhouse.bench.comparison import _speed_runs
 
     kept = runs(store)
     assert [one["label"] for one in _speed_runs(kept, "bare-speed", None)] == ["bare-speed"]
@@ -165,7 +165,7 @@ def test_the_export_refuses_a_path_inside_a_repository(store, tmp_path, monkeypa
 
 
 def test_the_subcommand_writes_the_document_and_says_what_each_label_had(store, tmp_path, capsys):
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     out = tmp_path / "comparison.json"
     code = bench._main(["compare", "--labels", "flash-plain,flash-ollama-plain,nothing",
@@ -182,7 +182,7 @@ def test_the_subcommand_writes_the_document_and_says_what_each_label_had(store, 
 
 
 def test_the_subcommand_refuses_a_repository_path_with_exit_2(store, tmp_path, capsys):
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     inside = tmp_path / "repo" / "comparison.json"
     inside.parent.mkdir()

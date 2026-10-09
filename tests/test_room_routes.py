@@ -12,7 +12,7 @@ from conftest import write_gguf
 from test_fleet_ui import WORDS, Serving, a_keystore, counting  # noqa: F401
 from test_wired import Recorder, dense
 
-from ml_stack.serve import wired, wired_apply as apply
+from poolhouse.serve import wired, wired_apply as apply
 
 
 @pytest.fixture(autouse=True)
@@ -22,10 +22,10 @@ def the_passphrase_is_kept(a_keystore):  # noqa: F811
 
 @pytest.fixture(autouse=True)
 def the_cluster_already_exists(monkeypatch, tmp_path):
-    from ml_stack.fleet.onboard import joining
+    from poolhouse.fleet.onboard import joining
 
     monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     for name in apply.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
@@ -45,7 +45,7 @@ def room(tmp_path):
 
 
 def test_the_page_carries_the_slider_on_the_models_and_settings_screens(room):
-    from ml_stack.fleet.page import render
+    from poolhouse.fleet.page import render
 
     page = render()
     assert page.count("<wired-memory>") == 2 and "Device memory controls" in page and "GPU memory" in page
@@ -92,7 +92,7 @@ def test_a_hostname_in_the_host_header_is_refused(room):
 
 
 def test_an_access_token_header_cannot_make_the_request(room):
-    for header in ({"Authorization": "Bearer abc"}, {"X-ML-Stack-Token": "abc"}):
+    for header in ({"Authorization": "Bearer abc"}, {"X-Poolhouse-Token": "abc"}):
         status, _, _ = room.call("/ui/room/apply", method="POST", body={"mb": 65536},
                                  headers=header)
         assert status == 403
@@ -135,7 +135,7 @@ def test_a_path_that_is_not_an_installed_model_is_never_read(room, tmp_path):
 
 
 def test_the_plan_for_an_installed_model_comes_back_as_plain_numbers(room, tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_MODEL_PATHS", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_MODEL_PATHS", str(tmp_path))
     path = write_gguf(tmp_path / "m-Q4_K_M.gguf", dense())
     with path.open("ab") as f:
         f.truncate(2 * 1024**3)
@@ -156,7 +156,7 @@ def test_an_agent_marker_in_the_daemons_environment_refuses_even_a_good_request(
 
 
 def test_another_machine_on_the_network_cannot_make_the_request_even_signed_in(room):
-    from ml_stack.fleet.discovery import primary_ip
+    from poolhouse.fleet.discovery import primary_ip
 
     lan = primary_ip()
     if lan.startswith("127."):

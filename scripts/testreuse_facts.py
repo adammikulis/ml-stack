@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import metadata
 
-SWITCHES = {"redteam": "--redteam", "slow": "--slow", "live_api": "ML_STACK_LIVE_API=1", "live_net": "ML_STACK_LIVE_NET=1",
+SWITCHES = {"redteam": "--redteam", "slow": "--slow", "live_api": "POOLHOUSE_LIVE_API=1", "live_net": "POOLHOUSE_LIVE_NET=1",
             "gpu": "a model or GPU lease on the serving machine", "model": "a model or GPU lease on the serving machine"}
 
 

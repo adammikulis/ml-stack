@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
-from ml_stack.train.tools import (
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
+from poolhouse.train.tools import (
     CHAT,
     SchemaDrift,
     evaluate,
@@ -19,7 +19,7 @@ from ml_stack.train.tools import (
     signatures,
     write_dataset,
 )
-from ml_stack.train.tools.drift import check
+from poolhouse.train.tools.drift import check
 
 FIND = {"type": "function", "function": {
     "name": "find_recipe", "description": "Search the cookbook.",
@@ -119,7 +119,7 @@ def test_scoring_each_measure() -> None:
 
 
 def test_evaluate_asks_a_served_model_with_each_rows_tools() -> None:
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     rows = [row("find_recipe", {"words": ["a"]}), row(CHAT)]
     server = ToolCallingServer([Turn(calls=(("find_recipe", '{"words": ["a"]}'),)),

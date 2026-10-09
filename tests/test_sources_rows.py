@@ -1,7 +1,7 @@
-"""`ml_stack.sources.rows`: the rows a Slack scraper writes, read back to messages.
+"""`poolhouse.sources.rows`: the rows a Slack scraper writes, read back to messages.
 
 The entry path for scraped data. Every row here is written the way the scraper writes it,
-and the round trip goes through `ml_stack.world.emit.rows`, which is the shape it promises.
+and the round trip goes through `poolhouse.world.emit.rows`, which is the shape it promises.
 Every name is invented.
 """
 
@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from ml_stack.messages import Message, message_id
-from ml_stack.sources.rows import read
+from poolhouse.messages import Message, message_id
+from poolhouse.sources.rows import read
 
 PEOPLE = {"person:ada-lovelace": {"label": "Ada Lovelace"},
           "person:bea-marlow": {"label": "Bea Marlow"}}
@@ -184,7 +184,7 @@ def test_a_missing_log_is_not_swallowed(tmp_path):
 
 
 def test_what_the_emitter_writes_is_what_the_reader_reads_back():
-    from ml_stack.world.emit import rows as emit_rows
+    from poolhouse.world.emit import rows as emit_rows
 
     said = [Message(id="m1", source="slack", channel="general",
                     sender="person:ada-lovelace", ts="1725100000.000100",

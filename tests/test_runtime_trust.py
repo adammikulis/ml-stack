@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import keystore, runtime, runtime_deploy, runtime_store, runtime_trust
-from ml_stack.activity import writer
-from ml_stack.activity.schema import Entry
+from poolhouse import keystore, runtime, runtime_deploy, runtime_store, runtime_trust
+from poolhouse.activity import writer
+from poolhouse.activity.schema import Entry
 
 pty = importlib.import_module("pty") if sys.platform != "win32" else None
 ROOT = Path(__file__).resolve().parent
@@ -40,17 +40,17 @@ class World:
     def __init__(self, tmp_path: Path, monkeypatch) -> None:
         self.tmp = tmp_path
         self.user = tmp_path / "user"
-        self.home = self.user / ".ml-stack"
+        self.home = self.user / ".poolhouse"
         self.keyring = tmp_path / "keyring.json"
-        for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_AGENT"):
+        for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE", "POOLHOUSE_WORKSPACE_AGENT"):
             monkeypatch.delenv(name, raising=False)
-        monkeypatch.setenv("ML_STACK_HOME", str(self.home))
-        monkeypatch.setenv("ML_STACK_TEST_KEYRING", str(self.keyring))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(self.home))
+        monkeypatch.setenv("POOLHOUSE_TEST_KEYRING", str(self.keyring))
         monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "onboard_support.FileKeyring")
         self.repo = tmp_path / "repo"
         self.repo.mkdir()
         git(self.repo, "init", "-q", "-b", "dev")
-        commit(self.repo, "src/ml_stack/__init__.py", "")
+        commit(self.repo, "src/poolhouse/__init__.py", "")
         self.base = commit(self.repo, "packaging/runtime-floor", "2\n")
         self.tip = commit(self.repo, "later.txt")
         git(self.repo, "checkout", "-q", "-b", "evil", self.base)
@@ -61,14 +61,14 @@ class World:
 
     def env(self, **extra) -> dict:
         env = {key: value for key, value in os.environ.items()
-               if key not in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "PYTEST_CURRENT_TEST", "ML_STACK_AUTHORITY_FLOOR")}
-        return {**env, "PYTHONPATH": os.pathsep.join([SRC, str(ROOT)]), "ML_STACK_HOME": str(self.home), "HOME": str(self.user),
+               if key not in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE", "PYTEST_CURRENT_TEST", "POOLHOUSE_AUTHORITY_FLOOR")}
+        return {**env, "PYTHONPATH": os.pathsep.join([SRC, str(ROOT)]), "POOLHOUSE_HOME": str(self.home), "HOME": str(self.user),
                 "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
-                "ML_STACK_TEST_KEYRING": str(self.keyring), "PIP_NO_INDEX": "1", **extra}
+                "POOLHOUSE_TEST_KEYRING": str(self.keyring), "PIP_NO_INDEX": "1", **extra}
 
     def cli(self, *argv: str, agent: bool = True, **extra) -> subprocess.CompletedProcess:
         env = self.env(**({"CLAUDECODE": "1"} if agent else {}), **extra)
-        return subprocess.run([sys.executable, "-m", "ml_stack.runtime_cli", *argv], capture_output=True,
+        return subprocess.run([sys.executable, "-m", "poolhouse.runtime_cli", *argv], capture_output=True,
                               text=True, timeout=120, env=env, stdin=subprocess.DEVNULL)
 
     def audited(self) -> list[Entry]:
@@ -152,7 +152,7 @@ def test_an_agent_cannot_deploy_on_a_machine_with_no_recorded_repository(world):
 def test_background_ensure_of_the_tip_needs_no_agent_identity(world):
     runtime_deploy.prepare_root()
     lock = runtime.directory() / "deploy.lock"
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
     with only_one(lock, note="busy"):
         done = world.cli("ensure", "--background")
     assert done.returncode == 0 and "already running" in done.stdout
@@ -161,7 +161,7 @@ def test_background_ensure_of_the_tip_needs_no_agent_identity(world):
 
 def test_unmerged_deploys_are_refused_to_an_agent_even_at_a_terminal(world):
     master, slave = pty.openpty()
-    child = subprocess.Popen([sys.executable, "-m", "ml_stack.runtime_cli", "ensure", "--ref", world.evil, "--allow-unmerged"],
+    child = subprocess.Popen([sys.executable, "-m", "poolhouse.runtime_cli", "ensure", "--ref", world.evil, "--allow-unmerged"],
                              env=world.env(CLAUDECODE="1"), stdin=slave, stdout=slave, stderr=slave, close_fds=True)
     os.close(slave)
     assert child.wait(timeout=60) != 0
@@ -171,14 +171,14 @@ def test_unmerged_deploys_are_refused_to_an_agent_even_at_a_terminal(world):
 
 def test_an_agent_started_process_ignores_the_variables_that_move_the_state_root(world):
     other = world.tmp / "elsewhere"
-    done = world.cli("status", "--json", ML_STACK_HOME=str(other))
-    assert done.returncode == 0 and "ignoring ML_STACK_HOME" in done.stderr
+    done = world.cli("status", "--json", POOLHOUSE_HOME=str(other))
+    assert done.returncode == 0 and "ignoring POOLHOUSE_HOME" in done.stderr
     assert not other.exists() and json.loads(done.stdout)["wanted"] == world.tip
 
 
 def test_a_person_process_keeps_the_variables(world):
     other = world.tmp / "elsewhere"
-    done = world.cli("status", "--json", agent=False, ML_STACK_HOME=str(other))
+    done = world.cli("status", "--json", agent=False, POOLHOUSE_HOME=str(other))
     assert "ignoring" not in done.stderr
     assert done.returncode == 1 and "no source checkout recorded" in done.stderr
 
@@ -186,7 +186,7 @@ def test_a_person_process_keeps_the_variables(world):
 def test_a_person_at_a_terminal_may_deploy_an_unmerged_commit_by_typing_its_ref(world):
     import select
     master, slave = pty.openpty()
-    child = subprocess.Popen([sys.executable, "-m", "ml_stack.runtime_cli", "ensure", "--ref", world.evil, "--allow-unmerged",
+    child = subprocess.Popen([sys.executable, "-m", "poolhouse.runtime_cli", "ensure", "--ref", world.evil, "--allow-unmerged",
                               "--timeout", "30"], env=world.env(), stdin=slave, stdout=slave, stderr=slave, close_fds=True)
     os.close(slave)
     heard, typed = b"", False
@@ -228,6 +228,6 @@ def test_a_forged_state_root_naming_a_hostile_clone_is_ignored_by_an_agent(world
     forged = world.tmp / "forged" / "runtimes"
     forged.mkdir(parents=True)
     (world.tmp / "forged").joinpath("marker").write_text("x")
-    done = world.cli("ensure", "--checkout", str(clone), ML_STACK_HOME=str(world.tmp / "forged"))
-    assert done.returncode == 1 and "ignoring ML_STACK_HOME" in done.stderr and "recorded repository" in done.stderr
+    done = world.cli("ensure", "--checkout", str(clone), POOLHOUSE_HOME=str(world.tmp / "forged"))
+    assert done.returncode == 1 and "ignoring POOLHOUSE_HOME" in done.stderr and "recorded repository" in done.stderr
     assert sorted(p.name for p in (world.tmp / "forged").iterdir()) == ["marker", "runtimes"]

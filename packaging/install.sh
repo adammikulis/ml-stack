@@ -1,5 +1,5 @@
 #!/bin/sh
-# Network installer for ml-stack, in four modes. Re-running any of them upgrades in place.
+# Network installer for poolhouse, in four modes. Re-running any of them upgrades in place.
 #
 #   curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --headless
@@ -7,38 +7,38 @@
 #   curl -fsSL .../install.sh | sudo sh -s -- --system
 #
 #   (default)   the app: the release zip for this machine, a window, updates from releases
-#   --headless  a venv under ~/.ml-stack, console scripts on PATH, no window
+#   --headless  a venv under ~/.poolhouse, console scripts on PATH, no window
 #   --dev       a git checkout with an immutable install, following 0.3dev
 #   --system    --headless, per machine: starts at boot, no login, as the user who ran it
 #   --uninstall takes it off, and leaves the model cache alone
 #
-# Every step past the install is an ml-stack command, not shell: `ml-stack-serve build`,
-# `ml-stack-setup`, `ml-stack-models fetch`, `ml-stack-cluster join`, `ml-stack-doctor`.
+# Every step past the install is a poolhouse command, not shell: `poolhouse-serve build`,
+# `poolhouse-setup`, `poolhouse-models fetch`, `poolhouse-cluster join`, `poolhouse-doctor`.
 # Nothing here reimplements what one of those already does.
 #
 # Answer every prompt with the environment and it runs unattended (a machine with no
 # terminal is never prompted at all):
-#   ML_STACK_MODE=app|headless|dev|system   ML_STACK_NAME=<this machine>
-#   ML_STACK_PASSPHRASE=<the words every machine shares>   ML_STACK_CLUSTER=<group>
-#   ML_STACK_MODELS=auto|default|none|<word>   ML_STACK_ADOPT_CACHE=yes|no
-#   ML_STACK_REF=main|v1.2.3   ML_STACK_BUILD=release|source
-#   ML_STACK_OFFLINE_ZIP=/path/to.zip   ML_STACK_OFFLINE_MODELS=/dir   (no network at all)
-#   ML_STACK_OFFLINE_WHEELS=/dir   the wheels the extras are installed from offline;
+#   POOLHOUSE_MODE=app|headless|dev|system   POOLHOUSE_NAME=<this machine>
+#   POOLHOUSE_PASSPHRASE=<the words every machine shares>   POOLHOUSE_CLUSTER=<group>
+#   POOLHOUSE_MODELS=auto|default|none|<word>   POOLHOUSE_ADOPT_CACHE=yes|no
+#   POOLHOUSE_REF=main|v1.2.3   POOLHOUSE_BUILD=release|source
+#   POOLHOUSE_OFFLINE_ZIP=/path/to.zip   POOLHOUSE_OFFLINE_MODELS=/dir   (no network at all)
+#   POOLHOUSE_OFFLINE_WHEELS=/dir   the wheels the extras are installed from offline;
 #                                  a `wheels` directory beside the zip is used by default
 set -eu
 
-REPO="${ML_STACK_REPO:-adammikulis/ml-stack}"
+REPO="${POOLHOUSE_REPO:-adammikulis/ml-stack}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 GIT_URL="https://github.com/$REPO"
 PYTHON="3.13"
 EXTRAS="store,hub,web,plot,graph,coordinator,agents"
-MODE="${ML_STACK_MODE:-app}"
-MODELS="${ML_STACK_MODELS:-}"
-REF="${ML_STACK_REF:-}"
-ADOPT="${ML_STACK_ADOPT_CACHE:-}"
-OFFLINE_ZIP="${ML_STACK_OFFLINE_ZIP:-}"
-OFFLINE_MODELS="${ML_STACK_OFFLINE_MODELS:-}"
-OFFLINE_WHEELS="${ML_STACK_OFFLINE_WHEELS:-}"
+MODE="${POOLHOUSE_MODE:-app}"
+MODELS="${POOLHOUSE_MODELS:-}"
+REF="${POOLHOUSE_REF:-}"
+ADOPT="${POOLHOUSE_ADOPT_CACHE:-}"
+OFFLINE_ZIP="${POOLHOUSE_OFFLINE_ZIP:-}"
+OFFLINE_MODELS="${POOLHOUSE_OFFLINE_MODELS:-}"
+OFFLINE_WHEELS="${POOLHOUSE_OFFLINE_WHEELS:-}"
 UNINSTALL=no
 PY=""
 BIN=""
@@ -78,7 +78,7 @@ case "$(uname -m)" in
   *) die "unsupported processor: $(uname -m)" ;;
 esac
 [ "$OS" = linux ] && ARCH=x86_64
-KEY="ml-stack-$OS-$ARCH"
+KEY="poolhouse-$OS-$ARCH"
 
 # -- what was downloaded -------------------------------------------------------
 # The sha256 GitHub reports for the release asset whose download URL contains $1, read from
@@ -106,7 +106,7 @@ find_python() {
     PY="$(command -v "python$PYTHON")"
     return 0
   fi
-  die "ml-stack runs on Python $PYTHON. Install it from https://www.python.org/downloads/, then run this again."
+  die "poolhouse runs on Python $PYTHON. Install it from https://www.python.org/downloads/, then run this again."
 }
 
 # -- the app (default) --------------------------------------------------------
@@ -119,7 +119,7 @@ install_app() {
     cp "$OFFLINE_ZIP" "$TMP/pkg.zip"
   else
     have curl || die "this needs curl"
-    say "looking for the newest ml-stack for $OS $ARCH"
+    say "looking for the newest poolhouse for $OS $ARCH"
     JSON=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$API") \
       || die "could not reach GitHub"
     TAG=$(printf '%s' "$JSON" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
@@ -140,34 +140,34 @@ install_app() {
   have unzip || die "this needs unzip"
   unzip -q "$TMP/pkg.zip" -d "$TMP/out" || die "the download could not be unpacked"
 
-  if [ "$OS" = macos ] && [ -d "$TMP/out/Poolside.app" ]; then
-    DEST="${ML_STACK_DEST:-/Applications}"
+  if [ "$OS" = macos ] && [ -d "$TMP/out/Poolhouse.app" ]; then
+    DEST="${POOLHOUSE_DEST:-/Applications}"
     [ -w "$DEST" ] || DEST="$HOME/Applications"
     mkdir -p "$DEST"
-    rm -rf "$DEST/Poolside.app"
-    cp -R "$TMP/out/Poolside.app" "$DEST/Poolside.app"
-    [ -d "$DEST/Poolside.app" ] || die "$KEY could not be copied into $DEST"
+    rm -rf "$DEST/Poolhouse.app"
+    cp -R "$TMP/out/Poolhouse.app" "$DEST/Poolhouse.app"
+    [ -d "$DEST/Poolhouse.app" ] || die "$KEY could not be copied into $DEST"
     say ""
-    say "Installed to $DEST/Poolside.app"
+    say "Installed to $DEST/Poolhouse.app"
     say "Open it to name this device and choose Dev or Prod."
     say "Setup downloads continue in the background while you finish onboarding."
-    open "$DEST/Poolside.app" 2>/dev/null || true
+    open "$DEST/Poolhouse.app" 2>/dev/null || true
   else
-    DEST="${ML_STACK_DEST:-$HOME/.local/bin}"
+    DEST="${POOLHOUSE_DEST:-$HOME/.local/bin}"
     mkdir -p "$DEST"
     APPIMAGE=$(find "$TMP/out" -maxdepth 2 -name '*.AppImage' -type f | head -1)
-    [ -n "$APPIMAGE" ] && install -m 0755 "$APPIMAGE" "$DEST/ml-stack"
-    for name in ml-stack ml-stack-headless; do
+    [ -n "$APPIMAGE" ] && install -m 0755 "$APPIMAGE" "$DEST/poolhouse"
+    for name in poolhouse poolhouse-headless; do
       [ -f "$TMP/out/$name" ] || continue
       install -m 0755 "$TMP/out/$name" "$DEST/$name"
     done
-    [ -x "$DEST/ml-stack" ] || die "$KEY held no runnable ml-stack.
+    [ -x "$DEST/poolhouse" ] || die "$KEY held no runnable poolhouse.
      Install without the window instead:  curl -fsSL $GIT_URL/releases/latest/download/install.sh | sh -s -- --headless"
     say ""
     say "Installed to $DEST"
     case ":$PATH:" in
-      *":$DEST:"*) say "Run: ml-stack" ;;
-      *)           say "Run: $DEST/ml-stack   (or add $DEST to your PATH)" ;;
+      *":$DEST:"*) say "Run: poolhouse" ;;
+      *)           say "Run: $DEST/poolhouse   (or add $DEST to your PATH)" ;;
     esac
   fi
 }
@@ -175,9 +175,9 @@ install_app() {
 # -- headless: a venv and the console scripts ---------------------------------
 venv_root() {
   if [ "$MODE" = system ]; then
-    printf '%s' "${ML_STACK_PREFIX:-/opt/ml-stack}/venv"
+    printf '%s' "${POOLHOUSE_PREFIX:-/opt/poolhouse}/venv"
   else
-    printf '%s' "${ML_STACK_PREFIX:-$HOME/.ml-stack}/venv"
+    printf '%s' "${POOLHOUSE_PREFIX:-$HOME/.poolhouse}/venv"
   fi
 }
 
@@ -198,17 +198,17 @@ wheelhouse() {
   return 0
 }
 
-# The extras come from wheels on the disk. Without them, ml-stack and nothing else.
+# The extras come from wheels on the disk. Without them, poolhouse and nothing else.
 install_offline() {
   HOUSE=$(wheelhouse)
   ABS=$(cd "$(dirname "$OFFLINE_ZIP")" && pwd)/$(basename "$OFFLINE_ZIP")
   if [ -n "$HOUSE" ]; then
     say "extras from the wheels in $HOUSE"
     if "$BIN/pip" install --quiet --no-index --find-links "$HOUSE" \
-         "ml-stack[$EXTRAS] @ file://$ABS"; then
+         "poolhouse[$EXTRAS] @ file://$ABS"; then
       return 0
     fi
-    say "  $HOUSE does not hold every wheel ml-stack[$EXTRAS] needs"
+    say "  $HOUSE does not hold every wheel poolhouse[$EXTRAS] needs"
   fi
   "$BIN/pip" install --quiet "$ABS" || die "could not install $OFFLINE_ZIP"
 }
@@ -226,9 +226,9 @@ install_headless() {
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
       [ -n "$WANT" ] || WANT=main
     fi
-    say "installing ml-stack[$EXTRAS] at $WANT"
+    say "installing poolhouse[$EXTRAS] at $WANT"
     "$BIN/pip" install --quiet --upgrade \
-      "ml-stack[$EXTRAS] @ git+$GIT_URL@$WANT" || die "pip could not install ml-stack"
+      "poolhouse[$EXTRAS] @ git+$GIT_URL@$WANT" || die "pip could not install poolhouse"
     # The ref decides how it keeps itself current: a tag follows releases, main follows main.
     case "$WANT" in
       main|master) TRACK="$WANT" ;;
@@ -240,11 +240,11 @@ install_headless() {
 
 link_scripts() {
   FROM="$1"
-  TO="${ML_STACK_DEST:-$HOME/.local/bin}"
-  [ "$MODE" = system ] && TO="${ML_STACK_DEST:-/usr/local/bin}"
+  TO="${POOLHOUSE_DEST:-$HOME/.local/bin}"
+  [ "$MODE" = system ] && TO="${POOLHOUSE_DEST:-/usr/local/bin}"
   mkdir -p "$TO" 2>/dev/null || true
-  for name in ml-stack ml-stack-traind ml-stack-cluster ml-stack-peers ml-stack-serve \
-              ml-stack-models ml-stack-bench ml-stack-setup ml-stack-doctor ml-stack-mcp; do
+  for name in poolhouse poolhouse-traind poolhouse-cluster poolhouse-peers poolhouse-serve \
+              poolhouse-models poolhouse-bench poolhouse-setup poolhouse-doctor poolhouse-mcp; do
     [ -x "$FROM/$name" ] || continue
     ln -sf "$FROM/$name" "$TO/$name" 2>/dev/null || true
   done
@@ -259,11 +259,11 @@ link_scripts() {
 install_dev() {
   step "developer"
   have git || die "this needs git"
-  TRACK="${ML_STACK_TRACK:-0.3dev}"
-  SRC="${ML_STACK_SRC:-$HOME/.local/share/ml-stack/src}"
+  TRACK="${POOLHOUSE_TRACK:-0.3dev}"
+  SRC="${POOLHOUSE_SRC:-$HOME/.local/share/poolhouse/src}"
   if [ -d "$SRC/.git" ]; then
     [ "$(git -C "$SRC" branch --show-current)" = "$TRACK" ] \
-      || die "$SRC must be on $TRACK; choose a separate ML_STACK_SRC for this install"
+      || die "$SRC must be on $TRACK; choose a separate POOLHOUSE_SRC for this install"
     say "updating $SRC"
     git -C "$SRC" pull --ff-only || die "could not fast-forward $SRC"
   else
@@ -275,7 +275,7 @@ install_dev() {
   say "immutable install of $SRC"
   (cd "$SRC" && "$BIN/pip" install --quiet ".[$EXTRAS]") \
     || die "pip could not install $SRC"
-  "$BIN/python" -c 'import sys; from pathlib import Path; from ml_stack.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' "$SRC" \
+  "$BIN/python" -c 'import sys; from pathlib import Path; from poolhouse.fleet.runtime_wheel import install_checkout; code, note = install_checkout(Path(sys.argv[1]), timeout=1800); print(note); raise SystemExit(code)' "$SRC" \
     || die "could not install the committed runtime from $SRC"
   link_scripts "$BIN"
 }
@@ -296,17 +296,17 @@ install_system() {
   CACHE_ARGS="--same-user"
   if [ "$ADOPT" = yes ]; then CACHE_ARGS="--adopt"; fi
   # shellcheck disable=SC2086
-  "$BIN/python" -m ml_stack.fleet.autostart cache \
+  "$BIN/python" -m poolhouse.fleet.autostart cache \
       --user-cache "$HOME_DIR/.cache/huggingface" $CACHE_ARGS || true
 
-  "$BIN/python" -m ml_stack.fleet.autostart system --user "$RUNAS" --home "$HOME_DIR" \
+  "$BIN/python" -m poolhouse.fleet.autostart system --user "$RUNAS" --home "$HOME_DIR" \
     || die "could not install the boot service"
   if [ "$OS" = macos ]; then
     # How much memory a model may wire down survives a reboot only as a LaunchDaemon plist,
     # and writing it needs root -- which this has, right now. Asking again later costs
     # another password. Windows has no equivalent: its VRAM is dedicated.
-    "$BIN/ml-stack-serve" memory --persist \
-      || say "  (the wired limit was not raised; 'ml-stack-serve memory' prints the line)"
+    "$BIN/poolhouse-serve" memory --persist \
+      || say "  (the wired limit was not raised; 'poolhouse-serve memory' prints the line)"
   fi
 }
 
@@ -314,7 +314,7 @@ install_system() {
 
 # The model this install will fetch, and the build its measured profile names -- decided
 # once, before the build and the fetch, so both agree. Sets PICK (the model and its draft
-# head, as `ml-stack-models fetch` and `ml-stack-serve build` take them), CHOSEN_BUILD (the
+# head, as `poolhouse-models fetch` and `poolhouse-serve build` take them), CHOSEN_BUILD (the
 # named build the profile wants, "" for the managed one), WANT and ROOM.
 choose_model() {
   WANT="$MODELS"
@@ -329,8 +329,8 @@ choose_model() {
   [ "$WANT" = none ] && return 0
   [ -n "$OFFLINE_MODELS" ] && return 0
   ROOM=$("$BIN/python" -c \
-    'from ml_stack.hub import machine_room; print(machine_room())' 2>/dev/null || echo 0)
-  PICKED=$("$BIN/python" -m ml_stack.fleet.autostart choose --room "$ROOM" --want "$WANT" \
+    'from poolhouse.hub import machine_room; print(machine_room())' 2>/dev/null || echo 0)
+  PICKED=$("$BIN/python" -m poolhouse.fleet.autostart choose --room "$ROOM" --want "$WANT" \
     --json 2>/dev/null || true)
   [ -n "$PICKED" ] || return 0
   PICK=$("$BIN/python" -c 'import json, sys
@@ -342,25 +342,25 @@ print(" ".join(x for x in (d.get("model", ""), d.get("draft", "")) if x))' "$PIC
 
 llama_build() {
   step "llama.cpp"
-  [ -x "$BIN/ml-stack-serve" ] || { say "skipped: no ml-stack-serve"; return 0; }
+  [ -x "$BIN/poolhouse-serve" ] || { say "skipped: no poolhouse-serve"; return 0; }
   if [ -n "$OFFLINE_ZIP" ]; then say "offline: skipping the llama.cpp build"; return 0; fi
   FROM=release
-  if [ "${ML_STACK_BUILD:-}" = source ] && { have cc || have clang || have gcc; }; then
+  if [ "${POOLHOUSE_BUILD:-}" = source ] && { have cc || have clang || have gcc; }; then
     FROM=source
   fi
-  "$BIN/ml-stack-serve" build --from "$FROM" \
-    || say "  the build did not finish; 'ml-stack-serve build' retries"
+  "$BIN/poolhouse-serve" build --from "$FROM" \
+    || say "  the build did not finish; 'poolhouse-serve build' retries"
   # A model whose measured profile names a fork needs that fork; mainline will not load it.
   case "$CHOSEN_BUILD" in
     unsloth)
-      "$BIN/ml-stack-serve" build --repo unslothai/llama.cpp --from release --name unsloth \
+      "$BIN/poolhouse-serve" build --repo unslothai/llama.cpp --from release --name unsloth \
         || say "  the named fork did not build, and the chosen model needs it" ;;
   esac
 }
 
 sizing() {
   step "what this machine can do"
-  if [ -x "$BIN/ml-stack-setup" ]; then "$BIN/ml-stack-setup" || true; else say "skipped"; fi
+  if [ -x "$BIN/poolhouse-setup" ]; then "$BIN/poolhouse-setup" || true; else say "skipped"; fi
 }
 
 fetch_models() {
@@ -375,60 +375,60 @@ fetch_models() {
     return 0
   fi
   say "fetching $PICK into the one cache on this machine"
-  # `ml-stack-models fetch` checks every download's sha256 and refuses a mismatch.
+  # `poolhouse-models fetch` checks every download's sha256 and refuses a mismatch.
   # shellcheck disable=SC2086
-  "$BIN/ml-stack-models" fetch $PICK \
-    || say "  the fetch did not finish; 'ml-stack-models fetch' retries"
+  "$BIN/poolhouse-models" fetch $PICK \
+    || say "  the fetch did not finish; 'poolhouse-models fetch' retries"
 }
 
 join_fleet() {
   step "joining the fleet"
-  [ -x "$BIN/ml-stack-cluster" ] || { say "skipped: no ml-stack-cluster"; return 0; }
+  [ -x "$BIN/poolhouse-cluster" ] || { say "skipped: no poolhouse-cluster"; return 0; }
   set -- join --persist
-  [ -n "${ML_STACK_NAME:-}" ] && set -- "$@" --name "$ML_STACK_NAME"
-  [ -n "${ML_STACK_CLUSTER:-}" ] && set -- "$@" --group "$ML_STACK_CLUSTER"
+  [ -n "${POOLHOUSE_NAME:-}" ] && set -- "$@" --name "$POOLHOUSE_NAME"
+  [ -n "${POOLHOUSE_CLUSTER:-}" ] && set -- "$@" --group "$POOLHOUSE_CLUSTER"
   [ -n "$TRACK" ] && set -- "$@" --track "$TRACK"
-  if [ -n "${ML_STACK_PASSPHRASE:-}" ]; then
-    set -- "$@" --passphrase "$ML_STACK_PASSPHRASE"
+  if [ -n "${POOLHOUSE_PASSPHRASE:-}" ]; then
+    set -- "$@" --passphrase "$POOLHOUSE_PASSPHRASE"
   elif ! interactive; then
-    say "no passphrase, and no terminal to ask at. Set ML_STACK_PASSPHRASE and re-run,"
-    say "or run:  ml-stack-cluster join --persist"
+    say "no passphrase, and no terminal to ask at. Set POOLHOUSE_PASSPHRASE and re-run,"
+    say "or run:  poolhouse-cluster join --persist"
     return 0
   fi
-  "$BIN/ml-stack-cluster" "$@" || say "  join did not finish; 'ml-stack-cluster join' retries"
+  "$BIN/poolhouse-cluster" "$@" || say "  join did not finish; 'poolhouse-cluster join' retries"
 }
 
 what_came_with_it() {
   step "what came with it"
   [ -x "$BIN/python" ] || { say "skipped"; return 0; }
-  if ! "$BIN/python" -m ml_stack.installed && [ -n "$OFFLINE_ZIP" ]; then
+  if ! "$BIN/python" -m poolhouse.installed && [ -n "$OFFLINE_ZIP" ]; then
     say "    on a machine with no network these come from wheels on its disk:"
-    say "    put them in one directory and name it with ML_STACK_OFFLINE_WHEELS=/dir"
+    say "    put them in one directory and name it with POOLHOUSE_OFFLINE_WHEELS=/dir"
   fi
 }
 
 check_over() {
   step "checking it over"
-  if [ -x "$BIN/ml-stack-doctor" ]; then "$BIN/ml-stack-doctor" || true; else say "skipped"; fi
+  if [ -x "$BIN/poolhouse-doctor" ]; then "$BIN/poolhouse-doctor" || true; else say "skipped"; fi
 }
 
 last_screen() {
   step "done"
   [ -x "$BIN/python" ] || { say "skipped"; return 0; }
-  "$BIN/python" -m ml_stack.fleet.autostart done --name "${ML_STACK_NAME:-$(hostname)}" \
+  "$BIN/python" -m poolhouse.fleet.autostart done --name "${POOLHOUSE_NAME:-$(hostname)}" \
     --track "$TRACK" || true
 }
 
 do_uninstall() {
-  step "removing ml-stack"
+  step "removing poolhouse"
   VENV="$(venv_root)"
-  [ -x "$VENV/bin/python" ] || VENV="${ML_STACK_PREFIX:-/opt/ml-stack}/venv"
+  [ -x "$VENV/bin/python" ] || VENV="${POOLHOUSE_PREFIX:-/opt/poolhouse}/venv"
   if [ -x "$VENV/bin/python" ]; then
-    # `uninstall.plan` ticks everything ml-stack made for itself and leaves unticked what
+    # `uninstall.plan` ticks everything poolhouse made for itself and leaves unticked what
     # the person made -- their models and their datasets. Only the ticked ones go.
     "$VENV/bin/python" - <<'PYEOF' || say "  (the uninstall plan did not run)"
-from ml_stack.fleet import uninstall
-from ml_stack.home import state
+from poolhouse.fleet import uninstall
+from poolhouse.home import state
 
 root = state("traind")
 items = uninstall.plan(root)

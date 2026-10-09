@@ -9,8 +9,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from ml_stack.workspace import automatic_connection, cli, project_connection
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import automatic_connection, cli, project_connection
+from poolhouse.workspace.identity import Denied
 
 pytest_plugins = ["test_project_source"]
 
@@ -160,7 +160,7 @@ def test_saved_alias_preserves_explicit_other_identity_and_token(monkeypatch, tm
 
 
 def _project_checkouts(repository, tmp_path):
-    from ml_stack.net import git
+    from poolhouse.net import git
     clone = tmp_path / "second-checkout"
     clone.mkdir()
     git.run(["init"], cwd=clone)
@@ -172,15 +172,15 @@ def _project_checkouts(repository, tmp_path):
 
 
 def _dev_device(state, number, checkout, udp, *, default_profile=False):
-    from ml_stack.fleet import discovery, tls
-    from ml_stack.fleet.api import Daemon, make_handler
-    from ml_stack.fleet.framing import LimitedServer
-    from ml_stack.fleet.jobs import JobRunner
-    from ml_stack.fleet.onboard.joining import Joining
-    from ml_stack.fleet.pool_roster import Pool
-    from ml_stack.fleet.projects import ProjectRegistry
-    from ml_stack.http import Server
-    from ml_stack.workspace.remote_host import WorkspaceHost
+    from poolhouse.fleet import discovery, tls
+    from poolhouse.fleet.api import Daemon, make_handler
+    from poolhouse.fleet.framing import LimitedServer
+    from poolhouse.fleet.jobs import JobRunner
+    from poolhouse.fleet.onboard.joining import Joining
+    from poolhouse.fleet.pool_roster import Pool
+    from poolhouse.fleet.projects import ProjectRegistry
+    from poolhouse.http import Server
+    from poolhouse.workspace.remote_host import WorkspaceHost
 
     keyfile = state / "cluster.key"
     member = discovery.mint_cluster("development", keyfile, selection="automatic")
@@ -216,7 +216,7 @@ def _dev_device(state, number, checkout, udp, *, default_profile=False):
 
 
 def _start_convergence(device):
-    from ml_stack.fleet import automatic_clusters, discovery
+    from poolhouse.fleet import automatic_clusters, discovery
     stop = threading.Event()
     def refresh():
         device.advertiser.key = discovery.memberships(device.keyfile)[0].key
@@ -228,10 +228,10 @@ def _start_convergence(device):
 
 @pytest.fixture
 def dev_pair(repository, tmp_path, monkeypatch):
-    from ml_stack import http
-    from ml_stack.fleet import automatic_clusters, discovery
-    from ml_stack.fleet.projects import identity
-    from ml_stack.fleet.remote import Peer
+    from poolhouse import http
+    from poolhouse.fleet import automatic_clusters, discovery
+    from poolhouse.fleet.projects import identity
+    from poolhouse.fleet.remote import Peer
 
     original_destinations = discovery._destinations
     monkeypatch.setattr(discovery, "_destinations", lambda group, port: [
@@ -269,12 +269,12 @@ def dev_pair(repository, tmp_path, monkeypatch):
 
 @pytest.mark.slow
 def test_two_device_states_share_board_over_real_udp_and_tls_without_codes(dev_pair, monkeypatch):
-    from ml_stack.fleet import discovery
+    from poolhouse.fleet import discovery
     devices, project_id = dev_pair
     actors = []
     for device in devices:
-        monkeypatch.setenv("ML_STACK_HOME", str(device.state / "client"))
-        monkeypatch.setenv("ML_STACK_CLUSTER_KEY", str(device.keyfile))
+        monkeypatch.setenv("POOLHOUSE_HOME", str(device.state / "client"))
+        monkeypatch.setenv("POOLHOUSE_CLUSTER_KEY", str(device.keyfile))
         monkeypatch.setattr(automatic_connection, "HTTP_PORT", device.local_port)
         monkeypatch.chdir(device.checkout)
         args = SimpleNamespace(agent="worker", token_file="", model="", harness="")
@@ -302,18 +302,18 @@ def test_two_device_states_share_board_over_real_udp_and_tls_without_codes(dev_p
 
 @pytest.mark.parametrize("mode", ["dev", "prod"])
 def test_default_profile_catalogue_and_automatic_board_use_real_udp_and_tls(repository, tmp_path, monkeypatch, mode):
-    from ml_stack import http
-    from ml_stack.fleet import automatic_clusters, discovery, tls
-    from ml_stack.fleet.pool_roster import Pool
-    from ml_stack.fleet.projects import identity
-    from ml_stack.fleet.remote import Peer
+    from poolhouse import http
+    from poolhouse.fleet import automatic_clusters, discovery, tls
+    from poolhouse.fleet.pool_roster import Pool
+    from poolhouse.fleet.projects import identity
+    from poolhouse.fleet.remote import Peer
     original_destinations = discovery._destinations
     monkeypatch.setattr(discovery, "_destinations", lambda group, port: [
         (address, interface) for address, interface in original_destinations(group, port)
         if address[0] != discovery.LOOPBACK and interface != discovery.LOOPBACK])
     state = tmp_path / "default-device"
-    monkeypatch.setenv("ML_STACK_HOME", str(state))
-    monkeypatch.delenv("ML_STACK_CLUSTER_KEY", raising=False)
+    monkeypatch.setenv("POOLHOUSE_HOME", str(state))
+    monkeypatch.delenv("POOLHOUSE_CLUSTER_KEY", raising=False)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("127.0.0.1", 0))
         udp = probe.getsockname()[1]
@@ -360,7 +360,7 @@ def test_default_profile_catalogue_and_automatic_board_use_real_udp_and_tls(repo
 
 
 def _exchange_default_board(repository, project_id):
-    from ml_stack.workspace.remote import RemoteWorkspace
+    from poolhouse.workspace.remote import RemoteWorkspace
 
     first = automatic_connection.connect(repository, "first")
     second = automatic_connection.connect(repository, "second")
@@ -377,8 +377,8 @@ def _exchange_default_board(repository, project_id):
 def test_setup_saved_standard_agent_attaches_without_device_registration(tmp_path, monkeypatch):
     from workspace_kit import Kit, clean_env
 
-    from ml_stack.workspace import onboard, project, tokens
-    from ml_stack.workspace.identity import AGENT
+    from poolhouse.workspace import onboard, project, tokens
+    from poolhouse.workspace.identity import AGENT
 
     root = tmp_path / 'project'
     root.mkdir()
@@ -411,9 +411,9 @@ def test_saved_git_grant_refuses_another_repository(repository, tmp_path, monkey
 
     from workspace_kit import Kit, clean_env
 
-    from ml_stack.net import git
-    from ml_stack.workspace import device_agent, onboard, project, tokens
-    from ml_stack.workspace.identity import AGENT
+    from poolhouse.net import git
+    from poolhouse.workspace import device_agent, onboard, project, tokens
+    from poolhouse.workspace.identity import AGENT
 
     kit = Kit(clean_env(monkeypatch, tmp_path))
     token = kit.ws.registry.mint(onboard.SETUP, 'worker', AGENT, 3600)
@@ -432,7 +432,7 @@ def test_saved_git_grant_refuses_another_repository(repository, tmp_path, monkey
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
         pytest.fail('another repository received project authorization')
-    (foreign / '.ml-stack-project.json').write_text(json.dumps({
+    (foreign / '.poolhouse-project.json').write_text(json.dumps({
         'kind': 'project-checkout', 'project_id': grant['key']}))
     with pytest.raises(Denied, match='not authorized'), device_agent.owned_project_session(
             kit.ws, token, 'worker', foreign):
@@ -454,14 +454,14 @@ def test_claude_first_command_and_saved_codex_session_share_dev_without_pairing(
     import sys
     from pathlib import Path
 
-    from ml_stack.workspace import coordinator_client, guide, project, tokens
+    from poolhouse.workspace import coordinator_client, guide, project, tokens
 
     devices, project_id = dev_pair
     device = devices[0]
-    monkeypatch.setenv('ML_STACK_HOME', str(device.state / 'client'))
-    monkeypatch.setenv('ML_STACK_WORKSPACE_HOME', str(device.state / 'own-workspace'))
-    monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(device.keyfile))
-    monkeypatch.setenv('ML_STACK_DISCOVERY_PORT', str(device.advertiser.port))
+    monkeypatch.setenv('POOLHOUSE_HOME', str(device.state / 'client'))
+    monkeypatch.setenv('POOLHOUSE_WORKSPACE_HOME', str(device.state / 'own-workspace'))
+    monkeypatch.setenv('POOLHOUSE_CLUSTER_KEY', str(device.keyfile))
+    monkeypatch.setenv('POOLHOUSE_DISCOVERY_PORT', str(device.advertiser.port))
     monkeypatch.setenv('CODEX_THREAD_ID', 'existing-main-session')
     monkeypatch.setattr(automatic_connection, 'HTTP_PORT', device.local_port)
     monkeypatch.chdir(device.checkout)
@@ -475,8 +475,8 @@ def test_claude_first_command_and_saved_codex_session_share_dev_without_pairing(
         entries['claude']['expires'] = local.clock() - 1
         local.registry._save(entries)
     source = '''import sys
-from ml_stack.workspace import automatic_connection, cli, coordinator_client
-from ml_stack.fleet import discovery
+from poolhouse.workspace import automatic_connection, cli, coordinator_client
+from poolhouse.fleet import discovery
 original_destinations = discovery._destinations
 discovery._destinations = lambda group, port: [(address, interface) for address, interface in original_destinations(group, port) if address[0] != discovery.LOOPBACK and interface != discovery.LOOPBACK]
 def forbidden(*args, **kwargs):
@@ -510,7 +510,7 @@ raise SystemExit(cli.main(["whoami", "--agent", "claude", "--json"]))
 
 @pytest.mark.parametrize('failure', ['revoked', 'foreign', 'restricted', 'lead', 'child'])
 def test_different_dev_local_actor_cannot_escape_existing_authority(repository, tmp_path, monkeypatch, failure):
-    from ml_stack.workspace import Workspace, guide, project, tokens
+    from poolhouse.workspace import Workspace, guide, project, tokens
 
     local = Workspace(tmp_path / 'private-local')
     found = project.describe(str(repository))

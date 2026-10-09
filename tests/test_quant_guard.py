@@ -15,14 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import sentinel
-from ml_stack.hub.discover import ModelInfo
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, quant_guard, suggest
-from ml_stack.serve.broker import Ask, Broker
-from ml_stack.serve.broker_wire import _Server, spec_from
-from ml_stack.serve.process import kill_process_tree
-from ml_stack.serve.quant_guard import BlockedQuant
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import sentinel
+from poolhouse.hub.discover import ModelInfo
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec, quant_guard, suggest
+from poolhouse.serve.broker import Ask, Broker
+from poolhouse.serve.broker_wire import _Server, spec_from
+from poolhouse.serve.process import kill_process_tree
+from poolhouse.serve.quant_guard import BlockedQuant
+from poolhouse.testing.fakes import fake_llama_binary
 
 STRING, U32 = 8, 4
 Q4_K, Q8_0, IQ4_NL, IQ4_XS = 12, 8, 20, 23
@@ -79,7 +79,7 @@ def test_strict_mode_blocks_an_iq_file_with_the_reason_both_measurements_and_the
     assert "Model-UD-Q4_K_XL-00001-of-00002.gguf" in said
     assert "00002-of-00002" not in said and "Other-Q4_K_M" not in said
     assert "IQ3_XXS" not in said
-    assert "--iq warn" in said and "ML_STACK_IQ=off" in said
+    assert "--iq warn" in said and "POOLHOUSE_IQ=off" in said
 
 
 def test_iq_tensors_holding_most_of_the_bytes_block_a_file_whose_type_says_otherwise(metal, tmp_path):
@@ -133,7 +133,7 @@ def lease(manager, model, **options):
 
 
 def _port() -> int:
-    from ml_stack.serve import free_port
+    from poolhouse.serve import free_port
 
     return free_port()
 
@@ -182,9 +182,9 @@ def test_off_says_nothing_and_records_nothing(metal, manager, iq_model, caplog, 
 
 def test_status_shows_the_warning_while_the_server_runs(metal, tmp_path, iq_model, capsys,
                                                          monkeypatch):
-    from ml_stack.serve import status_cli
+    from poolhouse.serve import status_cli
 
-    monkeypatch.setenv("ML_STACK_BROKER_LOCAL", "1")
+    monkeypatch.setenv("POOLHOUSE_BROKER_LOCAL", "1")
     manager = ServerManager(LlamaServerBackend(binary=fake_llama_binary(tmp_path)))
     info = lease(manager, str(iq_model))
     try:
@@ -244,7 +244,7 @@ def installed(name: str, quant: str, size: int, params: int = 30_000_000_000) ->
 
 
 def test_iq_is_only_a_tie_break_on_apple_silicon_and_is_never_dropped(metal, monkeypatch):
-    from ml_stack.hub.probe import MachineMemory
+    from poolhouse.hub.probe import MachineMemory
 
     roomy = MachineMemory(total_ram=512 * 2**30, available_ram=500 * 2**30, unified=True,
                           gpu_limit_bytes=400 * 2**30)
@@ -266,7 +266,7 @@ def test_iq_is_only_a_tie_break_on_apple_silicon_and_is_never_dropped(metal, mon
 # -- internal uses --------------------------------------------------------------------------
 
 def test_the_smoke_test_serves_an_iq_model_with_no_flag(metal, tmp_path, monkeypatch, caplog):
-    from ml_stack.serve import llamacpp_smoke
+    from poolhouse.serve import llamacpp_smoke
 
     monkeypatch.setattr(llamacpp_smoke.home, "user_home", lambda: tmp_path / "user")
     root = tmp_path / "user" / ".cache" / "huggingface" / "hub"
@@ -278,12 +278,12 @@ def test_the_smoke_test_serves_an_iq_model_with_no_flag(metal, tmp_path, monkeyp
 
 # -- the command ----------------------------------------------------------------------------
 
-def test_ml_stack_serve_up_takes_the_mode_and_exits_3_when_strict(
+def test_poolhouse_serve_up_takes_the_mode_and_exits_3_when_strict(
         metal, tmp_path, iq_model, monkeypatch, capsys):
-    from ml_stack.serve import lifecycle_cli, ops
-    from ml_stack.serve.cli import COMMANDS
+    from poolhouse.serve import lifecycle_cli, ops
+    from poolhouse.serve.cli import COMMANDS
 
-    monkeypatch.setenv("ML_STACK_BROKER_LOCAL", "1")
+    monkeypatch.setenv("POOLHOUSE_BROKER_LOCAL", "1")
     manager = ServerManager(LlamaServerBackend(binary=fake_llama_binary(tmp_path)),
                             state_file=tmp_path / "servers.json")
     manager._broker = Broker(manager, scan=lambda: [], room=lambda: None)

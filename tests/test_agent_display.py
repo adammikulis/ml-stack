@@ -4,8 +4,8 @@ import re
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace.agent_display import metadata
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace.agent_display import metadata
+from poolhouse.workspace.identity import Denied
 
 PERSON = {'terminal': (True, True), 'env': {}}
 
@@ -63,7 +63,7 @@ def test_revoked_main_is_ineligible(kit):
 
 
 def test_presented_agents_children_and_internal_senders_are_read_only(kit, monkeypatch):
-    from ml_stack.workspace.service import GREETER
+    from poolhouse.workspace.service import GREETER
 
     token = kit.agent('main-worker')
     kit.ws.register_session(token)

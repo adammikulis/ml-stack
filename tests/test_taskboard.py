@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from taskboard_kit import accepted, board, proposed
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import enforcement, resource_allocations, tokens
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.taskboard import TaskBoard, record, save
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import enforcement, resource_allocations, tokens
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.taskboard import TaskBoard, record, save
 
 __all__ = ['board']
 
@@ -91,7 +91,7 @@ def test_task_notice_remains_queued_when_inbox_delivery_is_rate_limited(board, m
     original = board.ws.send
 
     def limited(*args, **kwargs):
-        from ml_stack.workspace.rates import RateLimited
+        from poolhouse.workspace.rates import RateLimited
         raise RateLimited('test limit')
 
     monkeypatch.setattr(board.ws, 'send', limited)
@@ -168,7 +168,7 @@ def test_worker_claims_do_not_satisfy_acceptance_and_mutated_artifacts_refuse_re
 
 def test_dependencies_checkpoint_budget_and_infrastructure_outcome(board):
     dependent = board.board.create(board.parent, {**board.spec, 'source_key': '', 'deps': [board.task['id']]})
-    from ml_stack.workspace.resource_allocations import assign
+    from poolhouse.workspace.resource_allocations import assign
 
     board.prepare(dependent['id'])
     allocation = assign(board.ws, board.parent, board.worker_id, dependent['id'], 'native-grant')
@@ -193,7 +193,7 @@ def test_dependencies_checkpoint_budget_and_infrastructure_outcome(board):
 
 @pytest.mark.redteam
 def test_expired_lease_and_missing_capability_refuse_execution(board):
-    from ml_stack.workspace.resource_allocations import assign
+    from poolhouse.workspace.resource_allocations import assign
 
     task = board.board.create(board.parent, {**board.spec, 'source_key': '', 'capabilities': ['vision']})
     board.prepare(task['id'])
@@ -221,8 +221,8 @@ def test_changed_task_specification_cannot_be_claimed(board):
 def test_coordinator_identity_survives_graph_copy_to_new_root(board, tmp_path):
     import shutil
 
-    from ml_stack.workspace import Workspace
-    from ml_stack.workspace.coordination import workspace_id
+    from poolhouse.workspace import Workspace
+    from poolhouse.workspace.coordination import workspace_id
 
     other = tmp_path / 'replica'
     other.mkdir()

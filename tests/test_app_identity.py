@@ -8,7 +8,7 @@ import stat
 import pytest
 from test_fleet_ui import Serving
 
-from ml_stack.fleet import app_identity
+from poolhouse.fleet import app_identity
 
 CHALLENGE = "ab" * 16
 

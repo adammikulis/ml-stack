@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from autostart_support import Recorder, environment, seams, staged
 
-from ml_stack import authority, home
-from ml_stack.fleet import autostart_ledger
-from ml_stack.fleet.autostart_apply import install, rollback
-from ml_stack.person import HumanRequired
+from poolhouse import authority, home
+from poolhouse.fleet import autostart_ledger
+from poolhouse.fleet.autostart_apply import install, rollback
+from poolhouse.person import HumanRequired
 
 
 @pytest.fixture
@@ -40,8 +40,8 @@ def test_install_places_the_staged_bytes_loads_them_and_records_it(tmp_path, use
             placed = unit_dir(user) / unit.name
             assert placed.read_bytes() == (done.path.parent / unit.name).read_bytes()
             assert oct(placed.stat().st_mode & 0o777) == "0o644"
-    assert ["systemctl", "--user", "enable", "--now", "ml-stack-traind.service"] in recorder.ran
-    assert ["systemctl", "--user", "enable", "--now", "ml-stack-runtime-ensure.timer"] in recorder.ran
+    assert ["systemctl", "--user", "enable", "--now", "poolhouse-traind.service"] in recorder.ran
+    assert ["systemctl", "--user", "enable", "--now", "poolhouse-runtime-ensure.timer"] in recorder.ran
     ledger = autostart_ledger.read()
     assert ledger["version"] == 1 and done.manifest.id in ledger["used"]
     assert set(ledger["installed"]) == {"pool-daemon", "runtime-ensure"}
@@ -53,13 +53,13 @@ def test_install_places_the_staged_bytes_loads_them_and_records_it(tmp_path, use
 
 def test_install_backs_up_what_it_replaces_and_rollback_restores_it(tmp_path, user):
     done = staged(tmp_path, roles=("pool-daemon",))
-    old = unit_dir(user) / "ml-stack-traind.service"
+    old = unit_dir(user) / "poolhouse-traind.service"
     old.parent.mkdir(parents=True)
     old.write_text("[Service]\nExecStart=/old\n")
     outcome, recorder = run_install(done)
     assert outcome.ok
     backup = home.state("autostart", "backups", done.manifest.id)
-    assert (backup / "ml-stack-traind.service").read_text() == "[Service]\nExecStart=/old\n"
+    assert (backup / "poolhouse-traind.service").read_text() == "[Service]\nExecStart=/old\n"
     assert json.loads((backup / "index.json").read_text())["version"] == 1
     assert old.read_bytes() != b"[Service]\nExecStart=/old\n"
     undone = rollback(seams=seams(recorder, typed=lambda _p: done.manifest.id))
@@ -74,14 +74,14 @@ def test_rollback_of_a_first_install_removes_the_files_and_unloads(tmp_path, use
     _, recorder = run_install(done)
     undone = rollback(seams=seams(recorder, typed=lambda _p: done.manifest.id))
     assert undone.ok
-    assert not any(unit_dir(user).glob("ml-stack-*"))
-    assert ["systemctl", "--user", "disable", "--now", "ml-stack-traind.service"] in recorder.ran
+    assert not any(unit_dir(user).glob("poolhouse-*"))
+    assert ["systemctl", "--user", "disable", "--now", "poolhouse-traind.service"] in recorder.ran
     assert recorder.alive is False
 
 
 def test_a_failed_load_puts_the_previous_unit_back_and_spends_nothing(tmp_path, user):
     done = staged(tmp_path, roles=("pool-daemon",))
-    old = unit_dir(user) / "ml-stack-traind.service"
+    old = unit_dir(user) / "poolhouse-traind.service"
     old.parent.mkdir(parents=True)
     old.write_text("old\n")
     outcome, _ = run_install(done, Recorder(fail_load=True))
@@ -94,7 +94,7 @@ def test_a_unit_that_does_not_answer_its_health_probe_is_undone(tmp_path, user):
     done = staged(tmp_path, roles=("pool-daemon",))
     outcome, _ = run_install(done, probe=lambda health: False)
     assert not outcome.ok and "health probe" in outcome.lines[0]
-    assert not (unit_dir(user) / "ml-stack-traind.service").exists()
+    assert not (unit_dir(user) / "poolhouse-traind.service").exists()
     assert autostart_ledger.read()["installed"] == {}
 
 
@@ -120,7 +120,7 @@ def test_replaying_an_installed_manifest_is_refused(tmp_path, user):
 
 def test_changing_a_staged_unit_between_prepare_and_install_is_refused(tmp_path, user):
     done = staged(tmp_path)
-    target = done.path.parent / "ml-stack-traind.service"
+    target = done.path.parent / "poolhouse-traind.service"
     target.write_bytes(target.read_bytes() + b"ExecStartPost=/bin/sh -c evil\n")
     outcome, recorder = run_install(done)
     assert not outcome.ok and "changed after it was prepared" in " ".join(outcome.lines)
@@ -129,7 +129,7 @@ def test_changing_a_staged_unit_between_prepare_and_install_is_refused(tmp_path,
 
 def test_a_unit_and_manifest_edited_together_still_differ_from_what_prepare_renders(tmp_path, user):
     done = staged(tmp_path, roles=("pool-daemon",))
-    target = done.path.parent / "ml-stack-traind.service"
+    target = done.path.parent / "poolhouse-traind.service"
     forged = target.read_bytes() + b"ExecStartPost=/bin/sh -c evil\n"
     target.write_bytes(forged)
     import hashlib
@@ -145,14 +145,14 @@ def test_a_consistently_forged_environment_is_refused(tmp_path, user):
     import hashlib
     from dataclasses import replace
 
-    from ml_stack.fleet.autostart_manifest import parse
-    from ml_stack.fleet.autostart_units import render
+    from poolhouse.fleet.autostart_manifest import parse
+    from poolhouse.fleet.autostart_units import render
 
     done = staged(tmp_path, roles=("pool-daemon",))
     raw = json.loads(done.path.read_text())
     raw["roles"][0]["environment"]["PATH"] = "/tmp/evil"
     forged = render(replace(parse(raw).roles[0], units=()), "linux", "user", getpass.getuser())["service"]
-    (done.path.parent / "ml-stack-traind.service").write_bytes(forged)
+    (done.path.parent / "poolhouse-traind.service").write_bytes(forged)
     raw["roles"][0]["units"][0]["sha256"] = hashlib.sha256(forged).hexdigest()
     done.path.write_text(json.dumps(raw))
     outcome, recorder = run_install(done)
@@ -173,8 +173,8 @@ def edit(done, change):
 
 @pytest.mark.parametrize("destination", [
     "{user}/.config/systemd/user/../../../.bashrc",
-    "{user}/.config/systemd/user/../ml-stack-traind.service",
-    "/etc/systemd/system/ml-stack-traind.service",
+    "{user}/.config/systemd/user/../poolhouse-traind.service",
+    "/etc/systemd/system/poolhouse-traind.service",
     "{user}/.config/systemd/user/other.service",
 ])
 def test_a_destination_outside_the_allowed_set_is_refused(tmp_path, user, destination):
@@ -201,7 +201,7 @@ def test_a_symlinked_destination_file_is_refused(tmp_path, user):
     victim = tmp_path / "victim"
     victim.write_text("keep")
     unit_dir(user).mkdir(parents=True)
-    (unit_dir(user) / "ml-stack-traind.service").symlink_to(victim)
+    (unit_dir(user) / "poolhouse-traind.service").symlink_to(victim)
     outcome, _ = run_install(done)
     assert not outcome.ok and victim.read_text() == "keep"
 
@@ -235,7 +235,7 @@ def test_a_staging_directory_others_can_write_is_refused(tmp_path, user):
     assert not outcome.ok and "not private" in " ".join(outcome.lines)
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_NONINTERACTIVE", "ML_STACK_AGENT"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_NONINTERACTIVE", "POOLHOUSE_AGENT"])
 def test_an_agent_is_refused_install_and_rollback_before_anything_is_read(tmp_path, user, marker):
     done = staged(tmp_path)
     before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
@@ -284,24 +284,24 @@ def test_a_system_install_asks_the_operating_system_and_builds_a_quoted_command(
     assert not outcome.ok
     command = asked[0]
     words = shlex.split(command.replace("&&", " ").replace("{", " ").replace("}", " ").replace(";", " "))
-    assert "/Library/LaunchDaemons/com.ml-stack.traind.plist" in words
-    assert str(done.path.parent / "com.ml-stack.traind.plist") in words
+    assert "/Library/LaunchDaemons/com.poolhouse.traind.plist" in words
+    assert str(done.path.parent / "com.poolhouse.traind.plist") in words
     assert "sudo" not in command and recorder.ran == []
-    assert not Path("/Library/LaunchDaemons/com.ml-stack.traind.plist").exists()
+    assert not Path("/Library/LaunchDaemons/com.poolhouse.traind.plist").exists()
 
 
 def test_the_unit_runs_as_the_user_even_when_installed_system_wide(tmp_path, user):
     import plistlib
 
     done = staged(tmp_path, roles=("pool-daemon",), platform="darwin", scope="system")
-    body = plistlib.loads((done.path.parent / "com.ml-stack.traind.plist").read_bytes())
+    body = plistlib.loads((done.path.parent / "com.poolhouse.traind.plist").read_bytes())
     import getpass
 
     assert body["UserName"] == getpass.getuser() != "root"
 
 
 def test_a_concurrent_install_is_refused_not_interleaved(tmp_path, user):
-    from ml_stack.lock import only_one
+    from poolhouse.lock import only_one
 
     done = staged(tmp_path)
     with only_one(home.state("autostart", "apply.lock"), wait=False):

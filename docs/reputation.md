@@ -1,6 +1,6 @@
 # Reputation of sources
 
-ml-stack keeps a record of how every source it deals with has behaved: hosts, URLs, addresses,
+Poolhouse keeps a record of how every source it deals with has behaved: hosts, URLs, addresses,
 fleet peers, model repositories, artifact hashes and connectors. The record tightens what is
 asked of a source. It never grants anything.
 
@@ -35,15 +35,15 @@ is recorded and never scored.
 **Divergence.** An established source that gets fresh evidence (short term >= 1) is stepped to
 watch at once and one notice is queued. An unknown source that misbehaves is just bad.
 
-**Recovery.** Waiting restores nothing. A watched source returns after `ML_STACK_REPUTATION_RECOVER`
+**Recovery.** Waiting restores nothing. A watched source returns after `POOLHOUSE_REPUTATION_RECOVER`
 clean runs in a row (default 10); a bad source steps to watch after three times as many. A person
-clears a source with `ml-stack-reputation forget`.
+clears a source with `poolhouse-reputation forget`.
 
 ## The notice
 
 Raised through sentinel's single-flight dialog: one dialog at a time on the machine, the shared
-cooldown, off when `ML_STACK_NOTIFY=off`. Buttons: Later, Keep watching, Block it. With
-notifications off the notice stays queued and the counts show in `ml-stack-security status` and the
+cooldown, off when `POOLHOUSE_NOTIFY=off`. Buttons: Later, Keep watching, Block it. With
+notifications off the notice stays queued and the counts show in `poolhouse-security status` and the
 chip.
 
 ## Observation points
@@ -57,8 +57,8 @@ Only the system's own observations move a score; no function that changes a scor
 - `web.read`: a page that reads like an instruction is `injection_flagged` against the URL it was
   fetched from.
 
-Observation points call `ml_stack.sentinel.observers`, which does nothing until
-`ml_stack.reputation.hooks.install()` has run in the process (the web tools do it).
+Observation points call `poolhouse.sentinel.observers`, which does nothing until
+`poolhouse.reputation.hooks.install()` has run in the process (the web tools do it).
 
 ## What it changes
 
@@ -68,7 +68,7 @@ refuses, and never touches a role, rule or human-only step.
 
 ## Commands
 
-`ml-stack-reputation list | show kind:name | forget kind:name | forget --all | export | stats`.
+`poolhouse-reputation list | show kind:name | forget kind:name | forget --all | export | stats`.
 A person at a terminal only; an agent marker in the environment refuses every one.
 
 ## Verified work

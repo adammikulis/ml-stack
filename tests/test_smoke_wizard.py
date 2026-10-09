@@ -24,8 +24,8 @@ def _smoke():
 
 
 def test_the_walk_creates_the_pool_and_reaches_the_end_of_setup(daemon, open_page, monkeypatch):
-    from ml_stack.fleet import automatic_clusters
-    from ml_stack.fleet.discovery import memberships
+    from poolhouse.fleet import automatic_clusters
+    from poolhouse.fleet.discovery import memberships
 
     monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
     page, errors = open_page(daemon)

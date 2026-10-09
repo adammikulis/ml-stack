@@ -7,8 +7,8 @@ with hidden edges ... probably use less mem to use pointers".
 
 import json
 
-from ml_stack import ingest
-from ml_stack.graph.store import GraphStore
+from poolhouse import ingest
+from poolhouse.graph.store import GraphStore
 from tests.test_ingest import a_unit
 
 
@@ -97,8 +97,8 @@ def test_the_run_node_is_hidden_and_reached_by_pointer(tmp_path):
 
 
 def test_hidden_nodes_stay_off_the_page_and_out_of_list_kind():
-    from ml_stack.graph.looking import list_kind
-    from ml_stack.graph.page import kinds_of, shown
+    from poolhouse.graph.looking import list_kind
+    from poolhouse.graph.page import kinds_of, shown
 
     graph = {"nodes": [{"id": "concept:vault", "kind": "concept", "label": "vault",
                         "mentions": 2, "attrs": {}},
@@ -157,7 +157,7 @@ def test_a_second_sources_names_land_on_the_first_sources_nodes_on_the_way_in(tm
 
 
 def test_fold_checks_the_store_at_its_end(tmp_path, monkeypatch, capsys):
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     out = tmp_path / "sources"
     unit = a_unit()

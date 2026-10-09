@@ -1,0 +1,510 @@
+"""The read run: every unit of every source through the model, folded into the store as
+it goes, tidied at the end of each source, and stoppable."""
+
+from __future__ import annotations
+
+import hashlib
+import math
+import time
+import urllib.parse
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from poolhouse.client.counters import (
+    Ledger,
+    counting,
+    sampling_named,
+    survival_lines,
+)
+from poolhouse.home import expand
+from poolhouse.ingest.embed import embed_store
+from poolhouse.ingest.extract import schema
+from poolhouse.ingest.fold import fold_into
+from poolhouse.ingest.judge import run_record, write_run
+from poolhouse.ingest.progress import Progress
+from poolhouse.ingest.reads import Read, _keep_reads, _read_json, reads_path
+from poolhouse.ingest.serving import _sampling
+from poolhouse.log import say, warn
+from poolhouse.serve.profile import INGEST
+from poolhouse.sources.html import Marks
+
+__all__ = ["EMBED_URL", "FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit", "reader_for"]
+
+EMBED_URL = "http://127.0.0.1:8081"
+"""Where an embedding server is looked for when --embed-url does not say."""
+
+
+FOLD_EVERY = 25
+"""Units read between folds of a source into the store.
+
+A fold costs what `entities.fold_names` costs, which is every concept name against every
+other: measured over invented units, 400 units of a 12-word vocabulary folded and wrote in
+3.8 s, and 300 units of a 2,700-word one took 44 s to fold and 9 s to write. It grows with
+the square of the vocabulary rather than with the units, so the interval is a real cost and
+not a formality. A chapter's end folds once this many units have gone by since the last
+fold; a chapter longer than twice this folds inside itself; the end of a source and a stop
+always fold. What the last fold actually took widens it -- see `FOLD_SECONDS`."""
+
+FOLD_SECONDS = 20.0
+"""The most a fold may take before the run waits longer between folds.
+
+`fold_source` folds every name against every other, so it grows with the square of the
+vocabulary while the write grows with the units. Measured over invented units of a
+vocabulary as wide as the source (`tests/test_ingest_sources.py`, an M-series laptop): 300
+units and 300 concepts, 0.25 s to fold and 3.3 s to fold and write; 1,000 units and 1,000
+concepts, 2.9 s and 11.8 s; 3,000 units and 3,000 concepts, 28.5 s and 82.2 s. A source of
+thousands of nodes therefore costs a minute or more at every chapter end, so
+`_fold_interval` reads as many units again between folds as the last fold ran over this."""
+
+
+class Stopped(BaseException):
+    """SIGTERM reached a run. Not an `Exception`: one section's extraction catches every
+    `Exception` there is, and a stop is not one section's failure."""
+
+
+def read_unit(client: Any, unit: Any, shape: Mapping[str, Any], **asking: Any) -> Read:
+    """One unit, read a second time when the server reset inside the first read.
+
+    `ServerUnreachable` from a server that still answers is a connection dropped mid
+    request, not a server that has gone: the unit is read once more, and whatever the
+    second read says is what is written down. A server that does not answer is not retried
+    -- that is the dead-server path, and the run stops on it.
+    """
+    from poolhouse import ingest
+
+    row = ingest.extract_unit(client, unit, shape, **asking)
+    if row.error.startswith("ServerUnreachable") and ingest._alive(client):
+        row = ingest.extract_unit(client, unit, shape, **asking)
+        row.retried = True
+    return row
+
+
+def reader_for(where: str, *, images: bool = False, chapter: str | int | None = None,
+              cache_dir: str | Path | None = None, marks: Any = None
+              ) -> Callable[[], Any]:
+    """The reader for ``where``: a PDF, an HTML or XML file, or a URL fetched first.
+
+    ``.pdf`` reads through `poolhouse.sources.pdf`; ``.html``, ``.htm`` and ``.xml`` through
+    `poolhouse.sources.html`. http(s) is checked by `poolhouse.http.check`, fetched by
+    `poolhouse.media.download.fetch` into ``cache_dir`` (the state root by default), and
+    dispatched the same way once it is down.
+
+    ``marks`` says how this source marks a section -- a
+    :class:`~poolhouse.sources.html.Marks`. Left out, each reader takes its own default,
+    which no corpus with a spelling of its own will fit.
+    """
+    text = str(where)
+    how = marks if marks is not None else Marks()
+    if urllib.parse.urlsplit(text).scheme in ("http", "https"):
+        return lambda: _read_url(text, images=images, chapter=chapter, cache_dir=cache_dir,
+                                 marks=how)
+    return lambda: _read_local(text, images=images, chapter=chapter, marks=how)
+
+
+def _read_local(where: str, *, images: bool, chapter: str | int | None,
+               marks: Any = None) -> Any:
+    """A PDF, HTML or XML file, read by its suffix."""
+    from poolhouse.sources import html, pdf
+
+    marks = marks if marks is not None else Marks()
+    suffix = Path(where).suffix.casefold()
+    if suffix in (".html", ".htm"):
+        return html.read(where, sections=marks.rule())
+    if suffix == ".xml":
+        return html.read_xml(where, marks=marks)
+    return pdf.read(where, images=images, chapter=chapter)
+
+
+def _read_url(url: str, *, images: bool, chapter: str | int | None,
+             cache_dir: str | Path | None, marks: Any = None) -> Any:
+    """A document fetched from the web, then dispatched by what came down."""
+    from poolhouse.home import state
+    from poolhouse.http import check
+    from poolhouse.media.download import fetch
+    from poolhouse.sources import html, pdf
+
+    marks = marks if marks is not None else Marks()
+    safe = check(url)
+    root = expand(cache_dir) if cache_dir else state("ingest", "downloads")
+    local = fetch(safe, root / _cache_name(safe))
+    suffix = local.suffix.casefold()
+    if suffix in (".html", ".htm"):
+        return html.read(local, url=safe, sections=marks.rule())
+    if suffix == ".xml":
+        return html.read_xml(local, url=safe, marks=marks)
+    return pdf.read(local, images=images, chapter=chapter)
+
+
+def _cache_name(url: str) -> str:
+    """A filename for a downloaded document: its own name, deduped by a hash of the url."""
+    parts = urllib.parse.urlsplit(url)
+    name = Path(parts.path).name or "download"
+    stem, suffix = Path(name).stem or "download", Path(name).suffix
+    return f"{stem}-{hashlib.sha256(url.encode()).hexdigest()[:16]}{suffix}"
+
+
+def _opened(text: str, *, images: bool, chapter: str | int | None,
+           marks: Any = None) -> Any:
+    """One of `args.docs`, read into a `Document`; `FileNotFoundError` for a local path
+    that is not one."""
+    if urllib.parse.urlsplit(text).scheme not in ("http", "https") and not expand(text).is_file():
+        raise FileNotFoundError(f"no such document: {expand(text)}")
+    return reader_for(text, images=images, chapter=chapter, marks=marks)()
+
+
+@contextmanager
+def _stopping() -> Any:
+    """Turn SIGTERM into `Stopped` for the length of a run, and put the old handler back."""
+    import signal
+
+    def raise_it(*_: Any) -> None:
+        raise Stopped("SIGTERM")
+
+    try:
+        before = signal.signal(signal.SIGTERM, raise_it)
+    except ValueError:            # not the main thread: nothing to install onto
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, before)
+
+
+@dataclass
+class _RunContext:
+    """What every document in a read run shares."""
+
+    args: Any
+    client: Any
+    progress: Progress
+    words: Any
+    spent: Any
+    run_id: str
+    shape: Mapping[str, Any]
+    ingest: Any
+
+
+@dataclass
+class _Source:
+    """One document, and what has been read of it into the store so far."""
+
+    document: Any
+    slug: str
+    wanted: list[Any]
+    units_by_id: Mapping[str, Any]
+    reads_by_unit: dict[str, dict[str, Any]]
+
+
+def _read_run(args: Any) -> int:
+    from poolhouse import ingest
+    from poolhouse.client.spent import Spent
+    from poolhouse.http import Refused
+    from poolhouse.ingest.vocabulary import Vocabulary
+    from poolhouse.media.download import DownloadError
+
+    progress = Progress(Progress.beside(args.out))
+    spent = Spent()
+    core_only = bool(getattr(args, "core_only", False))
+    shape = schema(core_only=core_only)
+    words = None if core_only else Vocabulary.read(args.out)
+    started = time.time()
+    code = 0
+    stopped = False
+
+    try:
+        with _stopping(), ingest._serving(args) as client, _counted(args, client) as counted:
+            run_id = write_run(args.out,
+                               run_record(args, serving=ingest._serving_said(args)))
+            say(f"  run {run_id}: units read now point at it")
+            ctx = _RunContext(args=args, client=client, progress=progress, words=words,
+                              spent=spent, run_id=run_id, shape=shape, ingest=ingest)
+            for path in args.docs:
+                text = str(path)
+                began = time.time()
+                try:
+                    marks = Marks.from_args(args)
+                    document = _opened(text, images=args.images,
+                                      chapter=args.chapter or None, marks=marks)
+                except (FileNotFoundError, Refused, DownloadError, ValueError) as why:
+                    warn(f"error: {why}")
+                    code = 2
+                    continue
+                stopped = _read_document(ctx, document, marks, began, len(args.docs))
+                if stopped:
+                    break
+    except Stopped:
+        stopped = True
+
+    if words is not None:
+        for line in words.lines():
+            say(line)
+    totals = progress.totals()
+    say(f"\n{totals['sections']} section(s) of {totals['sources']} source(s) in "
+        f"{(time.time() - started) / 60:.1f} min; {spent.calls} calls, "
+        f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
+        + (f"; {totals['failed']} failed" if totals["failed"] else ""))
+    if spent.drafted:
+        say(_drafting_line(spent))
+    for line in _counter_lines(counted):
+        say(line)
+    if stopped:
+        say("stopped: what was read is folded into the store; "
+            f"the same command with --resume reads on ({args.out})")
+    else:
+        _embedded(args)
+    return code
+
+
+def _read_document(ctx: _RunContext, document: Any, marks: Any, began: float, docs: int) -> bool:
+    """Read one opened document into the store, folding and tidying it as it goes.
+
+    Returns whether a stop -- SIGTERM, or the model server going away -- cut it short.
+    """
+    from poolhouse.sources import units as source_units
+
+    args = ctx.args
+    _named(args, document, docs)
+    wanted = source_units.units(document, **({"max_tokens": args.max_tokens}
+                                             if args.max_tokens else {}))
+    if args.sample:
+        wanted = wanted[:args.sample]
+    slug = document.slug
+    ctx.progress.source(slug, title=document.title, path=document.path,
+                        sections=len(wanted), marks=asdict(marks))
+    banks = source_units.question_banks(document, **({"max_tokens": args.max_tokens}
+                                                     if args.max_tokens else {}))
+    say(f"{document.title}: {len(document.chapters)} chapter(s), "
+        f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
+        f"the {document.how}" + (", OpenStax" if document.openstax else "")
+        + (f", {banks} question-bank part(s) skipped" if banks else "")
+        + f" -- read in {time.time() - began:.0f}s")
+
+    units_by_id = {unit.id: unit for unit in wanted}
+    folded_seconds = float(
+        (ctx.progress.state["sources"].get(slug) or {}).get("folded_seconds") or 0.0)
+    held_reads = _read_json(reads_path(args.out, slug))
+    held_reads = held_reads if isinstance(held_reads, dict) else {}
+    reads_by_unit: dict[str, dict[str, Any]] = {}
+    to_read = []
+    for unit in wanted:
+        if args.resume and ctx.progress.done(slug, unit.id) and unit.id in held_reads:
+            reads_by_unit[unit.id] = held_reads[unit.id]
+            continue
+        to_read.append(unit)
+
+    source = _Source(document=document, slug=slug, wanted=wanted, units_by_id=units_by_id,
+                     reads_by_unit=reads_by_unit)
+    stopped, _ = _read_units(ctx, source, to_read, folded_seconds)
+
+    counts = _fold(ctx, source)
+    if not args.no_tidy:
+        # the hygiene pass over the store, with this run's model as the judge
+        # and the units still in memory as its source -- automated, recorded,
+        # nothing deferred
+        from poolhouse.graph.tidy import tidy as hygiene
+        texts = {unit.id: unit.text for unit in wanted}
+        judged = hygiene(args.out, judge=ctx.ingest._judge(
+            ctx.client, args.out, model=args.model, texts=texts), log=None)
+        say(f"  tidied: {judged.said()}")
+    say(f"  {document.title}: {counts['nodes']} nodes, {counts['edges']} edges "
+        f"into {args.out}")
+    return stopped
+
+
+def _read_units(ctx: _RunContext, source: _Source, to_read: Sequence[Any],
+                folded_seconds: float) -> tuple[bool, float]:
+    """Read every unit in ``to_read`` into ``source``, folding it in along the way.
+
+    One at a time, on the one slot: each unit is written down the moment it finishes, so a
+    run killed mid-source loses at most the unit in flight. Returns whether the read
+    stopped early, and the last fold's seconds.
+    """
+    args = ctx.args
+    since = 0
+    try:
+        for index, unit in enumerate(to_read):
+            row = read_unit(ctx.client, unit, ctx.shape, images=args.images,
+                            per_section=args.per_section,
+                            cache_dir=args.cache or None, vocabulary=ctx.words)
+            fresh = ctx.words.note(row.extracted, unit.id) if ctx.words is not None else []
+            row.run = ctx.run_id
+            source.reads_by_unit[unit.id] = asdict(row)
+            for call in row.calls:
+                ctx.spent.add(_call_of(call))
+            ctx.progress.note(source.slug, row)
+            _keep_reads(args.out, source.slug, [source.reads_by_unit[unit.id]])
+            if row.error.startswith("ServerUnreachable") and not ctx.ingest._alive(ctx.client):
+                # the server is gone -- killed, crashed, evicted. Every unit after this one
+                # would fail in a second and be written down as a failure (2026-09-03: 209
+                # of them, in under a minute), so the run folds what it has and ends; the
+                # unit is written down but not counted against, and --resume reads on once
+                # something serves again
+                say(f"  the model server went away at {unit.id}; folding what "
+                    f"was read and stopping -- --resume reads on")
+                raise Stopped("server gone")
+            since += 1
+            say(f"  ch {unit.chapter or '-':>3}  "
+                f"{unit.section or unit.section_title[:12]:<8}"
+                f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
+                f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
+                + (" (read again after a reset)" if row.retried else "")
+                + (f"  coined {', '.join(fresh)}" if fresh else "")
+                + (f"  {row.error}" if row.error else ""))
+            ahead = to_read[index + 1] if index + 1 < len(to_read) else None
+            if ahead is not None and _time_to_fold(
+                    since, ahead.chapter != unit.chapter, seconds=folded_seconds):
+                got = _fold(ctx, source)
+                folded_seconds = float(got["seconds"])
+                since = 0
+    except Stopped:
+        return True, folded_seconds
+    return False, folded_seconds
+
+
+def _fold(ctx: _RunContext, source: _Source) -> dict[str, Any]:
+    """Fold what has been read of ``source`` into the store so far, and print what changed."""
+    args = ctx.args
+    judge = None if args.no_tidy else ctx.ingest._judge(ctx.client, args.out, model=args.model)
+    got = fold_into(args.out, source.slug, title=source.document.title,
+                    reads=_rows(source.wanted, source.reads_by_unit),
+                    units_by_id=source.units_by_id, progress=ctx.progress, judge=judge)
+    if ctx.words is not None:
+        ctx.words.write(args.out)
+    landed = got.get("absorbed") or {}
+    say(f"  folded {source.slug} at unit {got['units']} in {got['seconds']:.1f}s: "
+        f"{got['nodes']} nodes, {got['edges']} edges"
+        + (" (partial)" if got["partial"] else "")
+        + (f"; {landed['same_name'] + landed['plural']} name(s) landed on existing "
+             f"nodes, judge: {landed['judged_same']} same, "
+             f"{landed['judged_different']} different, {landed['possible']} left"
+             if landed else "")
+        + (f"; the next fold is {_fold_interval(float(got['seconds']))} unit(s) away"
+             if _fold_interval(float(got['seconds'])) != ctx.ingest.FOLD_EVERY else ""))
+    return got
+
+
+def _named(args: Any, document: Any, docs: int) -> None:
+    """Put ``--slug`` and ``--title`` on the document, when one document was named.
+
+    A source's own markup is where a title comes from by default, and every corpus spells
+    that differently: a statute calls it ShortTitle, eCFR names it nowhere a reader would
+    guess, and a document with none is read under the slug ``untitled`` -- which two of
+    them share, and the second then overwrites the first in the store.
+    """
+    slug, title = str(getattr(args, "slug", "") or ""), str(getattr(args, "title", "") or "")
+    if not (slug or title):
+        return
+    if docs > 1:
+        warn("--slug and --title name one document; ignored for a run over several")
+        return
+    if title:
+        document.title = title
+    if slug:
+        document.named = slug
+
+
+def _embedded(args: Any) -> None:
+    """Embed what was just read, so the store answers by meaning and not only by words.
+
+    A store nobody embedded has no vector index, and `graph.search.hybrid` then votes on
+    words alone while `store.similar` answers every question with silence. Skipped by
+    ``--no-embed``; an embedder that cannot be reached is said, with the command that
+    finishes the job later.
+    """
+    if not getattr(args, "embed", True) or not args.out:
+        return
+    base = str(getattr(args, "embed_url", "") or EMBED_URL)
+    model = str(getattr(args, "embed_model", "") or "embed")
+    finish = f"poolhouse-ingest embed --out {args.out} --embed-url {base} --embed-model {model}"
+    try:
+        got = embed_store(args.out, base_url=base, model=model,
+                          smooth_hops=int(getattr(args, "smooth", 0) or 0), log=say)
+    except (OSError, ValueError, RuntimeError) as why:
+        warn(f"read, not embedded: {type(why).__name__}: {why}")
+        warn(f"  the store answers by words alone until: {finish}")
+        return
+    say(f"  embedded {got.written} of {got.total} node(s) through {base}")
+    if got.written < got.total:
+        warn(f"  {got.total - got.written} node(s) short of a vector; finish with: {finish}")
+
+
+@contextmanager
+def _counted(args: Any, client: Any) -> Iterator[Any]:
+    """The server's speculative counters either side of the whole read, labelled."""
+    base = str(getattr(client, "base_url", "") or "")
+    asked = _sampling(args)
+    if not base:
+        yield None
+        return
+    with counting(base, workload=INGEST,
+                  sampling=sampling_named(asked.get("temperature"), top_p=asked.get("top_p")),
+                  label=str(getattr(args, "out", "") or "")) as block:
+        yield block
+
+
+def _counter_lines(block: Any) -> list[str]:
+    """What the counters said about this read, or why they said nothing."""
+    if block is None:
+        return ["the server was not reachable for its speculative counters"]
+    led = Ledger([block])
+    out = list(led.lines())
+    if (moved := block.delta) is not None and moved.drafts:
+        out += ["", "  acceptance by position within the draft:", *survival_lines(moved)]
+    return out
+
+
+def _drafting_line(spent: Any) -> str:
+    """What the draft head guessed, what was kept, and the time each half took."""
+    line = (f"drafted {spent.draft_tokens}, kept {spent.draft_taken}"
+            f" ({(spent.acceptance or 0) * 100:.1f}%)")
+    if spent.verify_n:
+        line += f" over {spent.verify_n} pass(es), {spent.tokens_per_pass:.2f} tokens each"
+    if spent.draft_ms:
+        line += (f"; {spent.draft_ms / 1000:.1f}s drafting"
+                 f" + {(spent.verify_ms or 0) / 1000:.1f}s checking")
+    return line
+
+
+def _fold_interval(seconds: float, *, every: int | None = None,
+                   most: float | None = None) -> int:
+    """Units to read between folds, given what the last fold of this source took.
+
+    A fold under ``most`` seconds is paid at every chapter end. One over it is paid once
+    for every ``most`` seconds it ran to: a fold of a minute is worth waiting three
+    chapters for, and a source of nine thousand nodes is not folded for minutes at every
+    chapter end. Nothing measured makes it longer, so the first fold of a source is
+    `FOLD_EVERY` as it always was.
+    """
+    # read off the package rather than bound as defaults: a caller that moves either moves it
+    from poolhouse import ingest
+
+    every = ingest.FOLD_EVERY if every is None else int(every)
+    most = ingest.FOLD_SECONDS if most is None else float(most)
+    if seconds <= most or most <= 0:
+        return int(every)
+    return int(every) * math.ceil(seconds / most)
+
+
+def _time_to_fold(since: int, boundary: bool, *, seconds: float = 0.0) -> bool:
+    """Whether the source in flight should be folded into the store now.
+
+    ``seconds`` is what the last fold of this source took -- see `_fold_interval`.
+    """
+    every = _fold_interval(seconds)
+    return since >= (every if boundary else 2 * every)
+
+
+def _rows(wanted: Iterable[Any], reads_by_unit: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One source's reads so far, in the order the source has them."""
+    return [reads_by_unit[unit.id] for unit in wanted if unit.id in reads_by_unit]
+
+
+def _call_of(record: Mapping[str, Any]) -> Any:
+    from poolhouse.telemetry import Call
+
+    fields = set(Call.__dataclass_fields__)
+    return Call(**{k: v for k, v in record.items() if k in fields})

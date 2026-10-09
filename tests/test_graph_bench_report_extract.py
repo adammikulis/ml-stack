@@ -1,4 +1,4 @@
-"""The "Extraction" section of ``ml-stack-bench report``.
+"""The "Extraction" section of ``poolhouse-bench report``.
 
 Extraction runs are kept in the same store as answering runs and used to be dropped by the
 report before it read them, so the document could say nothing about reading a graph *out
@@ -11,7 +11,7 @@ at the most messages, and that a window holding no extraction run prints no sect
 
 Everything is built in ``tmp_path`` -- extraction runs through `extract.save` with
 hand-written `MessageRow` fixtures and score records, answering runs through `bench.save`.
-Nothing here reads ``~/.ml-stack``, serves a model or touches a GPU.
+Nothing here reads ``~/.poolhouse``, serves a model or touches a GPU.
 """
 
 from __future__ import annotations
@@ -22,16 +22,16 @@ import time
 
 import pytest
 
-from ml_stack import bench
-from ml_stack.bench import Row, extract as bx
-from ml_stack.bench.gathered import (
+from poolhouse import bench
+from poolhouse.bench import Row, extract as bx
+from poolhouse.bench.gathered import (
     MIN_MESSAGES,
     best_extractor,
     extract_model_of,
     extractions,
     read_messages,
 )
-from ml_stack.bench.report import report
+from poolhouse.bench.report import report
 
 GIB = 1024 ** 3
 
@@ -138,7 +138,7 @@ def store(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> str:
     and a relation vocabulary, so its topic precision and relation F1 are the low pair and
     the newer reader's are the high one -- the shape of the record the section exists for.
     """
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     where = str(tmp_path / "runs.ladybug")
     _clock(monkeypatch, 0)
     _answering(where, "kestrel-plain", questions=20, hits=15, seconds=200.0)
@@ -170,17 +170,17 @@ def split(store: str) -> tuple[list, list]:
 @pytest.fixture()
 def measured_fit(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The memory records the subcommand reads: an empty file in ``tmp_path``, never
-    ``~/.ml-stack`` and never the one that ships with the package."""
-    from ml_stack.serve import fit as fit_mod
+    ``~/.poolhouse`` and never the one that ships with the package."""
+    from poolhouse.serve import fit as fit_mod
 
     shipped = tmp_path / "shipped.json"
     shipped.write_text("[]", encoding="utf-8")
     mine = tmp_path / "fit.json"
     mine.write_text(json.dumps([]), encoding="utf-8")
     monkeypatch.setattr(fit_mod, "package_file", lambda: shipped)
-    monkeypatch.setenv("MLSTACK_FIT_FILE", str(mine))
-    monkeypatch.setattr("ml_stack.hub.room", lambda: 32 * GIB)
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+    monkeypatch.setenv("POOLHOUSE_FIT_FILE", str(mine))
+    monkeypatch.setattr("poolhouse.hub.room", lambda: 32 * GIB)
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
 
 
 # -- reading one run ---------------------------------------------------------------------
@@ -336,7 +336,7 @@ def test_the_subcommand_narrows_the_extraction_runs_by_model_too(store, measured
 
 
 def test_a_model_with_no_extraction_run_prints_no_section(tmp_path, measured_fit, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     where = str(tmp_path / "answering.ladybug")
     _answering(where, "kestrel-plain")
     assert bench.main(["report", "--kept", where]) == 0

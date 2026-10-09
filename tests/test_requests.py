@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import person, requests
-from ml_stack.requests import store as store_mod
-from ml_stack.requests.model import fingerprint
+from poolhouse import person, requests
+from poolhouse.requests import store as store_mod
+from poolhouse.requests.model import fingerprint
 from tests.requests_support import CANARY, SRC, ask, no_markers, person_home
 
 __all__ = ["no_markers", "person_home"]
@@ -117,7 +117,7 @@ def test_threads_racing_to_answer_one_request_produce_exactly_one_winner(tmp_pat
 
 CHILD_RACE = """
 import sys
-from ml_stack import requests
+from poolhouse import requests
 held = requests.Inbox(sys.argv[1], key=lambda: bytes(range(32)))
 ctx = requests.Context(terminal=(True, True), env={}, inbox=held)
 for ident, fp in zip(sys.argv[3::2], sys.argv[4::2]):
@@ -143,7 +143,7 @@ def test_processes_raising_and_answering_at_once_lose_no_request_and_resolve_eac
 
 CHILD_RAISE = """
 import sys
-from ml_stack import requests
+from poolhouse import requests
 held = requests.Inbox(sys.argv[1], key=lambda: bytes(range(32)))
 for n in range(5):
     h = requests.raise_request(requests.Ask("tool_call", f"p{sys.argv[2]} call {n}", "why", ("allow-once", "deny"),
@@ -251,7 +251,7 @@ def test_the_file_holds_no_plaintext_and_does_not_open_under_another_key(tmp_pat
 def test_a_request_is_stored_under_the_keystore_subkey_for_the_requests_purpose(person_home):
     handle = requests.raise_request(ask(CANARY))
     assert handle.outcome().state == "pending"
-    from ml_stack import home
+    from poolhouse import home
     blob = (home.state("requests") / "requests.enc").read_bytes()
     assert CANARY.encode() not in blob
     assert requests.get(handle.id).subject == CANARY

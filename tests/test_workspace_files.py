@@ -10,10 +10,10 @@ from pathlib import Path
 import pytest
 from workspace_kit import SRC, Kit, clean_env, cli
 
-from ml_stack import keystore
-from ml_stack.net.scan import Outcome, ScanResult
-from ml_stack.workspace import Denied, Refused
-from ml_stack.workspace.files import Attachment, Where, human_size
+from poolhouse import keystore
+from poolhouse.net.scan import Outcome, ScanResult
+from poolhouse.workspace import Denied, Refused
+from poolhouse.workspace.files import Attachment, Where, human_size
 
 CANARY = "CANARY-7f3a-orchid-ledger"
 TEXT = f"build notes\nthe {CANARY} lives here\nsecond line about orchids\n".encode()
@@ -21,7 +21,7 @@ TEXT = f"build notes\nthe {CANARY} lives here\nsecond line about orchids\n".enco
 
 @pytest.fixture
 def kit(monkeypatch, tmp_path):
-    monkeypatch.setattr("ml_stack.workspace.files.default_scanners", lambda: [])
+    monkeypatch.setattr("poolhouse.workspace.files.default_scanners", lambda: [])
     k = Kit(clean_env(monkeypatch, tmp_path))
     k.limits(sends_per_window=1000)
     k.tokens = {n: k.agent(n) for n in ("alice", "bob", "carol")}
@@ -134,7 +134,7 @@ def test_a_delegate_reads_only_what_its_parent_may(kit):
     h = attach(kit, "alice", "#ops")["file"]
     ws.board.add(kit.owner, "#ops", "bob")
     child = ws.delegate(t["bob"], "helper")
-    from ml_stack.workspace import tokens as tk
+    from poolhouse.workspace import tokens as tk
     ctoken = tk.read_file(Path(child["token_file"]))
     assert CANARY in ws.files.read_text(ctoken, h)["text"]
     dm = attach(kit, "alice", "carol")["file"] if False else attach(kit, "alice", "carol", b"for carol\n")["file"]
@@ -434,7 +434,7 @@ def test_search_never_returns_what_the_caller_may_not_read(kit):
     assert [i["name"] for i in ws.files.search(t["carol"], "zebrafish")] == ["dm-zebrafish.txt"]
     ws.board.add(kit.owner, "#ops", "bob")
     assert [i["name"] for i in ws.files.search(t["bob"], "zebrafish")] == ["zebrafish.txt"]
-    ctoken = __import__("ml_stack.workspace.tokens", fromlist=["x"]).read_file(Path(ws.delegate(t["bob"], "c")["token_file"]))
+    ctoken = __import__("poolhouse.workspace.tokens", fromlist=["x"]).read_file(Path(ws.delegate(t["bob"], "c")["token_file"]))
     assert [i["name"] for i in ws.files.search(ctoken, "zebrafish")] == ["zebrafish.txt"]
     assert len(ws.files.search(kit.owner, "zebrafish")) == 2
 
@@ -466,7 +466,7 @@ def test_the_default_listing_is_bounded_and_counts_the_rest(kit):
 def child_keys(tmp_path):
     tests = str(Path(__file__).resolve().parent)
     return {"PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
-            "ML_STACK_TEST_KEYRING": str(tmp_path / "keyring.json"),
+            "POOLHOUSE_TEST_KEYRING": str(tmp_path / "keyring.json"),
             "PYTHONPATH": f"{SRC}:{tests}"}
 
 
@@ -524,7 +524,7 @@ def test_the_command_line_refuses_to_attach_the_workspaces_own_files(kit, child_
 def page(kit):
     import http.client
 
-    from ml_stack.workspace import boardroute, tokens
+    from poolhouse.workspace import boardroute, tokens
     tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
     server = boardroute.serve(kit.ws, 0)
     server.start()

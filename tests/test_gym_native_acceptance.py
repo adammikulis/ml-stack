@@ -8,19 +8,19 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.gym import simulation
-from ml_stack.gym.models import model_choices
-from ml_stack.serve import broker_wire
-from ml_stack.serve.process import kill_process_tree
+from poolhouse.gym import simulation
+from poolhouse.gym.models import model_choices
+from poolhouse.serve import broker_wire
+from poolhouse.serve.process import kill_process_tree
 
 pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
 def installed_decide_cache(tmp_path, monkeypatch):
-    configured = os.environ.get('ML_STACK_ACCEPTANCE_DECIDE_CACHE')
+    configured = os.environ.get('POOLHOUSE_ACCEPTANCE_DECIDE_CACHE')
     if not configured:
-        pytest.skip('set ML_STACK_ACCEPTANCE_DECIDE_CACHE to an installed pinned decide cache')
+        pytest.skip('set POOLHOUSE_ACCEPTANCE_DECIDE_CACHE to an installed pinned decide cache')
     installed = Path(configured)
     assert (installed / 'snapshots').is_dir()
     cache = tmp_path / 'cache'
@@ -28,9 +28,9 @@ def installed_decide_cache(tmp_path, monkeypatch):
     (cache / 'decide' / 'snapshots').symlink_to(installed / 'snapshots', target_is_directory=True)
     if (installed / 'verified.json').is_file():
         shutil.copyfile(installed / 'verified.json', cache / 'decide' / 'verified.json')
-    monkeypatch.setenv('ML_STACK_CACHE', str(cache))
-    monkeypatch.setenv('ML_STACK_HOME', str(tmp_path / 'state'))
-    monkeypatch.delenv('ML_STACK_BROKER_LOCAL', raising=False)
+    monkeypatch.setenv('POOLHOUSE_CACHE', str(cache))
+    monkeypatch.setenv('POOLHOUSE_HOME', str(tmp_path / 'state'))
+    monkeypatch.delenv('POOLHOUSE_BROKER_LOCAL', raising=False)
     yield
     record = tmp_path / 'state' / 'broker.json'
     if record.is_file():
@@ -60,7 +60,7 @@ def _await_native_decision(live, device, engine):
 def test_cached_strands_reports_native_world_decisions_without_blocking(tmp_path, monkeypatch, installed_decide_cache):
     pytest.importorskip('metadrive')
     monkeypatch.setattr(simulation, 'artifact_root', lambda: tmp_path / 'recordings')
-    device = os.environ.get('ML_STACK_ACCEPTANCE_DECISION_DEVICE', 'cpu')
+    device = os.environ.get('POOLHOUSE_ACCEPTANCE_DECISION_DEVICE', 'cpu')
     age_limit = 1 if device == 'auto' else 30
     live = simulation.Simulation({'id': 'native-strands', 'environment': 'car', 'seed': 17,
         'controller': 'decider', 'config': {'simulation_mode': 'world', 'horizon': 100000,
@@ -112,8 +112,8 @@ def test_cached_strands_reports_native_world_decisions_without_blocking(tmp_path
 
 
 def test_installed_smolvlm_reads_native_rgb_thermal_and_pause_releases_lease(tmp_path, monkeypatch, installed_decide_cache):
-    if os.environ.get('ML_STACK_ACCEPTANCE_VISION') != '1':
-        pytest.skip('set ML_STACK_ACCEPTANCE_VISION=1 for serialized native vision acceptance')
+    if os.environ.get('POOLHOUSE_ACCEPTANCE_VISION') != '1':
+        pytest.skip('set POOLHOUSE_ACCEPTANCE_VISION=1 for serialized native vision acceptance')
     pytest.importorskip('PyFlyt')
     model = next(row for row in model_choices()['vision'] if 'smolvlm' in row['label'].lower() and row['available'])
     monkeypatch.setattr(simulation, 'artifact_root', lambda: tmp_path / 'recordings')

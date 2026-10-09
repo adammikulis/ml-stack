@@ -9,10 +9,10 @@ import os
 
 import pytest
 
-from ml_stack.sentinel import human
-from ml_stack.sentinel.events import Bus
-from ml_stack.sentinel.human import HumanGrant, HumanRequired
-from ml_stack.sentinel.store import (
+from poolhouse.sentinel import human
+from poolhouse.sentinel.events import Bus
+from poolhouse.sentinel.human import HumanGrant, HumanRequired
+from poolhouse.sentinel.store import (
     TRANSITIONS,
     Holding,
     Limits,
@@ -57,7 +57,7 @@ def test_a_quarantined_model_moves_aside_and_comes_back_identical(store, models)
     record = store.quarantine(("model", str(path)), "hash mismatch", {"sha256": "x"},
                               Holding(path=path))
     assert record.state == State.QUARANTINED and not path.exists()
-    held = models / ".ml-stack-quarantine" / record.id / "m.gguf"
+    held = models / ".poolhouse-quarantine" / record.id / "m.gguf"
     assert held.exists() and store.blocked("model", str(path))
     store.release(record.id, grant("release", record.id))
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
@@ -93,7 +93,7 @@ def test_nothing_outside_the_managed_roots_is_moved(store, tmp_path):
 def test_restore_refuses_when_the_held_bytes_changed(store, models):
     path = _model(models)
     record = store.quarantine(("model", str(path)), "x", None, Holding(path=path))
-    held = models / ".ml-stack-quarantine" / record.id / "m.gguf"
+    held = models / ".poolhouse-quarantine" / record.id / "m.gguf"
     held.write_bytes(b"swapped while held")
     with pytest.raises(OSError, match="changed while it was held"):
         store.release(record.id, grant("release", record.id))
@@ -199,7 +199,7 @@ def test_the_fingerprint_survives_case_and_spacing():
 def test_purge_deletes_what_was_held_and_keeps_the_record(store, models):
     path = _model(models)
     record = store.quarantine(("model", str(path)), "x", None, Holding(path=path))
-    held = models / ".ml-stack-quarantine" / record.id / "m.gguf"
+    held = models / ".poolhouse-quarantine" / record.id / "m.gguf"
     with pytest.raises(HumanRequired):
         store.purge(record.id, grant("release", record.id))
     store.purge(record.id, grant("purge", record.id))

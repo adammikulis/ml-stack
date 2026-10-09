@@ -13,41 +13,41 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import Denied, agent_display, onboard, tokens
-from ml_stack.workspace.cli import TABLE
-from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, RESERVED, valid_name
+from poolhouse.workspace import Denied, agent_display, onboard, tokens
+from poolhouse.workspace.cli import TABLE
+from poolhouse.workspace.identity import AGENT, HUMAN, LEAD, RESERVED, valid_name
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 CREATING = {"adopt", "mint", "enroll_project", "bootstrap_agent", "_add", "init", "delegate"}
 
 ALLOWED = {
-    "src/ml_stack/workspace/agent_invites.py": {"adopt"},
-    "src/ml_stack/workspace/cli.py": {"init", "mint"},
-    "src/ml_stack/workspace/device_agent.py": {"_add", "mint"},
-    "src/ml_stack/workspace/guide.py": {"bootstrap_agent", "init"},
-    "src/ml_stack/workspace/identity.py": {"_add"},
-    "src/ml_stack/workspace/journal.py": {"_add"},  # appends a journal row; it creates no identity
-    "src/ml_stack/workspace/localstart.py": {"mint"},
-    "src/ml_stack/workspace/onboard.py": {"adopt", "init", "mint"},
-    "src/ml_stack/workspace/remote_host.py": {"enroll_project", "init"},
-    "src/ml_stack/workspace/service.py": {"init", "mint"},
+    "src/poolhouse/workspace/agent_invites.py": {"adopt"},
+    "src/poolhouse/workspace/cli.py": {"init", "mint"},
+    "src/poolhouse/workspace/device_agent.py": {"_add", "mint"},
+    "src/poolhouse/workspace/guide.py": {"bootstrap_agent", "init"},
+    "src/poolhouse/workspace/identity.py": {"_add"},
+    "src/poolhouse/workspace/journal.py": {"_add"},  # appends a journal row; it creates no identity
+    "src/poolhouse/workspace/localstart.py": {"mint"},
+    "src/poolhouse/workspace/onboard.py": {"adopt", "init", "mint"},
+    "src/poolhouse/workspace/remote_host.py": {"enroll_project", "init"},
+    "src/poolhouse/workspace/service.py": {"init", "mint"},
     # a registered parent's own subagent, named by the board, under the parent's limits and expiry
-    "src/ml_stack/workspace/spawn.py": {"adopt"},
+    "src/poolhouse/workspace/spawn.py": {"adopt"},
 }
 PENDING_REMOVAL = {
-    "src/ml_stack/harnessid.py": {"delegate"},
-    "src/ml_stack/workspace/automatic_connection.py": {"delegate"},
-    "src/ml_stack/workspace/localstart.py": {"delegate"},
-    "src/ml_stack/workspace/remote_host.py": {"delegate"},
-    "src/ml_stack/workspace/service.py": {"delegate"},
+    "src/poolhouse/harnessid.py": {"delegate"},
+    "src/poolhouse/workspace/automatic_connection.py": {"delegate"},
+    "src/poolhouse/workspace/localstart.py": {"delegate"},
+    "src/poolhouse/workspace/remote_host.py": {"delegate"},
+    "src/poolhouse/workspace/service.py": {"delegate"},
 }
 IDENTITY_VERBS = {"init", "mint", "join", "invite", "connect", "setup", "agent"}
 
 
 def call_sites() -> dict[str, set[str]]:
     found: dict[str, set[str]] = {}
-    paths = [*(SRC / "ml_stack" / "workspace").rglob("*.py"), SRC / "ml_stack" / "harnessid.py"]
+    paths = [*(SRC / "poolhouse" / "workspace").rglob("*.py"), SRC / "poolhouse" / "harnessid.py"]
     for path in paths:
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in CREATING:
@@ -78,9 +78,9 @@ def test_the_command_line_has_no_verb_that_mints_for_another_actor():
 def test_the_removed_verb_is_refused_by_the_real_command(tmp_path, monkeypatch):
     kit = Kit(clean_env(monkeypatch, tmp_path))
     worker = kit.agent("worker")
-    done = subprocess.run([sys.executable, "-m", "ml_stack.workspace.cli", "delegate", "kid", "--agent", "worker"],
+    done = subprocess.run([sys.executable, "-m", "poolhouse.workspace.cli", "delegate", "kid", "--agent", "worker"],
                           env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SRC), "CLAUDECODE": "1",
-                               "ML_STACK_WORKSPACE_HOME": str(kit.base)},
+                               "POOLHOUSE_WORKSPACE_HOME": str(kit.base)},
                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60, check=False)
     assert done.returncode != 0
     assert worker not in done.stdout

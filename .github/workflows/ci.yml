@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   # The `mcp` extra (mcp 2.3 or later, MCP revision 2026-07-28) is installed on every OS below;
-  # the agent and ml-stack-mcp tests start real MCP servers with it.
+  # the agent and poolhouse-mcp tests start real MCP servers with it.
   test:
     strategy:
       fail-fast: false
@@ -63,7 +63,7 @@ jobs:
             echo "ok=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ matrix.experimental }}" = "true" ]; then
             tail -5 "$RUNNER_TEMP/dry.txt"
-            echo "::notice::ml-stack cannot be installed on Python ${{ matrix.python }} yet; the experimental run stops here"
+            echo "::notice::poolhouse cannot be installed on Python ${{ matrix.python }} yet; the experimental run stops here"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             cat "$RUNNER_TEMP/dry.txt"
@@ -85,8 +85,8 @@ jobs:
           # and without one they fail rather than skip.
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      # ml-stack's own packages are on no index. Without them the environment test
-      # can build a venv, install torch, and still not import ml_stack.
+      # poolhouse's own packages are on no index. Without them the environment test
+      # can build a venv, install torch, and still not import poolhouse.
       - name: build the wheels the environment test installs
         if: steps.ready.outputs.ok == 'true'
         run: python packaging/build.py
@@ -161,15 +161,15 @@ jobs:
           python -m pip install --upgrade pip build
           python packaging/build.py
 
-      # The node (app/poolside-node) is native on Windows: its local API is a named pipe limited to
+      # The node (app/poolhouse-node) is native on Windows: its local API is a named pipe limited to
       # the current user, its leases know a process by handle and creation time, its files are
       # owner-only by ACL. The crate's own tests run here, then the launcher starts the real
       # binary under its supervisor and stops it by the stop events (tests/test_node_windows.py).
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - name: crate tests of poolside-node
+      - name: crate tests of poolhouse-node
         shell: pwsh
         working-directory: app
-        run: cargo test --locked -p poolside-node
+        run: cargo test --locked -p poolhouse-node
       - name: the node starts under its supervisor and stops on its event
         shell: pwsh
         run: |
@@ -183,11 +183,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $wheel = Get-ChildItem dist\ml_stack-*.whl | Select-Object -First 1
+          $wheel = Get-ChildItem dist\poolhouse-*.whl | Select-Object -First 1
           if (-not $wheel) { throw "packaging/build.py left no wheel in dist/" }
-          $env:ML_STACK_PREFIX = Join-Path $pwd "scratch"
-          $env:ML_STACK_MODELS = "none"
-          $env:ML_STACK_OFFLINE_ZIP = $wheel.FullName
+          $env:POOLHOUSE_PREFIX = Join-Path $pwd "scratch"
+          $env:POOLHOUSE_MODELS = "none"
+          $env:POOLHOUSE_OFFLINE_ZIP = $wheel.FullName
           & .\packaging\install.ps1 -Headless
 
       - name: the venv it left behind runs
@@ -195,19 +195,19 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $py = Join-Path $pwd "scratch\venv\Scripts\python.exe"
-          if (-not (Test-Path $py)) { throw "no virtualenv where ML_STACK_PREFIX said: $py" }
-          & $py -c "from ml_stack.fleet import updates; print(updates.state()['version'])"
-          if ($LASTEXITCODE -ne 0) { throw "the installed machine could not import ml_stack" }
+          if (-not (Test-Path $py)) { throw "no virtualenv where POOLHOUSE_PREFIX said: $py" }
+          & $py -c "from poolhouse.fleet import updates; print(updates.state()['version'])"
+          if ($LASTEXITCODE -ne 0) { throw "the installed machine could not import poolhouse" }
 
       - name: install.ps1 -Headless -Uninstall takes the venv away
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $env:ML_STACK_PREFIX = Join-Path $pwd "scratch"
-          $env:ML_STACK_MODELS = "none"
-          $env:ML_STACK_OFFLINE_ZIP = (Get-ChildItem dist\ml_stack-*.whl | Select-Object -First 1).FullName
+          $env:POOLHOUSE_PREFIX = Join-Path $pwd "scratch"
+          $env:POOLHOUSE_MODELS = "none"
+          $env:POOLHOUSE_OFFLINE_ZIP = (Get-ChildItem dist\poolhouse-*.whl | Select-Object -First 1).FullName
           & .\packaging\install.ps1 -Headless -Uninstall
-          $venv = Join-Path $env:ML_STACK_PREFIX "venv"
+          $venv = Join-Path $env:POOLHOUSE_PREFIX "venv"
           if (Test-Path $venv) { throw "the venv survived -Uninstall: $venv" }
 
   gates:
@@ -237,7 +237,7 @@ jobs:
       # come from scripts/gates/pinned.txt: each ruff and pyright release finds sites the
       # last one did not, so an unpinned install scores the same tree differently here and
       # on a laptop. pytest-xdist is here because pyproject's addopts pass -n auto to every
-      # pytest run, and numpy because tests/conftest.py imports ml_stack.graph.topology at
+      # pytest run, and numpy because tests/conftest.py imports poolhouse.graph.topology at
       # collection, and psutil, keyring and cryptography because it imports those too.
       - name: install pytest, and the pinned ruff and pyright
         run: |

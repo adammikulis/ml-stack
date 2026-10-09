@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import project_client, projects, runtime_wheel
-from ml_stack.fleet.project_source import ProjectError
-from ml_stack.http import ServerUnreachable
-from ml_stack.net import git
+from poolhouse.fleet import project_client, projects, runtime_wheel
+from poolhouse.fleet.project_source import ProjectError
+from poolhouse.http import ServerUnreachable
+from poolhouse.net import git
 
 
 def repository(path):
@@ -24,7 +24,7 @@ def test_recorded_checkout_registered_from_unrelated_runtime_directory(tmp_path,
     unrelated = tmp_path / "runtime"
     unrelated.mkdir()
     monkeypatch.chdir(unrelated)
-    installed = tmp_path / "installed/ml_stack/fleet"
+    installed = tmp_path / "installed/poolhouse/fleet"
     installed.mkdir(parents=True)
     (installed / runtime_wheel.ORIGIN).write_text(str(checkout))
     monkeypatch.setattr(projects, "__file__", str(installed / "projects.py"))
@@ -39,7 +39,7 @@ def test_recorded_checkout_registered_from_unrelated_runtime_directory(tmp_path,
 
 def test_absent_installed_source_provenance_keeps_available_candidates(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(projects, "__file__", str(tmp_path / "installed/ml_stack/fleet/projects.py"))
+    monkeypatch.setattr(projects, "__file__", str(tmp_path / "installed/poolhouse/fleet/projects.py"))
     monkeypatch.setattr(runtime_wheel, "source_checkout", lambda: None)
     assert projects.local_candidates()[-1] == tmp_path
     assert projects.ProjectRegistry(tmp_path / "registry", "device", projects.local_candidates()).boards() == []
@@ -157,5 +157,5 @@ def test_local_registration_requires_available_daemon(tmp_path, monkeypatch):
         raise ServerUnreachable("offline")
 
     monkeypatch.setattr(project_client, "open_stream", unreachable)
-    with pytest.raises(ProjectError, match="start ml-stack and retry"):
+    with pytest.raises(ProjectError, match="start poolhouse and retry"):
         project_client.register_local(tmp_path, b"k" * 32, "a" * 32, 8770)

@@ -7,24 +7,24 @@ import json
 
 import pytest
 
-from ml_stack.fleet import autostart, autostart_keystore
+from poolhouse.fleet import autostart, autostart_keystore
 
 
 @pytest.fixture(autouse=True)
 def _no_state_root_override(monkeypatch):
-    """The suite points ML_STACK_HOME at a temporary root; the install reads the service's own home unless told."""
-    monkeypatch.delenv("ML_STACK_HOME", raising=False)
+    """The suite points POOLHOUSE_HOME at a temporary root; the install reads the service's own home unless told."""
+    monkeypatch.delenv("POOLHOUSE_HOME", raising=False)
 
 
 def provision(home_dir, *, at=1.0):
-    state = home_dir / ".ml-stack" / "keystore"
+    state = home_dir / ".poolhouse" / "keystore"
     state.mkdir(parents=True)
     (state / "provisioned.json").write_text(json.dumps({"at": at}))
 
 
 def test_a_user_without_a_master_is_told_to_unlock_and_what_stays_locked(tmp_path):
     said = autostart_keystore.notice("wren", tmp_path, "linux")
-    assert "ml-stack-security unlock" in said and "wren" in said
+    assert "poolhouse-security unlock" in said and "wren" in said
     assert "fails closed" in said and "signing key" in said
 
 
@@ -50,7 +50,7 @@ def test_the_install_warns_and_still_installs(tmp_path, monkeypatch, platform):
     monkeypatch.setattr(autostart, "say", lambda _m: None)
     assert autostart._install_system("wren", str(tmp_path / "nobody-home")) == 0
     assert target.read_text() == "[Unit]\n"
-    assert any("ml-stack-security unlock" in line for line in warned)
+    assert any("poolhouse-security unlock" in line for line in warned)
 
 
 def test_the_notice_says_plain_credentials_are_not_sealed(tmp_path):
@@ -58,17 +58,17 @@ def test_the_notice_says_plain_credentials_are_not_sealed(tmp_path):
 
 
 def test_a_provisioned_file_that_is_not_an_object_counts_as_no_key(tmp_path):
-    state = tmp_path / ".ml-stack" / "keystore"
+    state = tmp_path / ".poolhouse" / "keystore"
     state.mkdir(parents=True)
     (state / "provisioned.json").write_text("[1, 2]")
-    assert "no ml-stack keystore key" in autostart_keystore.notice("wren", tmp_path, "linux")
+    assert "no poolhouse keystore key" in autostart_keystore.notice("wren", tmp_path, "linux")
 
 
 def test_the_state_root_the_installing_environment_names_is_the_one_read(tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"
     (elsewhere / "keystore").mkdir(parents=True)
     (elsewhere / "keystore" / "provisioned.json").write_text(json.dumps({"at": 1.0}))
-    monkeypatch.setenv("ML_STACK_HOME", str(elsewhere))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(elsewhere))
     assert autostart_keystore.notice("wren", tmp_path / "other-home", "linux") == ""
 
 

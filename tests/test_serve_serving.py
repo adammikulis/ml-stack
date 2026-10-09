@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-import ml_stack.serve
-from ml_stack.client import Request, Transport
-from ml_stack.serve import serving as serving_mod
-from ml_stack.serve.serving import Serving, draft_for, projector_for, release_all, servers, slot
+import poolhouse.serve
+from poolhouse.client import Request, Transport
+from poolhouse.serve import serving as serving_mod
+from poolhouse.serve.serving import Serving, draft_for, projector_for, release_all, servers, slot
 
 
 class Held:
@@ -37,14 +37,14 @@ def leases(monkeypatch):
         started.append(Held(f"http://127.0.0.1:{kwargs['port']}"))
         return started[-1]
 
-    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(poolhouse.serve, "serve", fake_serve)
     monkeypatch.setattr(serving_mod, "_STACKS", {})
     monkeypatch.setattr(serving_mod, "_URLS", {})
     yield asked, started
 
 
 def test_a_unified_cache_is_asked_for_only_when_the_serving_says():
-    from ml_stack.serve.serving import Serving
+    from poolhouse.serve.serving import Serving
 
     assert "kv_unified" not in Serving(model="m").lease()
     assert Serving(model="m", kv_unified=True).lease()["kv_unified"] is True
@@ -140,7 +140,7 @@ def test_letting_go_releases_every_held_server(leases):
 
 def test_a_draft_that_cannot_be_found_is_served_without_it_out_loud(monkeypatch):
     """Said in silence once, and a model ran undrafted for an hour with nothing to show."""
-    import ml_stack.serve.ops as ops
+    import poolhouse.serve.ops as ops
 
     said: list[str] = []
     monkeypatch.setattr(ops, "drafted", lambda *a, **k: (_ for _ in ()).throw(
@@ -150,7 +150,7 @@ def test_a_draft_that_cannot_be_found_is_served_without_it_out_loud(monkeypatch)
 
 
 def test_a_draft_is_resolved_for_the_build_that_has_to_load_it(monkeypatch):
-    import ml_stack.serve.ops as ops
+    import poolhouse.serve.ops as ops
 
     asked: list[tuple] = []
 
@@ -159,7 +159,7 @@ def test_a_draft_is_resolved_for_the_build_that_has_to_load_it(monkeypatch):
         return "/models/mtp-Q8_0.gguf"
 
     monkeypatch.setattr(ops, "drafted", fake_drafted)
-    from ml_stack.serve import backend
+    from poolhouse.serve import backend
 
     monkeypatch.setattr(backend.LlamaServerBackend, "binary",
                         property(lambda self: f"/builds/{self._build}/llama-server"))
@@ -169,7 +169,7 @@ def test_a_draft_is_resolved_for_the_build_that_has_to_load_it(monkeypatch):
 
 
 def test_auto_takes_the_most_precise_projector_and_a_missing_one_is_no_projector(monkeypatch):
-    import ml_stack.serve.ops as ops
+    import poolhouse.serve.ops as ops
 
     asked: list[tuple] = []
 
@@ -194,21 +194,21 @@ FLASH = "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"
 
 @pytest.fixture
 def shipped(monkeypatch):
-    """The Flash-Next record that ships with ml-stack, as a `Config`.
+    """The Flash-Next record that ships with poolhouse, as a `Config`.
 
-    The packaged file only -- never this machine's `~/.ml-stack/profiles.json`, which would
+    The packaged file only -- never this machine's `~/.poolhouse/profiles.json`, which would
     make the test read a measurement somebody else made -- and the head and the projector
     resolve against fakes, so nothing looks in a Hub cache. The build the record names is
     written into the temporary state root, so the manager for it resolves on a machine
     that has never built llama.cpp.
     """
-    import ml_stack.hub
-    import ml_stack.serve.ops as ops
-    from ml_stack.serve.binary import managed_named
-    from ml_stack.serve.profile import package_file, profile_for, records_in
-    from ml_stack.testing.fakes import fake_binary
+    import poolhouse.hub
+    import poolhouse.serve.ops as ops
+    from poolhouse.serve.binary import managed_named
+    from poolhouse.serve.profile import package_file, profile_for, records_in
+    from poolhouse.testing.fakes import fake_binary
 
-    monkeypatch.setattr(ml_stack.hub, "located", lambda name: Path(f"/models/{name}"))
+    monkeypatch.setattr(poolhouse.hub, "located", lambda name: Path(f"/models/{name}"))
     monkeypatch.setattr(ops, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
     found = profile_for(FLASH, records=records_in(package_file()))
     assert found is not None, "the shipped profiles must still hold the Flash-Next record"
@@ -222,14 +222,14 @@ def shipped(monkeypatch):
 
 def _bench_lease(config, monkeypatch, leased):
     """What `bench.served` hands `serve`, with everything but the lease faked away."""
-    import ml_stack.hub
-    import ml_stack.serve.preflight as preflight
-    from ml_stack import bench
-    from ml_stack.serve.preflight import Check, Report
+    import poolhouse.hub
+    import poolhouse.serve.preflight as preflight
+    from poolhouse import bench
+    from poolhouse.serve.preflight import Check, Report
 
     monkeypatch.setattr(preflight, "Preflight", lambda spec, *, binary, limit_bytes=0: Report(
         checks=[Check("fit", True, "faked")], weights_bytes=1, kv_estimate_bytes=1))
-    monkeypatch.setattr(ml_stack.hub, "room", lambda: 110 * 2**30)
+    monkeypatch.setattr(poolhouse.hub, "room", lambda: 110 * 2**30)
     monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
     monkeypatch.setattr(bench, "asking", lambda graph, **k: leased.setdefault("asked", k))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
@@ -240,8 +240,8 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     """What replaced popping each way's keywords off a dict before the client was built:
     `over` knows which section owns each name, so nothing about the asking can reach the
     client at all. Mutation: send unknown names on to one of the three."""
-    from ml_stack.asking import Asking
-    from ml_stack.serve import Config, Serving
+    from poolhouse.asking import Asking
+    from poolhouse.serve import Config, Serving
 
     config = Config(serving=Serving(model="weights.gguf"))
     laid = config.over(cache_type="q8_0", few=True, reach=8000, n_predict=4096,
@@ -265,7 +265,7 @@ def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, l
     construction. Three places each built their own from the profile, and llama.cpp serves
     one serving per port: whichever leased second stopped the server and loaded the weights
     again. Mutation: give any one of them its own Serving."""
-    from ml_stack.graph.serve import AskRoutes
+    from poolhouse.graph.serve import AskRoutes
 
     asked, _servers = leases
     leased: dict = {}
@@ -303,7 +303,7 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
     """`Config.over` is the one place a knob is laid over a record, so setting it once sets it
     for the bench, the page and a slot at the same moment. Mutation: rebuild any one of the
     three from the profile instead of taking the run it was given."""
-    from ml_stack.graph.serve import AskRoutes
+    from poolhouse.graph.serve import AskRoutes
 
     asked, _servers = leases
     changed = shipped.over(cache_type="f16", slot_context=8192, batch=False, few=True,
@@ -327,7 +327,7 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
 
 
 def test_a_new_draft_depth_reaches_the_server_and_the_request():
-    from ml_stack.serve.serving import Config, Serving, Talking
+    from poolhouse.serve.serving import Config, Serving, Talking
 
     config = Config(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
               talking=Talking(spec_draft_max=4))
@@ -339,7 +339,7 @@ def test_a_new_draft_depth_reaches_the_server_and_the_request():
 
 
 def test_taking_the_head_away_takes_the_requests_depth_with_it():
-    from ml_stack.serve.serving import Config, Serving, Talking
+    from poolhouse.serve.serving import Config, Serving, Talking
 
     config = Config(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
               talking=Talking(spec_draft_max=4))
@@ -377,14 +377,14 @@ class TestDraftCacheType:
         assert lease["spec_draft_type_k"] == "q4_0"
 
     def test_a_run_lays_it_over_the_serving(self):
-        from ml_stack.serve.serving import Config
+        from poolhouse.serve.serving import Config
 
         config = Config(serving=Serving(model="m.gguf", draft="h.gguf", draft_cache_type="f16"))
         assert config.over(draft_cache_type="q4_0").serving.draft_cache_type == "q4_0"
 
 
 def test_one_cache_type_reads_both_ways():
-    from ml_stack.serve.serving import said_cache, split_cache_type
+    from poolhouse.serve.serving import said_cache, split_cache_type
 
     assert split_cache_type("q8_0") == ("q8_0", "q8_0")
     assert split_cache_type("q8_0/q4_0") == ("q8_0", "q4_0")
@@ -397,8 +397,8 @@ def test_shared_chat_and_coding_acquire_verified_broker_lease(monkeypatch):
     from contextlib import contextmanager
     from types import SimpleNamespace
 
-    from ml_stack.serve import manager
-    from ml_stack.serve.serving import Config, served
+    from poolhouse.serve import manager
+    from poolhouse.serve.serving import Config, served
 
     calls = []
     released = []

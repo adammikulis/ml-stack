@@ -6,23 +6,23 @@ about an unsure one. It does not write text. Use one where a program needs a cat
 this message, is this tool call destructive, which of these files matters) and an LLM where it
 needs a sentence or a plan.
 
-    from ml_stack.decide import router
+    from poolhouse.decide import router
     got = router.decide("Which team?", "payouts have failed for 3 days",
                         {"billing": "payments, invoices", "sales": "pricing", "tech": "outages"},
                         abstain_below=0.7)
     got.choice, got.confidence, got.scores, got.abstained, got.latency_ms
 
-`ml-stack-decide ask|train|eval|calibrate|bench|jevbench|list|make-cases|export-cases|check-cases|fetch`
+`poolhouse-decide ask|train|eval|calibrate|bench|jevbench|list|make-cases|export-cases|check-cases|fetch`
 is the command; `POST /decide` on the daemon (same bearer token as every route, 256 KB body
 limit) and the `decide` MCP tool call the same router.
 
 ## Named questions about one state
 
-`ml_stack.decide.questions` takes a state and a set of named questions and returns one typed
+`poolhouse.decide.questions` takes a state and a set of named questions and returns one typed
 answer per name, each with probabilities.
 
-    from ml_stack.decide import router
-    from ml_stack.decide.questions import choice, decide, noul, score
+    from poolhouse.decide import router
+    from poolhouse.decide.questions import choice, decide, noul, score
 
     got = decide(
         "payouts have failed for 3 days and I want to cancel",
@@ -37,7 +37,7 @@ answer per name, each with probabilities.
 
 The same from a shell, with `--json` printing `{name: answer}`:
 
-    ml-stack-decide ask --state "payouts have failed for 3 days" --backend logprob \
+    poolhouse-decide ask --state "payouts have failed for 3 days" --backend logprob \
         --noul urgent="Is this urgent?" \
         --choice team="Which team owns this?:billing,sales,tech" \
         --score anger="How angry is the customer?:1..5" --json
@@ -60,9 +60,9 @@ The same from a shell, with `--json` printing `{name: answer}`:
 
 | backend | what runs | needs | options |
 |---|---|---|---|
-| `pointer` | a LoRA on a 2B model with its output head removed, and a ~1M-parameter pointer head, one forward pass | `pip install 'ml-stack[decide-pointer]'`, 4.7 GB of pinned files fetched on request | any number |
+| `pointer` | a LoRA on a 2B model with its output head removed, and a ~1M-parameter pointer head, one forward pass | `pip install 'poolhouse[decide-pointer]'`, 4.7 GB of pinned files fetched on request | any number |
 | `logprob` | the first-token distribution of any chat model a server reports log-probabilities for, read over the option letters | a running llama-server (or vLLM, OpenAI) | at most 26 |
-| `embed` | sentence embeddings, then cosine ranking or a head trained from a few dozen cases | `ml-stack[decide]` and an embedding server | any number (`pairwise` head), a fixed set (`classes` head) |
+| `embed` | sentence embeddings, then cosine ranking or a head trained from a few dozen cases | `poolhouse[decide]` and an embedding server | any number (`pairwise` head), a fixed set (`classes` head) |
 | `rules` | patterns, words and allowed values; `ScopeDecider` checks paths and hosts | nothing | any number |
 
 `router.decide(..., config=Config(backend="auto"))` takes the first of `pointer`, `logprob`,
@@ -78,8 +78,8 @@ every temperature below is fitted on dev and every figure is scored on the 207 t
 (96 destructive, 51 grounded, 60 scope). Brier is the sum over options of the squared
 error (0 to 2, lower is better); ECE uses ten bins. "cal" is after the fitted temperature.
 Latency is the median over the test cases with the model warm, one request at a time.
-Raw rows: `ml-stack-decide bench guards --split test --tag QUESTION --backend NAME`; the
-temperature fit is `ml-stack-decide calibrate --split dev`. The embed heads are trained on
+Raw rows: `poolhouse-decide bench guards --split test --tag QUESTION --backend NAME`; the
+temperature fit is `poolhouse-decide calibrate --split dev`. The embed heads are trained on
 a 70% slice of dev and calibrated on the other 30%.
 
 Note (2026-10-08): the embed backend now targets `embeddinggemma-2` (Apache-2.0); the embeddinggemma-300M rows below were measured with the 300M model and are historical.
@@ -134,7 +134,7 @@ Reading it:
 
 ### Fine-tuning
 
-`ml-stack-train-decider guards --init strands --steps 120 --lr 5e-5 --out DIR` continued the
+`poolhouse-train-decider guards --init strands --steps 120 --lr 5e-5 --out DIR` continued the
 released checkpoint on 248 guard cases (61 for calibration, 103 held-out test cases from
 whole groups, all three questions pooled) in 364 s: accuracy 0.903 to 0.951, Brier 0.230 to
 0.069, ECE 0.216 to 0.035. The cases are one author's templates, so the test cases resemble
@@ -151,14 +151,14 @@ open-source lab of the Strands Agents project at AWS (announcement:
 github.com/strands-labs/strands-decider). It is a rank-16 LoRA and a pointer head on
 Qwen3.5-2B, scored on JevBench, and its training data, scripts and weights are released for
 fine-tuning. Its three question kinds are `noul` (yes/no), `choice` and `score`, and it is
-calibrated by a temperature per kind. `ml-stack-decide train` is this package's own
+calibrated by a temperature per kind. `poolhouse-decide train` is this package's own
 re-implementation of that recipe for a few hundred of your own cases; it does not run the
 released scripts (the reference recipe is about 11 hours on one RTX 3090 for the full corpus).
 
-    ml-stack-decide train --data tickets.jsonl --name tickets --dry-run
-    ml-stack-decide train --data tickets.jsonl --eval held-out.jsonl --name tickets \
+    poolhouse-decide train --data tickets.jsonl --name tickets --dry-run
+    poolhouse-decide train --data tickets.jsonl --eval held-out.jsonl --name tickets \
         --base qwen3.5-2b-base --baseline strands --steps 300
-    ml-stack-decide eval held-out.jsonl --decider tickets --decider strands
+    poolhouse-decide eval held-out.jsonl --decider tickets --decider strands
 
 **Data.** One JSON object per line (the format `export-cases` writes):
 
@@ -185,7 +185,7 @@ built-in guard set.
    same `--seed`. With `--eval FILE` the test cases are that file instead, and the run stops if
    any of its cases (same question, state and options, ignoring case and spacing) or groups
    also appear in `--data`.
-4. Holds the GPU: a claim named `gpu-training` at the Broker (visible in `ml-stack-serve
+4. Holds the GPU: a claim named `gpu-training` at the Broker (visible in `poolhouse-serve
    status`). A model server held by another process, or another training run, refuses the
    hold; `--wait SECONDS` waits for the claim. A `--device cpu` run holds nothing.
 5. Scores the baseline on the test cases: `auto` is the released checkpoint when `--init
@@ -206,9 +206,9 @@ built-in guard set.
    and config in the sentinel (source `trained:NAME`), so a changed file is a finding.
 
 `--replace` re-registers a name that is taken; the old entry and its directory stay, under
-`NAME.prev`. `ml-stack-decide eval FILE --decider NAME` scores a registered decider (or
+`NAME.prev`. `poolhouse-decide eval FILE --decider NAME` scores a registered decider (or
 `strands`, or a directory) on any labelled file with the same metrics, repeatable to compare.
-The same metrics are in `ml_stack.decide.metrics` for other runners.
+The same metrics are in `poolhouse.decide.metrics` for other runners.
 
 **Untrusted data.** Labels, ids, groups and text are only ever data: nothing from the file
 becomes a path (the name and `--out` come from the command line), a command or a pickle
@@ -228,7 +228,7 @@ the card prints only a reduced character set. Never commit the file you trained 
   GPUs, and a case over 1024 tokens is refused.
 - A temperature cannot change which option wins, only how sure the decider says it is.
 - The real-model path has been run here only on a random 2-layer model on CPU (the tests); the
-  same code on Qwen3.5 was last run by the earlier `ml-stack-train-decider` measurements above.
+  same code on Qwen3.5 was last run by the earlier `poolhouse-train-decider` measurements above.
 
 ## Licences
 
@@ -237,15 +237,15 @@ the card prints only a reduced character set. Never commit the file you trained 
 | strands-decider code, github.com/strands-labs/strands-decider | Apache-2.0 (LICENSE; GitHub reports the same) | read for the architecture; none of it is copied |
 | checkpoint `StrandsAgents/strands-decider-2B-hobson-v19` | Apache-2.0 (card metadata and LICENSE.md) | downloaded on request, pinned by commit, size and SHA-256; not redistributed |
 | base `Qwen/Qwen3.5-2B-Base` | Apache-2.0 (card and LICENSE) | same; the release is a LoRA on this model (the post's base is Qwen3.5-2B, not Qwen2.5) |
-| base `Qwen/Qwen3.5-0.8B-Base` | Apache-2.0 | the default base for `ml-stack-train-decider` |
+| base `Qwen/Qwen3.5-0.8B-Base` | Apache-2.0 | the default base for `poolhouse-train-decider` |
 | training data of the checkpoint | 29 public Hub datasets plus two author releases and teacher outputs from Qwen3.5-4B, each under its own licence; its `data/sources.md` lists them | not read or redistributed here; read that file before using the checkpoint where the data's terms matter |
 | this package | Apache-2.0 | a re-implementation of the described architecture and prompt layout; see `NOTICE` |
 
 ## A guard for an embedding application
 
-    from ml_stack.decide import router
-    from ml_stack.decide.guard import Policy, ToolCallGuard
-    from ml_stack.interventions import Call, Context, guard_tool_call
+    from poolhouse.decide import router
+    from poolhouse.decide.guard import Policy, ToolCallGuard
+    from poolhouse.interventions import Call, Context, guard_tool_call
 
     guard = ToolCallGuard(router.build("logprob", router.shared("logprob", "http://127.0.0.1:8080")),
                           project_dir="/work/app", allowed_hosts=["api.internal.test"],
@@ -278,10 +278,10 @@ of anything irreversible.
 
 ## JevBench (opt-in)
 
-`ml-stack-decide jevbench --fetch` downloads the 231 public items of
+`poolhouse-decide jevbench --fetch` downloads the 231 public items of
 [JevBench](https://github.com/fstandhartinger/jevbench) (MIT, Benchmark Heaven; not affiliated
 with TypeSafe AI) into the cache through the net pipeline, pinned by commit and SHA-256;
-`ml-stack-decide jevbench --yes --backend rules --backend pointer --backend logprob --gguf M.gguf`
+`poolhouse-decide jevbench --yes --backend rules --backend pointer --backend logprob --gguf M.gguf`
 scores the backends per question type and tier (accuracy with an unanswered item counted wrong,
 Brier and ECE over the answered ones). The held-out half and the sealed items are not public, and
 this is not the official JevBench Score (which also weighs cost, speed and a sealed set). It uses

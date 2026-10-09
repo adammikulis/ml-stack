@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.board import client as board_client, place
-from ml_stack.workspace import limits
+from poolhouse.board import client as board_client, place
+from poolhouse.workspace import limits
 
 pytest_plugins = ["node_kit"]
 pytestmark = pytest.mark.redteam

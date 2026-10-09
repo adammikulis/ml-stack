@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-from ml_stack.gym.cosim import make_cosim
-from ml_stack.gym.cosim_map import physics_heading, sumo_heading
+from poolhouse.gym.cosim import make_cosim
+from poolhouse.gym.cosim_map import physics_heading, sumo_heading
 
 
 @pytest.mark.parametrize("config", [{"physics_dt":0.03}, {"physics_dt":0},

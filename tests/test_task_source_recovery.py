@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 from taskboard_kit import board as _board_fixture
 
-from ml_stack import worktreerules
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import localagent, task_source_recovery as recovery, task_worktree_recovery
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.task_graph import record
+from poolhouse import worktreerules
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import localagent, task_source_recovery as recovery, task_worktree_recovery
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.task_graph import record
 
 board = _board_fixture
 
@@ -63,7 +63,7 @@ def test_source_rebind_refuses_unrelated_or_active_assignments(stopped, monkeypa
     elif kind == 'repository':
         target = kit.source.parent / 'unrelated'
         target.mkdir()
-        from ml_stack.workspace import integration_git as repo
+        from poolhouse.workspace import integration_git as repo
         repo.git(target, 'init')
     else:
         with GraphStore(kit.base / 'coordination.db') as graph:
@@ -79,7 +79,7 @@ def test_source_rebind_refuses_unrelated_or_active_assignments(stopped, monkeypa
                 if kind == 'creator':
                     task['created_by'] = 'unrelated'
                 else:
-                    from ml_stack.workspace.task_schema import SPEC_FIELDS, fingerprint
+                    from poolhouse.workspace.task_schema import SPEC_FIELDS, fingerprint
                     task['project'] = {'key': 'unrelated', 'name': 'other'}
                     task['spec_hash'] = fingerprint({key: task[key] for key in SPEC_FIELDS})
                 graph.upsert_node({'id': task['id'], 'kind': 'task', 'attrs': task})
@@ -151,15 +151,15 @@ def test_authenticated_revocation_waits_for_source_transaction(stopped, monkeypa
     def competing(ws, journal, runner, scopes):
         code = """import os, sys
 from pathlib import Path
-from ml_stack.workspace.service import Workspace
+from poolhouse.workspace.service import Workspace
 ws = Workspace(Path(sys.argv[1]))
 Path(sys.argv[3]).write_text('ready')
-ws.revoke(os.environ['ML_STACK_TEST_RECOVERY_PARENT'], sys.argv[2])
+ws.revoke(os.environ['POOLHOUSE_TEST_RECOVERY_PARENT'], sys.argv[2])
 Path(sys.argv[4]).write_text('finished')
 """
         process = subprocess.Popen([sys.executable, '-c', code, str(kit.base), kit.worker_id,
                                     str(ready), str(finished)],
-                                   env={**os.environ, 'ML_STACK_TEST_RECOVERY_PARENT': kit.parent})
+                                   env={**os.environ, 'POOLHOUSE_TEST_RECOVERY_PARENT': kit.parent})
         processes.append(process)
         deadline = time.monotonic() + 10
         while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
@@ -213,7 +213,7 @@ def test_cancelled_graph_update_restores_worker_and_preserves_pending_scope(stop
 @pytest.mark.parametrize('task_grant', [False, True])
 @pytest.mark.parametrize('child_grant', [False, True])
 def test_source_recovery_retains_inherited_parent_project_grant(stopped, task_grant, child_grant):
-    from ml_stack.workspace.task_schema import SPEC_FIELDS, fingerprint
+    from poolhouse.workspace.task_schema import SPEC_FIELDS, fingerprint
 
     kit = stopped
     project = {'key': 'repo-demo', 'name': 'demo'}
@@ -240,7 +240,7 @@ def test_source_recovery_retains_inherited_parent_project_grant(stopped, task_gr
 @pytest.mark.redteam
 @pytest.mark.parametrize('task_grant', [False, True])
 def test_source_recovery_refuses_conflicting_child_project_grant(stopped, task_grant):
-    from ml_stack.workspace.task_schema import SPEC_FIELDS, fingerprint
+    from poolhouse.workspace.task_schema import SPEC_FIELDS, fingerprint
 
     kit = stopped
     owner = kit.ws.auth(kit.owner)

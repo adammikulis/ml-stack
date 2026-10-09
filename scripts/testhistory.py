@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.lock import release, take
+from poolhouse.lock import release, take
 
 ALPHA = 0.3
 OUTLIER_FACTOR = 3.0

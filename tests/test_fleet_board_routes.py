@@ -8,8 +8,8 @@ from launch_support import signed
 from test_fleet_ui import Serving
 from workspace_kit import Kit, clean_env
 
-from ml_stack.fleet import routes
-from ml_stack.workspace import tokens
+from poolhouse.fleet import routes
+from poolhouse.workspace import tokens
 
 pytestmark = pytest.mark.redteam
 
@@ -92,7 +92,7 @@ def test_oversized_post_and_unsupported_methods_do_not_mutate(board):
     conn = http.client.HTTPConnection('127.0.0.1', server.port, timeout=5)
     try:
         conn.request('POST', '/ui/board/post', body=b'\xff', headers={
-            'X-ML-Stack-UI': '1', 'Content-Type': 'application/json', 'Cookie': server.cookie,
+            'X-Poolhouse-UI': '1', 'Content-Type': 'application/json', 'Cookie': server.cookie,
             'Origin': f'http://127.0.0.1:{server.port}'})
         assert conn.getresponse().status == 400
     finally:
@@ -118,10 +118,10 @@ def test_board_extension_is_registered_in_installed_distribution_metadata(board)
     from importlib.metadata import distribution
 
     server, _ = board
-    entries = [entry for entry in distribution('ml-stack').entry_points
-               if entry.group == 'ml_stack.ui_routes' and entry.name == 'board']
+    entries = [entry for entry in distribution('poolhouse').entry_points
+               if entry.group == 'poolhouse.ui_routes' and entry.name == 'board']
     assert len(entries) == 1
-    assert entries[0].value == 'ml_stack.workspace.fleet_routes:route'
+    assert entries[0].value == 'poolhouse.workspace.fleet_routes:route'
     assert callable(entries[0].load())
     assert server.call('/ui/board/boards')[0] == 200
 
@@ -129,7 +129,7 @@ def test_board_extension_is_registered_in_installed_distribution_metadata(board)
 def test_a_response_header_with_a_line_break_is_refused():
     import pytest
 
-    from ml_stack.fleet.routes import write
+    from poolhouse.fleet.routes import write
 
     class Handler:
         command = "GET"
@@ -150,7 +150,7 @@ def test_a_response_header_with_a_line_break_is_refused():
 def test_a_content_type_with_a_line_break_is_refused():
     import pytest
 
-    from ml_stack.fleet.routes import write
+    from poolhouse.fleet.routes import write
 
     class Handler:
         command = "GET"

@@ -1,7 +1,7 @@
 """What the invented company said, written the way each product exports it.
 
 Every file here is built in tmp_path from invented people (tests/known-fixtures.txt) and read
-back with the stdlib or with `ml_stack.sources`; nothing touches a network or a model.
+back with the stdlib or with `poolhouse.sources`; nothing touches a network or a model.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ml_stack.messages import (
+from poolhouse.messages import (
     Message,
     directory,
     slack_channel_id,
@@ -24,13 +24,13 @@ from ml_stack.messages import (
     ts_of,
     when,
 )
-from ml_stack.sources import (
+from poolhouse.sources import (
     mbox as read_mbox,
     rows as read_rows,
     slack_export as read_slack,
     teams as read_teams,
 )
-from ml_stack.world.emit import mbox, msgid, rows, slack_export, teams
+from poolhouse.world.emit import mbox, msgid, rows, slack_export, teams
 
 PEOPLE = {
     "person:ada-lovelace": {"label": "Ada Lovelace"},

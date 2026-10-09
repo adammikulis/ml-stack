@@ -4,9 +4,9 @@ import subprocess
 
 import pytest
 
-from ml_stack import net
-from ml_stack.httpguard import Refused
-from ml_stack.net import git as netgit, provenance
+from poolhouse import net
+from poolhouse.httpguard import Refused
+from poolhouse.net import git as netgit, provenance
 
 
 def local_policy(tmp_path, *allowed):

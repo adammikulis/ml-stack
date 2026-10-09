@@ -49,7 +49,7 @@ committed at the time of reading), `worktree-agent-a359e808db0d18e70` (`docs/ser
 | Verified completed work | Yes, as accepted reviewed tasks, not as landed commits | 10 credits per accepted task, up to three 5-credit quality tiers, once per workspace, agent and task. [V `reputation/economy.py` `BASE_CREDITS`, `reputation/work.py` `record`] No node ties an award to a git commit, a landing, or whether the work later survived. [analysis] |
 | Review outcomes | Yes | Every independently reviewed attempt is a `work_contribution` with outcome `accepted`, `rejected` or `blocked_infrastructure`; reliability is Beta(1,1) over accepted versus rejected, infrastructure blocks add no negative sample. [V `reputation/economy.py` `summary`] Quality is the mean of reviewer 0 to 100 ratings with a prior of weight two. |
 | Test-pass honesty | No | A worker's claimed checks are replaced by the reviewer's checks (`proof['checks'] = task_schema.checks(review['checks'])`); the claimed value is not compared or scored. [V `task_credit.py`] A rejected review lowers reliability but does not distinguish "tests failed honestly" from "claimed a pass that was false". [analysis] Notes carry `test-verified` only when a recorded verify run exited 0 and has not rotted. [V `workspace/notes.py` `trust_of`] |
-| Claim hygiene | No | Claims expire or are swept when the holder pid is dead and callbacks `on_swept` and `on_stolen` exist; a grep of `src/ml_stack` for writers into the ledger finds none wired from them. [V `workspace/claims.py`; grep of `observers.observe`] |
+| Claim hygiene | No | Claims expire or are swept when the holder pid is dead and callbacks `on_swept` and `on_stolen` exist; a grep of `src/poolhouse` for writers into the ledger finds none wired from them. [V `workspace/claims.py`; grep of `observers.observe`] |
 | Failures | Partly | Rejections count against reliability. A task carries a `failures` counter and `blocked_seconds`. [V `workspace/taskboard.py` create] Infrastructure blocks are deliberately neutral. |
 | Reverted work | No | No code path in `reputation/` or `workspace/task_*.py` mentions a revert. [V grep] |
 | Security findings | Barely | One event: `injection_flagged` against `workspace:<id>` when a message is held as a hard marker; it makes later messages from a `watch` or `bad` sender get held. [V `workspace/standing.py`, `workspace/service.py` line 243 to 247] Hook guard refusals, red-team findings, `auth.denied`, claim steals are audited but not attributed into the ledger. [analysis] |
@@ -88,7 +88,7 @@ otherwise a reason string. The ledger is not consulted and there is no tie-break
   [V `workspace/identity.py` `authenticate`, `workspace/service.py` message path]
   Attribution is sound on a single coordinator. [analysis]
 - **A token is a bearer secret.** Anything that holds it is that identity; the token travels in
-  `ML_STACK_WORKSPACE_TOKEN`. [V `identity.py` `TOKEN_ENV`] A compromised agent process inherits
+  `POOLHOUSE_WORKSPACE_TOKEN`. [V `identity.py` `TOKEN_ENV`] A compromised agent process inherits
   all standing of its identity. Mitigation is revocation plus brakes, not detection. [analysis]
 - **Names are chosen at mint.** `valid_name` limits shape and reserves `human`, `owner-token`,
   `system`, `all`. A person (or lead, for helpers) picks the name. [V `identity.py`]
@@ -109,7 +109,7 @@ otherwise a reason string. The ledger is not consulted and there is no tie-break
 | Model/runtime | A worker could claim any model. | Lease-based overwrite from the broker. [V `task_actions.submit`, `task_provenance.snapshot` on `03d09c55`] | Hosted models: `artifact` is `unknown`; "verified" is "the broker lease said so". |
 | Ledger contents | A same-user process could try to edit the sealed file. | AES-GCM authentication with a keystore key; `Tampered` if it fails and no earlier copy holds. [V `reputation/sealed.py`] The keystore is a person's floor. [D `AGENTS.md` "System settings and the authority registry"] | Sealed against outside edit, not against a rollback to an older valid snapshot. [analysis] |
 | Audit and board logs | Same-user process rewriting the file. | Hash chain; `verify(anchor)` detects mid-chain edits. [V `chain.py`] | The digest is unkeyed SHA-256: a full rewrite from genesis is consistent unless an external anchor exists. [V `_digest`] |
-| Human-only steps | An agent claiming to be the person. | Registry roles; `mint` is person-only; `HumanGrant` is 120 s and minted after a terminal confirmation; `_FORBIDDEN` keeps agent tool arguments off sentinel, authority and log state. [V `workspace/service.py` mint; D `docs/person-delegation.md` section 1] | Delegated gates pass on an environment marker (`CLAUDECODE`, `ML_STACK_AGENT`) that the model's own process sets. [D `docs/person-delegation.md` section 1] That is the weakest link for any control tied to "agent acted". |
+| Human-only steps | An agent claiming to be the person. | Registry roles; `mint` is person-only; `HumanGrant` is 120 s and minted after a terminal confirmation; `_FORBIDDEN` keeps agent tool arguments off sentinel, authority and log state. [V `workspace/service.py` mint; D `docs/person-delegation.md` section 1] | Delegated gates pass on an environment marker (`CLAUDECODE`, `POOLHOUSE_AGENT`) that the model's own process sets. [D `docs/person-delegation.md` section 1] That is the weakest link for any control tied to "agent acted". |
 | Test claims in commit messages and reports | Free text. | A reviewer's independent checks, the `test-verified` note trust, and `scripts/test` receipts where present. [V `notes.py`; D `AGENTS.md` "Saying that something works"] | No scored comparison of claim versus verified result. |
 
 ## 3. Proposed mapping from standing to delegated control
@@ -223,7 +223,7 @@ None of these reads the ledger, and none has a standing input; they stay at thei
 - **Keystore and secrets.** The keystore, cluster passphrase and token, signing keys, `sudoers`, and
   the OS privilege prompt are a person's regardless of registry. [D `AGENTS.md`]
 - **The authority registry.** `person` gates pass only a person at a terminal; a helper or child
-  identity never passes a `delegated` gate; `ML_STACK_AUTHORITY_FLOOR=person` only tightens.
+  identity never passes a `delegated` gate; `POOLHOUSE_AUTHORITY_FLOOR=person` only tightens.
   [D `AGENTS.md`] The levels here must sit **inside** these gates and never relax one.
 - **GPU, one at a time.** A GPU lease is required and nothing computes alongside it. [D `AGENTS.md`
   section 4] A high level does not skip the lease.
@@ -237,7 +237,7 @@ None of these reads the ledger, and none has a standing input; they stay at thei
 ### 5.1 What the person sees live (proposed on top of what exists)
 Exists: the Fleet page's read-only `/ui/work-reputation/standings` route for the person owner
 (verified completions, credits, reliability, evidence 20 at a time) [V `work_reputation.fleet_route`];
-the `authority show` and audit logs [D `AGENTS.md`]; `ml-stack-security status` and chip for source
+the `authority show` and audit logs [D `AGENTS.md`]; `poolhouse-security status` and chip for source
 risk [D `docs/reputation.md`]. Proposed: [analysis]
 
 - **Grants in force.** One table: identity, level, source of the level (default, earned, capped),

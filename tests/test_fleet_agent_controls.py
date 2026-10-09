@@ -11,8 +11,8 @@ from test_workspace_board_ui import browser
 from test_workspace_local_agent import PICK, sleeper
 from workspace_kit import Kit, clean_env
 
-from ml_stack.fleet import extension_routes
-from ml_stack.workspace import (
+from poolhouse.fleet import extension_routes
+from poolhouse.workspace import (
     agent_routes,
     device_agent,
     localagent,
@@ -21,7 +21,7 @@ from ml_stack.workspace import (
     localstart,
     tokens,
 )
-from ml_stack.workspace.device_accounts import account_for
+from poolhouse.workspace.device_accounts import account_for
 
 __all__ = ['browser']
 

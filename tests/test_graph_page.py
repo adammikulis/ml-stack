@@ -22,15 +22,15 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from ml_stack.http import Server
+from poolhouse.http import Server
 
-pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+pw = pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
 
 #: Every test here launches headless Chromium and drives a real page. Nothing in
 #: the module is under a second, so the whole of it is what `-m "not slow"` drops.
 pytestmark = pytest.mark.slow
 
-from ml_stack.graph import page as graph_page  # noqa: E402
+from poolhouse.graph import page as graph_page  # noqa: E402
 
 VENDOR = Path(__file__).resolve().parent / "support" / "vendor"
 
@@ -1088,7 +1088,7 @@ def test_the_map_draws_one_marker_for_every_geocoded_entry(open_page, tmp_path):
 
     Fails when `render` stops reading `lat`/`lon` off the nodes for the map's points.
     """
-    from ml_stack.graph.places import geocode
+    from poolhouse.graph.places import geocode
 
     where = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84)}
 

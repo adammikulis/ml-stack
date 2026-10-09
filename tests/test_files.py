@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from test_hub_discover import symlink
 
-from ml_stack.files import (
+from poolhouse.files import (
     UNVERSIONED,
     CrossDevice,
     promote,
@@ -94,7 +94,7 @@ def test_a_move_across_filesystems_says_so_rather_than_copying(tmp_path, monkeyp
     def elsewhere(_source, _target):
         raise OSError(errno.EXDEV, "Cross-device link")
 
-    monkeypatch.setattr("ml_stack.files.replace", elsewhere)
+    monkeypatch.setattr("poolhouse.files.replace", elsewhere)
     (tmp_path / "cache").mkdir()
     with pytest.raises(CrossDevice, match="different filesystems"):
         promote(tmp_path / "cache", tmp_path / "shared")
@@ -136,7 +136,7 @@ def test_a_record_written_before_the_key_existed_reads_as_unversioned(tmp_path):
 def test_sha256_file_matches_hashlib_across_chunk_boundaries(tmp_path):
     import hashlib
 
-    from ml_stack.files import sha256_file
+    from poolhouse.files import sha256_file
 
     data = bytes(range(256)) * 1000
     path = tmp_path / "blob.bin"
@@ -147,7 +147,7 @@ def test_sha256_file_matches_hashlib_across_chunk_boundaries(tmp_path):
 def test_status_updates_preserve_open_and_concurrent_snapshots(tmp_path):
     from workspace_kit import run_python
 
-    from ml_stack.workspace import localagent
+    from poolhouse.workspace import localagent
 
     ws = SimpleNamespace(base=tmp_path / "workspace")
     status = localagent.Status(ws, "worker")
@@ -169,7 +169,7 @@ def test_status_updates_preserve_open_and_concurrent_snapshots(tmp_path):
     code = '''import sys
 from pathlib import Path
 from types import SimpleNamespace
-from ml_stack.workspace.localagent import Status
+from poolhouse.workspace.localagent import Status
 status = Status(SimpleNamespace(base=Path(sys.argv[1])), "worker")
 for counter in range(1, 51):
     status.update(state="running", counter=counter, payload=str(counter) * 8192)

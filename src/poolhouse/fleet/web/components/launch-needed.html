@@ -1,0 +1,37 @@
+<!-- launch-needed: shown when the page was opened without the ticket the app hands its own window -->
+<template>
+  <div class="centre" id="launch-needed" hidden>
+    <div class="card">
+      <div class="hint">POOLHOUSE</div>
+      <h1>Open Poolhouse from its own window</h1>
+      <p class="sub">This page is not signed in: it was opened by hand, or its session ended. Open the Poolhouse app, or run this in a terminal on this computer:</p>
+      <p><code id="launch-needed-command">poolhouse peers open</code></p>
+      <p id="launch-needed-app" hidden><button id="launch-needed-go">Reopen this window</button></p>
+      <div id="launch-needed-note" role="alert" aria-live="polite"></div>
+    </div>
+  </div>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+
+  class LaunchNeeded extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#launch-needed");
+      const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+      if (invoke) {
+        this.querySelector("#launch-needed-app").hidden = false;
+        this.querySelector("#launch-needed-go").onclick = async () => {
+          let reopened = false;
+          try { reopened = await invoke("reopen_page"); } catch (_) { /* reported below */ }
+          if (!reopened) this.querySelector("#launch-needed-note").textContent = "The window could not be reopened. Quit Poolhouse and open it again.";
+        };
+      }
+      M.onRoute((route) => { this.box.hidden = route !== "launch-needed"; });
+    }
+  }
+  customElements.define("launch-needed", LaunchNeeded);
+})();
+</script>

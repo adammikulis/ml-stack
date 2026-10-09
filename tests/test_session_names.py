@@ -13,11 +13,11 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.board import session as board_session
-from ml_stack.net import git
-from ml_stack.workspace import agent_display, session_name
-from ml_stack.workspace.coordinator_calls import execute
-from ml_stack.workspace.identity import Denied
+from poolhouse.board import session as board_session
+from poolhouse.net import git
+from poolhouse.workspace import agent_display, session_name
+from poolhouse.workspace.coordinator_calls import execute
+from poolhouse.workspace.identity import Denied
 
 pytest_plugins = ['node_kit']
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,14 +57,14 @@ def run_hook(name, event, env):
 def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and_subagents(tmp_path, monkeypatch, workspace_node):
     shim = tmp_path / 'shim'
     shim.mkdir()
-    (shim / 'ml-stack-workspace').write_text(f'#!{sys.executable}\nimport sys\nsys.argv[0] = "ml-stack-workspace"\n'
-                                              'from ml_stack.workspace.cli import main\nsys.exit(main())\n')
-    (shim / 'ml-stack-workspace').chmod(0o700)
+    (shim / 'poolhouse-workspace').write_text(f'#!{sys.executable}\nimport sys\nsys.argv[0] = "poolhouse-workspace"\n'
+                                              'from poolhouse.workspace.cli import main\nsys.exit(main())\n')
+    (shim / 'poolhouse-workspace').chmod(0o700)
     environment = {key: value for key, value in os.environ.items()
-                   if key not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'ML_STACK_AGENT', 'CLAUDE_ENV_FILE',
-                                  'ML_STACK_WORKSPACE_AGENT', 'ML_STACK_SESSION_ID', 'ML_STACK_NONINTERACTIVE')}
+                   if key not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'POOLHOUSE_AGENT', 'CLAUDE_ENV_FILE',
+                                  'POOLHOUSE_WORKSPACE_AGENT', 'POOLHOUSE_SESSION_ID', 'POOLHOUSE_NONINTERACTIVE')}
     environment.update(PATH=os.pathsep.join([str(shim), str(Path(sys.executable).parent), str(Path(shutil.which('git')).parent)]),
-                       PYTHONPATH=str(ROOT / 'src'), ML_STACK_RUNTIME_ENSURE='off')
+                       PYTHONPATH=str(ROOT / 'src'), POOLHOUSE_RUNTIME_ENSURE='off')
     repository = tmp_path / 'project'
     git.run(['init', '-b', 'development', str(repository)])
     git.run(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
@@ -92,16 +92,16 @@ def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and
     listed = {a.name: a for a in me.agents()}
     assert agent_display.describe(listed[child])['session_kind'] == 'subagent'
     assert agent_display.describe(listed[child])['spawned_by'] == names[0]
-    agents = subprocess.run(['ml-stack-workspace', 'agents'], env={**environment, 'ML_STACK_WORKSPACE_AGENT': names[1]},
+    agents = subprocess.run(['poolhouse-workspace', 'agents'], env={**environment, 'POOLHOUSE_WORKSPACE_AGENT': names[1]},
                             capture_output=True, text=True, timeout=60, cwd=repository, check=False)
     assert agents.returncode == 0, agents.stderr
     assert names[0] in agents.stdout and names[1] in agents.stdout
 
 
 def test_old_brief_naming_the_shared_id_fails_clearly_in_the_cli(tmp_path):
-    environment = {**os.environ, 'ML_STACK_WORKSPACE_HOME': str(tmp_path / 'ws'), 'PYTHONPATH': str(ROOT / 'src'),
-                   'ML_STACK_WORKSPACE_AGENT': 'claude-6e1a2f'}
-    done = subprocess.run([sys.executable, '-m', 'ml_stack.workspace.cli', 'inbox', '--agent', 'claude'], env=environment,
+    environment = {**os.environ, 'POOLHOUSE_WORKSPACE_HOME': str(tmp_path / 'ws'), 'PYTHONPATH': str(ROOT / 'src'),
+                   'POOLHOUSE_WORKSPACE_AGENT': 'claude-6e1a2f'}
+    done = subprocess.run([sys.executable, '-m', 'poolhouse.workspace.cli', 'inbox', '--agent', 'claude'], env=environment,
                           capture_output=True, text=True, timeout=60, check=False)
     assert done.returncode == 3 and 'yours is claude-6e1a2f' in done.stderr
 
@@ -121,7 +121,7 @@ def test_a_name_looking_prefix_in_a_body_never_replaces_the_stamped_sender(kit):
 
 
 def test_a_remote_call_cannot_carry_a_sender_or_an_agent(kit):
-    from ml_stack.workspace import cli
+    from poolhouse.workspace import cli
 
     token = kit.agent('claude-hhhhhh')
     handlers = {name: handler for name, _help, _options, handler in cli.TABLE}

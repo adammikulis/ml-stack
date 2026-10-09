@@ -1,6 +1,6 @@
 """Finding things in a graph three ways at once."""
 
-from ml_stack.graph.search import hybrid, lexical, rrf
+from poolhouse.graph.search import hybrid, lexical, rrf
 
 GRAPH = {
     "nodes": [
@@ -89,7 +89,7 @@ def test_an_id_the_store_knows_but_the_graph_does_not_is_dropped():
 def test_fusion_can_say_what_placed_each_id():
     """The ids alone are what `rrf` always gave; the scores are for a hit to say how well
     it did, and the two must agree."""
-    from ml_stack.graph.search import rrf_scored
+    from poolhouse.graph.search import rrf_scored
 
     scored = rrf_scored(["a", "b"], ["c", "b"], limit=3)
     assert [i for i, _ in scored] == rrf(["a", "b"], ["c", "b"], limit=3)
@@ -154,7 +154,7 @@ def test_reranking_changes_the_order_of_the_fused_hits_and_never_the_membership(
     one -- so once the field is narrow, the first hits a model reads are put in their order.
 
     Measured cheaply for exactly this reason: the same entries come back either way."""
-    from ml_stack.graph.search import hybrid
+    from poolhouse.graph.search import hybrid
 
     # the characters and the word index both put the topic first, so fusion does; the
     # vectors are of the opposite opinion and, unlike a vote, say by how much
@@ -171,7 +171,7 @@ def test_a_hit_the_vectors_never_saw_keeps_its_place():
     """An exact label match with no embedding is still the right answer and must not be
     pushed down the page by a candidate the embedder merely likes. Mutation: sort the whole
     window with a missing similarity as zero, and the unembedded label sinks."""
-    from ml_stack.graph.search import RERANK, reranked
+    from poolhouse.graph.search import RERANK, reranked
 
     rows = [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]
     # only b and d are embedded, so only their two places are re-ordered

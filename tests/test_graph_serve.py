@@ -17,13 +17,13 @@ from http.server import BaseHTTPRequestHandler
 import pytest
 from conftest import threaded_server
 
-from ml_stack.graph.answers import Answer
-from ml_stack.graph.payloads import answer_payload, sse, thread_request
-from ml_stack.graph.questions import Ask, History
-from ml_stack.graph.serve import AskRoutes
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.thread import SUMMARY, WINDOW, follow
-from ml_stack.http import Server
+from poolhouse.graph.answers import Answer
+from poolhouse.graph.payloads import answer_payload, sse, thread_request
+from poolhouse.graph.questions import Ask, History
+from poolhouse.graph.serve import AskRoutes
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.thread import SUMMARY, WINDOW, follow
+from poolhouse.http import Server
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
@@ -474,7 +474,7 @@ def test_a_summariser_that_raises_loses_the_summary_not_the_answer(tmp_path, cap
 def test_the_done_frame_and_the_plain_answer_say_which_model_answered_and_what_it_spent():
     """An `Answer` carries `spent`; the payload carries the model's name and the record --
     calls, seconds, tokens read, cached, written, drafted -- for the page's footer."""
-    from ml_stack.client.chat import Reply
+    from poolhouse.client.chat import Reply
 
     out = Answer(content="Iris surveys land.")
     out.spent.note(Reply(content="ok", raw={"model": "tiny-Q4.gguf",
@@ -510,7 +510,7 @@ def test_the_model_route_names_what_is_serving_before_anything_is_asked(served):
 
 
 def test_the_page_shows_the_served_model_and_what_each_answer_spent():
-    from ml_stack.graph import page
+    from poolhouse.graph import page
 
     html = page.template()
     assert "fetch('/ask/model')" in html and "answered by" in html
@@ -531,7 +531,7 @@ def test_the_session_totals_add_up_every_answer_in_the_thread(served):
     url, handler = served
     kept = handler.answer
     try:
-        from ml_stack.client.chat import Reply
+        from poolhouse.client.chat import Reply
 
         out = Answer(content="Iris surveys land.", ids=["person:iris"], read=["person:iris"],
                      show=["person:iris"], steps=["found 2 entries"])
@@ -559,14 +559,14 @@ def test_the_session_totals_add_up_every_answer_in_the_thread(served):
 
 
 def test_totals_over_nothing_is_an_empty_session():
-    from ml_stack.client.spent import Spent
+    from poolhouse.client.spent import Spent
 
     assert Spent.totals([])["answers"] == 0
     assert Spent.totals([None, {"calls": 0}])["answers"] == 0
 
 
 def test_the_session_totals_carry_the_peak_context_and_the_parts_summed():
-    from ml_stack.client.spent import Spent
+    from poolhouse.client.spent import Spent
 
     a = {"calls": 2, "context_peak": 9000, "parts": {"system": 400, "window": 2000}}
     b = {"calls": 1, "context_peak": 4000, "parts": {"system": 400, "recalled": 800}}
@@ -584,7 +584,7 @@ def test_the_session_totals_carry_the_peak_context_and_the_parts_summed():
 
 def spent_answer(*, calls=1, content="Iris surveys land.", **timings):
     """An `Answer` carrying a `Spent` with ``calls`` replies noted into it."""
-    from ml_stack.client.chat import Reply
+    from poolhouse.client.chat import Reply
 
     out = Answer(content=content, ids=["person:iris"], read=["person:iris"],
                  show=["person:iris"], steps=["found 2 entries"])
@@ -706,7 +706,7 @@ def test_metrics_prom_is_the_same_numbers_a_scraper_can_read(served):
         assert float(said["seconds_total"]) == 1.6
         assert 'model_info{model="tiny-Q4.gguf"} 1' in body
         # every metric a scraper reads is declared, once, before its value
-        for name, _, kind_, _said in __import__("ml_stack.graph.metrics", fromlist=["PROM"]).PROM:
+        for name, _, kind_, _said in __import__("poolhouse.graph.metrics", fromlist=["PROM"]).PROM:
             assert f"# TYPE {name} {kind_}" in body and f"# HELP {name} " in body
     finally:
         handler.answer = kept
@@ -715,7 +715,7 @@ def test_metrics_prom_is_the_same_numbers_a_scraper_can_read(served):
 
 def test_a_model_name_with_a_quote_in_it_does_not_break_the_exposition(served):
     """A label value is escaped, or one odd model name makes the whole scrape unparsable."""
-    from ml_stack.graph.metrics import prometheus
+    from poolhouse.graph.metrics import prometheus
 
     body = prometheus({"answers": 1}, model='tiny "Q4"\\x.gguf', uptime=3.0)
     line = [ln for ln in body.splitlines() if ln.startswith("model_info")][0]
@@ -725,7 +725,7 @@ def test_a_model_name_with_a_quote_in_it_does_not_break_the_exposition(served):
 
 # -- the concrete handler: the page, the exports, and a 404 for the rest ------------------
 
-from ml_stack.graph.serve import Handler, bind, main  # noqa: E402
+from poolhouse.graph.serve import Handler, bind, main  # noqa: E402
 
 
 def fetch(url):
@@ -740,7 +740,7 @@ def fetch(url):
 @pytest.fixture
 def site(tmp_path):
     """A rendered page and an export root with one JSON file in a subdirectory."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = tmp_path / "site" / "index.html"
     page.parent.mkdir()
@@ -828,7 +828,7 @@ def test_bind_takes_the_command_line_and_answers_on_loopback(site, monkeypatch):
 def test_main_prints_where_it_is_serving_then_serves(site, monkeypatch, capsys):
     page, _ = site
     served = []
-    monkeypatch.setattr("ml_stack.http.Server.serve_forever",
+    monkeypatch.setattr("poolhouse.http.Server.serve_forever",
                         lambda self, *a, **k: served.append(self.server_address))
     assert main(["serve", "--site", str(page), "--port", "0"]) == 0
     assert served and served[0][0] == "127.0.0.1"
@@ -850,7 +850,7 @@ FINDER_GRAPH = {
 
 def finding_handler(*, finder):
     """A `Handler` over `FINDER_GRAPH` whose model calls look_up once, with that finder."""
-    from ml_stack.testing import ScriptedModel
+    from poolhouse.testing import ScriptedModel
 
     class Finding(Handler):
         graph = FINDER_GRAPH

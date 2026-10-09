@@ -16,14 +16,14 @@ class WindowsStartupTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         state = Path(directory.name)
         isolated = patch.dict(os.environ, {
-            "ML_STACK_HOME": str(state / "state"), "ML_STACK_CACHE": str(state / "cache"),
-            "ML_STACK_NO_REAL_KEYSTORE": "1", "PYTHON_KEYRING_BACKEND": "keyring.backends.fail.Keyring",
-            "ML_STACK_NOTIFY": "off",
+            "POOLHOUSE_HOME": str(state / "state"), "POOLHOUSE_CACHE": str(state / "cache"),
+            "POOLHOUSE_NO_REAL_KEYSTORE": "1", "PYTHON_KEYRING_BACKEND": "keyring.backends.fail.Keyring",
+            "POOLHOUSE_NOTIFY": "off",
         })
         isolated.start()
         self.addCleanup(isolated.stop)
-        self.sandbox_run = importlib.import_module("ml_stack.sandbox.run")
-        self.tailnet = importlib.import_module("ml_stack.fleet.tailnet")
+        self.sandbox_run = importlib.import_module("poolhouse.sandbox.run")
+        self.tailnet = importlib.import_module("poolhouse.fleet.tailnet")
 
     @unittest.skipUnless(os.name == "nt", "Windows startup")
     def test_startup_without_resource_module(self):
@@ -35,18 +35,18 @@ def without_resource(name, *args, **kwargs):
         raise ModuleNotFoundError('resource is unavailable')
     return original(name, *args, **kwargs)
 builtins.__import__ = without_resource
-import ml_stack.sandbox.run
-import ml_stack.fleet.launch
-import ml_stack.setup
+import poolhouse.sandbox.run
+import poolhouse.fleet.launch
+import poolhouse.setup
 """
-        env = dict(os.environ, ML_STACK_NO_REAL_KEYSTORE="1", ML_STACK_NOTIFY="off")
+        env = dict(os.environ, POOLHOUSE_NO_REAL_KEYSTORE="1", POOLHOUSE_NOTIFY="off")
         done = subprocess.run([sys.executable, "-c", code], env=env,
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_resource_limits_refuse_without_starting_child(self):
-        from ml_stack.sandbox.backend import SandboxUnavailable
-        from ml_stack.sandbox.policy import AllowUnsandboxed, Limits, Policy
+        from poolhouse.sandbox.backend import SandboxUnavailable
+        from poolhouse.sandbox.policy import AllowUnsandboxed, Limits, Policy
 
         sandbox_run = self.sandbox_run
         with patch.object(sandbox_run, "resource", None), patch.object(

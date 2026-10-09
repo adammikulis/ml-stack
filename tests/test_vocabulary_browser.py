@@ -18,8 +18,8 @@ pytestmark = pytest.mark.slow
 import test_fleet_page as fleet_page  # noqa: E402
 from rail import reach  # noqa: E402
 
-from ml_stack.fleet.page_security import CONTENT_SECURITY_POLICY  # noqa: E402
-from ml_stack.fleet.vocabulary_strings import CATALOGUE  # noqa: E402
+from poolhouse.fleet.page_security import CONTENT_SECURITY_POLICY  # noqa: E402
+from poolhouse.fleet.vocabulary_strings import CATALOGUE  # noqa: E402
 
 browser = fleet_page.browser
 daemon = fleet_page.daemon
@@ -52,8 +52,8 @@ def test_every_screen_loads_in_both_vocabularies(with_peers, open_page, vocab):
         assert vocab_of(page) == vocab
         assert page.title() == "Poolhouse"
         page.wait_for_selector(f"{shown}:not([hidden])")
-        assert page.locator(".poolside-mark svg").is_visible()
-        assert page.locator(".poolside-mark .wordmark").inner_text() == "Poolhouse"
+        assert page.locator(".poolhouse-mark svg").is_visible()
+        assert page.locator(".poolhouse-mark .wordmark").inner_text() == "Poolhouse"
         assert RAW_ID.findall(page.inner_text("body")) == [], route
         assert errors == [], (route, errors)
 
@@ -87,7 +87,7 @@ def test_the_developer_section_flips_the_vocabulary_live_and_keeps_it(with_peers
     assert vocab_of(page) == "friendly"
     assert page.inner_text("settings-view h1").startswith("Household")
     assert page.evaluate("() => window.marker") == "same page"
-    assert page.evaluate("() => localStorage.getItem('ml-stack.ui.vocab')") == "friendly"
+    assert page.evaluate("() => localStorage.getItem('poolhouse.ui.vocab')") == "friendly"
     page.goto(page.url.split("?")[0].split("#")[0] + "#cluster")
     page.wait_for_function("() => window.fleetModel && window.fleetModel.route === 'cluster'")
     assert vocab_of(page) == "friendly"

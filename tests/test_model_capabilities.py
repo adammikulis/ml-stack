@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from conftest import write_gguf
 
-from ml_stack.hub.capabilities import allows_chat, capabilities
-from ml_stack.serve import process
+from poolhouse.hub.capabilities import allows_chat, capabilities
+from poolhouse.serve import process
 
 
 @pytest.mark.parametrize('architecture,pooling', [('bert', 2), ('gemma-embedding', 1), ('other', 3)])

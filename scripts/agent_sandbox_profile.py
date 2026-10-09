@@ -18,8 +18,8 @@ RUNTIME_HOSTS = ("api.anthropic.com",)
 
 SCRUBBED_ENV = (
     "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-    "ML_STACK_HOME", "ML_STACK_CACHE", "ML_STACK_AGENT", "ML_STACK_WORKSPACE_AGENT",
-    "ML_STACK_NET_ALLOW_HOSTS", "HF_ENDPOINT", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
+    "POOLHOUSE_HOME", "POOLHOUSE_CACHE", "POOLHOUSE_AGENT", "POOLHOUSE_WORKSPACE_AGENT",
+    "POOLHOUSE_NET_ALLOW_HOSTS", "HF_ENDPOINT", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
     "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "SSH_AUTH_SOCK", "PYTHONPATH", "PYTHONSTARTUP",
     "PYTHON_KEYRING_BACKEND", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
@@ -54,10 +54,10 @@ DARWIN_DENY_READ = ("Library/Application Support/Google/Chrome", "Library/Applic
 DARWIN_DENY_WRITE = ("Library/LaunchAgents",)
 LINUX_DENY_READ = (".config/google-chrome", ".config/chromium", ".mozilla")
 LINUX_DENY_WRITE = (".config/systemd", ".config/autostart", ".local/share/systemd")
-CACHE_ALLOW_WRITE = (".cache/dev-test-slots", ".cache/ml_stack", ".cache/huggingface", ".cache/pip",
+CACHE_ALLOW_WRITE = (".cache/dev-test-slots", ".cache/poolhouse", ".cache/huggingface", ".cache/pip",
                      ".cache/ms-playwright", "Library/Caches/ms-playwright", "Library/Caches/pip")
 SHARED_GIT_DENY = ("config", "hooks", "info", "worktrees/*/config.worktree", "worktrees/*/hooks")
-DEPLOY_COMMANDS = ("ml-stack runtime ensure", "ml-stack runtime rollback", "ml-stack runtime restart-host")
+DEPLOY_COMMANDS = ("poolhouse runtime ensure", "poolhouse runtime rollback", "poolhouse runtime restart-host")
 """Run outside the sandbox because they write the runtimes root; the `runtime.deploy` authority gate is their guard."""
 CHECKOUT_DENY = ("scripts/hooks", ".claude", ".mcp.json", ".git/config", ".git/hooks", ".githooks")
 

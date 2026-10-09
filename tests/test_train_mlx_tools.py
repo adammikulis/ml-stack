@@ -8,8 +8,8 @@ import pytest
 
 @pytest.fixture
 def cpu():
-    pytest.importorskip('mlx.core', reason='ml-stack[train-mlx]')
-    pytest.importorskip('mlx_lm', reason='ml-stack[train-mlx]')
+    pytest.importorskip('mlx.core', reason='poolhouse[train-mlx]')
+    pytest.importorskip('mlx_lm', reason='poolhouse[train-mlx]')
     import mlx.core as mx
 
     previous = mx.default_device()
@@ -63,8 +63,8 @@ def settings(base):
 
 
 def test_assistant_only_loss_ignores_prompt_targets(base, data, cpu):
-    from ml_stack.train.recipes import build
-    from ml_stack.train.recipes.tool_calls_mlx import masked_loss
+    from poolhouse.train.recipes import build
+    from poolhouse.train.recipes.tool_calls_mlx import masked_loss
 
     built = build('tool-calls', settings(base), data)
     batch = built.batches(0)
@@ -80,7 +80,7 @@ def test_assistant_only_loss_ignores_prompt_targets(base, data, cpu):
 def test_trains_saves_adapter_and_reloads_without_frozen_weights(base, data, cpu, tmp_path):
     from mlx_lm import load
 
-    from ml_stack.train.run import run
+    from poolhouse.train.run import run
 
     updates = []
     out = tmp_path / 'run'
@@ -100,7 +100,7 @@ def test_trains_saves_adapter_and_reloads_without_frozen_weights(base, data, cpu
 
 
 def test_cancellation_records_partial_adapter(base, data, cpu, tmp_path):
-    from ml_stack.train.run import run
+    from poolhouse.train.run import run
 
     progress = []
     result = run('tool-calls', settings(base), data, tmp_path / 'cancelled',
@@ -110,7 +110,7 @@ def test_cancellation_records_partial_adapter(base, data, cpu, tmp_path):
 
 
 def test_projection_mismatch_fails_before_training(base, data, cpu):
-    from ml_stack.train.recipes import build
+    from poolhouse.train.recipes import build
 
     with pytest.raises(ValueError, match='no adapter projections'):
         build('tool-calls', {**settings(base), 'lora_targets': 'missing_projection'}, data)
@@ -119,8 +119,8 @@ def test_projection_mismatch_fails_before_training(base, data, cpu):
 def test_resume_refuses_different_same_shape_frozen_base(base, data, cpu, tmp_path):
     import shutil
 
-    from ml_stack.train.checkpoint import CheckpointError
-    from ml_stack.train.run import run
+    from poolhouse.train.checkpoint import CheckpointError
+    from poolhouse.train.run import run
 
     out = tmp_path / 'same-output'
     run('tool-calls', settings(base), data, out)
@@ -136,8 +136,8 @@ def test_resume_refuses_different_same_shape_frozen_base(base, data, cpu, tmp_pa
 
 
 def test_resume_refuses_replaced_weights_at_same_base_path(base, data, cpu, tmp_path):
-    from ml_stack.train.checkpoint import CheckpointError
-    from ml_stack.train.run import run
+    from poolhouse.train.checkpoint import CheckpointError
+    from poolhouse.train.run import run
 
     out = tmp_path / 'same-path-output'
     run('tool-calls', settings(base), data, out)
@@ -151,8 +151,8 @@ def test_resume_refuses_replaced_weights_at_same_base_path(base, data, cpu, tmp_
 
 
 def test_unmeasured_mlx_plan_exposes_unknown_cost(base, data, cpu):
-    from ml_stack.train.recipes import validate
-    from ml_stack.train.run import plan_for
+    from poolhouse.train.recipes import validate
+    from poolhouse.train.run import plan_for
 
     got = plan_for('tool-calls', validate('tool-calls', settings(base)), data).as_dict()
     assert got['seconds_per_step'] is None and got['estimated_seconds'] is None
@@ -165,8 +165,8 @@ def test_quantized_base_trains_adapter_without_changing_frozen_weights(base, dat
     from mlx_lm import load
     from mlx_lm.utils import get_total_parameters
 
-    from ml_stack.files import sha256_file
-    from ml_stack.train.run import run
+    from poolhouse.files import sha256_file
+    from poolhouse.train.run import run
 
     model, _ = load(str(base))
     nn.quantize(model, group_size=32, bits=4)
@@ -185,14 +185,14 @@ def test_quantized_base_trains_adapter_without_changing_frozen_weights(base, dat
 
 
 def test_recipe_size_backend_default_preserves_explicit_choice():
-    from ml_stack.train.recipes import validate
+    from poolhouse.train.recipes import validate
 
     assert validate('tool-calls', {'size': 'qwen27b'})['framework'] == 'mlx'
     assert validate('tool-calls', {'size': 'qwen27b', 'framework': 'torch'})['framework'] == 'torch'
 
 
 def test_same_base_resumes_adapter_and_optimizer(base, data, cpu, tmp_path):
-    from ml_stack.train.run import run
+    from poolhouse.train.run import run
 
     out = tmp_path / 'resume'
     first = run('tool-calls', settings(base), data, out)
@@ -202,11 +202,11 @@ def test_same_base_resumes_adapter_and_optimizer(base, data, cpu, tmp_path):
 
 
 def test_training_capability_does_not_redefine_existing_mlx_installation():
-    from ml_stack.fleet.environment import CATALOG
+    from poolhouse.fleet.environment import CATALOG
 
     existing = next(lib for lib in CATALOG if lib.name == 'mlx')
     training = next(lib for lib in CATALOG if lib.name == 'train-mlx')
     assert existing.packages == ('mlx>=0.18',)
-    assert training.packages == ('ml-stack[train-mlx]',)
+    assert training.packages == ('poolhouse[train-mlx]',)
     assert training.platforms == ('darwin',) and training.vendors == ('apple',)
     assert training.default is False

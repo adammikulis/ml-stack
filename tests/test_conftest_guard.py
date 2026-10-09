@@ -1,4 +1,4 @@
-"""The session guard over the real ml_stack cache."""
+"""The session guard over the real poolhouse cache."""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def test_keystore_rate_metadata_distinguishes_test_and_external_writes(tmp_path,
 
 
 def test_keystore_spending_records_actual_pid_without_calling_backend(tmp_path):
-    from ml_stack.keystore import Keystore
+    from poolhouse.keystore import Keystore
 
     held = Keystore(directory=tmp_path / 'ks')
     held._spend('read', 'process provenance')
@@ -157,7 +157,7 @@ def test_board_daemon_files_are_excluded_only_while_an_outside_process_serves_th
     board.mkdir(parents=True)
     (board / 'board.db').write_text('x')
     (tmp_path / 'other.json').write_text('x')
-    argv = {'pid': 12345, 'cmd': ['ml-stack-headless', '--port', '8770', '--root', str(served)]}
+    argv = {'pid': 12345, 'cmd': ['poolhouse-headless', '--port', '8770', '--root', str(served)]}
 
     class Process:
         def __init__(self):
@@ -170,7 +170,7 @@ def test_board_daemon_files_are_excluded_only_while_an_outside_process_serves_th
     assert set(file_mtimes(tmp_path)) == {'other.json'}
     argv['pid'] = os.getpid()
     assert set(file_mtimes(tmp_path)) == {'other.json', 'traind/shared-workspaces/project/board.db'}
-    argv.update(pid=12345, cmd=['ml-stack-headless', '--root', str(tmp_path / 'elsewhere')])
+    argv.update(pid=12345, cmd=['poolhouse-headless', '--root', str(tmp_path / 'elsewhere')])
     assert set(file_mtimes(tmp_path)) == {'other.json', 'traind/shared-workspaces/project/board.db'}
 
 

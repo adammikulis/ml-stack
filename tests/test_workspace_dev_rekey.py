@@ -9,11 +9,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from ml_stack.fleet import api, project_enrollment
-from ml_stack.fleet.discovery import derive_token
-from ml_stack.workspace import automatic_connection, project_connection, tokens
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.remote import RemoteWorkspace
+from poolhouse.fleet import api, project_enrollment
+from poolhouse.fleet.discovery import derive_token
+from poolhouse.workspace import automatic_connection, project_connection, tokens
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.remote import RemoteWorkspace
 
 pytest_plugins = ("test_workspace_enrollment",)
 
@@ -173,7 +173,7 @@ def test_saved_connection_refresh_is_determined_by_cluster_scope(tmp_path, monke
 
 
 def test_bind_renews_saved_scope_and_persists_current_cluster(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     root = tmp_path / "checkout"
     root.mkdir()
     prior = {"agent": "worker", "host": "https://board.invalid", "project_id": PROJECT,

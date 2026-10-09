@@ -19,7 +19,7 @@ the repository's owner-managed Python release metadata.
 Build from this directory with an installed Android SDK and JDK. Select a stable Android Gradle
 plugin through `-PandroidPlugin`, and the installed platform through `-PandroidApi`. Supply
 `ANDROID_SIGNING_STORE` and `ANDROID_SIGNING_PASSWORD` for a signing keystore whose alias is
-`ml-stack-preview`. The maintained CPU broker must admit builds and protocol tests.
+`poolhouse-preview`. The maintained CPU broker must admit builds and protocol tests.
 
 Android SDK downloads require a person to accept the current SDK license at
 https://developer.android.com/studio#downloads before downloading the command-line tools.

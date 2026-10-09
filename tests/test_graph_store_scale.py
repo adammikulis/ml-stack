@@ -4,7 +4,7 @@ node written twice; 0.19.1 passes both. Measured, never trusted again."""
 
 import pytest
 
-from ml_stack.graph.store import GraphStore
+from poolhouse.graph.store import GraphStore
 
 
 def _big_graph(n: int = 10_000):

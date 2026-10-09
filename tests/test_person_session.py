@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet.session import Sessions
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.person_session import SessionWorkspace, SetupRequired
-from ml_stack.workspace.remote_host import WorkspaceHost
-from ml_stack.workspace.remote_protocol import METHODS
-from ml_stack.workspace.service import Workspace
+from poolhouse.fleet.session import Sessions
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.person_session import SessionWorkspace, SetupRequired
+from poolhouse.workspace.remote_host import WorkspaceHost
+from poolhouse.workspace.remote_protocol import METHODS
+from poolhouse.workspace.service import Workspace
 
 PROJECT = 'a' * 32
 
@@ -23,7 +23,7 @@ def bound(tmp_path):
     host = WorkspaceHost(projects)
     sessions = Sessions()
     session = sessions.open('fixture-person', 'launch-ticket')
-    cookie = f'ml_stack_ui={session.sid}'
+    cookie = f'poolhouse_ui={session.sid}'
     ui = SimpleNamespace(sessions=sessions, projects=projects, workspaces=host, record=lambda *a, **k: None,
                          authed=lambda value: sessions.get(value.split('=', 1)[-1]) is not None,
                          host_ok=lambda value: value == '127.0.0.1:8770')
@@ -103,7 +103,7 @@ def test_connect_refuses_get_collision_and_revoked_person(bound):
 
 
 def test_task_write_revalidates_person_and_preserves_independent_review(bound):
-    from ml_stack.workspace.taskboard import TaskBoard
+    from poolhouse.workspace.taskboard import TaskBoard
 
     host, request, _, session = bound
     ws = SessionWorkspace(host, request, PROJECT)

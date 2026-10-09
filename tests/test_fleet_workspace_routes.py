@@ -8,7 +8,7 @@ import subprocess
 import pytest
 from test_fleet_ui import Serving
 
-from ml_stack.fleet.workspace_routes import PURPOSES
+from poolhouse.fleet.workspace_routes import PURPOSES
 
 
 @pytest.fixture
@@ -57,20 +57,20 @@ def test_workspace_requires_ui_header(daemon):
 
 
 def test_job_preview_is_not_submitted_and_commands_are_installed(daemon, monkeypatch):
-    from ml_stack.fleet import workspace_routes
+    from poolhouse.fleet import workspace_routes
     monkeypatch.setattr(workspace_routes, 'commands', lambda: [
-        {'name': 'ml-stack-doctor', 'entry': 'ml_stack.doctor:main'}])
+        {'name': 'poolhouse-doctor', 'entry': 'poolhouse.doctor:main'}])
     code, result, _ = daemon.call('/ui/workspace/jobs', method='POST', body={
-        'command': 'ml-stack-doctor', 'args': ['--help'], 'preview': True})
+        'command': 'poolhouse-doctor', 'args': ['--help'], 'preview': True})
     assert code == 200
-    assert result['argv'] == ['ml-stack-doctor', '--help']
+    assert result['argv'] == ['poolhouse-doctor', '--help']
     assert daemon.runner.snapshot() == []
     assert daemon.call('/ui/workspace/jobs', method='POST', body={
         'command': 'python', 'args': []})[0] == 400
     assert daemon.call('/ui/workspace/jobs', method='POST', body={
-        'command': 'ml-stack-doctor', 'args': ['--detach']})[0] == 400
+        'command': 'poolhouse-doctor', 'args': ['--detach']})[0] == 400
     assert daemon.call('/ui/workspace/jobs', method='POST', body={
-        'command': 'ml-stack-doctor', 'args': 'oops'})[0] == 400
+        'command': 'poolhouse-doctor', 'args': 'oops'})[0] == 400
 
 
 def test_job_log_metrics_and_cancel(daemon):
@@ -98,7 +98,7 @@ def test_job_log_metrics_and_cancel(daemon):
      '--steps', '60', '--batch-size', '4', '--lr', '.0002', '--rank', '16', '--seed', '0', '--dry-run'],
 ])
 def test_decision_workflow_arguments_match_command_contract(args):
-    from ml_stack.decide_cli import COMMANDS
+    from poolhouse.decide_cli import COMMANDS
     parsed = COMMANDS.parser().parse_args(args)
     assert parsed.cmd == args[0]
 
@@ -116,9 +116,9 @@ def test_frozen_gym_uses_installed_environment(daemon, monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     configured = []
-    from ml_stack.fleet import gym_interpreters, gym_routes
-    monkeypatch.delenv('ML_STACK_GYM_PYTHON', raising=False)
-    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+    from poolhouse.fleet import gym_interpreters, gym_routes
+    monkeypatch.delenv('POOLHOUSE_GYM_PYTHON', raising=False)
+    monkeypatch.setenv('POOLHOUSE_GYM_PYTHONS', '{}')
     monkeypatch.setattr(gym_routes, 'catalogue', lambda: [{'id': 'car', 'available': True}])
     monkeypatch.setattr(gym_interpreters, 'manager', SimpleNamespace(
         configure=lambda python: configured.append(python), configure_map=lambda mapping: None))
@@ -142,7 +142,7 @@ def test_recording_review_boundary_and_export_handoff(daemon, tmp_path, monkeypa
                 'truncated': False, 'observation': [0., 1.], 'frame': None,
                 'transition': {'episode_id': 1, 'sequence': 2, 'observation': [1., 0.]}}
     (recording / 'trajectory.jsonl').write_text(json.dumps(snapshot) + '\n')
-    from ml_stack.fleet import gym_recording_routes
+    from poolhouse.fleet import gym_recording_routes
     monkeypatch.setattr(gym_recording_routes, 'artifact_root', lambda: root)
 
     def export(trajectory, reviews, output):
@@ -177,11 +177,11 @@ def test_specialist_descriptions_cover_native_chat_memory_and_gym():
 
 
 def test_gym_jobs_use_saved_example_python_without_shell_expansion(daemon, monkeypatch, tmp_path):
-    from ml_stack.fleet import workspace_routes
-    from ml_stack.fleet.settings import Settings
+    from poolhouse.fleet import workspace_routes
+    from poolhouse.fleet.settings import Settings
 
-    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'ml-stack-gym'}])
-    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'poolhouse-gym'}])
+    monkeypatch.setenv('POOLHOUSE_GYM_PYTHONS', '{}')
     python = tmp_path / 'Python with spaces' / 'bin' / 'python'
     python.parent.mkdir(parents=True)
     python.write_text('')
@@ -190,13 +190,13 @@ def test_gym_jobs_use_saved_example_python_without_shell_expansion(daemon, monke
     daemon.ui.settings = Settings.load(daemon.ui.settings_path)
     args = ['train', 'drone', '--config', '{"note":"$(touch /tmp/nope); a b"}']
     code, result, _ = daemon.call('/ui/workspace/jobs', method='POST', body={
-        'command': 'ml-stack-gym', 'args': args, 'preview': True})
+        'command': 'poolhouse-gym', 'args': args, 'preview': True})
     assert code == 200
-    assert result['argv'] == [str(python), '-m', 'ml_stack.gym.cli', *args]
+    assert result['argv'] == [str(python), '-m', 'poolhouse.gym.cli', *args]
     assert daemon.runner.snapshot() == []
     assert daemon.call('/ui/workspace/jobs', method='POST', body={
-        'command': 'ml-stack-gym', 'args': ['train', '../../escape']})[0] == 400
-    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+        'command': 'poolhouse-gym', 'args': ['train', '../../escape']})[0] == 400
+    monkeypatch.setenv('POOLHOUSE_GYM_PYTHONS', '{}')
 
 
 @pytest.mark.slow
@@ -206,21 +206,21 @@ def test_saved_drone_interpreter_runs_a_queued_native_session(daemon, monkeypatc
     import time
     from pathlib import Path
 
-    from ml_stack.fleet import workspace_routes
-    from ml_stack.fleet.settings import Settings
+    from poolhouse.fleet import workspace_routes
+    from poolhouse.fleet.settings import Settings
 
-    python = os.environ.get('ML_STACK_TEST_DRONE_PYTHON')
+    python = os.environ.get('POOLHOUSE_TEST_DRONE_PYTHON')
     if not python or not Path(python).is_file():
-        pytest.skip('Set ML_STACK_TEST_DRONE_PYTHON to the installed native drone Python')
-    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
-    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'ml-stack-gym'}])
+        pytest.skip('Set POOLHOUSE_TEST_DRONE_PYTHON to the installed native drone Python')
+    monkeypatch.setenv('POOLHOUSE_GYM_PYTHONS', '{}')
+    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'poolhouse-gym'}])
     daemon.ui.settings.gym_pythons = {'drone': python}
     daemon.ui.settings.save(daemon.ui.settings_path)
     daemon.ui.settings = Settings.load(daemon.ui.settings_path)
     monkeypatch.setenv('PYTHONPATH', str(Path(__file__).resolve().parents[1] / 'src'))
     config = {'world': {'trees': 0, 'hikers': 1, 'fires': 0, 'n_agents': 1}}
     code, result, _ = daemon.call('/ui/workspace/jobs', method='POST', body={
-        'command': 'ml-stack-gym', 'args': ['run', 'drone', '--steps', '1', '--action', '0',
+        'command': 'poolhouse-gym', 'args': ['run', 'drone', '--steps', '1', '--action', '0',
                                          '--config', json.dumps(config)]})
     assert code == 202
     job = daemon.runner.jobs[result['id']]
@@ -228,6 +228,6 @@ def test_saved_drone_interpreter_runs_a_queued_native_session(daemon, monkeypatc
     while job.state not in {'done', 'failed', 'stopped'} and time.monotonic() < until:
         time.sleep(.05)
     assert job.state == 'done', daemon.runner.log_path(job.id).read_text()
-    assert job.argv[:3] == [python, '-m', 'ml_stack.gym.cli']
+    assert job.argv[:3] == [python, '-m', 'poolhouse.gym.cli']
     output = daemon.runner.log_path(job.id).read_text()
     assert 'drone' in output and 'observation' in output

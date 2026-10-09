@@ -16,19 +16,19 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import signing, updates
+from poolhouse.fleet import signing, updates
 
 
 def _zip(text: str) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("ml-stack", text * 100)
+        zf.writestr("poolhouse", text * 100)
     return buffer.getvalue()
 
 
 ZIP = _zip("the bundle")
 OTHER_ZIP = _zip("another bundle")
-NAME = "ml-stack-linux-x86_64-v9.9.9.zip"
+NAME = "poolhouse-linux-x86_64-v9.9.9.zip"
 
 
 def _keygen(where: Path, name: str) -> tuple[Path, str]:

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from test_trees import ENV, HOUR, REPO, commit, git, make_repo, status, tree
 
-from ml_stack import lock, trees, trees_notice
+from poolhouse import lock, trees, trees_notice
 
 HOOKS = REPO / "scripts" / "hooks"
 
@@ -50,12 +50,12 @@ def test_a_locked_registry_still_answers_reads_and_the_hooks_fail_open(main, mon
     sys.path.insert(0, str(HOOKS))
     import tree_watch
     monkeypatch.setattr(trees, "LOCK_TIMEOUT", 0.2)
-    with lock.only_one(registry(main).with_name("ml-stack-trees.json.lock"), announce=lambda _m: None):
+    with lock.only_one(registry(main).with_name("poolhouse-trees.json.lock"), announce=lambda _m: None):
         started = time.monotonic()
         assert status(main, 5) == {"t": "active"}                  # read path: answers, skips the save
         with pytest.raises(lock.Busy):
             trees.set_lead(main, "lead")
-        assert tree_watch.check("A", str(main), {"ML_STACK_WORKSPACE_AGENT": "lead"}, lead="lead") == ""
+        assert tree_watch.check("A", str(main), {"POOLHOUSE_WORKSPACE_AGENT": "lead"}, lead="lead") == ""
         assert time.monotonic() - started < 5
     assert "workspace A" in capsys.readouterr().err
 
@@ -72,7 +72,7 @@ def test_a_slow_git_is_cut_off_by_the_hook_budget(main, monkeypatch):
 
 def test_parallel_processes_writing_the_registry_lose_nothing_and_leave_valid_json(main):
     paths = [tree(main, f"w{i}") for i in range(8)]
-    code = ("import sys, time; from pathlib import Path; from ml_stack import trees\n"
+    code = ("import sys, time; from pathlib import Path; from poolhouse import trees\n"
             "trees.LOCK_TIMEOUT = 120  # the hooks' short wait is not under test\n"
             "root, mine = Path(sys.argv[1]), sys.argv[2:]\n"
             "for n in range(6):\n"
@@ -196,7 +196,7 @@ def test_a_warm_report_asks_git_only_for_the_worktree_list(main, monkeypatch):
 
 def run_hook(where: Path, **env: str) -> subprocess.CompletedProcess:
     merged = {**ENV, "PYTHON": sys.executable, "PYTHONPATH": str(REPO / "src"), **env}
-    merged.pop("ML_STACK_WORKSPACE_AGENT", None)             # a person, not an agent
+    merged.pop("POOLHOUSE_WORKSPACE_AGENT", None)             # a person, not an agent
     return subprocess.run(["sh", str(HOOKS / "post-commit")], cwd=where, text=True, capture_output=True, check=False,
                           env=merged)
 
@@ -214,7 +214,7 @@ def test_a_linked_tree_under_the_threshold_prints_nothing_and_over_it_prints_one
         commit(path, f"c{i}")
     quiet = run_hook(path)
     assert quiet.returncode == 0 and quiet.stdout == "" and quiet.stderr == ""
-    loud = run_hook(path, ML_STACK_TREES_MAX_AHEAD="2")
+    loud = run_hook(path, POOLHOUSE_TREES_MAX_AHEAD="2")
     assert loud.returncode == 0 and loud.stdout == "" and "3 commits ahead" in loud.stderr
     assert len(loud.stderr.strip().splitlines()) == 1
-    assert run_hook(path, ML_STACK_TREES_MAX_AHEAD="2").stderr == ""     # and not again for the same condition
+    assert run_hook(path, POOLHOUSE_TREES_MAX_AHEAD="2").stderr == ""     # and not again for the same condition

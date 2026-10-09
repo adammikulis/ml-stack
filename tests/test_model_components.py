@@ -5,10 +5,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from ml_stack.fleet import component_routes, component_store, model_components as components
-from ml_stack.fleet.models import Downloads, Getting, Model, Models
-from ml_stack.fleet.weights import ModelError, is_beside
-from ml_stack.serve import mtp
+from poolhouse.fleet import component_routes, component_store, model_components as components
+from poolhouse.fleet.models import Downloads, Getting, Model, Models
+from poolhouse.fleet.weights import ModelError, is_beside
+from poolhouse.serve import mtp
 
 SOURCE = "hf:publisher/Example-27B-GGUF/Example-27B-IQ3_S.gguf"
 
@@ -78,7 +78,7 @@ def test_replacement_keeps_base_and_is_used_without_a_separate_draft(tmp_path, m
     components.link(base, replacement, offer())
     assert base.read_bytes() == original and components.effective(base) == replacement
     monkeypatch.setattr(mtp, "help_of", lambda _: "--spec-type none,draft-mtp\n")
-    from ml_stack.serve.backend import ServerSpec
+    from poolhouse.serve.backend import ServerSpec
     planned = mtp.plan(ServerSpec(model=str(replacement)), binary="fixture")
     assert planned.spec_type == "draft-mtp" and planned.draft == ""
 
@@ -111,7 +111,7 @@ def test_link_cannot_escape_model_directory(tmp_path):
 
 def test_unselected_and_lan_only_sources_never_request_hub_metadata(tmp_path, monkeypatch):
     model = gguf(tmp_path / "Example-27B-IQ3_S.gguf")
-    monkeypatch.setattr("ml_stack.fleet.models.MIN_SIZE", 0)
+    monkeypatch.setattr("poolhouse.fleet.models.MIN_SIZE", 0)
     components.remember(model, SOURCE)
     monkeypatch.setattr(components.net, "default", lambda: pytest.fail("Unexpected Internet request"))
     for policy in ("", "lan"):
@@ -124,7 +124,7 @@ def test_vision_is_linked_and_not_listed_as_a_base_model(tmp_path, monkeypatch):
     vision = gguf(tmp_path / "mmproj-Example-27B-BF16.gguf", arch="clip")
     info = {**offer(), "kind": "vision", "packaging": "separate", "name": vision.name}
     components.link(model, vision, info)
-    monkeypatch.setattr("ml_stack.fleet.models.MIN_SIZE", 0)
+    monkeypatch.setattr("poolhouse.fleet.models.MIN_SIZE", 0)
     models = Models([tmp_path], tmp_path)
     assert [row.name for row in models.all()] == [model.name]
     assert models.inventory()[0]["components"][0]["name"] == vision.name
@@ -134,7 +134,7 @@ def test_vision_is_linked_and_not_listed_as_a_base_model(tmp_path, monkeypatch):
 def test_addon_route_refuses_untrusted_requests_before_component_lookup(method):
     from unittest.mock import patch
 
-    from ml_stack.fleet import routes
+    from poolhouse.fleet import routes
 
     handler = Mock(path="/ui/models/addons?name=../../outside&source=file:///outside",
                    command=method, client_address=("192.0.2.1", 1000))

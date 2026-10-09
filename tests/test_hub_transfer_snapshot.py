@@ -2,8 +2,8 @@
 
 import pytest
 
-from ml_stack.hub import transfer
-from ml_stack.hub.remote import NotFound, RemoteFile
+from poolhouse.hub import transfer
+from poolhouse.hub.remote import NotFound, RemoteFile
 
 
 @pytest.fixture

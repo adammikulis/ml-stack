@@ -28,8 +28,8 @@ def native_cli() -> None:
 
 
 def fixture_worker(root, cid, conversation, prompt, communication) -> None:
-    from ml_stack import coding
-    from ml_stack.workspace.coding_turns import worker
+    from poolhouse import coding
+    from poolhouse.workspace.coding_turns import worker
     def launch(model, role, project, **options):
         if prompt == "startup rejected":
             raise SystemExit(2)

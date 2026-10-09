@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import (
+from poolhouse import (
     features,
     lock,
     node_binary,
@@ -30,13 +30,13 @@ from ml_stack import (
     runtime,
     win32,
 )
-from ml_stack.platform import start_process
+from poolhouse.platform import start_process
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_the_pipe_key_is_the_one_the_rust_node_computes():
-    # the same vector is asserted in app/poolside-node/src/sys/mod.rs
+    # the same vector is asserted in app/poolhouse-node/src/sys/mod.rs
     want = "303c7027db4da393a0c6c375056106d2"
     assert node_health.key_of("C:\\Users\\Me\\State\\node") == want
     assert node_health.key_of("\\\\?\\c:\\users\\me\\state\\node\\") == want
@@ -46,8 +46,8 @@ def test_the_pipe_key_is_the_one_the_rust_node_computes():
 def test_every_state_directory_has_its_own_pipe_and_events(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     assert node_health.pipe_name(a) != node_health.pipe_name(b)
-    assert node_health.pipe_name(a).startswith("\\\\.\\pipe\\poolside-node-")
-    assert node_health.node_stop_event(a).startswith("Local\\poolside-node-stop-")
+    assert node_health.pipe_name(a).startswith("\\\\.\\pipe\\poolhouse-node-")
+    assert node_health.node_stop_event(a).startswith("Local\\poolhouse-node-stop-")
     assert node_supervise.supervisor_stop_event(a) != node_health.node_stop_event(a)
 
 
@@ -71,7 +71,7 @@ def framed(value: dict) -> bytes:
 
 def test_a_hello_over_a_pipe_is_framed_like_the_socket(monkeypatch, tmp_path):
     request, opened = [], []
-    reply = framed({"ok": True, "result": {"node": "poolside-node", "pid": 7, "version": "0.2.2"}})
+    reply = framed({"ok": True, "result": {"node": "poolhouse-node", "pid": 7, "version": "0.2.2"}})
     monkeypatch.setattr(node_health, "windows_node", lambda: True)
     monkeypatch.setattr(win32, "open_pipe", lambda name: opened.append(name) or reply_over_socketpair(reply, request))
     said = node_health.node_health(tmp_path)
@@ -147,7 +147,7 @@ def test_a_process_probe_on_windows_never_sends_a_signal(monkeypatch):
 @pytest.fixture(scope="module")
 def built() -> Path:
     with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("ML_STACK_HOME", tempfile.mkdtemp(prefix="mlf"))
+        patch.setenv("POOLHOUSE_HOME", tempfile.mkdtemp(prefix="mlf"))
         features.switch("windows-node", True)
         return node_binary.build(ROOT)
 
@@ -155,7 +155,7 @@ def built() -> Path:
 @pytest.fixture
 def home(monkeypatch):
     root = Path(tempfile.mkdtemp(prefix="mln"))
-    monkeypatch.setenv("ML_STACK_HOME", str(root))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(root))
     features.switch("windows-node", True)
     monkeypatch.setenv("PYTHONPATH", str(ROOT / "src"))
     yield root
@@ -172,7 +172,7 @@ def select(binary: Path) -> Path:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="needs the Windows node")
 def test_the_node_binary_is_an_exe(built):
-    assert built.name == "poolside-node.exe"
+    assert built.name == "poolhouse-node.exe"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="needs the Windows node")

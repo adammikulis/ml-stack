@@ -1,6 +1,6 @@
 """Pairing fills the peer book, and the model store is served to the devices that may have it.
 
-Real processes and files: the owner and the new machine are `python -m ml_stack.fleet.join`
+Real processes and files: the owner and the new machine are `python -m poolhouse.fleet.join`
 processes with their own homes (as in test_onboard_cli), pairing is the real flow with the code
 read out, ``share --models`` is a process serving a real folder of GGUF files over pinned TLS, and
 the downloading side is the real `PeerSession`. Nothing is added with ``peers add``.
@@ -21,12 +21,12 @@ from onboard_support import Clock, Recorder, identity as make_identity, requests
 from test_hub_pull import blob
 from test_onboard_cli import env_for, fleet as run_fleet, read_document, spawn, stop
 
-from ml_stack import hub, sentinel
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard import modelstore, pake, peerfirst, peerlearn
-from ml_stack.fleet.onboard.human import mint
-from ml_stack.fleet.onboard.manifest import DEFAULT_CHUNK, Entry
-from ml_stack.fleet.onboard.pairing import (
+from poolhouse import hub, sentinel
+from poolhouse.fleet import tls
+from poolhouse.fleet.onboard import modelstore, pake, peerfirst, peerlearn
+from poolhouse.fleet.onboard.human import mint
+from poolhouse.fleet.onboard.manifest import DEFAULT_CHUNK, Entry
+from poolhouse.fleet.onboard.pairing import (
     API,
     Grant,
     Hooks,
@@ -35,14 +35,14 @@ from ml_stack.fleet.onboard.pairing import (
     PairingServer,
     context_for,
 )
-from ml_stack.fleet.onboard.requests import Devices, Request
-from ml_stack.fleet.onboard.sharing import Access, Licences
-from ml_stack.fleet.onboard.transfer import Share, confined, serve_file
-from ml_stack.hub import origins, peers as hub_peers
-from ml_stack.hub.peerbook import PeerBook
-from ml_stack.hub.places import Place
-from ml_stack.safenames import Unsafe
-from ml_stack.sentinel.store import Holding
+from poolhouse.fleet.onboard.requests import Devices, Request
+from poolhouse.fleet.onboard.sharing import Access, Licences
+from poolhouse.fleet.onboard.transfer import Share, confined, serve_file
+from poolhouse.hub import origins, peers as hub_peers
+from poolhouse.hub.peerbook import PeerBook
+from poolhouse.hub.places import Place
+from poolhouse.safenames import Unsafe
+from poolhouse.sentinel.store import Holding
 from tests.cluster_support import join as cluster_join
 
 KIB = 1024
@@ -304,15 +304,15 @@ class Models:
 
 
 def quarantine(home: Path, data: bytes, monkeypatch, tmp: Path) -> None:
-    here = os.environ["ML_STACK_HOME"]
-    monkeypatch.setenv("ML_STACK_HOME", str(home))
+    here = os.environ["POOLHOUSE_HOME"]
+    monkeypatch.setenv("POOLHOUSE_HOME", str(home))
     digest = hashlib.sha256(data).hexdigest()
     held = tmp / "held-copy" / "x.gguf"
     held.parent.mkdir(parents=True, exist_ok=True)
     held.write_bytes(b"the copy")
     sentinel.default().store.quarantine(("artifact", f"download:{digest}"), "flagged",
                                         {"sha256": digest}, Holding(path=held), actor="test")
-    monkeypatch.setenv("ML_STACK_HOME", here)
+    monkeypatch.setenv("POOLHOUSE_HOME", here)
 
 
 def accept_licence(owner, name: str, who: str = "adam") -> None:
@@ -409,17 +409,17 @@ def test_a_gated_model_is_withheld_from_a_device_that_is_not_marked_the_owners(s
     assert ok and final.exists()
 
 
-def test_ml_stack_models_list_shows_where_a_peer_model_came_from_and_whose_acceptance(
+def test_poolhouse_models_list_shows_where_a_peer_model_came_from_and_whose_acceptance(
         store, tmp_path, monkeypatch, capsys):
     ok, final = store.get("gated-Q4.gguf")
     assert ok
-    monkeypatch.setenv("ML_STACK_HOME", str(store.box.home))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(store.box.home))
     here = final.parent
-    shown = Place("ml-stack", "flat", here, True, 4)
+    shown = Place("poolhouse", "flat", here, True, 4)
     monkeypatch.setattr(hub, "standard", lambda roots=None: [shown])
     origins.record({"file": final.name, "size": final.stat().st_size, "peer": "owner-box",
                     "relies_on": {"device": "owner-box", "accepted_by": "adam"}})
-    from ml_stack.serve import models_cli
+    from poolhouse.serve import models_cli
     assert models_cli.run(["list", "--json"]) == 0
     rows = json.loads(capsys.readouterr().out)
     [row] = [r for r in rows if r["path"].endswith("gated-Q4.gguf")]
@@ -434,7 +434,7 @@ def share_of(models: Models, names: list[str], *, withhold=None, licences=None, 
                      DEFAULT_CHUNK, (hashlib.sha256(models.data[n]).hexdigest(),), kind="model",
                      sharing=level) for n in names]
     paths = {e.name: models.root / n for e, n in zip(entries, names, strict=True)}
-    from ml_stack.fleet.onboard.manifest import Manifest
+    from poolhouse.fleet.onboard.manifest import Manifest
     manifest = Manifest(1, 0.0, 0.0, "", tuple(entries))
     return Share(models.root, b"", manifest, licences, withhold, paths, (models.root,)), entries
 
@@ -496,7 +496,7 @@ def test_a_copy_sentinel_holds_is_not_served_even_after_the_manifest_was_made(
     share, [entry] = share_of(models, ["open-Q4.gguf"], withhold=peerfirst.quarantine_veto)
     assert serve(share, entry).status == 206
     quarantine(tmp_path / "home", models.data["open-Q4.gguf"], monkeypatch, tmp_path)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     held = serve(share, entry)
     assert held.status == 403 and b"quarantine" in held.body
 
@@ -508,7 +508,7 @@ def test_building_the_store_skips_a_held_copy_a_link_out_and_a_second_file_of_on
     twin.parent.mkdir()
     twin.write_bytes(blob(10 * KIB, 5))
     quarantine(tmp_path / "home", models.data["held-Q4.gguf"], monkeypatch, tmp_path)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     found, roots = modelstore.candidates([models.root])
     found.append(modelstore.Candidate("escape.gguf", models.root / "escape.gguf",
                                       len(models.secret), ""))          # whatever found it

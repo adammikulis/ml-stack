@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ml_stack.interventions import (
+from poolhouse.interventions import (
     Base,
     Call,
     Confirm,

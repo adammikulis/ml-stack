@@ -8,7 +8,7 @@ import zlib
 
 import pytest
 
-from ml_stack.media import (
+from poolhouse.media import (
     DownloadError,
     ImageError,
     WavError,
@@ -44,7 +44,7 @@ class TestWav:
         standard = encode(pcm, sample_rate=16000)
         head, tail = standard[:36], standard[36:]  # split at the `data` chunk
 
-        software = b"ml_stack\x00\x00"  # NUL-terminated, word-aligned
+        software = b"poolhouse\x00\x00"  # NUL-terminated, word-aligned
         info_body = b"INFOISFT" + struct.pack("<I", len(software)) + software
         listed = head + b"LIST" + struct.pack("<I", len(info_body)) + info_body + tail
 
@@ -212,7 +212,7 @@ class TestDownload:
         instance = self._serve(server, body)
 
         target = tmp_path / "m.dat"
-        from ml_stack.net.download import staged_part
+        from poolhouse.net.download import staged_part
 
         partial = staged_part(f"{instance.base_url}/m", target)
         partial.write_bytes(b"STALE-PREFIX")

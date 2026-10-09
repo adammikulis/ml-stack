@@ -1,11 +1,11 @@
-"""Pi runs with the explicit local endpoint and ml-stack's tool-policy extension."""
+"""Pi runs with the explicit local endpoint and poolhouse's tool-policy extension."""
 from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from ml_stack import pi
+from poolhouse import pi
 
 
 def test_pi_launch_is_offline_and_uses_the_policy_extension(monkeypatch, tmp_path):
@@ -42,17 +42,17 @@ def test_pi_launch_is_offline_and_uses_the_policy_extension(monkeypatch, tmp_pat
 
     assert pi.launch(["--on", "http://127.0.0.1:8080", "--project", str(tmp_path)],
                      say=lambda _: None, run_pi=run_pi) == 0
-    assert seen["command"][:5] == [str(binary), "--provider", "mlstack", "--model", "local-model"]
+    assert seen["command"][:5] == [str(binary), "--provider", "poolhouse", "--model", "local-model"]
     assert seen["command"][seen["command"].index("--thinking") + 1] == "off"
     assert "--no-session" in seen["command"] and "--no-mcp" in seen["command"]
     extension = Path(seen["command"][seen["command"].index("--extension") + 1]).read_text()
-    assert 'pi.on("tool_call"' in extension and "ml_stack.harnesshook" in extension
+    assert 'pi.on("tool_call"' in extension and "poolhouse.harnesshook" in extension
     assert seen["env"]["PI_OFFLINE"] == "1"
     assert seen["env"]["PI_CODING_AGENT_DIR"] == str(config)
 
 
 def test_pi_events_stream_usage_and_fail_closed():
-    from ml_stack.workspace.coding_events import event
+    from poolhouse.workspace.coding_events import event
 
     assert event({"type": "message_update", "assistantMessageEvent":
         {"type": "text_delta", "delta": "Hello"}}, "pi") == {"delta": "Hello"}
@@ -60,7 +60,7 @@ def test_pi_events_stream_usage_and_fail_closed():
     assert event({"type": "message_end", "message": {"role": "assistant",
         "stopReason": "error", "errorMessage": "local runtime failed"}}, "pi") == {"error": "local runtime failed"}
     assert event({"type": "tool_execution_end", "isError": True, "result":
-        {"content": [{"type": "text", "text": "ml-stack: person refused"}]}}, "pi") == {"blocked": "ml-stack: person refused"}
+        {"content": [{"type": "text", "text": "poolhouse: person refused"}]}}, "pi") == {"blocked": "poolhouse: person refused"}
 
 
 def test_pi_extension_denies_writes_and_reports_exhausted_turns(tmp_path):
@@ -89,7 +89,7 @@ def test_pi_extension_denies_writes_and_reports_exhausted_turns(tmp_path):
     rows = [json.loads(line) for line in done.stdout.splitlines()]
     assert rows[0] == {"type": "error", "message": "Pi turn budget exhausted"}
     assert rows[1]["state"] == {"aborted": True, "stopped": True}
-    assert rows[1]["result"]["block"] and "ml-stack:" in rows[1]["result"]["reason"]
+    assert rows[1]["result"]["block"] and "poolhouse:" in rows[1]["result"]["reason"]
     assert not (tmp_path / "output.py").exists()
 
 
@@ -145,12 +145,12 @@ def test_pi_provider_payload_preserves_explicit_output_budget(tmp_path):
     assert payload["messages"] == result["original"]["messages"]
     assert payload["chat_template_kwargs"] == {"other": 1, "enable_thinking": False}
     assert result["original"]["max_tokens"] == 4096
-    model = json.loads(pi.models("http://localhost:8080", "local-model", 49152, 32000))["providers"]["mlstack"]["models"][0]
+    model = json.loads(pi.models("http://localhost:8080", "local-model", 49152, 32000))["providers"]["poolhouse"]["models"][0]
     assert model["contextWindow"] == 49152 and model["maxTokens"] == 32000
 
 
 def test_native_pi_options_keep_output_effort_and_turns_separate(monkeypatch):
-    from ml_stack import coding
+    from poolhouse import coding
 
     seen = {}
     def launch(argv, **kwargs):
@@ -165,7 +165,7 @@ def test_native_pi_options_keep_output_effort_and_turns_separate(monkeypatch):
 
 
 def test_chat_agent_output_default_keeps_caller_caps():
-    from ml_stack.workspace.localtools import Guarded, Limits
+    from poolhouse.workspace.localtools import Guarded, Limits
 
     class Client:
         def chat(self, messages, **kwargs):
@@ -180,14 +180,14 @@ def test_chat_agent_output_default_keeps_caller_caps():
 
 
 def test_guarded_output_cap_reaches_real_client_body():
-    from ml_stack.client import Client, Request
-    from ml_stack.workspace.localtools import Guarded, Limits
+    from poolhouse.client import Client, Request
+    from poolhouse.workspace.localtools import Guarded, Limits
 
     class BodyClient(Client):
         def chat(self, messages, **kwargs):
             return self.build_body(messages, **kwargs)
     for api in ("llama", "openai"):
-        from ml_stack.client import Transport
+        from poolhouse.client import Transport
         client = BodyClient("http://127.0.0.1:1", model="qwen", request=Request(n_predict=2048),
                             transport=Transport(api=api))
         guarded = Guarded(client, effort="off", limits=Limits(60, 5, max_output_tokens=8192), stop=lambda: False)

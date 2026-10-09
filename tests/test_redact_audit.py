@@ -1,4 +1,4 @@
-"""`ml-stack-audit`: every tracked file read for a person's details, reported, never blocked.
+"""`poolhouse-audit`: every tracked file read for a person's details, reported, never blocked.
 
 The recogniser here is a fake that finds what it is told to, so nothing depends on presidio.
 Everything named is invented.
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.redact import audit, hook
+from poolhouse.redact import audit, hook
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "audit-pii"
 

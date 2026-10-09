@@ -1,4 +1,4 @@
-"""`ml-stack runtime restart-host`: the running host is replaced by the selected runtime, gracefully or not at all.
+"""`poolhouse runtime restart-host`: the running host is replaced by the selected runtime, gracefully or not at all.
 
 The host is a real HTTP server answering `/health` the way the daemon does; the runtime is a real selected tree from the
 deploy tests' fake builder. The only seam is the detached process that would run the replacement: it records its command
@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 from test_runtime_deploy import builder, commit, plan_for, world  # noqa: F401
 
-from ml_stack import runtime, runtime_deploy, runtime_host
-from ml_stack.http import Server
+from poolhouse import runtime, runtime_deploy, runtime_host
+from poolhouse.http import Server
 
 pytestmark = pytest.mark.slow
 OLD = "0" * 40
@@ -106,7 +106,7 @@ def test_a_host_already_on_the_selected_runtime_is_not_restarted_unless_forced(d
 def test_a_host_with_no_launcher_control_is_refused_and_never_signalled(deployed, host):
     running, spawn = host(control=""), Spawner()
     out = runtime_host.restart(running.port, Path("/r"), seams=runtime_host.Seams(spawn=spawn))
-    assert out.action == "failed" and "predates" in out.detail and "Poolside" in out.detail and not spawn.calls
+    assert out.action == "failed" and "predates" in out.detail and "Poolhouse" in out.detail and not spawn.calls
 
 
 def test_a_behind_host_is_replaced_through_the_job_preserving_restart_on_its_port_and_root(deployed, host):
@@ -115,7 +115,7 @@ def test_a_behind_host_is_replaced_through_the_job_preserving_restart_on_its_por
     out = runtime_host.restart(running.port, Path("/the/root"), seams=runtime_host.Seams(spawn=spawn), wait_s=10)
     assert (out.action, out.commit) == ("restarted", deployed)
     [(module, argv, log)] = spawn.calls
-    assert module == "ml_stack.fleet.launch"
+    assert module == "poolhouse.fleet.launch"
     assert argv == ["--restart", "--no-browser", "--port", str(running.port), "--root", "/the/root"]
     assert log == runtime.directory() / "restart.log"
 

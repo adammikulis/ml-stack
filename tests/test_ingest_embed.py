@@ -8,12 +8,12 @@ import json
 import pytest
 from conftest import json_reply
 
-pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
 
-from ml_stack.client.embed import BATCH
-from ml_stack.graph.store import GraphStore
-from ml_stack.graph.vectors import embedded
-from ml_stack.ingest.embed import embed_store, texts_for
+from poolhouse.client.embed import BATCH
+from poolhouse.graph.store import GraphStore
+from poolhouse.graph.vectors import embedded
+from poolhouse.ingest.embed import embed_store, texts_for
 
 GRAPH = {
     "nodes": [
@@ -155,7 +155,7 @@ def test_a_server_dying_partway_leaves_a_written_count_short_of_the_total(server
 def test_the_read_run_prints_the_denominator_and_warns_short(server, tmp_path, capsys):
     import argparse
 
-    from ml_stack.ingest import run
+    from poolhouse.ingest import run
 
     n = BATCH + 8
     instance = server(_dies_after_first_batch())
@@ -169,12 +169,12 @@ def test_the_read_run_prints_the_denominator_and_warns_short(server, tmp_path, c
     out, err = capsys.readouterr()
     assert f"embedded {BATCH} of {n} node(s)" in out
     assert f"{n - BATCH} node(s) short of a vector" in err
-    assert "ml-stack-ingest embed --out" in err
+    assert "poolhouse-ingest embed --out" in err
 
 
 def test_embed_raises_on_a_dimension_mismatch(server):
     """`client.embed.embed` itself: a server answering the wrong width is refused, not padded."""
-    from ml_stack.client.embed import EmbeddingError, embed
+    from poolhouse.client.embed import EmbeddingError, embed
 
     instance = server(lambda method, path, body: json_reply(
         {"data": [{"embedding": [1.0, 2.0, 3.0]}]}))
@@ -193,8 +193,8 @@ class TestAReadRunEmbedsWhatItRead:
         return argparse.Namespace(**said)
 
     def test_it_embeds_when_the_read_finishes(self, tmp_path, monkeypatch, capsys):
-        from ml_stack.ingest import run
-        from ml_stack.ingest.embed import Embedded
+        from poolhouse.ingest import run
+        from poolhouse.ingest.embed import Embedded
 
         asked = {}
 
@@ -202,40 +202,40 @@ class TestAReadRunEmbedsWhatItRead:
             asked.update(out=str(out), base_url=base_url, model=model)
             return Embedded(written=7, total=7)
 
-        monkeypatch.setattr("ml_stack.ingest.run.embed_store", note)
+        monkeypatch.setattr("poolhouse.ingest.run.embed_store", note)
         run._embedded(self.args(tmp_path / "s.ladybug"))
         assert asked["base_url"] == run.EMBED_URL
         assert asked["model"] == "embed"
         assert "embedded 7 of 7 node(s)" in capsys.readouterr().out
 
     def test_no_embed_leaves_it_to_the_embed_command(self, tmp_path, monkeypatch):
-        from ml_stack.ingest import run
+        from poolhouse.ingest import run
 
         def never(*a, **k):
             raise AssertionError("--no-embed still embedded")
 
-        monkeypatch.setattr("ml_stack.ingest.run.embed_store", never)
+        monkeypatch.setattr("poolhouse.ingest.run.embed_store", never)
         run._embedded(self.args(tmp_path / "s.ladybug", embed=False))
 
     def test_an_embedder_that_cannot_be_reached_says_how_to_finish_later(
             self, tmp_path, monkeypatch, capsys):
-        from ml_stack.ingest import run
+        from poolhouse.ingest import run
 
         def refuse(*a, **k):
             raise ConnectionError("nothing is serving on 8081")
 
-        monkeypatch.setattr("ml_stack.ingest.run.embed_store", refuse)
+        monkeypatch.setattr("poolhouse.ingest.run.embed_store", refuse)
         run._embedded(self.args(tmp_path / "s.ladybug"))
         said = capsys.readouterr().err
         assert "read, not embedded" in said
-        assert "ml-stack-ingest embed --out" in said
+        assert "poolhouse-ingest embed --out" in said
 
     def test_the_url_and_the_model_asked_for_win(self, tmp_path, monkeypatch):
-        from ml_stack.ingest import run
-        from ml_stack.ingest.embed import Embedded
+        from poolhouse.ingest import run
+        from poolhouse.ingest.embed import Embedded
 
         asked = {}
-        monkeypatch.setattr("ml_stack.ingest.run.embed_store",
+        monkeypatch.setattr("poolhouse.ingest.run.embed_store",
                             lambda out, **kw: asked.update(kw) or Embedded(written=1, total=1))
         run._embedded(self.args(tmp_path / "s.ladybug", embed_url="http://127.0.0.1:9",
                                 embed_model="a-embedder"))
@@ -244,23 +244,23 @@ class TestAReadRunEmbedsWhatItRead:
 
     def test_a_partial_embed_warns_with_the_command_that_finishes_it(
             self, tmp_path, monkeypatch, capsys):
-        from ml_stack.ingest import run
-        from ml_stack.ingest.embed import Embedded
+        from poolhouse.ingest import run
+        from poolhouse.ingest.embed import Embedded
 
-        monkeypatch.setattr("ml_stack.ingest.run.embed_store",
+        monkeypatch.setattr("poolhouse.ingest.run.embed_store",
                             lambda out, **kw: Embedded(written=3, total=5))
         run._embedded(self.args(tmp_path / "s.ladybug", embed_url="http://127.0.0.1:9",
                                 embed_model="a-embedder"))
         out, err = capsys.readouterr()
         assert "embedded 3 of 5 node(s)" in out
         assert "2 node(s) short of a vector" in err
-        assert ("ml-stack-ingest embed --out" in err
+        assert ("poolhouse-ingest embed --out" in err
                and "--embed-url http://127.0.0.1:9" in err
                and "--embed-model a-embedder" in err)
 
 
 def test_embedding_is_on_unless_the_command_line_says_otherwise():
-    from ml_stack.ingest.cli import parser
+    from poolhouse.ingest.cli import parser
 
     assert parser().parse_args(["doc.pdf"]).embed is True
     assert parser().parse_args(["doc.pdf", "--no-embed"]).embed is False

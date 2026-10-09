@@ -1,6 +1,6 @@
 """One word written two ways."""
 
-from ml_stack.entities.spelling import budget, close, collapsed, distance, nearest, spelled_in
+from poolhouse.entities.spelling import budget, close, collapsed, distance, nearest, spelled_in
 
 
 def test_distance_gives_up_past_the_ceiling():

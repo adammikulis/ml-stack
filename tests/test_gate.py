@@ -1,8 +1,8 @@
-"""Requests to servers ml-stack started are served one at a time per device, across processes.
+"""Requests to servers poolhouse started are served one at a time per device, across processes.
 
 The servers here are real HTTP servers in this process that record the window in which each
 generation was running; the callers are separate Python processes sending through
-`ml_stack.http`, the path every consumer uses.
+`poolhouse.http`, the path every consumer uses.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from typing import NamedTuple
 
 import pytest
 
-from ml_stack import gate, home
-from ml_stack.http import Server, ServerError, request_json
-from ml_stack.serve.process import kill_process_tree
+from poolhouse import gate, home
+from poolhouse.http import Server, ServerError, request_json
+from poolhouse.serve.process import kill_process_tree
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 HOLD_S = 0.3
@@ -98,7 +98,7 @@ def servers():
 
 
 def worker(url: str, who: str, *, env: dict[str, str] | None = None) -> subprocess.Popen:
-    code = ("import sys\nfrom ml_stack.http import request_json\n"
+    code = ("import sys\nfrom poolhouse.http import request_json\n"
             "request_json(sys.argv[1], payload={'messages': []}, headers={'X-Who': sys.argv[2]})\n")
     return subprocess.Popen([sys.executable, "-c", code, url, who],
                             env={**os.environ, "PYTHONPATH": SRC, **(env or {})},
@@ -107,7 +107,7 @@ def worker(url: str, who: str, *, env: dict[str, str] | None = None) -> subproce
 
 def together(url: str, who: str, at: float) -> subprocess.Popen:
     """A worker that sends its request at the clock time ``at``."""
-    code = ("import sys, time\nfrom ml_stack.http import request_json\n"
+    code = ("import sys, time\nfrom poolhouse.http import request_json\n"
             "while time.time() < float(sys.argv[3]):\n    pass\n"
             "request_json(sys.argv[1], payload={}, headers={'X-Who': sys.argv[2]})\n")
     return subprocess.Popen([sys.executable, "-c", code, url, who, str(at)],
@@ -184,7 +184,7 @@ def test_requests_are_served_in_the_order_they_arrived(servers):
 
 HOLDER = """
 import os, sys, time
-from ml_stack import gate
+from poolhouse import gate
 with gate.turn(sys.argv[1]):
     print(f'held {os.getpid()}', flush=True)
     time.sleep(60)
@@ -280,7 +280,7 @@ def test_a_thread_holding_the_device_can_send_a_nested_request(servers):
 
 def test_the_turn_is_held_until_a_streamed_answer_is_read(servers):
     (one,) = servers(1, hold_s=0.01)
-    from ml_stack.http import request_stream
+    from poolhouse.http import request_stream
 
     stream = request_stream(one.url, payload={}, timeout=5)
     with contextlib.suppress(ServerError):
@@ -290,7 +290,7 @@ def test_the_turn_is_held_until_a_streamed_answer_is_read(servers):
 
 
 def test_a_streamed_request_waits_for_its_turn_like_any_other(servers, monkeypatch):
-    from ml_stack.http import request_stream
+    from poolhouse.http import request_stream
 
     (one,) = servers(1, hold_s=0.01)
     held = holder(one.url)
@@ -308,7 +308,7 @@ def test_parallel_block_is_named_and_logged(servers, caplog):
     (one,) = servers(1, hold_s=0.01)
     held = holder(one.url)
     try:
-        with caplog.at_level("WARNING", logger="ml_stack.gate"), gate.parallel("bench sweep"):
+        with caplog.at_level("WARNING", logger="poolhouse.gate"), gate.parallel("bench sweep"):
             request_json(one.url, payload={}, timeout=5)
         assert len(one.windows) == 1
         assert "bench sweep" in caplog.text
@@ -319,8 +319,8 @@ def test_parallel_block_is_named_and_logged(servers, caplog):
 
 def test_the_benchmarks_that_measure_streams_in_flight_together_send_them_in_parallel(
         servers, monkeypatch):
-    from ml_stack.bench import speed
-    from ml_stack.client import Client
+    from poolhouse.bench import speed
+    from poolhouse.client import Client
 
     (one,) = servers(1, hold_s=0.01)
     held = holder(one.url)
@@ -336,8 +336,8 @@ def test_the_benchmarks_that_measure_streams_in_flight_together_send_them_in_par
 
 
 def test_conversations_measured_in_flight_together_are_sent_in_parallel(servers, monkeypatch):
-    from ml_stack.bench.measure import concurrent
-    from ml_stack.client import Client
+    from poolhouse.bench.measure import concurrent
+    from poolhouse.client import Client
 
     (one,) = servers(1, hold_s=0.01)
     held = holder(one.url)

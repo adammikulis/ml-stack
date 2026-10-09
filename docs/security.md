@@ -1,6 +1,6 @@
 # Security
 
-What ml-stack trusts, what it exposes, and what each kind of attacker can do. Reviewed
+What Poolhouse trusts, what it exposes, and what each kind of attacker can do. Reviewed
 2026-10-02 on `agent/hardening` and carried onto the integration branch; the fix for each
 finding is the commit named in the table. Other documents: `docs/credentials.md` (tokens and
 keys), `docs/fleet.md` (the daemon), `docs/serving.md` and `docs/serve-admission.md` (model
@@ -10,11 +10,11 @@ for anything that acts for a person, with what is built and what is not).
 
 ## The model
 
-**Trusted.** The account that runs ml-stack, the files under `ML_STACK_HOME` and
-`ML_STACK_CACHE`, every machine that holds the cluster key, `huggingface.co`, `github.com`
+**Trusted.** The account that runs Poolhouse, the files under `POOLHOUSE_HOME` and
+`POOLHOUSE_CACHE`, every machine that holds the cluster key, `huggingface.co`, `github.com`
 and the Python packages the user installed.
 
-Development is the default cluster mode and trusts nearby ml-stack devices for automatic
+Development is the default cluster mode and trusts nearby Poolhouse devices for automatic
 admission. A local-network device can obtain the Development cluster key through the
 advertised pinned TLS endpoint without a passphrase or person approval. Production requires
 explicit admission and preserves an explicitly recorded Production profile.
@@ -29,14 +29,14 @@ else on the LAN.
 sends (`PUT /files/*`). Holding the cluster key is the same as having a shell on every machine
 in the cluster, and holding the key is no longer enough to be one: a request from another machine
 is answered only over mutual TLS 1.3 by a device whose own certificate is listed as a member
-(`fleet/membership.py`), so a device is put out alone (`ml-stack-peers members revoke`) and is refused
+(`fleet/membership.py`), so a device is put out alone (`poolhouse-peers members revoke`) and is refused
 from its next handshake and next request. The cluster key stays as the secret that seals beacons and
 signs and seals request bodies (defence in depth); a device that is revoked still knows it until the
 key is rotated (docs/pool-encryption.md, slice 7). Production admission protects its cluster key, 256 random bits that
 no passphrase derives. Development admission extends this trust to nearby devices through
 its automatic TLS handshake. The passphrase is only a password for the Production join handshake, which locks out a
-source that keeps failing, so it is at least 5 characters; `ml-stack-peers init` makes a key with
-no passphrase. A job a peer submits is limited to an allowlist of ml-stack commands
+source that keeps failing, so it is at least 5 characters; `poolhouse-peers init` makes a key with
+no passphrase. A job a peer submits is limited to an allowlist of Poolhouse commands
 (`docs/fleet.md`).
 
 ## What listens
@@ -47,9 +47,9 @@ no passphrase. A job a peer submits is limited to an allowlist of ml-stack comma
 | Daemon web interface, `/ui` | this machine alone | other machines only with `--ui-from-lan`, and then over TLS only (it signs in with the passphrase) |
 | Discovery beacons, UDP 8771, multicast `239.255.77.70`, TTL 1 | sent once a cluster is joined | the LAN segment |
 | llama-server and other model servers | `127.0.0.1`, a random port | this machine; the daemon's `/infer` passes signed requests on to a fixed set of model-server paths |
-| `ml-stack-graph` page | `127.0.0.1` | this machine |
-| Pairing listener, TCP 8772, announcements UDP 8773 | off; only while `ml-stack cluster listen` runs | anyone on the LAN can send a request; nothing is given until the owner accepts and the code is typed. TLS only; plain HTTP is refused. `docs/onboarding.md` |
-| Bootstrap offer, an HTTPS port chosen at the time | off; only while `ml-stack cluster bootstrap` runs, for ten minutes | whoever has the unguessable address; program files only |
+| `poolhouse-graph` page | `127.0.0.1` | this machine |
+| Pairing listener, TCP 8772, announcements UDP 8773 | off; only while `poolhouse cluster listen` runs | anyone on the LAN can send a request; nothing is given until the owner accepts and the code is typed. TLS only; plain HTTP is refused. `docs/onboarding.md` |
+| Bootstrap offer, an HTTPS port chosen at the time | off; only while `poolhouse cluster bootstrap` runs, for ten minutes | whoever has the unguessable address; program files only |
 
 A beacon carries the machine's name, port, device report and its TLS certificate, sealed with
 AES-256-GCM under a key derived from the cluster key; the kind, a timestamp and the asker's nonce
@@ -90,12 +90,12 @@ hostname: unsigned `/health` detail and the web interface setup guard check that
 names an address, not a DNS name.
 
 **A malicious model file or repository.** A repository's file names are only written under
-`ML_STACK_HOME` after `safenames.safe_filename`; a download from a URL cannot reach a private or
+`POOLHOUSE_HOME` after `safenames.safe_filename`; a download from a URL cannot reach a private or
 metadata address at any redirect; a GGUF is parsed by llama.cpp, which is outside this library, and by a reader here that refuses a header that claims more than the file holds.
 No model is loaded with a pickle (`torch.load`, `pickle`, `yaml.load` and `eval` are not used on
 a file anywhere in the package), and `trust_remote_code` is never set.
 
-**A malicious page being scraped or read.** `ml_stack.web.read` goes through `ml_stack.net`:
+**A malicious page being scraped or read.** `poolhouse.web.read` goes through `poolhouse.net`:
 the address is resolved once and connected to, every redirect is re-checked, the body is
 capped, hidden text and invisible characters are removed, and the result is fenced and marked
 untrusted. A URL that only fetched content mentioned is not fetched by itself. The browser
@@ -118,14 +118,14 @@ These apply to every consumer of the library without a switch.
 - An `Agent` runs with the built-in rails (tool policy, secrets, untrusted-text fencing, taint)
   and the model tier unless the caller passes `interventions=guard.off(because=...)`, which is
   logged. An empty list is refused.
-- A GGUF or safetensors header is read by one bounded reader (`ml_stack.hub.modelfile`): every
+- A GGUF or safetensors header is read by one bounded reader (`poolhouse.hub.modelfile`): every
   count and length is checked against the file's size, and a header is held to a pair cap, an
   item budget, a nesting depth, a dimension cap and a time budget.
 - A server a `ServerManager` starts stops with the process that started it, including when that
   process is killed outright (`stop_on_exit`, a watchdog process, an orphan sweep on the next
   lease that stops only a server whose record proves its pid).
-- Importing `ml_stack` registers no signal handler or exit hook, builds no manager, opens no
-  socket and writes no file; `ml_stack.__version__` and a `NullHandler` are all it adds.
+- Importing `poolhouse` registers no signal handler or exit hook, builds no manager, opens no
+  socket and writes no file; `poolhouse.__version__` and a `NullHandler` are all it adds.
 - The daemon listens on this machine until the machine joins a cluster; beyond this machine it
   is TLS 1.3 to a pinned certificate or nothing (there is no switch that turns it off, and a
   listener beyond this machine cannot be built without a TLS context); every request is signed, fresh and unseen, and its body is sealed
@@ -133,12 +133,12 @@ These apply to every consumer of the library without a switch.
   connection count and time are bounded.
 - A cluster's key is random and is handed to a joining machine by a password-authenticated
   exchange; no key is derived from a passphrase, and a protocol 2 peer is ignored.
-- `ml_stack.http.open_stream` and `build_request` open only `http` and `https`; messages about
+- `poolhouse.http.open_stream` and `build_request` open only `http` and `https`; messages about
   a URL carry no user, password or secret query parameter.
-- Everything fetched from the internet goes through `ml_stack.net` (`docs/internet.md`): a
+- Everything fetched from the internet goes through `poolhouse.net` (`docs/internet.md`): a
   host allow-list with recorded approvals; loopback, private, link-local, metadata,
   carrier-grade-NAT and multicast addresses refused at every redirect (an operator names an
-  exception in `ML_STACK_FETCH_ALLOW_HOSTS`); no downgrade from HTTPS; size and time caps;
+  exception in `POOLHOUSE_FETCH_ALLOW_HOSTS`); no downgrade from HTTPS; size and time caps;
   a pinned SHA-256 where a manifest lists one, and none to download without one where a digest
   is required; staging in a private directory; GGUF, safetensors, PDF and archive checks;
   a virus scan where a scanner exists; provenance beside the file; a file that fails goes to
@@ -147,11 +147,11 @@ These apply to every consumer of the library without a switch.
 - Archives unpack through `safenames.unpack`; a remote file name goes through
   `safenames.safe_filename`.
 - Child processes (model servers, a peer's job) do not inherit tokens and keys.
-- An MCP server started over stdio runs under the sandbox (`ml_stack.sandbox`): it reads the
+- An MCP server started over stdio runs under the sandbox (`poolhouse.sandbox`): it reads the
   interpreter and the project, writes a scratch directory, reaches loopback only and sees only
   the environment it was given. With no sandbox available it is not started unless the caller
   passes `AllowUnsandboxed(reason)`, which is logged and sent to the sentinel.
-- A credential is read through `ml_stack.credentials`, from a file only its owner can read.
+- A credential is read through `poolhouse.credentials`, from a file only its owner can read.
 - State, token and credential files are written atomically with mode `0600`.
 - Server logs are bounded in count, size and age.
 - Decision models are the guard/decider layer, and their kind is a label, not a trust grant:
@@ -162,21 +162,21 @@ These apply to every consumer of the library without a switch.
 
 ## The OS keystore
 
-One module, `ml_stack/keystore.py`, talks to the operating system's keystore, and
+One module, `poolhouse/keystore.py`, talks to the operating system's keystore, and
 `tests/test_keystore_gate.py` fails if another does. It holds one master key per user; the
 memory vault, the fleet signing key and wrapped credentials use subkeys cut from it with a
 purpose label that is also authenticated data. It asks the OS lazily and at most once per
 process, stops for good in a process after a refusal (and for ten minutes across processes),
 allows twenty operations per hour, lets one process of several that start together do the
-asking, and refuses a background process until a person runs `ml-stack-security unlock`.
+asking, and refuses a background process until a person runs `poolhouse-security unlock`.
 Every operation is a sentinel event without a value. The design and the limits are in
 `docs/keystore.md`; the attacks it is tested against are in `tests/test_redteam_keystore.py`.
 
 ## What is exempt from the net scan
 
-`tests/test_net_no_bypass.py` fails for any module outside `ml_stack.net` that imports a network
+`tests/test_net_no_bypass.py` fails for any module outside `poolhouse.net` that imports a network
 library, opens a socket, runs `git`, `curl` or `pip install` against a remote, or calls
-`ml_stack.http`'s request functions. The list of modules it lets through is short and each entry
+`poolhouse.http`'s request functions. The list of modules it lets through is short and each entry
 carries its reason in the test. Three kinds, none of which can fetch from a public host on its
 own:
 
@@ -184,10 +184,10 @@ own:
   `docs/redteam/findings.md` ("Judge hardening") and `docs/guardrails.md` ("Attacks on the judge itself").
 - **Model servers a person pointed at.** `client/`, `bench/`, `fleet/*` peers, `serve/*` (a
   server's slots and props by local port), and the decide backend (`decide/logprob.py`,
-  `decide/router.py`, the server in `ML_STACK_DECIDE_URL`, 127.0.0.1:8080 unless set). These
+  `decide/router.py`, the server in `POOLHOUSE_DECIDE_URL`, 127.0.0.1:8080 unless set). These
   talk to an inference server the person configured; nothing they get back is installed or kept.
   The decide backend is stricter than `client/`: its URL must be on this machine (127.0.0.1,
-  `localhost`, `::1`) unless the operator names the host in `ML_STACK_FETCH_ALLOW_HOSTS`,
+  `localhost`, `::1`) unless the operator names the host in `POOLHOUSE_FETCH_ALLOW_HOSTS`,
   because a decider sees every tool call it judges (`decide.logprob.require_decider_host`;
   `tests/test_decide_hosts.py`). `client/` may still name a remote host; that is the person's choice.
 - **LAN onboarding** (`fleet/onboard/pairing.py`, `fleet/onboard/transfer.py`). A peer's
@@ -207,7 +207,7 @@ own:
 
 A relative import such as `from .requests import ...` is a sibling module, not the `requests`
 library, and is not flagged. Everything that does reach a public host (the Hub, GitHub, the
-geocoder, pages, `huggingface_hub`) goes through `ml_stack.net`: the decider checkpoint and the
+geocoder, pages, `huggingface_hub`) goes through `poolhouse.net`: the decider checkpoint and the
 injection classifier now do too.
 
 ## Internet pipeline
@@ -252,7 +252,7 @@ at that commit.
 | 26 | Info | `http.check` | The address check ran before the connection, so DNS could answer differently the second time | `db89b03` `httpguard.fetch` connects to the address it checked |
 | 27 | Low | `serve/preflight.py:87`, `serve/mlx_tree.py:92` | A model file whose header declares a string, an array or a pair count of 2^40 made the preflight allocate or loop on it | `35846af` |
 | 28 | Medium | `fleet/daemon.py`, `fleet/api.py` | Anyone on the segment read and altered peer-to-peer bodies (jobs, files, replies) | `d6ea366` |
-| 29 | Medium | `fleet/discovery.py:_salt_for` | The passphrase salt was a hash of the cluster name, so a table precomputed for `ml-stack` fit every cluster of that name | `518a855` per-cluster random salt, protocol 2; superseded: no key is derived from a passphrase |
+| 29 | Medium | `fleet/discovery.py:_salt_for` | The passphrase salt was a hash of the cluster name, so a table precomputed for `poolhouse` fit every cluster of that name | `518a855` per-cluster random salt, protocol 2; superseded: no key is derived from a passphrase |
 | 30 | Medium | `hub/header.py`, `hub/cards.py`, `serve/tensors.py` | Three more GGUF readers walked the counts and lengths a file claimed: a 2^60-byte string raised `MemoryError`, a 2^50-item or deeply nested array looped for as long as it liked, and a model list hung on one hostile file | integration: one reader, `hub/modelfile.py` |
 
 `ruff --select S` (bandit) over `src`: 84 findings at `agent/audit`; the `ruff-security` budget
@@ -298,7 +298,7 @@ exists only after the owner accepts, never appears in a notification, lives 120 
 has three tries; requests are limited per device, per address and overall, and a declined or
 failed device waits. A cluster member is fully trusted, so pairing hands over the cluster key
 unless told not to. Pairing also lists each side's certificate in the other's cluster record, and
-`ml-stack-peers members revoke` puts a device out of the cluster (not only of pairing): it is
+`poolhouse-peers members revoke` puts a device out of the cluster (not only of pairing): it is
 refused from its next handshake, but, while it holds the key, it can still read captured beacons until
 the key is rotated (not automated yet). Files from peers are checked
 against a manifest signed with the cluster's Ed25519 key (generated on the controller, kept in the
@@ -312,7 +312,7 @@ Hub (`docs/model-discovery.md`, "Peers first"): the digest a file must have is t
 never one a peer states; peers are reached only on private, loopback, link-local or tailnet
 addresses over pinned TLS; the serving device applies the sharing level and withholds a quarantined
 copy; a peer whose bytes fail a digest is dropped and reported to sentinel. Off with `--no-peers`,
-`ML_STACK_NO_PEERS=1` or `ml-stack cluster peers off`. Pairing fills the peer book: each side's
+`POOLHOUSE_NO_PEERS=1` or `poolhouse cluster peers off`. Pairing fills the peer book: each side's
 share address, pinned certificate, signing key and request key arrive in the grant and in an
 offer sealed under the exchange (a bad tag, or a certificate other than the one the exchange
 bound, stores nothing); revoking removes the rows. `fleet share --models` serves only paths that
@@ -327,7 +327,7 @@ not built.
 
 ## Open
 
-These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-stack issue
+These need a decision, or work that belongs to another branch (`HANDOFF.md`, Poolhouse issue
 #18).
 
 - **Windows:** the mode and ownership checks on credential files do not apply, `icacls` is
@@ -346,14 +346,14 @@ route or workspace message can answer, cancel or list the answers of a request.
 
 ## Sentinel
 
-`ml_stack.sentinel` watches for the attacks above and holds what they touched; the design,
+`poolhouse.sentinel` watches for the attacks above and holds what they touched; the design,
 the measurements and the limits are in `docs/sentinel.md`. What it adds to this model, and
 no more than what its tests show:
 
 - **A pinned model, binary, adapter or config file that changes is found** at load and on a
   timer, by digest (and by link target), and in the default `guarded` mode moved aside into a
-  `.ml-stack-quarantine` directory under the managed root it sits in. Nothing outside
-  `ML_STACK_HOME`, `ML_STACK_CACHE` and the Hugging Face hub cache is ever moved. Release
+  `.poolhouse-quarantine` directory under the managed root it sits in. Nothing outside
+  `POOLHOUSE_HOME`, `POOLHOUSE_CACHE` and the Hugging Face hub cache is ever moved. Release
   moves the file back byte for byte; only a person's confirmed purge deletes.
 - **A peer that replays signed requests or sends forged ones is refused** once it crosses a
   threshold, through a wrapper around `macauth.Authenticator.check` that the fleet daemon
@@ -361,10 +361,10 @@ no more than what its tests show:
 - **Text a guard rail denies or reads as an instruction is held**, not shown again, and a
   summary that repeats a held sentence is held too. Nothing a model could be shown comes back
   except through a person's release at a terminal. Rewording defeats the summary check.
-- **Release is human-only, and `ml-stack-security review` keeps it that way while making it
+- **Release is human-only, and `poolhouse-security review` keeps it that way while making it
   easy.** A release or purge needs a grant that only `human.mint` or `human.mint_pressed` can
   make, and both refuse before reading a key unless stdin and stdout are terminals and no
-  agent marker (`CLAUDECODE`, `ML_STACK_AGENT`, `ML_STACK_NONINTERACTIVE`) is set. The review
+  agent marker (`CLAUDECODE`, `POOLHOUSE_AGENT`, `POOLHOUSE_NONINTERACTIVE`) is set. The review
   screen lowers the cost (one confirming key to release, after showing what is unblocked)
   but not the bar: a purge still needs the id typed in full, the keys come only from the
   terminal, and everything printed from a held subject is escaped and bounded. Viewing
@@ -389,14 +389,14 @@ no more than what its tests show:
   is parked and counted, one that names a decoy or a sentinel path is refused, and a result
   that is held or carries a decoy value is replaced. Running without it takes
   `unwatched(because=...)` or `guard.off(because=...)` and is logged.
-- **A server is started only for a model that matches its pin** (a model ml-stack pulled is pinned
+- **A server is started only for a model that matches its pin** (a model Poolhouse pulled is pinned
   at pull time, `source=pull`; a model it did not pull is pinned on first use and logged as such; a signed
   owner manifest that this machine accepted and that names the file must agree with it, else the file is
   quarantined and an older manifest is refused), and a held model or server cannot be leased or restarted until a person
   releases it. The Broker and fleet daemons scan every pin on a timer
-  (`ML_STACK_SENTINEL_SCAN`), and `ml-stack security status` says whether that loop is armed.
-  Switching sentinel (`ML_STACK_SENTINEL=off`) or the scan off needs a reason in
-  `ML_STACK_SENTINEL_BECAUSE` / `ML_STACK_SENTINEL_SCAN_BECAUSE`; without one the switch is
+  (`POOLHOUSE_SENTINEL_SCAN`), and `poolhouse security status` says whether that loop is armed.
+  Switching sentinel (`POOLHOUSE_SENTINEL=off`) or the scan off needs a reason in
+  `POOLHOUSE_SENTINEL_BECAUSE` / `POOLHOUSE_SENTINEL_SCAN_BECAUSE`; without one the switch is
   ignored and logged. A start skips re-hashing a model whose size, mtime and inode are
   unchanged since its last full check; an in-place edit that restores them waits for a deep scan.
   `docs/sentinel.md`, "What is armed by default", lists what is not wired.
@@ -410,13 +410,13 @@ no more than what its tests show:
   the server launcher and the MCP launcher start; a quarantined MCP server is not connected.**
 - **A decoy HTTP endpoint on loopback** (Broker and fleet daemons) turns any request to it into
   a high-confidence event and freezes the sessions that had a tool running. Its address is only
-  in `credentials.endpoint` under the state root. Off: `ML_STACK_SENTINEL_DECOY=off` with
-  `ML_STACK_SENTINEL_DECOY_BECAUSE`.
+  in `credentials.endpoint` under the state root. Off: `POOLHOUSE_SENTINEL_DECOY=off` with
+  `POOLHOUSE_SENTINEL_DECOY_BECAUSE`.
 - **Served models are probed on a schedule** (default hourly, 18 short requests each) against the
   answers recorded the first time: a drift is a watch, a large confirmed one quarantines the
-  model. Off: `ML_STACK_SENTINEL_CANARY=off` with `ML_STACK_SENTINEL_CANARY_BECAUSE`. It
+  model. Off: `POOLHOUSE_SENTINEL_CANARY=off` with `POOLHOUSE_SENTINEL_CANARY_BECAUSE`. It
   detects change, not a model that was bad at the start.
-- **The event log is hash-chained** and `ml-stack security verify` finds edits, cuts and
+- **The event log is hash-chained** and `poolhouse security verify` finds edits, cuts and
   reordering; the head can be written down elsewhere.
 - **A model that answers a fixed probe set differently from how it did at install is
   flagged.** This is not backdoor detection. A model that was bad when it was pinned, or whose
@@ -429,12 +429,12 @@ signals above act; `enforce` also acts on thresholds.
 
 ## Agent workspace
 
-`ml-stack-workspace` (`src/ml_stack/workspace/`, design in `docs/workspace.md`) lets agent
+`poolhouse-workspace` (`src/poolhouse/workspace/`, design in `docs/workspace.md`) lets agent
 processes on one machine exchange messages and notes and avoid each other's ports, worktrees
 and scratch files. It is a channel from one model's output into another model's input, so it is
 treated as untrusted input.
 
-**What listens.** Nothing. The workspace is a directory (`ML_STACK_WORKSPACE_HOME`, else
+**What listens.** Nothing. The workspace is a directory (`POOLHOUSE_WORKSPACE_HOME`, else
 `<state>/workspace`, mode 0700) read and written by the commands and MCP tools of processes of
 one account. There is no socket and no LAN exposure.
 
@@ -455,25 +455,25 @@ logs (a full rewrite with recomputed hashes is undetectable) and read another pr
 environment. Pattern screens miss paraphrase. The workspace labels and fences text; it does not
 stop a model from obeying what it was shown.
 
-**Operations.** `init` refuses to run when `CLAUDECODE`, `ML_STACK_AGENT` or
-`ML_STACK_NONINTERACTIVE` is set. Minting, revoking, releasing quarantine, running a note's
+**Operations.** `init` refuses to run when `CLAUDECODE`, `POOLHOUSE_AGENT` or
+`POOLHOUSE_NONINTERACTIVE` is set. Minting, revoking, releasing quarantine, running a note's
 command and `gc` are CLI-only and are not offered over MCP. Tokens come from
-`ML_STACK_WORKSPACE_TOKEN` or `--token-file`, never from an argument.
+`POOLHOUSE_WORKSPACE_TOKEN` or `--token-file`, never from an argument.
 
-**Private terms.** The denylist is a file outside the repository (`ML_STACK_WORKSPACE_DENYLIST`,
+**Private terms.** The denylist is a file outside the repository (`POOLHOUSE_WORKSPACE_DENYLIST`,
 else `<state>/workspace/private-terms`), one term per line.
 
 ## Sandbox
 
-`ml_stack.sandbox` confines a command to a deny-by-default policy (`docs/sandbox.md`): files it
+`poolhouse.sandbox` confines a command to a deny-by-default policy (`docs/sandbox.md`): files it
 may read and write, programs it may start, loopback or named ports or no network, an explicit
 environment, and time, CPU, file-size and output limits. It is the second layer behind the
 guard's rails and the taint rule: a command the guard allowed still cannot read a credential file
 outside its allow-list, write outside its scratch directory or open a connection.
 
-- **Where:** the shell tool (`ml_stack.sandbox.tools.SandboxedBash`), MCP servers started by
-  `McpTools.stdio`, Claude Code's Bash tool in `ml_stack.harness`, and a model server when
-  `ML_STACK_SANDBOX_SERVE=1` or `LlamaServerBackend(sandboxed=True)`.
+- **Where:** the shell tool (`poolhouse.sandbox.tools.SandboxedBash`), MCP servers started by
+  `McpTools.stdio`, Claude Code's Bash tool in `poolhouse.harness`, and a model server when
+  `POOLHOUSE_SANDBOX_SERVE=1` or `LlamaServerBackend(sandboxed=True)`.
 - **Fail closed:** with no sandbox the command is not run. `AllowUnsandboxed(reason)` is the only
   way around it and is logged on every use.
 - **Events:** a refusal is `sandbox.denied` on the sentinel bus (warning), with the operation and
@@ -481,7 +481,7 @@ outside its allow-list, write outside its scratch directory or open a connection
 - **macOS uses `sandbox-exec`, which Apple has deprecated.** This is a recorded exception
   (`docs/sandbox.md`), confined to `sandbox/seatbelt.py`; GPU workloads have no replacement yet.
 - **Linux** (bubblewrap) is built and checked by its argument list only.
-- `ml-stack security sandbox status|test` shows the backend and runs the guarantees.
+- `poolhouse security sandbox status|test` shows the backend and runs the guarantees.
 
 ## Live Gym and training workspace
 
@@ -492,7 +492,7 @@ its worker process group, including child simulators. These processes run as the
 account. They inherit its environment and are not enclosed in the agent shell sandbox. They
 are therefore trusted installed programs, not an isolation boundary for hostile native code.
 Gym sessions do not create containers or mount host directories into them. Monitored workspace
-jobs run an installed `ml-stack-*` command with literal argument strings, without a shell.
+jobs run an installed `poolhouse-*` command with literal argument strings, without a shell.
 
 Browser routes require the UI authentication and host checks. Request bodies must be JSON
 objects; session configuration and control payloads must be objects. Manual scenario filenames

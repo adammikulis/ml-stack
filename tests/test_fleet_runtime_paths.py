@@ -1,7 +1,7 @@
 import pytest
 
-from ml_stack import home
-from ml_stack.fleet.runtime_paths import configure
+from poolhouse import home
+from poolhouse.fleet.runtime_paths import configure
 
 
 def test_custom_runtime_routes_process_state_and_cache(tmp_path, monkeypatch):
@@ -23,7 +23,7 @@ def test_default_runtime_preserves_machine_identity(tmp_path, monkeypatch):
     expected = home.home()
     configure(expected / "traind")
     assert home.home() == expected
-    assert home.cache() == tmp_path / "account" / ".cache" / "ml_stack"
+    assert home.cache() == tmp_path / "account" / ".cache" / "poolhouse"
 
 
 def test_explicit_state_and_cache_roots_are_preserved(tmp_path, monkeypatch):
@@ -54,10 +54,10 @@ def test_empty_root_overrides_route_to_custom_runtime(tmp_path, monkeypatch):
 
 
 def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
-    from ml_stack import keystore, sentinel
-    from ml_stack.fleet import daemon
-    from ml_stack.sentinel.honey import Honey
-    from ml_stack.serve.leases import lease_file
+    from poolhouse import keystore, sentinel
+    from poolhouse.fleet import daemon
+    from poolhouse.sentinel.honey import Honey
+    from poolhouse.serve.leases import lease_file
 
     monkeypatch.delenv(home.ROOT_ENV, raising=False)
     monkeypatch.delenv(home.CACHE_ENV, raising=False)
@@ -79,10 +79,10 @@ def test_daemon_routes_roots_before_startup_services(tmp_path, monkeypatch):
         daemon.serve(daemon.DaemonOptions(root=root, announce=False, web=False))
 
 
-@pytest.mark.parametrize("marker", ["", "CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["", "CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"])
 def test_background_startup_does_not_display_token(marker, monkeypatch, capsys):
-    from ml_stack import person
-    from ml_stack.fleet.runtime_paths import announce_token
+    from poolhouse import person
+    from poolhouse.fleet.runtime_paths import announce_token
 
     for name in person.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
@@ -94,8 +94,8 @@ def test_background_startup_does_not_display_token(marker, monkeypatch, capsys):
 
 
 def test_person_startup_displays_token(monkeypatch, capsys):
-    from ml_stack import person
-    from ml_stack.fleet.runtime_paths import announce_token
+    from poolhouse import person
+    from poolhouse.fleet.runtime_paths import announce_token
 
     for name in person.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
@@ -113,9 +113,9 @@ def test_launcher_and_cluster_cli_import_in_a_fresh_process(first):
 
     source = Path(__file__).resolve().parents[1] / 'src'
     script = ("import importlib; "
-              f"importlib.import_module('ml_stack.fleet.{first}'); "
-              "from ml_stack.fleet import launch, join; "
-              "from ml_stack.fleet.runtime_paths import default_root; "
+              f"importlib.import_module('poolhouse.fleet.{first}'); "
+              "from poolhouse.fleet import launch, join; "
+              "from poolhouse.fleet.runtime_paths import default_root; "
               "assert launch.default_root is default_root; "
               "assert join.default_root is default_root")
     done = subprocess.run([sys.executable, '-c', script], capture_output=True,

@@ -6,19 +6,19 @@ import os
 
 import pytest
 
-from ml_stack.keystore import ENV_NONINTERACTIVE
-from ml_stack.workspace.identity import Denied, Registry
+from poolhouse.keystore import ENV_NONINTERACTIVE
+from poolhouse.workspace.identity import Denied, Registry
 
 
 def test_a_test_that_sets_the_agent_marker_in_process_sets_it():
     os.environ[ENV_NONINTERACTIVE] = "1"
-    os.environ["ML_STACK_TEST_LEAK"] = "1"
+    os.environ["POOLHOUSE_TEST_LEAK"] = "1"
     assert os.environ[ENV_NONINTERACTIVE] == "1"
 
 
 def test_the_next_test_does_not_see_it_and_can_register_a_person(tmp_path):
     assert ENV_NONINTERACTIVE not in os.environ
-    assert "ML_STACK_TEST_LEAK" not in os.environ
+    assert "POOLHOUSE_TEST_LEAK" not in os.environ
     assert Registry(tmp_path / "agents.json").init("someone")
 
 

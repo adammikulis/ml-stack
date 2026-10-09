@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from taskboard_kit import board as _board_fixture
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_worktree_recovery as recovery, task_worktrees
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.task_graph import record
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import task_worktree_recovery as recovery, task_worktrees
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.task_graph import record
 
 board = _board_fixture
 
@@ -75,7 +75,7 @@ def test_recovery_refuses_live_or_unique_work(inactive, monkeypatch, kind, legac
     elif kind in ('dirty', 'ignored'):
         (target / ('code.py' if kind == 'dirty' else '.private-state')).write_text('preserve\n')
     elif kind == 'commit':
-        from ml_stack.workspace import integration_git as repo
+        from poolhouse.workspace import integration_git as repo
         (target / 'code.py').write_text('unique = True\n')
         repo.git(target, 'add', '--', 'code.py')
         repo.git(target, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fix: unique task work')
@@ -110,8 +110,8 @@ def test_registered_legacy_scope_without_state_recovers_through_checked_lifecycl
 
 
 def test_missing_legacy_checkout_preserves_pending_history(inactive):
-    from ml_stack import worktreerules
-    from ml_stack.workspace import integration_git as repo
+    from poolhouse import worktreerules
+    from poolhouse.workspace import integration_git as repo
 
     kit = inactive
     with GraphStore(kit.base / 'coordination.db') as graph:
@@ -148,8 +148,8 @@ def test_claim_reservation_waits_for_recovery_lock(inactive):
 
 
 def test_existing_legacy_reserved_checkout_keeps_its_baseline(inactive):
-    from ml_stack import worktreerules
-    from ml_stack.workspace import integration_git as repo
+    from poolhouse import worktreerules
+    from poolhouse.workspace import integration_git as repo
 
     kit = inactive
     kit.board.resume(kit.parent, kit.task['id'], 'Prepare existing legacy reservation')

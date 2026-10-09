@@ -9,10 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import companion_routes
-from ml_stack.fleet.discovery import Membership, derive_token
-from ml_stack.fleet.invite_routes import ui_route
-from ml_stack.fleet.invites import Invitations, decode, proof
+from poolhouse.fleet import companion_routes
+from poolhouse.fleet.discovery import Membership, derive_token
+from poolhouse.fleet.invite_routes import ui_route
+from poolhouse.fleet.invites import Invitations, decode, proof
 
 CLUSTER_KEY = base64.urlsafe_b64encode(b"x" * 32).rstrip(b"=")
 
@@ -150,7 +150,7 @@ def test_machine_token_browser_session_cannot_enroll_android(enrolled):
 
 
 def test_stream_delivers_actual_deltas_then_completion(enrolled, monkeypatch):
-    from ml_stack.fleet import sdk_chat
+    from poolhouse.fleet import sdk_chat
     store, grant, _, _ = enrolled
     request = handler(grant, "/companion/v1/chat", "POST")
     observed = []
@@ -167,7 +167,7 @@ def test_stream_delivers_actual_deltas_then_completion(enrolled, monkeypatch):
 
 
 def test_revocation_closes_stream_before_more_output(enrolled, monkeypatch):
-    from ml_stack.fleet import sdk_chat
+    from poolhouse.fleet import sdk_chat
     store, grant, _, _ = enrolled
     request = handler(grant, "/companion/v1/chat", "POST")
     closed = []
@@ -200,10 +200,10 @@ def test_chat_rejects_extra_authority_and_unavailable_targets(enrolled, body):
 def test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes(enrolled, tmp_path):
     import http.client
 
-    from ml_stack.fleet import tls
-    from ml_stack.fleet.api import Daemon, make_handler
-    from ml_stack.fleet.framing import LimitedServer
-    from ml_stack.fleet.jobs import JobRunner
+    from poolhouse.fleet import tls
+    from poolhouse.fleet.api import Daemon, make_handler
+    from poolhouse.fleet.framing import LimitedServer
+    from poolhouse.fleet.jobs import JobRunner
     store, grant, _, _ = enrolled
     root = tmp_path / "daemon"
     root.mkdir()

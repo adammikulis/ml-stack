@@ -1,4 +1,4 @@
-# Contributing to ml-stack
+# Contributing to Poolhouse
 
 Issues and pull requests are welcome. This is a one-person, pre-1.0 project: expect slow reviews and changes to
 names and layout. `AGENTS.md` holds the working rules in full; the short version:
@@ -11,7 +11,7 @@ names and layout. `AGENTS.md` holds the working rules in full; the short version
   and verifying cleanup before the final report (see `AGENTS.md`, "Worktrees").
 - The gates in `scripts/gates/` refuse a new violation; run `scripts/budgets` before you push. A number in
   `budgets.json` may fall, never rise.
-- Tests build their own fixtures with invented names and never read `~/.ml-stack`. No real names, emails, hostnames
+- Tests build their own fixtures with invented names and never read `~/.poolhouse`. No real names, emails, hostnames
   or home paths in files or commit messages (`scripts/hooks/no-real-names` checks this).
 - A new dependency needs a licence compatible with Apache-2.0. `python scripts/notices.py` regenerates
   `THIRD_PARTY_NOTICES.md` and `--check` fails on a disallowed licence. GPL and AGPL packages stay optional extras that

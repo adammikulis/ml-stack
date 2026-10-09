@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import bench, net, sentinel
-from ml_stack.activity import feeds, writer
-from ml_stack.reputation.store import Ledger
-from ml_stack.sentinel.events import Event, Severity
-from ml_stack.serve.broker import Ask
+from poolhouse import bench, net, sentinel
+from poolhouse.activity import feeds, writer
+from poolhouse.reputation.store import Ledger
+from poolhouse.sentinel.events import Event, Severity
+from poolhouse.serve.broker import Ask
 from tests.activity_support import CANARY, entries, person, ring
 from tests.conftest import a_row
 from tests.net_site import gguf_bytes
@@ -76,7 +76,7 @@ def test_never_allow_records_the_answer_the_rule_saved_and_the_rule_that_later_f
 
 
 def test_removing_a_rule_is_recorded_as_the_persons_edit(person):
-    from ml_stack import rules as saved
+    from poolhouse import rules as saved
     rules = saved.Rules()
     rules.add("serve_up", {"model": "m", "port": 1}, "never", "")
     rules.flip(1)

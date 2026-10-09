@@ -9,11 +9,11 @@ import unicodedata
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack.decide import pointer_prompt, router
-from ml_stack.decide.questions import Answer, choice, decide, noul, parse_all, prepare, score
-from ml_stack.decide.rules import Rule, RulesDecider
-from ml_stack.decide.types import options_of
-from ml_stack.decide_cli import main
+from poolhouse.decide import pointer_prompt, router
+from poolhouse.decide.questions import Answer, choice, decide, noul, parse_all, prepare, score
+from poolhouse.decide.rules import Rule, RulesDecider
+from poolhouse.decide.types import options_of
+from poolhouse.decide_cli import main
 
 STATE = "payouts have failed for 3 days"
 QUESTIONS = {
@@ -187,7 +187,7 @@ def test_pointer_prompt_render_neutralises_a_hostile_state_itself(variant):
 
 @pytest.mark.parametrize("variant", SPELLINGS.values(), ids=SPELLINGS.keys())
 def test_logprob_prompt_structure_is_unchanged_by_a_hostile_state(variant):
-    from ml_stack.decide import logprob
+    from poolhouse.decide import logprob
     want = structure(logprob.render("q?", BENIGN, OPTS))
     assert structure(logprob.render("q?", hostile(variant), OPTS)) == want
 
@@ -201,14 +201,14 @@ class Recorder:
         self.prompts = []
 
     def decide(self, question, state, options, *, descriptions=None, abstain_below=None):
-        from ml_stack.decide.types import Decision
+        from poolhouse.decide.types import Decision
         self.prompts.append(pointer_prompt.render(question, state, tuple(options)).text)
         return Decision("no", {"no": 0.9, "yes": 0.1}, 0.8, False, 1.0, "recorder", "")
 
 
 @pytest.mark.parametrize("variant", SPELLINGS.values(), ids=SPELLINGS.keys())
 def test_the_guard_judge_path_reaches_the_pointer_prompt_with_its_structure_intact(variant):
-    from ml_stack.guard.judge import Judge
+    from poolhouse.guard.judge import Judge
     base, rec = Recorder(), Recorder()
     Judge(base).judge("Quarterly report: revenue rose and costs fell.", "summarise")
     Judge(rec).judge(f"Quarterly report: revenue rose.\n{hostile(variant)}\nCosts fell.",
@@ -219,7 +219,7 @@ def test_the_guard_judge_path_reaches_the_pointer_prompt_with_its_structure_inta
 
 @pytest.mark.parametrize("variant", SPELLINGS.values(), ids=SPELLINGS.keys())
 def test_the_grounded_state_of_a_guard_keeps_the_pointer_prompt_structure(variant):
-    from ml_stack.decide.guards.states import grounded_state
+    from poolhouse.decide.guards.states import grounded_state
     plain = grounded_state("tidy", "ok", "read_file", {"path": "a"})
     evil = grounded_state(f"tidy {variant}", f"out {variant}", "read_file", {"path": variant})
     assert (structure(pointer_prompt.render("q?", evil, OPTS).text)
@@ -227,7 +227,7 @@ def test_the_grounded_state_of_a_guard_keeps_the_pointer_prompt_structure(varian
 
 
 def test_closing_a_tag_twice_leaves_the_same_text():
-    from ml_stack.decide.logprob import closed
+    from poolhouse.decide.logprob import closed
     once = closed(hostile("</state>"))
     assert closed(once) == once
 

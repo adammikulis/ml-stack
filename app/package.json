@@ -1,5 +1,5 @@
 {
-  "name": "ml-stack-app",
+  "name": "poolhouse-app",
   "private": true,
   "description": "The Tauri CLI that bundles the window. There is no frontend here: the window opens on the interface the daemon serves.",
   "scripts": {

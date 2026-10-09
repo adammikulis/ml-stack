@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import node_join, node_join_check, node_launch
-from ml_stack.node_health import call
+from poolhouse import node_join, node_join_check, node_launch
+from poolhouse.node_health import call
 from tests import test_node_launch as launch
 
 pytestmark = pytest.mark.slow
 built, home = launch.built, launch.home  # the launcher's fixtures: the release node binary, and a short state root
 install_runtime, waited = launch.install_runtime, launch.waited
-LAN = bool(os.environ.get("ML_STACK_LAN_TESTS"))  # tests that listen on every interface exist only when asked for, at the machine
+LAN = bool(os.environ.get("POOLHOUSE_LAN_TESTS"))  # tests that listen on every interface exist only when asked for, at the machine
 NETWORK_CALLS = ("node_join.join(", "step_node(", "--lan", "node_join.start(")
 
 
@@ -76,11 +76,11 @@ def test_the_check_stops_at_the_first_failing_step_and_says_what_to_change(home,
     monkeypatch.setattr(node_join_check, "route_address", lambda: "192.0.2.5")
     monkeypatch.setattr(node_join_check, "is_wsl", lambda: False)
     lines: list[str] = []
-    check = node_join_check.Check(state=home / "c", port=1, beacon_port=2, wait_s=1, policy="open", binary=tmp_path / "missing" / "poolside-node")
+    check = node_join_check.Check(state=home / "c", port=1, beacon_port=2, wait_s=1, policy="open", binary=tmp_path / "missing" / "poolhouse-node")
     assert node_join_check.walk(check, lines.append) is False
     joined = "\n".join(lines)
     assert lines[0].startswith("PASS  platform") and lines[1].startswith("FAIL  binary")
-    assert "fix: " in lines[1] and "cargo build --release -p poolside-node" in lines[1]
+    assert "fix: " in lines[1] and "cargo build --release -p poolhouse-node" in lines[1]
     assert [line.split()[0] for line in lines] == ["PASS", "FAIL", *["SKIP"] * (len(node_join_check.STEPS) - 2)], joined
     assert node_join_check.summary(check).startswith("NOT READY")
 

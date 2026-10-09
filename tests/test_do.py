@@ -1,8 +1,8 @@
-"""The tools `ml-stack-chat` offers: the registry, the lookups and the worked examples.
+"""The tools `poolhouse-chat` offers: the registry, the lookups and the worked examples.
 
 The model is a `ScriptedModel`, the commands are a fake registry that records what it was
 called with, the person is a string on stdin. Nothing here serves a model, touches a port or
-reads ``~/.ml-stack``.
+reads ``~/.poolhouse``.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ import io
 
 import pytest
 
-from ml_stack import do, mcp
-from ml_stack.testing import ScriptedModel
-from ml_stack.testing.fakes import reply_from
+from poolhouse import do, mcp
+from poolhouse.testing import ScriptedModel
+from poolhouse.testing.fakes import reply_from
 
 
 def call(name, **args):
@@ -90,7 +90,7 @@ def test_every_bench_example_parses_as_the_bench_command_line(capsys):
     import ast
     import re
 
-    from ml_stack.bench.run import _parser
+    from poolhouse.bench.run import _parser
 
     found = []
     for name, pairs in do.EXAMPLES.items():
@@ -102,7 +102,7 @@ def test_every_bench_example_parses_as_the_bench_command_line(capsys):
         try:
             _parser().parse_args([sub, *args])
         except SystemExit:
-            pytest.fail(f"{name}: `ml-stack-bench {sub} {' '.join(args)}` -- "
+            pytest.fail(f"{name}: `poolhouse-bench {sub} {' '.join(args)}` -- "
                         + capsys.readouterr().err.strip().splitlines()[-1])
 
 
@@ -141,7 +141,7 @@ def test_models_on_disk_lists_the_weights_with_the_head_and_projector_beside_the
 
 def test_a_head_in_a_sibling_folder_of_the_repository_counts_as_beside(tmp_path):
     """A Hub snapshot keeps the head under MTP/ beside the quant folders. Driven
-    2026-09-05: ml-stack-do said no head was on disk and planned to fetch one."""
+    2026-09-05: poolhouse-do said no head was on disk and planned to fetch one."""
     snap = tmp_path / "snapshots" / "abc"
     (snap / "UD-Q4_K_XL").mkdir(parents=True)
     (snap / "MTP").mkdir()

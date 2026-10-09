@@ -1,4 +1,4 @@
-"""ml-stack-claude: Claude Code on a served model, in the settings it scored best with, off the network."""
+"""poolhouse-claude: Claude Code on a served model, in the settings it scored best with, off the network."""
 
 import contextlib
 import functools
@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import claude, harnessid
+from poolhouse import claude, harnessid
 
 
 @pytest.fixture(autouse=True)
 def _no_workspace(monkeypatch, tmp_path):
-    from ml_stack.workspace import harness_seat, tokens
+    from poolhouse.workspace import harness_seat, tokens
 
     kit = Kit(clean_env(monkeypatch, tmp_path))
     def invite(name, project, parent, say, *, claim):
@@ -40,7 +40,7 @@ def test_the_environment_points_every_model_call_at_the_server_and_nothing_elsew
 
 
 def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, tmp_path):
-    from ml_stack.serve.profile import record
+    from poolhouse.serve.profile import record
 
     seen = {}
 
@@ -56,9 +56,9 @@ def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, 
         seen["released"] = True
 
     profile = record("kestrel-8B-UD-Q4_K_XL.gguf", cache_type="q8_0", tight=True, batch=True)
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: profile)
-    monkeypatch.setattr("ml_stack.hub.located",
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: profile)
+    monkeypatch.setattr("poolhouse.hub.located",
                         lambda *a, **k: Path("/models/kestrel-8B-UD-Q4_K_XL.gguf"))
     monkeypatch.setattr(claude, "alias_of", lambda url, model: "kestrel-8B")
     binary = tmp_path / "claude"
@@ -84,7 +84,7 @@ def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, 
 
 def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
     """`--ctx` tokens are served in all: one slot holds them, `--slots N` divides them between N."""
-    from ml_stack.serve.profile import record
+    from poolhouse.serve.profile import record
 
     seen = {}
 
@@ -98,9 +98,9 @@ def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
         yield Server()
 
     profile = record("kestrel-8B-UD-Q4_K_XL.gguf", slot_context=32768, parallel=2)
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: profile)
-    monkeypatch.setattr("ml_stack.hub.located",
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: profile)
+    monkeypatch.setattr("poolhouse.hub.located",
                         lambda *a, **k: Path("/models/kestrel-8B-UD-Q4_K_XL.gguf"))
     monkeypatch.setattr(claude, "alias_of", lambda url, model: "kestrel-8B")
     binary = tmp_path / "claude"
@@ -125,9 +125,9 @@ def test_launch_refuses_without_a_claude_binary(monkeypatch, capsys):
 
 
 def test_alias_falls_back_to_the_file_stem(monkeypatch):
-    monkeypatch.setattr("ml_stack.claude.reported_models", lambda url, **kw: [])
+    monkeypatch.setattr("poolhouse.claude.reported_models", lambda url, **kw: [])
     assert claude.alias_of("http://127.0.0.1:1", "/m/kestrel-8B-UD-Q4_K_XL.gguf") == "kestrel-8B-UD-Q4_K_XL"
-    monkeypatch.setattr("ml_stack.claude.reported_models", lambda url, **kw: ["served-name"])
+    monkeypatch.setattr("poolhouse.claude.reported_models", lambda url, **kw: ["served-name"])
     assert claude.alias_of("http://127.0.0.1:1", "x.gguf") == "served-name"
 
 
@@ -152,11 +152,11 @@ class TestServingWithTheHead:
 
     def _serving(self, monkeypatch, tmp_path, argv, heads):
         seen: dict = {}
-        monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
-        monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
-        monkeypatch.setattr("ml_stack.hub.located",
+        monkeypatch.setattr("poolhouse.serve.manager.serve", _leases(seen))
+        monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: None)
+        monkeypatch.setattr("poolhouse.hub.located",
                             lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))
-        monkeypatch.setattr("ml_stack.hub.heads_for", lambda *a, **k: heads)
+        monkeypatch.setattr("poolhouse.hub.heads_for", lambda *a, **k: heads)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "quince-2b")
         binary = tmp_path / "claude"
         binary.write_text("#!/bin/sh\nexit 0\n")
@@ -168,7 +168,7 @@ class TestServingWithTheHead:
 
     def test_the_cheapest_head_is_served_and_named_on_the_launch_line(self, monkeypatch,
                                                                      tmp_path):
-        from ml_stack.hub import Head
+        from poolhouse.hub import Head
 
         heads = [Head(path="/models/mtp-quince-2b-Q4_K_M.gguf", bytes=100,
                       spec_type="draft-mtp"),
@@ -188,7 +188,7 @@ class TestServingWithTheHead:
         assert any("without a draft head" in one for one in said)
 
     def test_asking_for_none_serves_without_one(self, monkeypatch, tmp_path):
-        from ml_stack.hub import Head
+        from poolhouse.hub import Head
 
         heads = [Head(path="/models/mtp-quince-2b-Q4_K_M.gguf", bytes=100,
                       spec_type="draft-mtp")]
@@ -208,7 +208,7 @@ class TestJoiningAServerAlreadyUp:
     """Weights already loaded on the port are talked to, not loaded a second time."""
 
     def test_the_server_on_the_port_is_used_and_left_running(self, monkeypatch, tmp_path):
-        from ml_stack.serve import leases
+        from poolhouse.serve import leases
 
         seen: dict = {}
         @contextlib.contextmanager
@@ -219,15 +219,15 @@ class TestJoiningAServerAlreadyUp:
             server.base_url = f"http://127.0.0.1:{server.port}"
             yield server
 
-        monkeypatch.setattr("ml_stack.serve.manager.serve", adopted)
+        monkeypatch.setattr("poolhouse.serve.manager.serve", adopted)
         monkeypatch.setattr(leases, "already_up",
                             lambda model, port, **_: {"base_url": f"http://127.0.0.1:{port}",
                                                       "pid": 1, "model": model})
-        monkeypatch.setattr("ml_stack.serve.serving.serving_said", lambda url: "1 slot x 32k")
-        monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
-        monkeypatch.setattr("ml_stack.hub.located",
+        monkeypatch.setattr("poolhouse.serve.serving.serving_said", lambda url: "1 slot x 32k")
+        monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: None)
+        monkeypatch.setattr("poolhouse.hub.located",
                             lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))
-        monkeypatch.setattr("ml_stack.hub.heads_for", lambda *a, **k: [])
+        monkeypatch.setattr("poolhouse.hub.heads_for", lambda *a, **k: [])
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "quince-2b")
         binary = tmp_path / "claude"
         binary.write_text("#!/bin/sh\nexit 0\n")
@@ -242,15 +242,15 @@ class TestJoiningAServerAlreadyUp:
         assert where["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8123"
 
     def test_nothing_up_on_the_port_leases_the_model(self, monkeypatch, tmp_path):
-        from ml_stack.serve import leases
+        from poolhouse.serve import leases
 
         seen: dict = {}
-        monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
+        monkeypatch.setattr("poolhouse.serve.manager.serve", _leases(seen))
         monkeypatch.setattr(leases, "already_up", lambda model, port, **_: None)
-        monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
-        monkeypatch.setattr("ml_stack.hub.located",
+        monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: None)
+        monkeypatch.setattr("poolhouse.hub.located",
                             lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))
-        monkeypatch.setattr("ml_stack.hub.heads_for", lambda *a, **k: [])
+        monkeypatch.setattr("poolhouse.hub.heads_for", lambda *a, **k: [])
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "quince-2b")
         binary = tmp_path / "claude"
         binary.write_text("#!/bin/sh\nexit 0\n")

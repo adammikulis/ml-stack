@@ -8,8 +8,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from ml_stack.fleet import api, project_enrollment as admission, projects
-from ml_stack.fleet.discovery import derive_token
+from poolhouse.fleet import api, project_enrollment as admission, projects
+from poolhouse.fleet.discovery import derive_token
 
 
 @pytest.fixture

@@ -9,12 +9,12 @@ import sys
 
 import pytest
 
-from ml_stack import sandbox
-from ml_stack.sandbox import AllowUnsandboxed, Limits, Net, Policy, PolicyError, policies, run
-from ml_stack.sandbox.backend import Availability
-from ml_stack.sandbox.bubblewrap import Bubblewrap, arguments
-from ml_stack.sandbox.container import Container
-from ml_stack.sandbox.seatbelt import ProfileError, profile, quote
+from poolhouse import sandbox
+from poolhouse.sandbox import AllowUnsandboxed, Limits, Net, Policy, PolicyError, policies, run
+from poolhouse.sandbox.backend import Availability
+from poolhouse.sandbox.bubblewrap import Bubblewrap, arguments
+from poolhouse.sandbox.container import Container
+from poolhouse.sandbox.seatbelt import ProfileError, profile, quote
 from tests.sandbox_kit import require_native_sandbox
 
 SYSTEM_BIN = os.path.realpath("/bin")
@@ -172,7 +172,7 @@ def test_a_tag_must_be_a_plain_token(tree):
 
 
 def test_the_command_is_found_on_the_policy_path_and_must_exist(tree):
-    from ml_stack.sandbox.backend import program_of
+    from poolhouse.sandbox.backend import program_of
 
     assert program_of(["sh"], "/bin") == "/bin/sh"
     for argv, path in (([], "/bin"), ([""], "/bin"), (["nosuchprogram"], "/bin"),
@@ -218,7 +218,7 @@ def test_running_unsandboxed_needs_a_named_reason_and_is_logged(tmp_path, caplog
     marker = tmp_path / "ran"
     events: list[tuple[str, dict]] = []
     pol = Policy("untrusted", env={"PATH": "/bin"})
-    caplog.set_level("WARNING", logger="ml_stack.sandbox")
+    caplog.set_level("WARNING", logger="poolhouse.sandbox")
     result = run(["/usr/bin/touch", str(marker)], pol, via=Container(),
                  unsandboxed=AllowUnsandboxed("test on a host with no sandbox"),
                  on_event=lambda n, f: events.append((n, f)), cwd=str(tmp_path))

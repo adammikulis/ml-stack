@@ -6,16 +6,16 @@ from coding_kit import fixture_worker
 from test_fleet_ui import Serving
 from workspace_kit import Kit
 
-from ml_stack.fleet.conversation_settings import DEFAULTS
-from ml_stack.fleet.conversations import Conversations
-from ml_stack.workspace import coding_turns
+from poolhouse.fleet.conversation_settings import DEFAULTS
+from poolhouse.fleet.conversations import Conversations
+from poolhouse.workspace import coding_turns
 
 pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
 def coding_browser(tmp_path, monkeypatch, playwright):
-    monkeypatch.setenv("ML_STACK_WORKSPACE_HOME", str(tmp_path / "workspace"))
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_HOME", str(tmp_path / "workspace"))
     Kit(tmp_path / "workspace")
     monkeypatch.setattr(coding_turns, "worker", fixture_worker)
     served = Serving(tmp_path)

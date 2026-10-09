@@ -7,8 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ml_stack import home
-from ml_stack.redteam.lab import lab, own_home
+from poolhouse import home
+from poolhouse.redteam.lab import lab, own_home
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -30,12 +30,12 @@ def test_own_home_removes_the_variable_it_set_when_there_was_none(tmp_path, monk
 
 
 def test_the_red_team_command_writes_nothing_under_the_users_home(tmp_path):
-    """The real regression: run the command the way a person does, with no ML_STACK_HOME and a throwaway HOME."""
+    """The real regression: run the command the way a person does, with no POOLHOUSE_HOME and a throwaway HOME."""
     fake = tmp_path / "home"
     fake.mkdir()
     env = {**os.environ, "HOME": str(fake), "PYTHONPATH": str(REPO / "src")}
     env.pop(home.ROOT_ENV, None)
-    done = subprocess.run([sys.executable, "-m", "ml_stack.redteam", "run", "--scenarios", "fleet", "--model", "stub"],
+    done = subprocess.run([sys.executable, "-m", "poolhouse.redteam", "run", "--scenarios", "fleet", "--model", "stub"],
                           env=env, capture_output=True, text=True, timeout=300, cwd=tmp_path)
     assert done.returncode in (0, 1), done.stderr[-400:]
-    assert not (fake / ".ml-stack").exists(), sorted(p.name for p in (fake / ".ml-stack").iterdir())
+    assert not (fake / ".poolhouse").exists(), sorted(p.name for p in (fake / ".poolhouse").iterdir())

@@ -15,8 +15,8 @@ pytestmark = pytest.mark.slow
 def test_download_component_choices_and_installed_component_action(joined, open_page, monkeypatch):
     from playwright.sync_api import expect
 
-    from ml_stack.fleet import catalogue, model_components, routes
-    from ml_stack.fleet.models import Getting
+    from poolhouse.fleet import catalogue, model_components, routes
+    from poolhouse.fleet.models import Getting
 
     pick = catalogue.Suggestion("Qwen Example 2B", "hf:publisher/example/Example-Q4_K_M.gguf", 1,
                                "Fixture model", family="Qwen", draft_ref="hf:publisher/example/mtp-Example.gguf")
@@ -47,7 +47,7 @@ def test_download_component_choices_and_installed_component_action(joined, open_
     assert downloads.start.call_args.kwargs["components"] == [offers[1]]
     base = joined.files / pick.file
     base.write_bytes(b"fixture")
-    monkeypatch.setattr("ml_stack.fleet.models.MIN_SIZE", 0)
+    monkeypatch.setattr("poolhouse.fleet.models.MIN_SIZE", 0)
     monkeypatch.setattr(joined.ui.models, "library", lambda: [{
         "id": "fixture", "name": "Example", "path": str(base), "family": "Example", "format": "gguf",
         "status": "ready", "servable": True, "shards": 1, "is_complete": True, "files": [],

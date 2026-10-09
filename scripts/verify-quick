@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that `scripts/test quick` notices a broken function.
 
-    scripts/verify-quick src/ml_stack/units.py src/ml_stack/http.py [--workers N]
+    scripts/verify-quick src/poolhouse/units.py src/poolhouse/http.py [--workers N]
 
 For each module, one function is mutated (an operator from scripts/gates/_mutation), the mutant
 is written into this checkout, and `scripts/test quick --base HEAD` runs. A passing quick run is
@@ -78,7 +78,7 @@ def main() -> int:
     """Mutate each named module and print one JSON row per attempt."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("modules", nargs="+", help="repo-relative paths under src/ml_stack")
+    parser.add_argument("modules", nargs="+", help="repo-relative paths under src/poolhouse")
     parser.add_argument("--workers", type=int, default=2)
     args = parser.parse_args()
     if sh("git", "status", "--porcelain")[1].strip():

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.discovery import DEFAULT_CLUSTER, Membership, _write_memberships, memberships
-from ml_stack.fleet.onboard.joining import join_secret
+from poolhouse.fleet.discovery import DEFAULT_CLUSTER, Membership, _write_memberships, memberships
+from poolhouse.fleet.onboard.joining import join_secret
 from tests.keystore_support import counting  # noqa: F401
 
 
@@ -45,8 +45,8 @@ def join_cluster(words: str, *, group: str = DEFAULT_CLUSTER, path: Path | str |
 @pytest.fixture
 def a_keystore(tmp_path, counting, monkeypatch):  # noqa: F811
     """The passphrase store over a fake keyring backend; the machine's own is never touched."""
-    from ml_stack.fleet import recovery
-    from ml_stack.keystore import Keystore, Wires
+    from poolhouse.fleet import recovery
+    from poolhouse.keystore import Keystore, Wires
 
     store = Keystore(directory=tmp_path / "ks", wires=Wires(interactive=lambda: True, sleep=lambda _s: None))
     monkeypatch.setattr(recovery, "_store", lambda: store)

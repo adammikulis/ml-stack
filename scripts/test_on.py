@@ -27,16 +27,16 @@ from pathlib import Path
 import affected
 import testreuse_key as keys
 
-from ml_stack import features
-from ml_stack.activity import reuse
-from ml_stack.activity.gate import tree_hash
-from ml_stack.fleet import shard_split
-from ml_stack.fleet.shard_spec import TEST_FILE
-from ml_stack.testfarm import report
-from ml_stack.testfarm.client import ShardError, Shards, choose, pool_devices
-from ml_stack.testfarm.consent import FEATURE
-from ml_stack.testfarm.ledger import Ledger, key as ledger_key
-from ml_stack.workspace import testruns
+from poolhouse import features
+from poolhouse.activity import reuse
+from poolhouse.activity.gate import tree_hash
+from poolhouse.fleet import shard_split
+from poolhouse.fleet.shard_spec import TEST_FILE
+from poolhouse.testfarm import report
+from poolhouse.testfarm.client import ShardError, Shards, choose, pool_devices
+from poolhouse.testfarm.consent import FEATURE
+from poolhouse.testfarm.ledger import Ledger, key as ledger_key
+from poolhouse.workspace import testruns
 
 NOT_RUN = 70
 TIERS = ("quick", "fast", "full", "slow", "all", "gate")
@@ -199,7 +199,7 @@ def main(args: argparse.Namespace, rest: list[str], root: Path, command_for: Cal
     if tier == "gate" and files:
         return refuse("the gate takes no files")
     if not features.enabled(FEATURE):
-        return refuse(f"running tests on another device is an experimental feature and off here; a person turns it on with `ml-stack features enable {FEATURE}`")
+        return refuse(f"running tests on another device is an experimental feature and off here; a person turns it on with `poolhouse features enable {FEATURE}`")
     try:
         chosen = choose(args.on, pool_devices())
         shards = Shards()

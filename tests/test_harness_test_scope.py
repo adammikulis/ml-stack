@@ -1,6 +1,6 @@
 """Routine scoped testing and inventory use the existing reversible policy."""
-from ml_stack import roles
-from ml_stack.harnesspolicy import decide
+from poolhouse import roles
+from poolhouse.harnesspolicy import decide
 
 
 def test_queue_is_reversible_only_in_authorized_isolated_worktree(tmp_path):
@@ -21,8 +21,8 @@ def test_queue_is_reversible_only_in_authorized_isolated_worktree(tmp_path):
 def test_inventory_and_policy_source_reads_do_not_request_mutation_authority():
     assert decide(roles.READ_ONLY, "Bash", {"command": "pyenv versions 2>/dev/null"}).action == "allow"
     assert decide(roles.PLAN_AND_GO, "Bash", {"command": "pyenv exec arbitrary-program"}).action == "ask"
-    assert decide(roles.READ_ONLY, "Bash", {"command": "git log -- src/ml_stack/sentinel/policy.py"}).action == "allow"
-    assert decide(roles.PLAN_AND_GO, "Bash", {"command": "ml-stack-security mode off"}).action != "allow"
+    assert decide(roles.READ_ONLY, "Bash", {"command": "git log -- src/poolhouse/sentinel/policy.py"}).action == "allow"
+    assert decide(roles.PLAN_AND_GO, "Bash", {"command": "poolhouse-security mode off"}).action != "allow"
 
 
 def test_native_testing_cannot_bypass_queue_in_reversible_role():

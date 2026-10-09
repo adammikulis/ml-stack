@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from ml_stack import guard
-from ml_stack.agent import (
+from poolhouse import guard
+from poolhouse.agent import (
     Agent as GuardedAgent,
     Budget,
     Compacted,
@@ -30,10 +30,10 @@ from ml_stack.agent import (
     has_open_calls,
     model_summarizer,
 )
-from ml_stack.agent.compact import ELIDED, SUMMARY_PREFIX
-from ml_stack.client import Client
-from ml_stack.testing import FakeLlamaServer, Served
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse.agent.compact import ELIDED, SUMMARY_PREFIX
+from poolhouse.client import Client
+from poolhouse.testing import FakeLlamaServer, Served
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 
 OFF = guard.off("these tests are about the loop, not the guard")
 
@@ -405,7 +405,7 @@ def test_a_repeated_call_inside_the_kept_messages_is_kept() -> None:
 
 
 def test_a_conversation_waiting_on_a_tool_result_is_not_compacted(served, tmp_path) -> None:
-    from ml_stack.agent import AutoCompact
+    from poolhouse.agent import AutoCompact
 
     fake = served(context=500)
     auto = AutoCompact(Client(fake.base_url), Compaction(keep_last=2, summarizer=summarizer))

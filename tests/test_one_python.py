@@ -1,7 +1,7 @@
 """The interpreter the app runs on, and the range the library supports.
 
 The two installers, the Linux container, the release workflow and
-`ml_stack.fleet.environment` name one interpreter, `PYTHON`: the app builds its own
+`poolhouse.fleet.environment` name one interpreter, `PYTHON`: the app builds its own
 environment and chooses it. `pyproject.toml` names the range the library is imported under. The required CI
 tests run on that one interpreter; the next release runs as an experiment that may fail.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ml_stack.fleet.environment import PYTHON
+from poolhouse.fleet.environment import PYTHON
 
 REPO = Path(__file__).resolve().parents[1]
 PYPROJECT = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))

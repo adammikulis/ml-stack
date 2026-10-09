@@ -44,8 +44,8 @@ def test_a_file_over_the_size_limit_is_refused(staging):
 
 
 def test_code_and_package_resources_pass(staging):
-    assert staging("src/ml_stack/tool.py", b"x = 1\n").returncode == 0
-    assert staging("src/ml_stack/data/fit.json", b"{}").returncode == 0
+    assert staging("src/poolhouse/tool.py", b"x = 1\n").returncode == 0
+    assert staging("src/poolhouse/data/fit.json", b"{}").returncode == 0
 
 
 @pytest.mark.gate

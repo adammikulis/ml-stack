@@ -73,16 +73,16 @@ Effect of each level:
 ## 3. Easy manual use
 
 ```
-ml-stack-workspace flag NAME --reason TEXT [--level note|restrict|suspend] [--evidence ID ...]
-ml-stack-workspace flags [--open] [--subject NAME]
-ml-stack-workspace flag-clear FLAG_ID --reason TEXT
+poolhouse-workspace flag NAME --reason TEXT [--level note|restrict|suspend] [--evidence ID ...]
+poolhouse-workspace flags [--open] [--subject NAME]
+poolhouse-workspace flag-clear FLAG_ID --reason TEXT
 ```
 
 - `flag` by a registered agent: level defaults to `note`; a higher level is `denied` for an agent that is
   not coordinator. By the person at a terminal: any level, with the existing `HumanGrant` check
   (not under an agent marker). `NAME` may be a device fingerprint prefix; ambiguity is an error.
 - `flags` lists open flags, newest first: id, subject, level, code, age, raised by (where visible).
-  `--json` for scripts. Viewing is not privileged, as with `ml-stack-security review --list`. [V pattern
+  `--json` for scripts. Viewing is not privileged, as with `poolhouse-security review --list`. [V pattern
   `docs/sentinel.md`]
 - `flag-clear` needs the person or the coordinator and a reason; the reason is stored.
 - `digest --status` gains lines: "2 open flags: claude-6e1a2f restricted (forged_sender), device ab12... noted".

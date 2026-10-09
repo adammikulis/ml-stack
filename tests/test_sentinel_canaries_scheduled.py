@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, sentinel
-from ml_stack.sentinel import State, canary, human, watch
-from ml_stack.serve import LlamaServerBackend, ServerManager, canaries, guarded
-from ml_stack.serve.broker import Ask, Broker
-from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.process import kill_process_tree
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import home, sentinel
+from poolhouse.sentinel import State, canary, human, watch
+from poolhouse.serve import LlamaServerBackend, ServerManager, canaries, guarded
+from poolhouse.serve.broker import Ask, Broker
+from poolhouse.serve.leases import recorded_servers
+from poolhouse.serve.process import kill_process_tree
+from poolhouse.testing.fakes import fake_llama_binary
 
 GOOD = {"default": "Sure, here you go.", "contains": {
     "17 times 23": "391", "capital of France": "Paris",
@@ -173,13 +173,13 @@ def test_the_scan_loop_runs_the_canary_round(broker, served, model) -> None:
 
 def test_off_needs_a_reason_and_is_logged(monkeypatch) -> None:
     node = sentinel.default()
-    monkeypatch.setenv("ML_STACK_SENTINEL_CANARY", "off")
+    monkeypatch.setenv("POOLHOUSE_SENTINEL_CANARY", "off")
     assert canaries.schedule(node, lambda: []) is not None, "off without a reason was honoured"
     assert [e.kind for e in node.bus.recent(kind="sentinel.canary_off_refused")]
-    monkeypatch.setenv("ML_STACK_SENTINEL_CANARY_BECAUSE", "a model under test")
+    monkeypatch.setenv("POOLHOUSE_SENTINEL_CANARY_BECAUSE", "a model under test")
     assert canaries.schedule(node, lambda: []) is None
     assert [e.kind for e in node.bus.recent(kind="sentinel.opt_out")]
-    monkeypatch.delenv("ML_STACK_SENTINEL_CANARY")
+    monkeypatch.delenv("POOLHOUSE_SENTINEL_CANARY")
     assert canaries.schedule(node, lambda: []).interval_s == watch.CANARY_INTERVAL_S
 
 

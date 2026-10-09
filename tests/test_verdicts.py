@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.testing import verdicts
-from ml_stack.testing.verdicts import Attack, Cache, Limits, Subject, Verdict
+from poolhouse.testing import verdicts
+from poolhouse.testing.verdicts import Attack, Cache, Limits, Subject, Verdict
 
 GUARD = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "claude-bash-guard"
 REFUSED = {
@@ -115,10 +115,10 @@ def test_each_input_changes_the_key(tmp_path, change) -> None:
 
 
 def test_a_dotted_module_and_a_package_are_surfaces_too() -> None:
-    assert [p.name for p in verdicts.surface_files("ml_stack.files")] == ["files.py"]
-    assert len(verdicts.surface_files("ml_stack.testing")) > 3
-    assert verdicts.surface_files("ml_stack.no_such_module") == []
-    one = verdicts.key(Attack("a", surfaces=("ml_stack.no_such_module",)), SUBJECT)
+    assert [p.name for p in verdicts.surface_files("poolhouse.files")] == ["files.py"]
+    assert len(verdicts.surface_files("poolhouse.testing")) > 3
+    assert verdicts.surface_files("poolhouse.no_such_module") == []
+    one = verdicts.key(Attack("a", surfaces=("poolhouse.no_such_module",)), SUBJECT)
     assert one != verdicts.key(Attack("a"), SUBJECT), "a surface that is not there still counts"
 
 

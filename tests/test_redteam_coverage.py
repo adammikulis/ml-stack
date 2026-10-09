@@ -136,5 +136,5 @@ def test_the_written_map_is_the_one_the_tree_produces():
 @pytest.mark.parametrize("call", ["json.load(handle)", "json.loads(text)"])
 def test_json_stream_and_text_parsers_remain_inventoried(call):
     found = {}
-    coverage().find_parsers(found, "src/ml_stack/files.py", ast.parse(call))
+    coverage().find_parsers(found, "src/poolhouse/files.py", ast.parse(call))
     assert "parser:files.py" in found

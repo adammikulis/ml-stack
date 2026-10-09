@@ -1,5 +1,5 @@
 """The Broker starts no server for a model sentinel holds or that no longer matches its pin, a
-daemon runs the periodic scan, and `ml-stack-security status` says whether it is armed. Real
+daemon runs the periodic scan, and `poolhouse-security status` says whether it is armed. Real
 Broker, real fake-llama-server processes, real sentinel store under the test's state root."""
 
 from __future__ import annotations
@@ -15,22 +15,22 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, sentinel
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.remote import Peer, PeerError
-from ml_stack.http import Server
-from ml_stack.sentinel import State, human, watch
-from ml_stack.sentinel.cli import status as security_status
-from ml_stack.sentinel.store import Holding
-from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec
-from ml_stack.serve.broker import Ask, Broker, BrokerError
-from ml_stack.serve.guarded import SentinelRefused
-from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.ports import free_port
-from ml_stack.serve.process import kill_process_tree, pid_exists
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import home, sentinel
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.remote import Peer, PeerError
+from poolhouse.http import Server
+from poolhouse.sentinel import State, human, watch
+from poolhouse.sentinel.cli import status as security_status
+from poolhouse.sentinel.store import Holding
+from poolhouse.serve import LlamaServerBackend, ServerManager, ServerSpec
+from poolhouse.serve.broker import Ask, Broker, BrokerError
+from poolhouse.serve.guarded import SentinelRefused
+from poolhouse.serve.leases import recorded_servers
+from poolhouse.serve.ports import free_port
+from poolhouse.serve.process import kill_process_tree, pid_exists
+from poolhouse.testing.fakes import fake_llama_binary
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -114,7 +114,7 @@ def test_a_quarantined_model_cannot_be_leased_until_a_person_releases_it(broker,
         human.mint("release", held.id, terminal=(False, False), env={})
     with pytest.raises(human.HumanRequired):
         human.mint("release", held.id, typed=lambda _p: held.id, terminal=(True, True),
-                   env={"ML_STACK_AGENT": "1"})
+                   env={"POOLHOUSE_AGENT": "1"})
     with pytest.raises(BrokerError, match="quarantined"):
         broker.lease(ask(model), timeout=30)
     node.store.release(held.id, person(held))
@@ -198,7 +198,7 @@ def test_the_scan_is_switched_off_only_with_a_reason_and_it_is_logged(monkeypatc
 
 def test_the_broker_daemon_runs_the_scan_and_stops_it_on_exit(model):
     env = {**os.environ, "PYTHONPATH": str(REPO / "src"), watch.ENV_SCAN: "0.3"}
-    daemon = subprocess.Popen([sys.executable, "-m", "ml_stack.serve.cli", "broker",
+    daemon = subprocess.Popen([sys.executable, "-m", "poolhouse.serve.cli", "broker",
                                "--quit-after", "120"], env=env, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL)
     root = sentinel.default().root
@@ -216,7 +216,7 @@ def test_the_broker_daemon_runs_the_scan_and_stops_it_on_exit(model):
 
 def test_a_fresh_heartbeat_from_a_process_that_is_gone_is_not_armed(tmp_path):
     """A daemon killed before it could write its stopped beat must not read as armed for three intervals."""
-    from ml_stack.sentinel.sealed import SealedFile
+    from poolhouse.sentinel.sealed import SealedFile
 
     done = subprocess.Popen([sys.executable, "-c", "pass"])
     done.wait(timeout=30)
@@ -253,7 +253,7 @@ def test_the_fleet_daemon_quarantines_a_peer_that_forges_requests(tmp_path):
 
 
 def counting_hashes(monkeypatch):
-    from ml_stack.sentinel import integrity
+    from poolhouse.sentinel import integrity
 
     seen: list[str] = []
     real = integrity.sha256_file
@@ -267,7 +267,7 @@ def counting_hashes(monkeypatch):
 
 
 def start_check(manager, model):
-    from ml_stack.serve import guarded
+    from poolhouse.serve import guarded
 
     guarded.verify(model, state_file=manager.state_file, stop=manager.reclaim)
 
@@ -326,14 +326,14 @@ def test_a_replaced_file_with_the_same_size_and_mtime_is_hashed_again(manager, m
 
 
 def test_sentinel_off_is_honoured_only_with_a_reason(model, monkeypatch, capsys):
-    from ml_stack.sentinel import Sentinel
+    from poolhouse.sentinel import Sentinel
 
-    monkeypatch.setenv("ML_STACK_SENTINEL", "off")
-    monkeypatch.delenv("ML_STACK_SENTINEL_BECAUSE", raising=False)
+    monkeypatch.setenv("POOLHOUSE_SENTINEL", "off")
+    monkeypatch.delenv("POOLHOUSE_SENTINEL_BECAUSE", raising=False)
     refused = Sentinel(home.home() / "x1")
     assert refused.mode != sentinel.Mode.OFF
     assert list(refused.bus.recent(kind="sentinel.off_refused"))
-    monkeypatch.setenv("ML_STACK_SENTINEL_BECAUSE", "benchmarking the bare loop")
+    monkeypatch.setenv("POOLHOUSE_SENTINEL_BECAUSE", "benchmarking the bare loop")
     off = Sentinel(home.home() / "x2")
     assert off.mode == sentinel.Mode.OFF
     got = off.bus.recent(kind="sentinel.opt_out")

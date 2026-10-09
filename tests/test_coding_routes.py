@@ -9,13 +9,13 @@ from launch_support import signed
 from test_fleet_ui import Serving
 from workspace_kit import Kit
 
-from ml_stack.fleet.conversations import Conversations
-from ml_stack.workspace import coding_turns
+from poolhouse.fleet.conversations import Conversations
+from poolhouse.workspace import coding_turns
 
 
 @pytest.fixture
 def coding_api(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_WORKSPACE_HOME", str(tmp_path / "workspace"))
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_HOME", str(tmp_path / "workspace"))
     kit = Kit(tmp_path / "workspace")
     monkeypatch.setattr(coding_turns, "worker", fixture_worker)
     server = signed(Serving(tmp_path))
@@ -105,10 +105,10 @@ def test_coding_start_requires_person_page_origin_and_ui_header(coding_api):
 
 def test_coding_extension_is_declared_in_installed_metadata():
     from importlib.metadata import entry_points
-    entries = [entry for entry in entry_points(group="ml_stack.ui_routes") if entry.name == "coding"]
+    entries = [entry for entry in entry_points(group="poolhouse.ui_routes") if entry.name == "coding"]
     assert len(entries) == 1
-    assert entries[0].value == "ml_stack.workspace.coding_routes:route"
-    assert entries[0].load().__module__ == "ml_stack.workspace.coding_routes"
+    assert entries[0].value == "poolhouse.workspace.coding_routes:route"
+    assert entries[0].load().__module__ == "poolhouse.workspace.coding_routes"
 
 
 def test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn(coding_api):
@@ -122,7 +122,7 @@ def test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn(coding_api
 
 
 def test_joined_coding_session_is_required_before_starting_a_worker(coding_api, monkeypatch):
-    from ml_stack.fleet import routes
+    from poolhouse.fleet import routes
 
     server, conversation, _kit = coding_api
     monkeypatch.setattr(routes, "in_cluster", lambda _: True)
@@ -136,8 +136,8 @@ def test_joined_coding_session_is_required_before_starting_a_worker(coding_api, 
 
 
 def test_catalogue_uses_real_modelinfo_paths_and_coding_profile(monkeypatch, tmp_path):
-    from ml_stack.hub.discover import ModelInfo
-    from ml_stack.workspace import coding_routes, localmodel
+    from poolhouse.hub.discover import ModelInfo
+    from poolhouse.workspace import coding_routes, localmodel
 
     installed = ModelInfo(id="model", name="Qwen3.8-27B-Q4_K_XL.gguf", path=tmp_path / "model.gguf",
                           format="gguf", size_bytes=1234, source="local")
@@ -157,7 +157,7 @@ def test_catalogue_uses_real_modelinfo_paths_and_coding_profile(monkeypatch, tmp
 
 
 def test_launch_adapter_forwards_exact_context_and_mtp_head(monkeypatch):
-    from ml_stack import coding
+    from poolhouse import coding
 
     calls = []
     monkeypatch.setitem(coding.HARNESSES, "codex", lambda argv, **options: calls.append(argv) or 0)

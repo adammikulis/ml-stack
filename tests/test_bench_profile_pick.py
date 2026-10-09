@@ -1,10 +1,10 @@
 """The row a model's profile is written from: the fastest whose F1 held, where held is a
 claim about the difference the questions measured -- and never a smoke."""
 
-from ml_stack.bench import invented_digest, runs, save
-from ml_stack.bench.keep import SHORT
-from ml_stack.bench.profiles import measured_best
-from ml_stack.bench.score import held_up, separated
+from poolhouse.bench import invented_digest, runs, save
+from poolhouse.bench.keep import SHORT
+from poolhouse.bench.profiles import measured_best
+from poolhouse.bench.score import held_up, separated
 from tests.test_graph_bench import scored_rows
 
 
@@ -49,8 +49,8 @@ def test_a_profile_is_never_set_from_a_smoke(tmp_path):
 
 def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says(tmp_path):
     """A run with no asking record keeps the batch, kinds and summary its file's record holds."""
-    from ml_stack.bench.profiles import write_profiles
-    from ml_stack.serve.profile import add, profile_for, record, records_in
+    from poolhouse.bench.profiles import write_profiles
+    from poolhouse.serve.profile import add, profile_for, record, records_in
 
     where = tmp_path / "profiles.json"
     add(record("flash.gguf", tight=True, batch=True, kinds=True, summary=True, rounds=6,
@@ -75,8 +75,8 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
 
 def test_a_run_without_an_asking_record_never_takes_another_quantisations_asking(tmp_path):
     """The record for another file of the same family is not this file's asking."""
-    from ml_stack.bench.profiles import write_profiles
-    from ml_stack.serve.profile import add, profile_for, record, records_in
+    from poolhouse.bench.profiles import write_profiles
+    from poolhouse.serve.profile import add, profile_for, record, records_in
 
     where = tmp_path / "profiles.json"
     add(record("Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf", tight=True, batch=True, kinds=True,
@@ -95,8 +95,8 @@ def test_a_run_without_an_asking_record_never_takes_another_quantisations_asking
 
 def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
     """One model measured two askings writes two records, and neither overwrites the other."""
-    from ml_stack.bench.profiles import write_profiles
-    from ml_stack.serve.profile import profile_for, records_in
+    from poolhouse.bench.profiles import write_profiles
+    from poolhouse.serve.profile import profile_for, records_in
 
     where = tmp_path / "profiles.json"
     store = tmp_path / "runs.ladybug"
@@ -119,8 +119,8 @@ def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
 
 def test_a_recorded_draft_p_min_is_written_into_the_profile(tmp_path):
     """A run served with a measured confidence floor keeps it in the record `up` reads."""
-    from ml_stack.bench.profiles import write_profiles
-    from ml_stack.serve.profile import profile_for, records_in
+    from poolhouse.bench.profiles import write_profiles
+    from poolhouse.serve.profile import profile_for, records_in
 
     where = tmp_path / "profiles.json"
     store = tmp_path / "runs.ladybug"
@@ -133,8 +133,8 @@ def test_a_recorded_draft_p_min_is_written_into_the_profile(tmp_path):
 
 
 def test_a_store_of_runs_that_name_no_workload_writes_the_graph_asking_record(tmp_path):
-    from ml_stack.bench.profiles import write_profiles
-    from ml_stack.serve.profile import records_in
+    from poolhouse.bench.profiles import write_profiles
+    from poolhouse.serve.profile import records_in
 
     where = tmp_path / "profiles.json"
     store = tmp_path / "runs.ladybug"

@@ -1,6 +1,6 @@
-"""A llama-server ml-stack did not start is reported, counted, and adopted only on request.
+"""A llama-server poolhouse did not start is reported, counted, and adopted only on request.
 
-Adoption is off until ``ML_STACK_ADOPT_UNMANAGED`` or the ``adopt_unmanaged`` limit says
+Adoption is off until ``POOLHOUSE_ADOPT_UNMANAGED`` or the ``adopt_unmanaged`` limit says
 ``auto`` or ``ask``. Even then the listener is identified before anything is sent to it. The
 hostile listener below is a real process that answers like llama-server on loopback; the
 checks that refuse it read the real process table.
@@ -18,15 +18,15 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import gate, limits
-from ml_stack.http import Server
-from ml_stack.serve import admission, unmanaged
-from ml_stack.serve.backend import ServerFailed, ServerSpec
-from ml_stack.serve.leases import lease_file, recorded_servers
-from ml_stack.serve.manager import ServerManager, stop_all_servers
-from ml_stack.serve.ports import free_port
-from ml_stack.serve.process import pid_exists
-from ml_stack.testing.fakes import FakeBackend, FakeLlamaServer, Served
+from poolhouse import gate, limits
+from poolhouse.http import Server
+from poolhouse.serve import admission, unmanaged
+from poolhouse.serve.backend import ServerFailed, ServerSpec
+from poolhouse.serve.leases import lease_file, recorded_servers
+from poolhouse.serve.manager import ServerManager, stop_all_servers
+from poolhouse.serve.ports import free_port
+from poolhouse.serve.process import pid_exists
+from poolhouse.testing.fakes import FakeBackend, FakeLlamaServer, Served
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 LLAMA = {"pid": 0, "ip": "127.0.0.1", "uid": os.getuid(), "user": "me",
@@ -186,7 +186,7 @@ def test_by_default_a_busy_port_with_an_unmanaged_server_is_left_alone(served, t
     assert info.port != fake.port and not info.adopted
     assert recorded_servers(tmp_path / "servers.json").get(fake.port) is None
     _, _, strict = lease_beside(tmp_path, fake.port, model="model.gguf", roam=False)
-    with pytest.raises(ServerFailed, match="ml-stack did not start"):
+    with pytest.raises(ServerFailed, match="Poolhouse did not start"):
         strict()
 
 
@@ -220,7 +220,7 @@ def test_auto_adopts_a_verified_server_and_it_is_queued_counted_and_never_stoppe
         process.wait()
 
 
-def test_adopted_servers_survive_every_way_ml_stack_stops_servers(served, tmp_path,
+def test_adopted_servers_survive_every_way_poolhouse_stops_servers(served, tmp_path,
                                                                    monkeypatch):
     fake, process = served(), sleeping()
     monkeypatch.setenv(unmanaged.ENV, "auto")
@@ -228,12 +228,12 @@ def test_adopted_servers_survive_every_way_ml_stack_stops_servers(served, tmp_pa
     manager = ServerManager(FakeBackend(), state_file=lease_file())
     try:
         manager.lease(ServerSpec(model="model.gguf", port=fake.port), roam=False, preflight=False)
-        from ml_stack.serve import ops
-        from ml_stack.serve.reclaim import _recorded
+        from poolhouse.serve import ops
+        from poolhouse.serve.reclaim import _recorded
 
         stop_all_servers()
         assert process.poll() is None
-        with pytest.raises(ops.Refused, match="not started by ml-stack"):
+        with pytest.raises(ops.Refused, match="not started by poolhouse"):
             ops.down(fake.port)
         assert process.poll() is None
         assert fake.port not in _recorded(), "idle reclaim does not see it"

@@ -3,7 +3,7 @@
 
     scripts/pool-join-check                       start this device's node, set policy open, wait 90 s for the other device
     scripts/pool-join-check --wait 180
-    scripts/pool-join-check --binary app/target/release/poolside-node
+    scripts/pool-join-check --binary app/target/release/poolhouse-node
     scripts/pool-join-check --policy secure       only check that the node starts, listens and beacons; enrol nobody
 
 Run it on each of the two devices (within a minute or so of each other). Every step prints PASS, FAIL with the one
@@ -21,15 +21,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from ml_stack import node_join  # noqa: E402
-from ml_stack.node_launch import default_state  # noqa: E402
-from ml_stack.node_join_check import Check, summary, walk  # noqa: E402
+from poolhouse import node_join  # noqa: E402
+from poolhouse.node_launch import default_state  # noqa: E402
+from poolhouse.node_join_check import Check, summary, walk  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--state", default="", help="the node's state directory (default: the machine's)")
-    ap.add_argument("--binary", default="", help="run this poolside-node binary (default: the selected runtime's, else one built here)")
+    ap.add_argument("--binary", default="", help="run this poolhouse-node binary (default: the selected runtime's, else one built here)")
     ap.add_argument("--wait", type=float, default=90.0, help="seconds to wait for the other device at each step that needs it")
     ap.add_argument("--yes", action="store_true", help="agree to turning the network on without being asked")
     ap.add_argument("--policy", choices=node_join.POLICIES, default="open")

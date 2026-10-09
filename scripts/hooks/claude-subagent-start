@@ -44,7 +44,7 @@ def spawn(event: dict) -> bool:
     parent = workspace_hook.parent_environment(event, "SubagentStart")
     if parent is None:
         return False
-    command = ["ml-stack-workspace", "spawn", "--session", agent, "--harness", "claude-code"]
+    command = ["poolhouse-workspace", "spawn", "--session", agent, "--harness", "claude-code"]
     model = definition_model(event)
     if model:
         command += ["--model", model]
@@ -60,9 +60,9 @@ def workspace_brief(event: dict) -> str:
         return ""
     purpose = " ".join(str(event.get("description") or event.get("agent_type") or "subagent").split())[:190]
     tree_watch.started("SubagentStart", str(event.get("cwd") or ""),
-                       environment.get("ML_STACK_WORKSPACE_AGENT", ""), purpose)
-    workspace_hook.run(["ml-stack-workspace", "announce", "joined", purpose], "SubagentStart", environment=environment)
-    done = workspace_hook.run(["ml-stack-workspace", "brief", "--registered"],
+                       environment.get("POOLHOUSE_WORKSPACE_AGENT", ""), purpose)
+    workspace_hook.run(["poolhouse-workspace", "announce", "joined", purpose], "SubagentStart", environment=environment)
+    done = workspace_hook.run(["poolhouse-workspace", "brief", "--registered"],
                               "SubagentStart", environment=environment)
     return done.stdout.strip() if done else ""
 

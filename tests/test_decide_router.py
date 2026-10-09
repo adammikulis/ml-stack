@@ -7,9 +7,9 @@ import json
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack.decide import Rule, RulesDecider, router
-from ml_stack.decide.fetch import Pin, _verified
-from ml_stack.decide.types import BackendUnavailable
+from poolhouse.decide import Rule, RulesDecider, router
+from poolhouse.decide.fetch import Pin, _verified
+from poolhouse.decide.types import BackendUnavailable
 
 
 def config(server, **kw):
@@ -63,7 +63,7 @@ def test_an_unknown_backend_is_an_error_naming_the_choices():
 
 def test_the_pointer_backend_reports_a_missing_download_without_fetching():
     why = router.unavailable("pointer", router.Config())
-    assert why == "" or "ml-stack decide fetch" in why or "needs" in why
+    assert why == "" or "poolhouse decide fetch" in why or "needs" in why
 
 
 def test_a_pin_needs_full_length_hashes():
@@ -72,7 +72,7 @@ def test_a_pin_needs_full_length_hashes():
 
 
 def test_a_file_is_verified_by_size_and_hash_and_the_result_is_remembered(tmp_path, monkeypatch):
-    from ml_stack import home
+    from poolhouse import home
     monkeypatch.setattr(home, "cache", lambda *parts: tmp_path.joinpath("cache", *parts))
     f = tmp_path / "w.bin"
     f.write_bytes(b"weights")

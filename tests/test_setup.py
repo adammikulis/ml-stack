@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.checks import Finding, ask
-from ml_stack.setup import BEHAVIOURS, explain, look, main
+from poolhouse.checks import Finding, ask
+from poolhouse.setup import BEHAVIOURS, explain, look, main
 
 
 def test_it_reports_rather_than_changes(capsys):
@@ -32,7 +32,7 @@ def test_it_reports_rather_than_changes(capsys):
 
 def test_a_machine_that_will_not_answer_says_so_rather_than_guessing(monkeypatch):
     """A wrong "supported" sends someone to debug a model that was never going to load."""
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     monkeypatch.setattr(setup, "_arches", lambda binary: set())
     named = {f.name for f in setup.look()}
@@ -41,11 +41,11 @@ def test_a_machine_that_will_not_answer_says_so_rather_than_guessing(monkeypatch
 
 
 def test_an_architecture_is_only_claimed_when_the_names_were_read(monkeypatch, tmp_path):
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
     fake = tmp_path / "llama-server"
     fake.write_text("#!/bin/sh\necho usage\n")
     fake.chmod(0o755)
-    monkeypatch.setattr("ml_stack.serve.binary.find_binary", lambda *a, **k: fake)
+    monkeypatch.setattr("poolhouse.serve.binary.find_binary", lambda *a, **k: fake)
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"qwen3moe", "gemma4"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
@@ -86,7 +86,7 @@ def test_it_never_asks_for_a_password():
     password in order to pass it along is doing what this deliberately does not."""
     import inspect
 
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     source = inspect.getsource(setup)
     for reading in ("getpass", "password=", "input(\"password", "sudo -S", "--stdin"):
@@ -130,9 +130,9 @@ def _server_answering(tmp_path, help_text: str):
 def test_a_flag_the_build_lacks_is_reported_with_the_nearest_it_has(tmp_path, monkeypatch):
     """`--draft-max` became `--spec-draft-n-max`; a build listing only the new name must
     say so here, before a load finds out."""
-    import ml_stack.serve.binary as binary_module
-    import ml_stack.setup as setup
-    from ml_stack.serve import backend
+    import poolhouse.serve.binary as binary_module
+    import poolhouse.setup as setup
+    from poolhouse.serve import backend
 
     monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
@@ -147,11 +147,11 @@ def test_a_flag_the_build_lacks_is_reported_with_the_nearest_it_has(tmp_path, mo
 
 
 def test_a_build_that_answers_every_flag_is_not_mentioned(tmp_path, monkeypatch):
-    import ml_stack.serve.binary as binary_module
-    import ml_stack.setup as setup
-    from ml_stack.serve import backend
-    from ml_stack.serve.backend import LlamaServerBackend
-    from ml_stack.serve.emitted import emitted_flags
+    import poolhouse.serve.binary as binary_module
+    import poolhouse.setup as setup
+    from poolhouse.serve import backend
+    from poolhouse.serve.backend import LlamaServerBackend
+    from poolhouse.serve.emitted import emitted_flags
 
     monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
@@ -165,18 +165,18 @@ def test_a_build_that_answers_every_flag_is_not_mentioned(tmp_path, monkeypatch)
 
 
 def test_a_missing_architecture_offers_the_build_fix(monkeypatch, tmp_path):
-    """`ml-stack-serve build` is the fix for a release lagging master by an architecture --
-    `ml-stack-setup --yes` runs whatever a finding's `fix` names, so this is what makes
+    """`poolhouse-serve build` is the fix for a release lagging master by an architecture --
+    `poolhouse-setup --yes` runs whatever a finding's `fix` names, so this is what makes
     `--yes` actually get a missing architecture rather than just naming the gap."""
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
     fake = tmp_path / "llama-server"
     fake.write_text("#!/bin/sh\necho usage\n")
     fake.chmod(0o755)
-    monkeypatch.setattr("ml_stack.serve.binary.find_binary", lambda *a, **k: fake)
+    monkeypatch.setattr("poolhouse.serve.binary.find_binary", lambda *a, **k: fake)
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
-    assert found and found[0].fix == ["ml-stack-serve", "build"]
+    assert found and found[0].fix == ["poolhouse-serve", "build"]
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4", "qwen4exp"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
@@ -184,22 +184,22 @@ def test_a_missing_architecture_offers_the_build_fix(monkeypatch, tmp_path):
 
 
 def test_lacking_flags_offer_the_build_fix(tmp_path, monkeypatch):
-    import ml_stack.serve.binary as binary_module
-    import ml_stack.setup as setup
-    from ml_stack.serve import backend
+    import poolhouse.serve.binary as binary_module
+    import poolhouse.setup as setup
+    from poolhouse.serve import backend
 
     monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     stand_in = _server_answering(tmp_path, "-m, --model FNAME   model path\n")
     monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
     found = [f for f in setup.look() if f.name == "flags this build lacks"]
-    assert found and found[0].fix == ["ml-stack-serve", "build"]
+    assert found and found[0].fix == ["poolhouse-serve", "build"]
 
 
 def test_a_managed_build_is_labelled_by_commit_and_age_not_by_version(tmp_path):
     """BUILD.json is what tells a managed build apart from a brew one -- read it rather than
     guessing from the path, since both sit at some arbitrary directory."""
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\nexit 0\n")
@@ -213,7 +213,7 @@ def test_a_managed_build_is_labelled_by_commit_and_age_not_by_version(tmp_path):
 
 
 def test_an_unmanaged_build_is_labelled_by_its_own_version_output(tmp_path):
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'version: 0.3.0'; fi\n")
@@ -225,9 +225,9 @@ def test_an_unmanaged_build_is_labelled_by_its_own_version_output(tmp_path):
 def test_a_build_that_prints_no_help_is_not_accused_of_lacking_anything(tmp_path, monkeypatch):
     """Unknown is not none: a stand-in that says nothing must not be reported as lacking
     every flag there is."""
-    import ml_stack.serve.binary as binary_module
-    import ml_stack.setup as setup
-    from ml_stack.serve import backend
+    import poolhouse.serve.binary as binary_module
+    import poolhouse.setup as setup
+    from poolhouse.serve import backend
 
     monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: set())
@@ -243,38 +243,38 @@ def test_every_command_the_package_installs_is_looked_for_on_path(monkeypatch, t
     died on `command not found` for it. Setup names each missing command and the line."""
     import shutil
 
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     monkeypatch.setattr(shutil, "which",
-                        lambda name, *a, **k: None if name == "ml-stack-ingest"
+                        lambda name, *a, **k: None if name == "poolhouse-ingest"
                         else f"/opt/bin/{name}")
     found = [f for f in setup.look() if f.name == "commands on PATH"]
     assert found and not found[0].good
-    assert "ml-stack-ingest" in found[0].said
-    assert "ml-stack-serve" not in found[0].said, "only what is missing is named"
+    assert "poolhouse-ingest" in found[0].said
+    assert "poolhouse-serve" not in found[0].said, "only what is missing is named"
     assert found[0].fix == ["pip", "install", "-e", str(tmp_path)]
 
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: f"/opt/bin/{name}")
     found = [f for f in setup.look() if f.name == "commands on PATH"]
     assert found and found[0].good
-    assert "ml-stack-serve" in found[0].note
+    assert "poolhouse-serve" in found[0].note
 
 
 def test_the_commands_are_read_from_the_install_and_the_checkouts_pyproject(monkeypatch,
                                                                            tmp_path):
     """The installed metadata says what was installed; the checkout's pyproject says what
     should be -- and the difference is the command nobody can run yet."""
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "ml-stack"\n[project.scripts]\n'
-        'ml-stack-serve = "ml_stack.serve.cli:main"\n'
-        'ml-stack-newthing = "ml_stack.newthing:main"\n')
+        '[project]\nname = "poolhouse"\n[project.scripts]\n'
+        'poolhouse-serve = "poolhouse.serve.cli:main"\n'
+        'poolhouse-newthing = "poolhouse.newthing:main"\n')
     monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     names = setup._scripts()
-    assert {"ml-stack-serve", "ml-stack-setup", "ml-stack-ingest"} <= set(names)
-    assert "ml-stack-newthing" in names, "named in the checkout, not yet installed"
+    assert {"poolhouse-serve", "poolhouse-setup", "poolhouse-ingest"} <= set(names)
+    assert "poolhouse-newthing" in names, "named in the checkout, not yet installed"
     assert names == sorted(set(names))
 
 
@@ -282,16 +282,16 @@ def test_the_printed_report_names_the_missing_command_and_the_line(monkeypatch, 
                                                                    tmp_path):
     import shutil
 
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     monkeypatch.setattr(shutil, "which",
-                        lambda name, *a, **k: None if name == "ml-stack-jobs"
+                        lambda name, *a, **k: None if name == "poolhouse-jobs"
                         else f"/opt/bin/{name}")
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert setup.main(["--quiet"]) == 1
     out = capsys.readouterr().out
-    assert "ml-stack-jobs" in out
+    assert "poolhouse-jobs" in out
     assert f"fix: pip install -e {tmp_path}" in out
 
 
@@ -304,7 +304,7 @@ def test_the_models_finding_names_each_cache_and_its_size(monkeypatch, capsys, t
     mine = tmp_path / "models"
     mine.mkdir()
     (mine / "small.gguf").write_bytes(b"y" * (1024 * 1024 + 1024))
-    monkeypatch.setattr("ml_stack.hub.default_roots",
+    monkeypatch.setattr("poolhouse.hub.default_roots",
                         lambda root: [tmp_path / "hf" / "hub", mine, tmp_path / "absent"])
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -319,8 +319,8 @@ def test_the_models_finding_names_each_cache_and_its_size(monkeypatch, capsys, t
 
 def _speech(monkeypatch, *, asr=(), tts=(), vad=()):
     """Stand named providers on the three speech registries; each entry is (name, health)."""
-    from ml_stack import speech as package
-    from ml_stack.speech import Registry
+    from poolhouse import speech as package
+    from poolhouse.speech import Registry
 
     def stub(name, health):
         class One:
@@ -346,7 +346,7 @@ def _speech(monkeypatch, *, asr=(), tts=(), vad=()):
 
 
 def test_the_speech_findings_name_the_engine_and_the_one_that_would_be_used(monkeypatch):
-    from ml_stack.speech import ProviderHealth
+    from poolhouse.speech import ProviderHealth
 
     _speech(monkeypatch,
             asr=[("faster-whisper", ProviderHealth.ok("small.en")),
@@ -361,7 +361,7 @@ def test_the_speech_findings_name_the_engine_and_the_one_that_would_be_used(monk
 
 
 def test_a_machine_with_no_speech_engine_is_told_what_would_add_one(monkeypatch):
-    from ml_stack.speech import ProviderHealth
+    from poolhouse.speech import ProviderHealth
 
     _speech(monkeypatch,
             asr=[("faster-whisper", ProviderHealth.missing("faster-whisper is not installed"))],
@@ -369,14 +369,14 @@ def test_a_machine_with_no_speech_engine_is_told_what_would_add_one(monkeypatch)
             vad=[("energy", ProviderHealth.ok("energy"))])
     found = {f.name: f for f in look()}
     assert not found["speech recognition"].good
-    assert found["speech recognition"].fix == ["pip", "install", "ml-stack[speech]"]
+    assert found["speech recognition"].fix == ["pip", "install", "poolhouse[speech]"]
     assert "faster-whisper is not installed" in found["speech recognition"].note
     assert not found["speech synthesis"].good
     assert found["voice activity"].good, "the energy detector needs nothing installed"
 
 
 def test_the_speech_findings_are_printed_with_the_rest(monkeypatch, capsys):
-    from ml_stack.speech import ProviderHealth
+    from poolhouse.speech import ProviderHealth
 
     _speech(monkeypatch, vad=[("energy", ProviderHealth.ok("energy"))])
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -389,8 +389,8 @@ def test_the_speech_findings_are_printed_with_the_rest(monkeypatch, capsys):
 def test_the_firewall_finding_names_both_inbound_rules_and_how_to_add_them():
     """Windows hears no beacon and answers no peer until TCP 8770 and UDP 8771 are let in.
     `_firewall_rule_present` asks ``netsh``; where there is none, every rule reads absent."""
-    from ml_stack.fleet.discovery import windows_firewall_line, windows_firewall_rules
-    from ml_stack.setup import _firewall_finding
+    from poolhouse.fleet.discovery import windows_firewall_line, windows_firewall_rules
+    from poolhouse.setup import _firewall_finding
 
     finding = _firewall_finding()
     named = [name for name, _ in windows_firewall_rules()]
@@ -412,22 +412,22 @@ def test_the_firewall_finding_names_both_inbound_rules_and_how_to_add_them():
 
 
 def test_a_rule_netsh_cannot_confirm_reads_as_absent():
-    from ml_stack.setup import _firewall_rule_present
+    from poolhouse.setup import _firewall_rule_present
 
-    assert _firewall_rule_present("ml-stack: a rule no machine has") is False
+    assert _firewall_rule_present("poolhouse: a rule no machine has") is False
 
 
 def test_the_gguf_finding_only_counts_gguf_files(monkeypatch, tmp_path):
     """A safetensors checkpoint on disk does not mean llama-server has anything to load."""
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     mine = tmp_path / "models"
     mine.mkdir()
     (mine / "small.safetensors").write_bytes(b"x")
-    monkeypatch.setattr("ml_stack.hub.default_roots", lambda root: [mine, tmp_path / "absent"])
+    monkeypatch.setattr("poolhouse.hub.default_roots", lambda root: [mine, tmp_path / "absent"])
     found = {f.name: f for f in setup.look()}
     assert not found["a GGUF on disk"].good
-    assert found["a GGUF on disk"].fix == ["ml-stack-models", "fetch", "hf:owner/repo/file.gguf"]
+    assert found["a GGUF on disk"].fix == ["poolhouse-models", "fetch", "hf:owner/repo/file.gguf"]
 
     (mine / "small-Q4_K_M.gguf").write_bytes(b"y")
     found = {f.name: f for f in setup.look()}
@@ -438,7 +438,7 @@ def test_the_gguf_finding_only_counts_gguf_files(monkeypatch, tmp_path):
 # -- the store ------------------------------------------------------------
 
 def test_store_finding_says_there_is_nothing_to_open_yet(tmp_path):
-    from ml_stack.setup import _store_finding
+    from poolhouse.setup import _store_finding
 
     found = _store_finding(tmp_path / "runs.ladybug")
     assert found.good
@@ -446,8 +446,8 @@ def test_store_finding_says_there_is_nothing_to_open_yet(tmp_path):
 
 
 def test_store_finding_opens_a_real_store(tmp_path):
-    from ml_stack.graph.cypher import CypherStore
-    from ml_stack.setup import _store_finding
+    from poolhouse.graph.cypher import CypherStore
+    from poolhouse.setup import _store_finding
 
     path = tmp_path / "runs.ladybug"
     with CypherStore(path):
@@ -458,13 +458,13 @@ def test_store_finding_opens_a_real_store(tmp_path):
 
 
 def test_store_finding_reports_a_store_that_will_not_open(tmp_path):
-    from ml_stack.setup import _store_finding
+    from poolhouse.setup import _store_finding
 
     path = tmp_path / "runs.ladybug"
     path.write_bytes(b"not a ladybug database")
     found = _store_finding(path)
     assert not found.good
-    assert found.fix == ["ml-stack-store", "check", str(path)]
+    assert found.fix == ["poolhouse-store", "check", str(path)]
 
 
 # -- the ports --------------------------------------------------------------
@@ -482,7 +482,7 @@ def _free_udp_port() -> int:
 
 
 def test_ports_finding_says_free_when_nothing_listens():
-    from ml_stack.setup import _ports_finding
+    from poolhouse.setup import _ports_finding
 
     http_port, disco_port = _free_tcp_port(), _free_udp_port()
     found = _ports_finding(http_port, disco_port, None)
@@ -491,7 +491,7 @@ def test_ports_finding_says_free_when_nothing_listens():
 
 
 def test_ports_finding_says_what_holds_a_taken_port():
-    from ml_stack.setup import _ports_finding
+    from poolhouse.setup import _ports_finding
 
     http_port, disco_port = _free_tcp_port(), _free_udp_port()
     holder = socket.socket()
@@ -507,7 +507,7 @@ def test_ports_finding_says_what_holds_a_taken_port():
 
 
 def test_ports_finding_says_held_by_the_given_daemon():
-    from ml_stack.setup import _ports_finding
+    from poolhouse.setup import _ports_finding
 
     found = _ports_finding(8770, 8771, {"name": "testbox", "ok": True})
     assert found.good
@@ -517,28 +517,28 @@ def test_ports_finding_says_held_by_the_given_daemon():
 # -- the fleet ----------------------------------------------------------------
 
 def test_fleet_finding_says_in_no_cluster_when_never_joined(tmp_path):
-    from ml_stack.setup import _fleet_findings
+    from poolhouse.setup import _fleet_findings
 
     found = {f.name: f for f in
              _fleet_findings(cluster_key_path=tmp_path / "cluster.key")}
     assert found.keys() == {"fleet: joined", "ports"}
     assert not found["fleet: joined"].good
     assert found["fleet: joined"].said == "in no cluster"
-    assert found["fleet: joined"].fix[:2] == ["ml-stack-cluster", "join"] and "--passphrase" in found["fleet: joined"].fix
+    assert found["fleet: joined"].fix[:2] == ["poolhouse-cluster", "join"] and "--passphrase" in found["fleet: joined"].fix
 
 
 def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
-    from ml_stack.fleet.discovery import create_cluster_key
-    from ml_stack.setup import _fleet_findings
+    from poolhouse.fleet.discovery import create_cluster_key
+    from poolhouse.setup import _fleet_findings
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile, group="ml-stack")
+    create_cluster_key(keyfile, group="poolhouse")
     found = {f.name: f for f in
              _fleet_findings(port=_free_tcp_port(), discovery_port=_free_udp_port(),
                              cluster_key_path=keyfile)}
     assert found["fleet: joined"].good
     assert not found["fleet: daemon"].good
-    assert found["fleet: daemon"].fix == ["ml-stack-cluster", "join"]
+    assert found["fleet: daemon"].fix == ["poolhouse-cluster", "join"]
     assert "fleet: seen" not in found
     assert found["ports"].good
 
@@ -548,20 +548,20 @@ REPO = Path(__file__).resolve().parent.parent
 
 @contextlib.contextmanager
 def _booted_daemon(tmp_path):
-    """A real ``ml-stack-traind``, on its own cluster key and its own ports, for the
+    """A real ``poolhouse-traind``, on its own cluster key and its own ports, for the
     fleet findings to answer and be heard by."""
-    from ml_stack.fleet.discovery import create_cluster_key
-    from ml_stack.fleet.launch import already_running
+    from poolhouse.fleet.discovery import create_cluster_key
+    from poolhouse.fleet.launch import already_running
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile, group="ml-stack")
+    create_cluster_key(keyfile, group="poolhouse")
     http_port, disco_port = _free_tcp_port(), _free_udp_port()
-    env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
+    env = {**os.environ, "POOLHOUSE_DISCOVERY_PORT": str(disco_port),
           "PYTHONPATH": str(REPO / "src"), "PYTHONUNBUFFERED": "1"}
     log = tmp_path / "traind.out"
     fh = log.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "ml_stack.fleet.daemon",
+        [sys.executable, "-m", "poolhouse.fleet.daemon",
          "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", "setuptestbox",
          "--cluster-key", str(keyfile), "--no-web"],
@@ -589,7 +589,7 @@ def _booted_daemon(tmp_path):
 
 @pytest.mark.slow
 def test_fleet_findings_see_a_real_booted_daemon(tmp_path):
-    from ml_stack.setup import _fleet_findings
+    from poolhouse.setup import _fleet_findings
 
     with _booted_daemon(tmp_path) as (keyfile, http_port, disco_port):
         found = {f.name: f for f in _fleet_findings(
@@ -604,8 +604,8 @@ def test_fleet_findings_see_a_real_booted_daemon(tmp_path):
 
 
 def test_a_named_build_that_is_not_here_is_a_finding(monkeypatch, tmp_path):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
-    monkeypatch.setenv("MLSTACK_LLAMA_BUILD", "gone")
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_LLAMA_BUILD", "gone")
     found = [f for f in look() if f.name == "llama-server"]
     assert len(found) == 1 and not found[0].good
     assert "'gone'" in found[0].said
@@ -613,7 +613,7 @@ def test_a_named_build_that_is_not_here_is_a_finding(monkeypatch, tmp_path):
 
 
 def test_a_model_root_that_cannot_be_read_is_a_finding(monkeypatch):
-    from ml_stack.fleet import models
+    from poolhouse.fleet import models
 
     def unreadable(root):
         raise PermissionError(13, "Permission denied", "/models")
@@ -627,16 +627,16 @@ def test_a_model_root_that_cannot_be_read_is_a_finding(monkeypatch):
 def test_a_checkout_with_no_installed_metadata_reads_its_pyproject(monkeypatch, tmp_path):
     from importlib.metadata import PackageNotFoundError
 
-    import ml_stack.setup as setup
+    import poolhouse.setup as setup
 
     def not_installed(name):
         raise PackageNotFoundError(name)
 
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "ml-stack"\n[project.scripts]\nml-stack-newthing = "m:main"\n')
+        '[project]\nname = "poolhouse"\n[project.scripts]\npoolhouse-newthing = "m:main"\n')
     monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     monkeypatch.setattr(setup, "distribution", not_installed)
-    assert setup._scripts() == ["ml-stack-newthing"]
+    assert setup._scripts() == ["poolhouse-newthing"]
 
 
 def test_a_fix_naming_a_hostile_path_runs_as_one_argument_and_no_shell(tmp_path, monkeypatch):

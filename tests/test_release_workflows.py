@@ -350,8 +350,8 @@ def test_the_dry_run_path_filter_covers_what_ships_the_app():
     for expected in (
         "app/**",
         "packaging/**",
-        "src/ml_stack/fleet/**",
-        "src/ml_stack/ui/**",
+        "src/poolhouse/fleet/**",
+        "src/poolhouse/ui/**",
         ".github/workflows/release*.yml",
     ):
         assert expected in paths

@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from ml_stack.serve.chat_template import forgiving, needs_forgiving
+from poolhouse.serve.chat_template import forgiving, needs_forgiving
 
 GUARD = ("{%- for message in messages %}\n"
          "    {%- if message.role == \"system\" %}\n"
@@ -47,7 +47,7 @@ def test_the_late_system_message_is_rendered_rather_than_dropped():
 
 
 def test_a_model_that_names_no_template_needs_none(tmp_path):
-    from ml_stack.serve.chat_template import template_of, written_beside
+    from poolhouse.serve.chat_template import template_of, written_beside
 
     empty = tmp_path / "nothing.gguf"
     empty.write_bytes(b"not a gguf")
@@ -56,7 +56,7 @@ def test_a_model_that_names_no_template_needs_none(tmp_path):
 
 
 def test_shared_launchers_get_the_same_cached_template(monkeypatch, tmp_path):
-    from ml_stack.serve import chat_template
+    from poolhouse.serve import chat_template
 
     monkeypatch.setattr(chat_template, "template_of", lambda _: GUARD)
     first = chat_template.written_beside(tmp_path / "qwen.gguf")
@@ -66,9 +66,9 @@ def test_shared_launchers_get_the_same_cached_template(monkeypatch, tmp_path):
 
 
 def test_resolved_launch_profile_uses_the_shared_template(monkeypatch, tmp_path):
-    from ml_stack.serve import chat_template, ops
-    from ml_stack.serve.backend import ServerSpec
-    from ml_stack.serve.manager import ServerManager
+    from poolhouse.serve import chat_template, ops
+    from poolhouse.serve.backend import ServerSpec
+    from poolhouse.serve.manager import ServerManager
 
     monkeypatch.setattr(chat_template, "template_of", lambda _: GUARD)
     model = tmp_path / "qwen.gguf"

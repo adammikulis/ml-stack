@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from ml_stack.workspace import worktree_lifecycle as lifecycle
+from poolhouse.workspace import worktree_lifecycle as lifecycle
 
 
 def seed(base):
@@ -20,7 +20,7 @@ def test_killed_staged_writer_preserves_active_records(tmp_path):
     before = (tmp_path / 'worktree-lifecycle.db').read_bytes()
     script = """from pathlib import Path
 import os, sys
-from ml_stack.workspace.worktree_lifecycle import _storage
+from poolhouse.workspace.worktree_lifecycle import _storage
 with _storage(Path(sys.argv[1]), write=True) as graph:
  graph.upsert_node({'id':'unpublished','kind':'worktree-lifecycle','attrs':{'owner':'worker'}})
  os._exit(23)

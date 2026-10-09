@@ -1,11 +1,11 @@
-"""Every ``ml-stack`` command answers ``--help``, and the docs name only flags that exist.
+"""Every ``poolhouse`` command answers ``--help``, and the docs name only flags that exist.
 
 Nothing else in the suite catches a flag that does not exist. Three silent edits in one
 afternoon left ``--sample`` and ``--short`` documented but never added to the bench, so
 argparse matched ``--short`` to ``--shortlist`` by prefix and refused it with a message about
 the wrong flag. A ``--help`` that is asserted is the cheapest guard there is: each command
 here is imported and its ``main`` called, so a fresh checkout tests itself without being
-installed. No model is served, and nothing under ``~/.ml-stack`` is touched.
+installed. No model is served, and nothing under ``~/.poolhouse`` is touched.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def parser_of(command: str) -> argparse.ArgumentParser:
     # A launcher forwards to the machine's selected runtime by exec, which on a machine that
     # has one would replace the test process; reading a parser must never do that.
     with (mock.patch.object(argparse.ArgumentParser, "parse_known_args", grab),
-          mock.patch("ml_stack.runtime.forward", return_value=False)):
+          mock.patch("poolhouse.runtime.forward", return_value=False)):
         try:
             _main_of(command)([])
         except _Captured as caught:
@@ -97,8 +97,8 @@ SUBCOMMANDS = [(command, path) for command, parser in PARSERS.items()
 
 @pytest.fixture(autouse=True)
 def bench_at_home(tmp_path, monkeypatch):
-    """The bench takes a lock under its home before measuring; keep that out of ~/.ml-stack."""
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+    """The bench takes a lock under its home before measuring; keep that out of ~/.poolhouse."""
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
 
 
 @pytest.mark.parametrize("command", sorted(SCRIPTS), ids=sorted(SCRIPTS))
@@ -109,16 +109,16 @@ def test_every_command_answers_help(command, capsys):
     assert "usage:" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("command", sorted(c for c in SCRIPTS if c.startswith("ml-stack-")))
+@pytest.mark.parametrize("command", sorted(c for c in SCRIPTS if c.startswith("poolhouse-")))
 def test_the_umbrella_hands_back_the_same_help(command, capsys):
-    """``ml-stack chat --help`` is ``ml-stack-chat --help``; ``ml-stack train run`` joins the words."""
-    words = command[len("ml-stack-"):].split("-")
+    """``poolhouse chat --help`` is ``poolhouse-chat --help``; ``poolhouse train run`` joins the words."""
+    words = command[len("poolhouse-"):].split("-")
     with pytest.raises(SystemExit) as left:
         _main_of(command)(["--help"])
     assert left.value.code == 0
     direct = capsys.readouterr().out
     with pytest.raises(SystemExit) as left:
-        _main_of("ml-stack")([*words, "--help"])
+        _main_of("poolhouse")([*words, "--help"])
     assert left.value.code == 0
     assert capsys.readouterr().out == direct
 
@@ -169,7 +169,7 @@ def _pages() -> list[Path]:
 
 
 def _command_lines(text: str) -> list[tuple[int, str]]:
-    """Every line of a fenced block that starts an ``ml-stack`` command, continuations joined."""
+    """Every line of a fenced block that starts an ``poolhouse`` command, continuations joined."""
     found: list[tuple[int, str]] = []
     fenced = False
     pending: tuple[int, str] | None = None
@@ -186,7 +186,7 @@ def _command_lines(text: str) -> list[tuple[int, str]]:
         if line.rstrip().endswith("\\"):
             pending = (number, line.rstrip()[:-1])
             continue
-        if line.strip().startswith("ml-stack"):
+        if line.strip().startswith("poolhouse"):
             found.append((number, line.strip()))
     return found
 
@@ -215,7 +215,7 @@ def _documented() -> list[tuple[str, str, tuple[str, ...], set[str]]]:
                 found.append((f"{where}:{number}", command, tuple(subs), flags))
 
         for number, line in enumerate(text.splitlines(), start=1):
-            if not line.startswith("| `ml-stack"):
+            if not line.startswith("| `poolhouse"):
                 continue
             command = line.split("`", 2)[1].split()[0]
             if command not in SCRIPTS:
@@ -233,8 +233,8 @@ def test_the_docs_were_read():
     """A regex that matches nothing would make the test below pass by saying nothing."""
     pages = {page.name for page in _pages()}
     assert {"install.md", "commands.md", "serving.md", "bench.md"} <= pages
-    assert any(cmd == "ml-stack-serve" and subs == ("up",) for _, cmd, subs, _ in DOCUMENTED)
-    assert any(cmd == "ml-stack-bench" and "--rates" in flags for _, cmd, _, flags in DOCUMENTED)
+    assert any(cmd == "poolhouse-serve" and subs == ("up",) for _, cmd, subs, _ in DOCUMENTED)
+    assert any(cmd == "poolhouse-bench" and "--rates" in flags for _, cmd, _, flags in DOCUMENTED)
 
 
 @pytest.mark.parametrize(("where", "command", "subs", "flags"), DOCUMENTED,
@@ -255,19 +255,19 @@ def test_every_measuring_subcommand_takes_a_sample_and_no_two_define_it_twice():
     while building the parser, and ``parser_of`` would have failed before this test ran;
     what is asserted here is that each still accepts it.
     """
-    from ml_stack.bench import MEASURING
+    from poolhouse.bench import MEASURING
     for sub in MEASURING:
-        assert "--sample" in flags_of(PARSERS["ml-stack-bench"], sub), sub
+        assert "--sample" in flags_of(PARSERS["poolhouse-bench"], sub), sub
     for sub in ("run", "sweep"):
-        assert {"--short", "--smoke"} <= flags_of(PARSERS["ml-stack-bench"], sub), sub
+        assert {"--short", "--smoke"} <= flags_of(PARSERS["poolhouse-bench"], sub), sub
 
 
 def test_the_bench_refuses_an_abbreviated_flag_rather_than_guessing():
     """``--short`` bound to ``--shortlist`` by prefix was the bug; a prefix binds nothing now."""
-    for path, parser in parsers_of(PARSERS["ml-stack-bench"]).items():
+    for path, parser in parsers_of(PARSERS["poolhouse-bench"]).items():
         assert parser.allow_abbrev is False, f"bench {path or 'top level'} allows abbreviation"
     with pytest.raises(SystemExit) as left:
-        PARSERS["ml-stack-bench"].parse_args(["run", "x", "--shortl", "3"])
+        PARSERS["poolhouse-bench"].parse_args(["run", "x", "--shortl", "3"])
     assert left.value.code == 2
 
 
@@ -276,5 +276,5 @@ def test_the_help_of_a_measuring_subcommand_names_no_queue(sub, capsys):
     """``--no-queue`` is taken out of argv before the parser sees it, so only the parser
     can tell anyone it exists."""
     with pytest.raises(SystemExit):
-        _main_of("ml-stack-bench")([sub, "--help"])
+        _main_of("poolhouse-bench")([sub, "--help"])
     assert "--no-queue" in capsys.readouterr().out

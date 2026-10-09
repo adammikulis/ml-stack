@@ -21,7 +21,7 @@ spec.loader.exec_module(load)
 
 
 def run_script(*args: str) -> tuple[int, dict]:
-    env = {k: v for k, v in os.environ.items() if k not in ("ML_STACK_WORKSPACE_HOME", "ML_STACK_HOME")}
+    env = {k: v for k, v in os.environ.items() if k not in ("POOLHOUSE_WORKSPACE_HOME", "POOLHOUSE_HOME")}
     done = subprocess.run([sys.executable, str(SCRIPT), *args], env=env, capture_output=True, text=True,
                           timeout=300, check=False)
     assert done.stdout.strip(), done.stderr

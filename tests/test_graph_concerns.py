@@ -1,6 +1,6 @@
 """A change request that reaches past the claimant's own information is flagged."""
 
-from ml_stack.graph.concerns import concerns
+from poolhouse.graph.concerns import concerns
 
 GRAPH = {
     "nodes": [{"id": "p:ada", "kind": "person", "label": "Ada Lovelace", "attrs": {}},

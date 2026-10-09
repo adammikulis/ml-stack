@@ -2,8 +2,8 @@
  "version": 1,
  "meta": {
   "date": "2026-10-03",
-  "command": "python -m ml_stack.redteam run --model stub --scenarios extraction,fleet,sentinel --out redteam-stub",
-  "ml_stack": "0.1.7 @ fafd034+dirty",
+  "command": "python -m poolhouse.redteam run --model stub --scenarios extraction,fleet,sentinel --out redteam-stub",
+  "poolhouse": "0.1.7 @ fafd034+dirty",
   "pyrit": "1.1.0",
   "python": "3.13.5",
   "platform": "macOS-26.6",

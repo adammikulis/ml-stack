@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import Denied, screen
-from ml_stack.workspace.identity import AGENT, HUMAN, RESERVED, Identity, valid_name
-from ml_stack.workspace.notes import KINDS
-from ml_stack.workspace.quarantine import Quarantine
+from poolhouse.workspace import Denied, screen
+from poolhouse.workspace.identity import AGENT, HUMAN, RESERVED, Identity, valid_name
+from poolhouse.workspace.notes import KINDS
+from poolhouse.workspace.quarantine import Quarantine
 
 
 @pytest.fixture

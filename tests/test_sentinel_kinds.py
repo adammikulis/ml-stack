@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.sentinel import Mode, Sentinel, State, human
-from ml_stack.sentinel.store import KINDS, Holding
+from poolhouse.sentinel import Mode, Sentinel, State, human
+from poolhouse.sentinel.store import KINDS, Holding
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 

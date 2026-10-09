@@ -5,9 +5,9 @@ import threading
 from contextlib import nullcontext
 from types import SimpleNamespace
 
-from ml_stack.fleet.chat import Target, reply_parts
-from ml_stack.fleet.chat_stream import Transfer, frame, release, reserve
-from ml_stack.fleet.conversations import Conversations
+from poolhouse.fleet.chat import Target, reply_parts
+from poolhouse.fleet.chat_stream import Transfer, frame, release, reserve
+from poolhouse.fleet.conversations import Conversations
 
 
 def test_reasoning_survives_conversation_reload(tmp_path):
@@ -32,8 +32,8 @@ def test_pending_conversation_is_reserved_once():
 
 
 def test_upstream_error_is_an_sse_error(monkeypatch):
-    from ml_stack.fleet import chat_stream
-    from ml_stack.fleet.chat import ChatError
+    from poolhouse.fleet import chat_stream
+    from poolhouse.fleet.chat import ChatError
     monkeypatch.setattr(chat_stream, "turn", lambda *a, **k: nullcontext())
     def fail(*args, **kwargs):
         raise ChatError("upstream failed")
@@ -47,7 +47,7 @@ def test_upstream_error_is_an_sse_error(monkeypatch):
 
 
 def test_disconnect_cancels_worker_and_frees_model_slot(monkeypatch):
-    from ml_stack.fleet import chat_stream
+    from poolhouse.fleet import chat_stream
     monkeypatch.setattr(chat_stream, "turn", lambda *a, **k: nullcontext())
     stopped = threading.Event()
     def waiting(target, payload, *, control):

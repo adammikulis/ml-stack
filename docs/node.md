@@ -1,8 +1,8 @@
 # The node
 
-One `poolside-node` runs per device. It holds the boards that device takes part in, gives every
+One `poolhouse-node` runs per device. It holds the boards that device takes part in, gives every
 session one unique name per board, stamps every write from the session's token, and answers a
-local API on a Unix socket (a named pipe on Windows). It is the Rust crate `app/poolside-node` (lib and bin) in the cargo
+local API on a Unix socket (a named pipe on Windows). It is the Rust crate `app/poolhouse-node` (lib and bin) in the cargo
 workspace `app/`; the Tauri app (`app/src-tauri`) is the other member and depends on the lib.
 
 This is slices A and B1 of the node refactor: the crate (boards, identity, local socket, in-process
@@ -24,7 +24,7 @@ built and tested alone. The shipping section below puts it in every runtime and 
   directory, so every worktree of a repo is the same project; a directory that matches nothing
   gets `denied: this directory is not part of a project`, never another project's board. A git
   source is stored as the repository's main working tree. One place cannot belong to two projects.
-  `.poolside/project.toml` in a repo (`board = "id"`) is an optional hint only
+  `.poolhouse/project.toml` in a repo (`board = "id"`) is an optional hint only
   (`project::propose_id`, `project::init_project`); it is never required.
   `--board ID` still names a board directly, and is checked against the session's registration.
 - **Links.** Nothing crosses between boards except through a link: a session of board `from`
@@ -82,7 +82,7 @@ foreign entry of those kinds is not shown yet. `head` is a signature row, never 
 `register {model, harness, session}` on a board returns `{name, token}`. The name is the model
 family (`claude`, `chatgpt`, `qwen`, else `agent`), a dash, and the first six hex of
 SHA-256(`harness NUL session`), extended by two hex per collision, exactly the algorithm of
-`src/ml_stack/workspace/session_name.py`. The same session always gets the same name back. A
+`src/poolhouse/workspace/session_name.py`. The same session always gets the same name back. A
 `register` carrying the token of a session of the same board makes the new session its subagent
 (`parent` recorded in its identity entry); the parent is never a request field.
 
@@ -99,7 +99,7 @@ Frames are a 4-byte big-endian length (at most 1 MiB) and JSON. The socket is
 per state directory: `node.lock` is held with `flock`; a stale socket from a killed node is replaced
 by the next one.
 
-**On Windows** the same frames and methods run over a named pipe, `\\.\pipe\poolside-node-<key>`, where `<key>` is the
+**On Windows** the same frames and methods run over a named pipe, `\\.\pipe\poolhouse-node-<key>`, where `<key>` is the
 first 32 hex characters of the SHA-256 of the state directory's absolute path (backslashes, lower case, no `\\?\`
 prefix, no trailing separator; `sys::key_of` in Rust and `node_health.key_of` in Python, one test vector in both).
 The pipe is created with a protected DACL that grants the current user's SID alone (`D:P(A;;GA;;;<sid>)`),
@@ -189,7 +189,7 @@ never runs `verify_cmd`: a client does and records `exit` and the SHA-256 of the
 
 The Rust client (`client::Client`, `client::ensure_running`) finds a dead socket, takes
 `start.lock` (single-flight, so callers queue and the second finds the first's node), spawns
-`poolside-node run --state DIR` in its own process group, and polls `hello`. State is the logs on
+`poolhouse-node run --state DIR` in its own process group, and polls `hello`. State is the logs on
 disk, so a killed node restarts with every committed entry and every token.
 
 ## Leases
@@ -307,18 +307,18 @@ listener is the one network port.
   the same segment and the enrolment is recorded with the certificate fingerprint (`by: open`). A device
   joins only if it is alone in its pool.
 
-`poolside-node run --state DIR --listen 127.0.0.1:0 --beacon-bind ADDR --beacon-send ADDR
+`poolhouse-node run --state DIR --listen 127.0.0.1:0 --beacon-bind ADDR --beacon-send ADDR
 --advertise IP --sync-ms N` starts the network; tests use real sockets on loopback with injected
 addresses and an unused UDP port for the beacon. No default test listens beyond loopback or uses multicast
 (`tests/loopback_only.rs` and `tests/test_node_join.py` enforce it): that makes macOS ask the person for Local
-Network permission. The LAN tests are `#[ignore]`d / need `ML_STACK_LAN_TESTS=1` and are run by a person at the machine.
+Network permission. The LAN tests are `#[ignore]`d / need `POOLHOUSE_LAN_TESTS=1` and are run by a person at the machine.
 
-`poolside-node run --state DIR --network [--port 47321] [--beacon-port 47322]` is the real network: every interface,
+`poolhouse-node run --state DIR --network [--port 47321] [--beacon-port 47322]` is the real network: every interface,
 the multicast group and each network's broadcast address (`netif.rs` reads the interfaces; a VPN or loopback is not
 a segment), each beacon advertising the address of the interface it leaves by. Open join is accepted from, and dialled
 to, an address inside a subnet of this machine only. `pool_status` adds `beacon_sent|heard|own|rejected`, the last send
 error and `last_join`: a node that sends but never hears its own beacon is blocked by the system (macOS Local Network,
-a firewall, WSL2 NAT). `python -m ml_stack.node_join join --policy open|secure` starts it that way after showing what
+a firewall, WSL2 NAT). `python -m poolhouse.node_join join --policy open|secure` starts it that way after showing what
 it does and getting a yes (`--yes` for a script), and `scripts/pool-join-check` walks every step on one device and prints
 the fix for the first that fails.
 
@@ -326,7 +326,7 @@ the fix for the first that fails.
 
 macOS ties Local Network permission to an app's bundle id and code signature, so a bare cargo-built binary asks again for every
 build. On macOS the LAN-enabled node (`--lan`, started by the supervisor) therefore runs as the executable inside
-`~/.ml-stack/apps/Poolhouse.app` (outside every checkout), never as a bare binary: `node_app.bundled` rebuilds the bundle
+`~/.poolhouse/apps/Poolhouse.app` (outside every checkout), never as a bare binary: `node_app.bundled` rebuilds the bundle
 when the verified binary's checksum differs from the one inside, so the supervisor still checks the checksum it always did.
 
 - **Fixed id.** The bundle id is `app.poolhouse.node` and is never changed: a new id is a new app to macOS and loses every grant.
@@ -338,28 +338,28 @@ when the verified binary's checksum differs from the one inside, so the supervis
   requirement `identifier "app.poolhouse.node" and certificate leaf = H"<sha1>"`. It names no cdhash, so rebuilding the binary
   keeps the grant. If the certificate cannot be made, the bundle is signed ad hoc with the identifier-only requirement and a
   warning says the permission may be asked again after a rebuild. A bundle is built beside its place and moved in only once signed.
-- **Asking once.** `ml-stack node permission` launches the bundle through Launch Services with `poolside-node probe`, which joins
+- **Asking once.** `poolhouse node permission` launches the bundle through Launch Services with `poolhouse-node probe`, which joins
   the beacon group, sends datagrams of its own (multicast, each network's broadcast address and the router) and listens for
   itself, up to 30 seconds. It prints GRANTED, DENIED (the sends were refused or never heard) or NOT ASKED (the bundle did not
   run). This is the only place that touches multicast on a Mac outside a node the person turned the network on for.
-  `ml-stack node build [--binary PATH]` builds and signs the bundle by hand.
+  `poolhouse node build [--binary PATH]` builds and signs the bundle by hand.
 - **What the probe cannot see.** Hearing its own datagram is delivered inside the machine, so a refused send (`No route to host`
   on the multicast group) is the signal of a denied permission, and a run launched from a terminal borrows that terminal's
   permission; only the `open` launch the command uses measures the bundle's own.
 
 ## Shipping and keeping it up
 
-The Python side of getting the node onto a device and keeping it there: `ml_stack.node_binary` (build, checksum,
-verify; the binary is `poolside-node.exe` on Windows), `node_build` (into a runtime), `node_health` (the socket or pipe call), `node_supervise` (the restart loop) and
-`node_launch` (find, start, stop, swap, smoke; also `python -m ml_stack.node_launch ensure|status|stop|swap|supervise`).
+The Python side of getting the node onto a device and keeping it there: `poolhouse.node_binary` (build, checksum,
+verify; the binary is `poolhouse-node.exe` on Windows), `node_build` (into a runtime), `node_health` (the socket or pipe call), `node_supervise` (the restart loop) and
+`node_launch` (find, start, stop, swap, smoke; also `python -m poolhouse.node_launch ensure|status|stop|swap|supervise`).
 
 - **In the runtime.** `runtime ensure` builds the node from the same commit as the wheel (`cargo build --release
-  --locked -p poolside-node`, target directory shared by all builds in `<runtimes>/cargo-target`), copies it to
-  `<runtime prefix>/node/poolside-node` with `node.json` (`sha256`, `bytes`, `target`, `commit`), starts it once on a
+  --locked -p poolhouse-node`, target directory shared by all builds in `<runtimes>/cargo-target`), copies it to
+  `<runtime prefix>/node/poolhouse-node` with `node.json` (`sha256`, `bytes`, `target`, `commit`), starts it once on a
   scratch state and asks `hello`; a build that does not answer is discarded before it is selected. The checksum is
   written again into the tree's `verified.json` (`node_sha256`) after the smoke, and `node_binary.verified` refuses a
   binary that differs from either record (and one built for another platform). The binary is as immutable as the tree.
-  `packaging/build.py --node` writes the same binary to `dist/node/poolside-node-<target>` with a `.sha256` file for a
+  `packaging/build.py --node` writes the same binary to `dist/node/poolhouse-node-<target>` with a `.sha256` file for a
   bundle or release asset.
 - **Start on demand.** `node_launch.ensure_node(state)` is what every client calls: it returns the node's `hello`
   (plus `socket` and `latency_ms`), and when nothing answers it verifies the binary, takes `start.lock` (single-flight:
@@ -371,10 +371,10 @@ verify; the binary is `poolside-node.exe` on Windows), `node_build` (into a runt
   writes `node-run.json` (pid, binary, sha256, started_at, supervisor pid, previous binary) and logs to `node.log`. It
   watches the pin and `selected.json`, so selecting a new runtime moves the node by itself; it gives up after five
   consecutive starts with no verified binary. It owns no service: the optional always-on form is any unit that runs
-  `python -m ml_stack.node_launch supervise` (not wired into `fleet/autostart` roles yet).
+  `python -m poolhouse.node_launch supervise` (not wired into `fleet/autostart` roles yet).
 - **Stopping on Windows.** A detached process has no signal to receive and `os.kill(pid, SIGTERM)` is `TerminateProcess`,
-  so the node creates a named event `Local\poolside-node-stop-<key>` and the supervisor
-  `Local\mlstack-node-supervisor-stop-<key>` (both open to the current user alone, `ml_stack.win32`). `stop_node`,
+  so the node creates a named event `Local\poolhouse-node-stop-<key>` and the supervisor
+  `Local\poolhouse-node-supervisor-stop-<key>` (both open to the current user alone, `poolhouse.win32`). `stop_node`,
   `swap` and `smoke` set them first (the node leaves with exit code 0, the supervisor stops restarting), and only
   terminate a node still running after the wait. Ctrl+C, Ctrl+Break and a console close stop a node run by hand the
   same way (`SetConsoleCtrlHandler`); the supervisor takes `SIGBREAK` and `SIGINT`. `lock.pid_alive` asks the process
@@ -390,15 +390,15 @@ verify; the binary is `poolside-node.exe` on Windows), `node_build` (into a runt
   the node outcome in its detail and exits non-zero.
 - **Health.** `node_health.node_health(state)` is one framed `hello` (2 s timeout) returning `node, version, pid,
   fingerprint, socket, latency_ms`, or `None`; `node_launch.status` adds uptime (from the run record, only when its pid is
-  the answering pid), binary, sha256, `supervised` and `pinned`, and `ml-stack runtime status [--json]` prints the line.
+  the answering pid), binary, sha256, `supervised` and `pinned`, and `poolhouse runtime status [--json]` prints the line.
   `node_health.call(state, method, params, board=, token=)` is the minimal socket call for tests and tools; the
-  Python board client is `ml_stack.board` (below).
+  Python board client is `poolhouse.board` (below).
 
 ## The Python client
 
-`ml_stack.board` is the client. `client.Client` speaks the socket (starting the node through
+`poolhouse.board` is the client. `client.Client` speaks the socket (starting the node through
 `node_launch.ensure_node` when it is dead) and raises `NodeError` (`Denied`, `Invalid`, `Quota`) with the node's code;
-`place.resolve` maps the working directory to a board (`ML_STACK_BOARD`, else the project registry; a git repository
+`place.resolve` maps the working directory to a board (`POOLHOUSE_BOARD`, else the project registry; a git repository
 the node does not know is added as a project, named by its folder and a few hex of its git common directory);
 `credentials` keeps a private token file per board and name under `<state>/client/` and the read cursors of each
 question (inbox, announcements); `session.Session` is one token's typed API (`post`, `read`, `notes`, `claim`,
@@ -413,11 +413,11 @@ sessions is fenced as untrusted data on the way out and a credential in outgoing
 
 ```
 cd app
-cargo build -p poolside-node
-target/debug/poolside-node run --state ~/.poolside/node     # serve
-target/debug/poolside-node status --state ~/.poolside/node
-cargo test -p poolside-node                                  # about 93 tests; crash.rs starts two node processes and SIGKILLs one
-cargo test -p ml-stack-app                                   # the window; needs the sidecar binary in src-tauri/binaries
+cargo build -p poolhouse-node
+target/debug/poolhouse-node run --state ~/.poolhouse/node     # serve
+target/debug/poolhouse-node status --state ~/.poolhouse/node
+cargo test -p poolhouse-node                                  # about 93 tests; crash.rs starts two node processes and SIGKILLs one
+cargo test -p poolhouse-app                                   # the window; needs the sidecar binary in src-tauri/binaries
 ```
 
 The workspace Cargo.lock is `app/Cargo.lock`, the build output `app/target/`. Crypto is
@@ -440,7 +440,7 @@ What `sys` (`src/sys/{unix,win}`) does on each platform, so nothing else in the 
 | graceful stop | `shutdown` request, SIGTERM | `shutdown` request, the stop event, Ctrl+C / Ctrl+Break |
 
 `lease::types` accepts a drive path (`C:\x`, `C:/x`) or a UNC path as an absolute worktree or area claim, and compares
-claims with one separator and no case on a drive. The state directory is `%USERPROFILE%\.poolside\node` by default.
+claims with one separator and no case on a drive. The state directory is `%USERPROFILE%\.poolhouse\node` by default.
 Tests that need a socket path short enough for macOS use `kit::short_dir()`; `kit::kill_hard` is `kill -9` or `taskkill /F`.
 
 ## What is left

@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.workspace import ChainBroken, claims as claimlib, wake
-from ml_stack.workspace.bus import Bus
-from ml_stack.workspace.chain import ChainLog
-from ml_stack.workspace.identity import Identity
+from poolhouse.workspace import ChainBroken, claims as claimlib, wake
+from poolhouse.workspace.bus import Bus
+from poolhouse.workspace.chain import ChainLog
+from poolhouse.workspace.identity import Identity
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 
@@ -254,7 +254,7 @@ def test_a_second_read_of_a_big_log_is_much_cheaper_than_the_first(tmp_path):
 
 
 def test_twenty_writer_processes_leave_one_numbered_verifiable_chain(tmp_path):
-    code = ("import sys\nfrom ml_stack.workspace.chain import ChainLog\n"
+    code = ("import sys\nfrom poolhouse.workspace.chain import ChainLog\n"
             "log = ChainLog(sys.argv[1])\n"
             "for i in range(15):\n    log.append({'who': sys.argv[2], 'i': i})\n")
     env = {**os.environ, "PYTHONPATH": SRC}

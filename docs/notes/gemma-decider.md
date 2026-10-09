@@ -6,7 +6,7 @@ Paused on purpose. Nothing here is merged; the work is on branch `feat/decider-g
 ## What exists on the branch
 * Loading a Gemma 4 E2B torso for the pointer decider (`Gemma4Model.language_model`), a pin for
   `google/gemma-4-E2B` (10.2 GB, Apache-2.0 per the model card; weights are cached under
-  `~/.cache/ml_stack/decide/`), `--base gemma-4-e2b`, `jevbench --decider`, `--max-tokens`.
+  `~/.cache/poolhouse/decide/`), `--base gemma-4-e2b`, `jevbench --decider`, `--max-tokens`.
 * Memory-safe training: gradient checkpointing (on by default on GPUs), `--accum`, length-bucketed
   micro-batches, the baseline model freed before training, peak memory logged per step.
   Measured on E2B (bf16, MPS): activations cost about 44 GB per 3072-token sequence without
@@ -42,4 +42,4 @@ datasets, about 11 hours on an RTX 3090) than the synthetic-only data used here.
 2. Fix what stops it; add a regression test.
 3. Then one real run, judged on the Strands eval file with the baseline gate; JevBench only after
    it passes. Fine-tuned weights never go in the repo. Leftover run directories sit in
-   `~/.ml-stack/decide/models/` (`gemma4-e2b-v1`, `-v2`, `g270m-v1`) and can be deleted.
+   `~/.poolhouse/decide/models/` (`gemma4-e2b-v1`, `-v2`, `g270m-v1`) and can be deleted.

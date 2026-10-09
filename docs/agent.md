@@ -1,17 +1,17 @@
 # The agent runtime
 
-`ml_stack.agent` uses the OpenAI Agents Python SDK to run a model against tools and stream
-application events. Install `ml-stack[agents]`; standard installations include this extra.
-`ml-stack-chat` and Fleet chat also use the SDK. Claude and Codex remain coding harness options.
+`poolhouse.agent` uses the OpenAI Agents Python SDK to run a model against tools and stream
+application events. Install `poolhouse[agents]`; standard installations include this extra.
+`poolhouse-chat` and Fleet chat also use the SDK. Claude and Codex remain coding harness options.
 
 Local runs use an explicit managed model endpoint. The SDK does not select a hosted model or
 export traces to OpenAI. Existing conversation stores keep history; there is no second SDK
 conversation database. Tool approvals, roles, sentinel checks, result screening, and context
-compaction remain applied by ml-stack's adapters. The SDK owns turn progression and tool execution.
+compaction remain applied by Poolhouse's adapters. The SDK owns turn progression and tool execution.
 
 ```python
-from ml_stack.agent import Agent, Budget, Compaction, FunctionTools, McpTools
-from ml_stack.client import Client
+from poolhouse.agent import Agent, Budget, Compaction, FunctionTools, McpTools
+from poolhouse.client import Client
 
 async with McpTools.stdio("python", ["-m", "my_server"]) as tools:      # or McpTools.http(url)
     agent = Agent(Client("http://127.0.0.1:8080"), tools,
@@ -69,9 +69,9 @@ tier unless a list is given (`interventions=guard.off(because=...)` for none; an
 is refused). A list replaces them: `[*guard.default(), hook, ...]` keeps them. Each hook may define `before_invocation(context)`,
 `before_model_call(context)`, `before_tool_call(call, context)` and `after_tool_call(call, result,
 context)`, returning `Proceed()`, `Deny(reason)`, `Confirm(question, details)`, `Guide(message)` or
-`Rewrite(text, tainted=...)`. These are the types of `ml_stack.interventions`, the one mechanism
-the guard's rails, a decision model's tool-call check (`ml_stack.decide.guard`) and the
-`ml_stack.chat` loop share; `docs/guardrails.md` lists the rails.
+`Rewrite(text, tainted=...)`. These are the types of `poolhouse.interventions`, the one mechanism
+the guard's rails, a decision model's tool-call check (`poolhouse.decide.guard`) and the
+`poolhouse.chat` loop share; `docs/guardrails.md` lists the rails.
 
 - `Deny` on a tool call is answered to the model as a tool error carrying the reason; on a model
   call or the invocation it ends the run with `Done("denied")`; on a tool result it replaces the
@@ -85,14 +85,14 @@ the guard's rails, a decision model's tool-call check (`ml_stack.decide.guard`) 
 
 ## Slot caches
 
-`ml-stack-serve slots save|restore` and `ml_stack.serve.save_slot` / `restore_slot` write a
+`poolhouse-serve slots save|restore` and `poolhouse.serve.save_slot` / `restore_slot` write a
 running server's slot caches to its `--slot-save-path`, each with a `.guard.json` naming the
 model, per-slot context, slot count and llama-server build; a restore against a server that
 differs, or of a dump with no guard file, is refused.
 
 ## Tool-calling models
 
-`ml-stack-train-tools` writes `schema_hash` and `signatures` into a dataset's manifest, refuses
-to reuse data made for other tools, and `ml-stack-train-tools eval --data DIR --url URL` scores a
+`poolhouse-train-tools` writes `schema_hash` and `signatures` into a dataset's manifest, refuses
+to reuse data made for other tools, and `poolhouse-train-tools eval --data DIR --url URL` scores a
 served model on the held-out rows: tool name, required arguments, valid JSON, exact arguments and
 all together.

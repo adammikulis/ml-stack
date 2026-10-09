@@ -3,8 +3,8 @@
 Everything here is invented: two made-up model files (`thornfield-8B`, `alderpost-2B`)
 with made-up heads, written into ``tmp_path``. Both halves of the source of truth are
 pointed away from the real ones in an autouse fixture -- ``package_file`` is replaced and
-``$MLSTACK_PROFILES_FILE`` moves the local half -- so no test can read the records this
-repository ships or write into a real ``~/.ml-stack``. No model is served and no GPU is
+``$POOLHOUSE_PROFILES_FILE`` moves the local half -- so no test can read the records this
+repository ships or write into a real ``~/.poolhouse``. No model is served and no GPU is
 touched: what `up --profile` would start is a fake manager that records the spec.
 """
 
@@ -17,12 +17,12 @@ from types import SimpleNamespace
 import pytest
 from conftest import write_gguf
 
-from ml_stack.asking import Asking
-from ml_stack.client import Reply
-from ml_stack.graph.conversation import converse
-from ml_stack.serve import cli as serve_cli, holding, ops as serve_ops, profile as prof
-from ml_stack.serve.fit import Fit
-from ml_stack.serve.profile import Profile, add, asking_for, profile_for, profiles, record, said
+from poolhouse.asking import Asking
+from poolhouse.client import Reply
+from poolhouse.graph.conversation import converse
+from poolhouse.serve import cli as serve_cli, holding, ops as serve_ops, profile as prof
+from poolhouse.serve.fit import Fit
+from poolhouse.serve.profile import Profile, add, asking_for, profile_for, profiles, record, said
 
 MODEL = "thornfield-8B-UD-Q4_K_XL.gguf"
 OTHER = "alderpost-2B-Q4_K_M.gguf"
@@ -41,10 +41,10 @@ def _profiles_in_tmp(tmp_path, monkeypatch, fit_files):
     shipped.parent.mkdir(parents=True, exist_ok=True)
     shipped.write_text("[]\n", encoding="utf-8")
     monkeypatch.setattr(prof, "package_file", lambda: shipped)
-    monkeypatch.setenv("MLSTACK_PROFILES_FILE", str(tmp_path / "local" / "profiles.json"))
+    monkeypatch.setenv("POOLHOUSE_PROFILES_FILE", str(tmp_path / "local" / "profiles.json"))
     monkeypatch.setattr(prof, "writable_file", lambda: shipped)
     fit_files()
-    monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
+    monkeypatch.setattr("poolhouse.hub.located", lambda name: None)
     return shipped
 
 
@@ -163,10 +163,10 @@ def test_the_serving_uses_the_reference_asked_for_and_the_slots_asked_for():
 
 def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_models(
         monkeypatch):
-    monkeypatch.setattr("ml_stack.hub.located", lambda name: Path(f"/models/{name}"))
+    monkeypatch.setattr("poolhouse.hub.located", lambda name: Path(f"/models/{name}"))
     assert measured().serving(resolve=True).draft == str(Path(f"/models/{HEAD}"))
 
-    monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
+    monkeypatch.setattr("poolhouse.hub.located", lambda name: None)
     assert measured().serving(resolve=True).draft == "", "a head not on this machine is not served"
 
 
@@ -254,7 +254,7 @@ def test_the_asking_is_every_way_the_record_measured_and_nothing_it_did_not():
         tight=False, rich=True, reach=8000)
 
 
-# -- ml-stack-serve profile --------------------------------------------------------------
+# -- poolhouse-serve profile --------------------------------------------------------------
 
 def test_the_command_reads_out_the_serving_the_asking_and_what_measured_it(capsys):
     add(measured())
@@ -297,7 +297,7 @@ def test_the_command_hands_a_script_the_records_as_they_are_kept(capsys):
     assert rows[0]["measured"]["label"] == "thornfield--all-plain-kv-q8_0-rb0"
 
 
-# -- ml-stack-serve up --profile ---------------------------------------------------------
+# -- poolhouse-serve up --profile ---------------------------------------------------------
 
 @pytest.fixture
 def leases(monkeypatch, tmp_path):
@@ -321,7 +321,7 @@ def leases(monkeypatch, tmp_path):
 
     monkeypatch.setattr(serve_ops, "ServerManager", Manager)
     monkeypatch.setattr(holding, "up", up)
-    monkeypatch.setattr("ml_stack.hub.located", lambda name, **k: Path(f"/models/{name}"))
+    monkeypatch.setattr("poolhouse.hub.located", lambda name, **k: Path(f"/models/{name}"))
     return seen
 
 
@@ -437,7 +437,7 @@ def test_a_model_nothing_measured_is_asked_the_default_way():
     assert asking_for("nothing-measured-this-Q4_K_M.gguf") == Asking()
 
 
-# -- ml-stack-bench report --profile ------------------------------------------------------
+# -- poolhouse-bench report --profile ------------------------------------------------------
 
 def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a record is never set from fewer
              seconds: float = 2.0, **held) -> str:
@@ -447,8 +447,8 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a
     without changing what it got right: which of two rows a record is written from is a
     question about both at once.
     """
-    from ml_stack import bench
-    from ml_stack.bench import Row
+    from poolhouse import bench
+    from poolhouse.bench import Row
 
     rows = []
     for question in range(n):
@@ -463,7 +463,7 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a
 
 
 def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
-    from ml_stack.bench.report import run as reporting
+    from poolhouse.bench.report import run as reporting
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-kv-q8_0-rb0", right=0.4, cache_type="q8_0")
@@ -492,7 +492,7 @@ def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
 
 
 def test_the_asking_a_run_recorded_is_taken_over_the_words_in_its_label():
-    from ml_stack.bench.profiles import flags_of
+    from poolhouse.bench.profiles import flags_of
 
     said = {"tight": True, "terse": False, "batch": True, "reach": 8000}
     assert flags_of({"label": "thornfield--plain", "asking": said}) == {
@@ -522,8 +522,8 @@ def test_constrain_ids_is_kept_on_the_record_and_read_out(tmp_path):
     assert "constrain-ids" in line
     assert "constrain-ids" not in said(record(OTHER))
 
-    from ml_stack import bench
-    from ml_stack.bench.profiles import write_profiles
+    from poolhouse import bench
+    from poolhouse.bench.profiles import write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain", asking={"tight": True, "constrain_ids": True})
@@ -547,8 +547,8 @@ def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_pa
     Mutation: rank by F1 alone and the slow row wins; drop the `held_up` guard and the
     cheap wrong one does.
     """
-    from ml_stack import bench
-    from ml_stack.bench.profiles import measured_best, write_profiles
+    from poolhouse import bench
+    from poolhouse.bench.profiles import measured_best, write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-batch", right=0.75, n=20, seconds=6.0,
@@ -559,7 +559,7 @@ def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_pa
              asking={"tight": True, "single": True})
 
     kept = bench.runs(store)
-    from ml_stack.bench.score import band, separated
+    from poolhouse.bench.score import band, separated
 
     slow = next(o for o in kept if o["label"].endswith("batch"))
     quick = next(o for o in kept if o["label"].endswith("few"))
@@ -618,11 +618,11 @@ def test_what_a_person_reads_says_the_sampling_it_was_measured_at(capsys):
 
 
 def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):
-    from ml_stack.bench.profiles import write_profiles
+    from poolhouse.bench.profiles import write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-kv-q8_0-rb0", cache_type="q8_0")
-    from ml_stack import bench
+    from poolhouse import bench
 
     where = tmp_path / "written.json"
     add(measured(), path=where)             # -ub 2048 and the projector, measured by hand
@@ -635,7 +635,7 @@ def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):
 
 
 def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_path, capsys):
-    from ml_stack.bench.report import run as reporting
+    from poolhouse.bench.report import run as reporting
 
     assert reporting(SimpleNamespace(kept=str(tmp_path / "nothing.ladybug"), profile=True,
                                      profiles=str(tmp_path / "none.json"),
@@ -644,8 +644,8 @@ def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_pat
 
 
 def test_the_named_build_is_read_off_the_binary_a_run_started(tmp_path):
-    from ml_stack.bench.record import of
-    from ml_stack.serve.build import named_dir
+    from poolhouse.bench.record import of
+    from poolhouse.serve.build import named_dir
 
     def build(server):
         return of({"server": server}).build
@@ -665,7 +665,7 @@ def test_what_a_person_reads_names_the_flags_and_the_ways(capsys):
 
 def test_alone_is_one_slot_holding_the_whole_measured_cache():
     """A record measured at two slots of 32k is one slot of 64k, asked for either way."""
-    from ml_stack.serve.profile import Profile
+    from poolhouse.serve.profile import Profile
 
     record = Profile(model="quince-2b.gguf", slot_context=32768, parallel=2)
     run = record.alone(port=8123, model="quince-2b.gguf", resolve=False)
@@ -678,7 +678,7 @@ def test_alone_is_one_slot_holding_the_whole_measured_cache():
 
 def test_slots_asked_for_get_what_one_measured_slot_got():
     """`--parallel N` is how anyone asks for more than one conversation."""
-    from ml_stack.serve.profile import Profile
+    from poolhouse.serve.profile import Profile
 
     record = Profile(model="quince-2b.gguf", slot_context=32768, parallel=2)
     crowded = record.serving(slots=4, model="quince-2b.gguf", resolve=False)
@@ -829,11 +829,11 @@ def test_profile_for_a_workload_with_no_record_says_what_it_fell_back_to(capsys)
 
 def test_an_ingest_reads_the_ingest_record(monkeypatch):
     """The extraction path asks for its own workload, not the graph asking's."""
-    from ml_stack.ingest import serving
+    from poolhouse.ingest import serving
 
     add(measured(workload="ask", spec_draft_max=4))
     add(measured(workload="ingest", spec_draft_max=2))
-    monkeypatch.setattr("ml_stack.hub.located", lambda *a, **k: Path(MODEL))
+    monkeypatch.setattr("poolhouse.hub.located", lambda *a, **k: Path(MODEL))
 
     run, found = serving._run(SimpleNamespace(model=MODEL, profile=True), resolve=False)
 
@@ -849,7 +849,7 @@ def test_a_record_refuses_a_workload_that_is_not_one():
 
 
 def test_a_run_records_the_workload_it_measured():
-    from ml_stack.bench.record import Measured
+    from poolhouse.bench.record import Measured
 
     run = Measured(label="a", workload="ingest")
     assert run.to_dict()["workload"] == "ingest"
@@ -859,7 +859,7 @@ def test_a_run_records_the_workload_it_measured():
 
 
 def test_two_workloads_are_two_measurements():
-    from ml_stack.bench.record import Measured
+    from poolhouse.bench.record import Measured
 
     asked = Measured(label="a", model=MODEL, workload="ask")
     read = Measured(label="a", model=MODEL, workload="ingest")
@@ -867,7 +867,7 @@ def test_two_workloads_are_two_measurements():
 
 
 def test_a_run_with_no_workload_writes_the_graph_asking_record():
-    from ml_stack.bench.profiles import workload_of
+    from poolhouse.bench.profiles import workload_of
 
     assert workload_of({"label": "a", "server": {}}) == "ask"
     assert workload_of({"label": "a", "workload": "ingest", "server": {}}) == "ingest"
@@ -876,7 +876,7 @@ def test_a_run_with_no_workload_writes_the_graph_asking_record():
 def test_a_record_keeps_the_drafts_own_cache_type():
     """The head's cache is a measured setting like any other, and a record that lost it
     would serve the head at f16 again."""
-    from ml_stack.serve.profile import Profile, _flags
+    from poolhouse.serve.profile import Profile, _flags
 
     one = Profile(model="m.gguf", draft="h.gguf", cache_type="q8_0",
                   draft_cache_type="q4_0")
@@ -886,7 +886,7 @@ def test_a_record_keeps_the_drafts_own_cache_type():
 
 
 def test_a_record_carries_the_draft_p_min_to_the_flags_line():
-    from ml_stack.serve.profile import Profile, _flags
+    from poolhouse.serve.profile import Profile, _flags
 
     one = Profile(model="m.gguf", spec_p_min=0.5)
     assert Profile.from_dict(one.as_dict()).spec_p_min == 0.5
@@ -896,7 +896,7 @@ def test_a_record_carries_the_draft_p_min_to_the_flags_line():
 
 def test_a_rewrite_that_cannot_see_the_drafts_cache_keeps_it():
     """`/props` does not report it, so a record rewritten from a bench run would erase it."""
-    from ml_stack.serve.profile import Profile
+    from poolhouse.serve.profile import Profile
 
     older = Profile(model="m.gguf", draft="h.gguf", draft_cache_type="q4_0")
     assert Profile(model="m.gguf").carrying(older).draft_cache_type == "q4_0"

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import device_host, device_setup, node_binary, node_join
+from poolhouse import device_host, device_setup, node_binary, node_join
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -115,7 +115,7 @@ def test_wsl_that_needs_mirroring_writes_the_config_and_restarts_before_anything
     monkeypatch.setattr(device_setup, "binary_of", lambda *a: pytest.fail("started the node before the restart"))
     assert device_setup.main(["--yes"]) == 0
     assert calls == ["restart"] and "networkingMode=mirrored" in config.read_text(encoding="utf-8")
-    assert any(p.name.startswith(".wslconfig.ml-stack-backup") for p in tmp_path.iterdir())
+    assert any(p.name.startswith(".wslconfig.poolhouse-backup") for p in tmp_path.iterdir())
 
 
 def test_a_missing_firewall_rule_after_the_prompt_is_not_ready_with_the_fix(monkeypatch, capsys):

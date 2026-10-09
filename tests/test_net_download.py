@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import files, home, net
-from ml_stack.httpguard import Limits, Refused, TooLarge
-from ml_stack.net import provenance
-from ml_stack.net.download import accept
-from ml_stack.net.hold import staging_dir
-from ml_stack.net.scan import Outcome, ScanPolicy, ScanResult
+from poolhouse import files, home, net
+from poolhouse.httpguard import Limits, Refused, TooLarge
+from poolhouse.net import provenance
+from poolhouse.net.download import accept
+from poolhouse.net.hold import staging_dir
+from poolhouse.net.scan import Outcome, ScanPolicy, ScanResult
 from tests.net_site import EICAR, Site, gguf_bytes, safetensors_bytes
 
 SHA = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
@@ -460,14 +460,14 @@ def test_a_token_goes_to_a_private_mirror_the_person_named(tmp_path, site, pipe)
 
 def test_a_name_that_escapes_is_refused(tmp_path, site, pipe):
     site.add("/m.gguf", gguf_bytes())
-    from ml_stack.safenames import Unsafe
+    from poolhouse.safenames import Unsafe
 
     with pytest.raises(Unsafe):
         net.download(site.base + "/m.gguf", tmp_path / "nul", None, pipe)
 
 
 def test_failures_are_moved_into_sentinels_quarantine_with_an_event(tmp_path, site, pipe):
-    from ml_stack import sentinel
+    from poolhouse import sentinel
 
     body = gguf_bytes()
     site.add("/m.gguf", body)
@@ -489,7 +489,7 @@ def test_stale_partial_files_are_swept(tmp_path):
     os.utime(part, (time.time() - 30 * 86400,) * 2)
     fresh = staging_dir() / "new.part"
     fresh.write_bytes(b"x")
-    from ml_stack.net.download import sweep
+    from poolhouse.net.download import sweep
 
     assert sweep() == 1 and fresh.exists() and not part.exists()
 
@@ -549,7 +549,7 @@ def test_overlapping_safetensors_tensors_are_refused(tmp_path, site, pipe):
 
 
 def test_an_archive_over_the_entry_or_size_limit_is_refused(tmp_path):
-    from ml_stack.net.sniff import audit_archive
+    from poolhouse.net.sniff import audit_archive
 
     path = tmp_path / "many.zip"
     path.write_bytes(_zip({f"f{n}": b"x" * 10 for n in range(6)}))

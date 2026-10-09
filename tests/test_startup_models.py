@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from ml_stack.fleet import routes, serving, startup_models
-from ml_stack.fleet.models import Downloads, Getting
-from ml_stack.hub.probe import GIB, Gpu, MachineMemory
-from ml_stack.serve.estimate import Setup, estimate_meta
+from poolhouse.fleet import routes, serving, startup_models
+from poolhouse.fleet.models import Downloads, Getting
+from poolhouse.hub.probe import GIB, Gpu, MachineMemory
+from poolhouse.serve.estimate import Setup, estimate_meta
 
 
 class StartupModelTests(unittest.TestCase):

@@ -10,13 +10,13 @@ from ._perfile import finder
 from ._util import parse
 
 NAME = "ad-hoc-fakes"
-OWNER = "ml_stack.testing.fakes"
+OWNER = "poolhouse.testing.fakes"
 INCREMENTAL = True
 ROOTS = ("tests",)
 
 
 def describe() -> str:
-    return "A fake written in the suite; ml_stack.testing.fakes holds the shared ones."
+    return "A fake written in the suite; poolhouse.testing.fakes holds the shared ones."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

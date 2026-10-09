@@ -21,10 +21,10 @@ import test_on
 from node_kit import STRIPPED, node_binary  # noqa: F401  (a fixture the ones below use)
 from testfarm_tree import make_tree
 
-from ml_stack import features, node_binary as node_binary_module, node_launch, node_supervise
-from ml_stack.board import session as board_session
-from ml_stack.board.client import Client
-from ml_stack.testfarm.client import Shards, pool_devices
+from poolhouse import features, node_binary as node_binary_module, node_launch, node_supervise
+from poolhouse.board import session as board_session
+from poolhouse.board.client import Client
+from poolhouse.testfarm.client import Shards, pool_devices
 
 BOARD = "demo"
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,9 +72,9 @@ def pool(node_binary, monkeypatch, tmp_path):  # noqa: F811
     pair(a, b)
     for name in STRIPPED:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ML_STACK_HOME", str(a.root))
-    monkeypatch.setenv("ML_STACK_BOARD", BOARD)
-    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a.token)
+    monkeypatch.setenv("POOLHOUSE_HOME", str(a.root))
+    monkeypatch.setenv("POOLHOUSE_BOARD", BOARD)
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_TOKEN", a.token)
     monkeypatch.setenv("DEV_TEST_REUSE_DIR", str(tmp_path / "reuse"))
     features.switch("remote-tests", True)  # this machine (device A's root) has the experimental feature on
     tree = make_tree(tmp_path / "tree", tmp_path / "pids")

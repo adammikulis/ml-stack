@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ml_stack.jsonl import MalformedLine, append, compact, read, ts_key, write
+from poolhouse.jsonl import MalformedLine, append, compact, read, ts_key, write
 
 
 def _write(p, rows):

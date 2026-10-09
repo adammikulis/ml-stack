@@ -106,7 +106,7 @@ def test_a_checker_that_cannot_run_here_names_a_metric_with_a_budget() -> None:
 
 def test_findings_are_named_relative_to_the_tree_they_were_found_in(tmp_path) -> None:
     """The hook plants staged files under a temporary root and matches paths by name."""
-    where = tmp_path / "src" / "ml_stack"
+    where = tmp_path / "src" / "poolhouse"
     where.mkdir(parents=True)
     (where / "sample.py").write_text(
         "def f():\n    try:\n        return 1\n    except Exception:\n        return 2\n",
@@ -130,7 +130,7 @@ def test_the_hook_counts_what_a_commit_deletes(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     run("config", "user.email", "nobody@example.invalid")
     run("config", "user.name", "A Tester")
-    src = tmp_path / "src" / "ml_stack"
+    src = tmp_path / "src" / "poolhouse"
     src.mkdir(parents=True)
     (src / "leaving.py").write_text('def a():\n    print("one")\n    print("two")\n')
     (src / "staying.py").write_text("def b():\n    return 1\n")
@@ -140,9 +140,9 @@ def test_the_hook_counts_what_a_commit_deletes(tmp_path):
     run("add", "-A")
     run("commit", "-qm", "before")
 
-    run("rm", "-q", "src/ml_stack/leaving.py")
+    run("rm", "-q", "src/poolhouse/leaving.py")
     (src / "staying.py").write_text('def b():\n    print("moved")\n    return 1\n')
-    run("add", "src/ml_stack/staying.py")
+    run("add", "src/poolhouse/staying.py")
 
     done = subprocess.run([sys.executable, str(hook)], cwd=tmp_path,
                           capture_output=True, text=True)
@@ -161,21 +161,21 @@ def test_the_hook_leaves_a_merge_to_the_landing_gate_and_counts_an_ordinary_comm
     run("init", "-q", "-b", "main")
     run("config", "user.email", "nobody@example.invalid")
     run("config", "user.name", "A Tester")
-    src = tmp_path / "src" / "ml_stack"
+    src = tmp_path / "src" / "poolhouse"
     src.mkdir(parents=True)
     (src / "base.py").write_text("def b():\n    return 1\n")
     (tmp_path / "budgets.json").write_text('{"print-calls": 0}\n')
     (tmp_path / "pyproject.toml").write_text(
         (REPO / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8")
-    run("add", "src/ml_stack/base.py", "budgets.json", "pyproject.toml")
+    run("add", "src/poolhouse/base.py", "budgets.json", "pyproject.toml")
     run("commit", "-qm", "base", "--no-verify")
     run("checkout", "-q", "-b", "side")
     (src / "noisy.py").write_text('def n():\n    print("x")\n')
-    run("add", "src/ml_stack/noisy.py")
+    run("add", "src/poolhouse/noisy.py")
     run("commit", "-qm", "side", "--no-verify")
     run("checkout", "-q", "main")
     (src / "other.py").write_text("def o():\n    return 2\n")
-    run("add", "src/ml_stack/other.py")
+    run("add", "src/poolhouse/other.py")
     run("commit", "-qm", "main", "--no-verify")
     run("merge", "--no-commit", "--no-ff", "side")
     assert (tmp_path / ".git" / "MERGE_HEAD").exists()
@@ -184,7 +184,7 @@ def test_the_hook_leaves_a_merge_to_the_landing_gate_and_counts_an_ordinary_comm
 
     run("merge", "--abort")
     (src / "noisy.py").write_text('def n():\n    print("y")\n')
-    run("add", "src/ml_stack/noisy.py")
+    run("add", "src/poolhouse/noisy.py")
     plain = subprocess.run([sys.executable, str(hook)], cwd=tmp_path, capture_output=True, text=True)
     assert plain.returncode == 1 and "print-calls" in plain.stderr, plain.stderr
 

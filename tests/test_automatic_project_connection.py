@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import home, sealing
-from ml_stack.fleet import project_client, remote as fleet_remote
-from ml_stack.http import Sealed
-from ml_stack.workspace import automatic_connection as automatic
-from ml_stack.workspace.identity import Denied
+from poolhouse import home, sealing
+from poolhouse.fleet import project_client, remote as fleet_remote
+from poolhouse.http import Sealed
+from poolhouse.workspace import automatic_connection as automatic
+from poolhouse.workspace.identity import Denied
 
 PROJECT = "a" * 32
 
@@ -178,14 +178,14 @@ def test_native_person_start_creates_durable_parent_and_revocable_child(startup_
 
 @pytest.mark.redteam
 def test_native_agent_start_cannot_mint_an_unrelated_project_parent(startup_remote, tmp_path, monkeypatch):
-    monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
+    monkeypatch.setattr(automatic.person, "marked", lambda: "POOLHOUSE_AGENT")
     with pytest.raises(Denied, match=r"parent.*connection"):
         automatic.startup(tmp_path, "worker", "local-parent")
     assert startup_remote == []
 
 
 def test_native_agent_start_delegates_from_its_authenticated_project_parent(startup_remote, tmp_path, monkeypatch):
-    monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
+    monkeypatch.setattr(automatic.person, "marked", lambda: "POOLHOUSE_AGENT")
     monkeypatch.setattr(automatic, "selected", lambda root: {
         "host": "https://node-a:8770", "project_id": PROJECT,
         "cluster": "development", "agent": "connected-parent"})
@@ -197,7 +197,7 @@ def test_native_agent_start_delegates_from_its_authenticated_project_parent(star
 
 @pytest.mark.redteam
 def test_native_agent_cannot_select_another_connected_parent(startup_remote, tmp_path, monkeypatch):
-    monkeypatch.setattr(automatic.person, "marked", lambda: "ML_STACK_AGENT")
+    monkeypatch.setattr(automatic.person, "marked", lambda: "POOLHOUSE_AGENT")
     monkeypatch.setattr(automatic, "selected", lambda root: {
         "host": "https://node-a:8770", "project_id": PROJECT,
         "cluster": "development", "agent": "connected-parent"})

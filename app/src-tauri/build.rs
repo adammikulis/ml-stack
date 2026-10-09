@@ -7,7 +7,7 @@ use std::{env, fs, path::Path};
 fn ensure_sidecar() {
     let target = env::var("TARGET").unwrap_or_default();
     let suffix = if target.contains("windows") { ".exe" } else { "" };
-    let path = Path::new("binaries").join(format!("ml-stack-headless-{target}{suffix}"));
+    let path = Path::new("binaries").join(format!("poolhouse-headless-{target}{suffix}"));
     if path.exists() {
         return;
     }

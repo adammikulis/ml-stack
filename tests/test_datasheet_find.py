@@ -7,9 +7,9 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from ml_stack import web
-from ml_stack.datasheet import NotFound, find, rank, tools
-from ml_stack.scrape.polite import Polite
+from poolhouse import web
+from poolhouse.datasheet import NotFound, find, rank, tools
+from poolhouse.scrape.polite import Polite
 from tests.web_site import allow_all, serving
 
 
@@ -51,7 +51,7 @@ def polite():
 
 
 def make_pdf(text):
-    from ml_stack.redteam.minipdf import Doc
+    from poolhouse.redteam.minipdf import Doc
 
     doc = Doc()
     doc.page().text(50, 80, text, size=11)
@@ -111,13 +111,13 @@ def test_a_search_that_will_not_answer_is_not_found():
 @pytest.fixture
 def scratch(monkeypatch, tmp_path):
     monkeypatch.setattr(web, "downloads_dir", lambda: tmp_path)
-    monkeypatch.setattr("ml_stack.datasheet.tooling.downloads_dir", lambda: tmp_path)
+    monkeypatch.setattr("poolhouse.datasheet.tooling.downloads_dir", lambda: tmp_path)
     return tmp_path
 
 
 def test_the_find_tool_returns_the_record_or_a_reason(lan, scratch, monkeypatch):
     lan.file("/good.pdf", make_pdf("QX2200 regulator"), "application/pdf")
-    monkeypatch.setattr("ml_stack.datasheet.finder.politeness", polite)
+    monkeypatch.setattr("poolhouse.datasheet.finder.politeness", polite)
     finding, _, _ = (c for _, c in tools(engine=engine_for(lan, "/good.pdf")))
     got = finding({"part": "QX2200"})
     assert got["path"].startswith(str(scratch)) and got["pages"] == 1

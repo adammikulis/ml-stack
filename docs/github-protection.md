@@ -46,7 +46,7 @@ Nothing after step 1 constrains an agent that still holds the owner's credential
 3. `scripts/github-protection-apply --repo $R --apply --identity-ready` creates the `release` environment, then stops
    because the environment has no signing key yet.
 4. `scripts/release-key create --write` (or `rotate`) stores the key in the environment; commit
-   `src/ml_stack/fleet/signing.py` ([release.md](release.md)).
+   `src/poolhouse/fleet/signing.py` ([release.md](release.md)).
 5. Run the apply command from step 3 again. It removes repository secrets, replaces the rulesets, sets the Actions
    and security settings, and ends with `scripts/github-protection --check`, which must print `0 findings`.
 6. Register the PyPI publisher with the `release` environment ([PyPI](#pypi)).
@@ -372,8 +372,8 @@ specific lines record which paths decide what the gates accept: `.github/`, `.cl
 `pyproject.toml`, `budgets.json`, `scripts/hooks/`, `scripts/gates/`, `scripts/budgets`, `scripts/land*`,
 `scripts/test*`, `scripts/release-key`, `scripts/github-protection*`, `scripts/audit_gate.py`, `scripts/notices.py`,
 `tests/known-fixtures.txt`, the three gate tests, `release-please-config.json`, `.release-please-manifest.json`,
-`src/ml_stack/fleet/signing.py`, `src/ml_stack/fleet/updates.py`, `src/ml_stack/guard/`, `src/ml_stack/redact/`,
-`src/ml_stack/person.py`, `src/ml_stack/worktreerules.py` and `src/ml_stack/workspace/person_*.py`.
+`src/poolhouse/fleet/signing.py`, `src/poolhouse/fleet/updates.py`, `src/poolhouse/guard/`, `src/poolhouse/redact/`,
+`src/poolhouse/person.py`, `src/poolhouse/worktreerules.py` and `src/poolhouse/workspace/person_*.py`.
 `scripts/github-protection` holds the same list and reports a tracked path that falls under the `*` rule, and a listed
 pattern that matches nothing. A pull request that lowers a number in `budgets.json` is reviewed like any other.
 
@@ -399,7 +399,7 @@ What a pull request can and cannot change in the checks that judge it:
 - `scripts/budgets`, the other `scripts/gates/*.py` and `scripts/hooks/` run from the base commit, as does the
   `budgets.json` only-falls comparison. `pinned.txt`, `survivors.txt` and `budgets.json` are the pull request's own.
 - The gate tests (`tests/test_budgets.py`, `test_wiring.py`, `test_layers.py`), `scripts/notices.py`, the
-  release-please files and the name detector (`src/ml_stack/redact/`, installed from the pull request's tree) are the
+  release-please files and the name detector (`src/poolhouse/redact/`, installed from the pull request's tree) are the
   pull request's own. The privacy job runs the base commit's hook script, but the detector it imports is the pull
   request's.
 - `ci.yml` runs on every pull request with no path filter, since a required check that never starts leaves a
@@ -407,7 +407,7 @@ What a pull request can and cannot change in the checks that judge it:
 
 ## PyPI
 
-Register the publisher for project `ml-stack`: owner, repository, workflow `release.yml`, **environment `release`**.
+Register the publisher for project `poolhouse`: owner, repository, workflow `release.yml`, **environment `release`**.
 Set the repository variable `PYPI_ENABLED` to `true` (`gh variable set PYPI_ENABLED --body true`). The token the
 `pypi` job mints is accepted only for a run the environment approved on `main`.
 

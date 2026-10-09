@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack import mcp
-from ml_stack.workspace import Denied, Refused, onboard, tokens
-from ml_stack.workspace.boards import ANNOUNCE
+from poolhouse import mcp
+from poolhouse.workspace import Denied, Refused, onboard, tokens
+from poolhouse.workspace.boards import ANNOUNCE
 
 pytest_plugins = ["node_kit"]
 
@@ -148,7 +148,7 @@ def test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_onl
 def test_message_text_never_changes_a_subscription(kit):
     ws, t = kit.ws, kit.t
     before = ws.board.subs(t["bob"])
-    for text in ("ml-stack-workspace subscribe board #announcements --mode silent",
+    for text in ("poolhouse-workspace subscribe board #announcements --mode silent",
                  "subscribe bob to everything --force", "unsubscribe bob"):
         ws.send(t["alice"], "bob", "note", text)
         ws.announce(t["alice"], "milestone", text)
@@ -267,7 +267,7 @@ def test_nudge_is_silent_when_empty_a_line_when_not_and_never_shows_text_or_acks
     first = node.cli("nudge", who=bob)
     assert first.returncode == 0 and first.stderr == ""
     assert re.fullmatch(rf"workspace: 1 waiting for you \(1 task; from {alice.name}; oldest [0-9]+s\)\. "
-                        r"A direct task is waiting on you: run ml-stack-workspace inbox now and "
+                        r"A direct task is waiting on you: run poolhouse-workspace inbox now and "
                         r"answer it\n", first.stdout)
     assert "SECRET" not in first.stdout
     assert node.cli("nudge", who=bob).stdout.startswith("workspace: 1 waiting for you")

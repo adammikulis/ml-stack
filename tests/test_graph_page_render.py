@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 
-from ml_stack.graph import page as graph_page
+from poolhouse.graph import page as graph_page
 
 SHIPPED = ("person", "org", "place", "topic", "opportunity")
 
@@ -97,7 +97,7 @@ class TestTheCountsUnderTheGraph:
     """A page of clauses has no members and no messages; the caller's words decide."""
 
     def test_the_shipped_words_are_there_to_be_replaced(self):
-        from ml_stack.graph.page import render
+        from poolhouse.graph.page import render
 
         page = render({"nodes": [], "edges": []})
         assert "countMessages: 'messages'" in page
@@ -106,7 +106,7 @@ class TestTheCountsUnderTheGraph:
     def test_a_word_left_empty_takes_its_count_away(self):
         import json
 
-        from ml_stack.graph.page import render
+        from poolhouse.graph.page import render
 
         page = render({"nodes": [], "edges": []},
                       copy={"countMessages": "", "countMembers": ""})
@@ -119,7 +119,7 @@ class TestTheCountsUnderTheGraph:
 
 def test_a_graph_that_records_nothing_about_its_making_says_nothing():
     """The line under the graph read `built —` on a graph with no metadata."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []})
     assert "'built —'" not in page
@@ -130,7 +130,7 @@ def test_a_verb_can_be_given_the_caller_s_words():
     """`incorporates_by_reference` is the edge a reader most needs and least knows."""
     import json
 
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []},
                   extra={"relWords": {"incorporates_by_reference": "makes binding"}})
@@ -143,7 +143,7 @@ def test_a_kind_can_say_what_state_it_opens_in():
     """A graph whose bulk is detail opens on its structure and draws faster for it."""
     import json
 
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []},
                   kinds=[{"k": "clause", "label": "Clauses", "shape": "square"},
@@ -158,7 +158,7 @@ def test_a_kind_can_say_what_state_it_opens_in():
 
 def test_a_node_can_say_what_state_it_opens_in():
     """A corpus read into the same kinds a caller authored cannot be told apart by kind."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [
         {"id": "a", "label": "Authored", "kind": "clause", "attrs": {}},
@@ -171,7 +171,7 @@ def test_a_node_can_say_what_state_it_opens_in():
 def test_the_panes_do_not_depend_on_the_map_being_drawn():
     """`aside` gives its rows out in order; a page without the map has one child fewer, and
     the panes landed in the six-pixel grip row."""
-    from ml_stack.graph.page import COMPONENTS, render
+    from poolhouse.graph.page import COMPONENTS, render
 
     without = [n for n in COMPONENTS if n != "graph-map"]
     page = render({"nodes": [], "edges": []}, parts=without)
@@ -181,7 +181,7 @@ def test_the_panes_do_not_depend_on_the_map_being_drawn():
 
 def test_the_detail_panel_does_not_list_what_the_caller_told_the_page():
     """`start` is a display instruction, not something the node is."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [{"id": "a", "label": "A", "kind": "clause",
                               "attrs": {"start": "remove", "title": "kept"}}], "edges": []})
@@ -191,7 +191,7 @@ def test_the_detail_panel_does_not_list_what_the_caller_told_the_page():
 
 def test_a_clicked_node_is_never_dimmed_by_a_search():
     """A search dimmed everything it did not match, so clicking one of those did nothing."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []})
     assert "if (M.selected === n.id || picked.has(n.id)) return true;" in page
@@ -199,7 +199,7 @@ def test_a_clicked_node_is_never_dimmed_by_a_search():
 
 def test_an_empty_heading_draws_no_heading():
     """A heading left empty is one the caller does not want, not an empty one."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []}, copy={"heading": ""})
     assert "COPY.heading ? `<h3>" in page
@@ -209,7 +209,7 @@ def test_the_detail_pane_can_be_an_inspector_with_no_back_link():
     """A back link is a navigation stack, and a stack is two panes."""
     import json
 
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []}, copy={"backTo": ""})
     said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])
@@ -221,7 +221,7 @@ def test_the_detail_pane_can_be_an_inspector_with_no_back_link():
 def test_the_ask_pane_scrolls_in_one_place():
     """The turns list scrolled inside a pane that also scrolled; the trace under it grew the
     pane past its row."""
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []})
     assert "overflow: hidden; }  /* the turns list is the one thing that scrolls */" in page
@@ -230,7 +230,7 @@ def test_the_ask_pane_scrolls_in_one_place():
 
 
 def test_escape_puts_the_selection_down():
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []})
     assert "if (e.key !== 'Escape' || !M.selected) return;" in page
@@ -240,7 +240,7 @@ def test_the_banner_title_can_be_left_off():
     """A page whose bar already names the graph does not want it twice."""
     import json
 
-    from ml_stack.graph.page import render
+    from poolhouse.graph.page import render
 
     page = render({"nodes": [], "edges": []}, copy={"bannerTitle": ""})
     said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])

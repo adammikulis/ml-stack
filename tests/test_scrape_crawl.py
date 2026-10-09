@@ -7,8 +7,8 @@ import urllib.parse
 
 import pytest
 
-from ml_stack.scrape.crawl import Walk, crawl, links, more, next_link, pages
-from ml_stack.scrape.polite import Disallowed, Polite
+from poolhouse.scrape.crawl import Walk, crawl, links, more, next_link, pages
+from poolhouse.scrape.polite import Disallowed, Polite
 from tests.web_site import allow_all, serving
 
 
@@ -185,7 +185,7 @@ def test_a_503_is_retried_then_succeeds(site):
 
 
 def test_crawl_refuses_private_hosts_by_default(site):
-    from ml_stack.http import Refused
+    from poolhouse.http import Refused
     with pytest.raises(Refused):
         list(pages(f"{site.base}/x", fetch=None, polite=Polite(robots=False)))
 

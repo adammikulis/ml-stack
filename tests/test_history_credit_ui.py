@@ -73,7 +73,7 @@ def test_history_credits_without_recent_actions_and_review_evidence(tmp_path, pl
             expect(viewer.get_by_text("Recorded compute usage", exact=False)).to_have_count(0)
             expect(viewer.get_by_text("scout · 35 credits", exact=True)).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-            page.screenshot(path="/private/tmp/ml-stack-history-credit-mobile.png", full_page=True)
+            page.screenshot(path="/private/tmp/poolhouse-history-credit-mobile.png", full_page=True)
     finally:
         server.close()
 

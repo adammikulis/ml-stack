@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.net import git
-from ml_stack.workspace import (
+from poolhouse.net import git
+from poolhouse.workspace import (
     backlog,
     issuepump,
     localagent as la,
@@ -15,8 +15,8 @@ from ml_stack.workspace import (
     project as projects,
     tokens,
 )
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.taskboard import TaskBoard
 
 
 @pytest.fixture

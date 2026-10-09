@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import write_gguf
 
-from ml_stack.hub.probe import (
+from poolhouse.hub.probe import (
     GIB,
     Gpu,
     MachineMemory,
@@ -17,9 +17,9 @@ from ml_stack.hub.probe import (
     macos_available,
     nvidia_gpus,
 )
-from ml_stack.serve import estimate as est
-from ml_stack.serve.loadlog import parse_load_log
-from ml_stack.serve.suggest import Candidate, Want, suggest, suggest_meta, suggest_model
+from poolhouse.serve import estimate as est
+from poolhouse.serve.loadlog import parse_load_log
+from poolhouse.serve.suggest import Candidate, Want, suggest, suggest_meta, suggest_model
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "estimate_logs.json").read_text())
 
@@ -155,7 +155,7 @@ def test_verdict_is_green_below_80_percent_yellow_to_95_then_red():
 def test_the_thresholds_are_the_ones_the_meters_use():
     shipped = Path(est.__file__).parents[1] / "ui" / "assets" / "verdict.json"
     if not shipped.is_file():
-        pytest.skip("ml_stack.ui has no verdict.json in this tree")
+        pytest.skip("poolhouse.ui has no verdict.json in this tree")
     said = json.loads(shipped.read_text())
     assert (said["yellow_at"], said["red_at"]) == (est.YELLOW_AT, est.RED_AT)
 

@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, sentinel
-from ml_stack.sentinel import core, human
-from ml_stack.sentinel.store import State
+from poolhouse import home, sentinel
+from poolhouse.sentinel import core, human
+from poolhouse.sentinel.store import State
 
 TESTS = str(Path(__file__).resolve().parent)
 
@@ -130,9 +130,9 @@ KILLED = """
 import sys, time
 sys.path.insert(0, {tests!r})
 from pathlib import Path
-import ml_stack.train.decider as d
+import poolhouse.train.decider as d
 from test_train_decider import tiny_cases
-from ml_stack.train.lora import Lora
+from poolhouse.train.lora import Lora
 
 def stall(*a, **k):
     Path({marker!r}).write_text("fitting")
@@ -168,8 +168,8 @@ def test_a_decider_run_killed_while_fitting_leaves_no_pins(tmp_path):
 
 
 def test_pins_made_before_a_failure_part_way_are_dropped(tmp_path, monkeypatch):
-    from ml_stack.sentinel.integrity import Manifest
-    from ml_stack.train import decider
+    from poolhouse.sentinel.integrity import Manifest
+    from poolhouse.train import decider
     root = tmp_path / "out"
     (root / "lora").mkdir(parents=True)
     for rel, _ in decider.PINNED:
@@ -226,7 +226,7 @@ def test_deep_scan_records_changed_verified_metadata():
 def test_metadata_refresh_preserves_concurrent_pin_change(operation, monkeypatch):
     from contextlib import contextmanager
 
-    from ml_stack.sentinel import integrity
+    from poolhouse.sentinel import integrity
 
     node = sentinel.default()
     (path,) = pinned(node, 1)

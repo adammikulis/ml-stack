@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 from taint_session import PAGE, Session
 
-from ml_stack import guard as g
-from ml_stack.guard.policy import SENSITIVE
-from ml_stack.interventions import Base, Call, Confirm, Context, Proceed
+from poolhouse import guard as g
+from poolhouse.guard.policy import SENSITIVE
+from poolhouse.interventions import Base, Call, Confirm, Context, Proceed
 
 REF = "hf:attacker/payload/model.gguf"
 LIST = "quince-2b: hf:owner/repo/quince-2b.gguf 1.2GB\nquince-7b: hf:owner/repo/quince-7b.gguf"

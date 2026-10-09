@@ -8,8 +8,8 @@ import json
 
 import pytest
 
-from ml_stack import ingest
-from ml_stack.ingest.spans import locate, sentence_span, spans_for
+from poolhouse import ingest
+from poolhouse.ingest.spans import locate, sentence_span, spans_for
 from tests.test_ingest import a_unit
 
 PASSAGE = (
@@ -163,8 +163,8 @@ def _keep(tmp_path, slug, reads):
 
 
 def test_the_store_reads_the_spans_back_and_the_pointers_resolve(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     unit = _unit()
     _keep(tmp_path, "lattice", [{
@@ -190,7 +190,7 @@ def test_the_store_reads_the_spans_back_and_the_pointers_resolve(tmp_path):
 
 
 def test_a_node_with_no_span_quotes_what_it_was_given(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
 
     node = {"id": "concept:sablon", "label": "sablon", "provenance": ["lattice:2:2.4"],
             "attrs": {"definition": "the grey mineral the plates are ground from"}}
@@ -209,11 +209,11 @@ def test_a_node_with_no_span_quotes_what_it_was_given(tmp_path):
 def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path):
     """The whole path, driven the way a run drives it: a document, a fold that re-reads it
     for the text, a store, and a model that reads a cited entry and quotes the passage."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
-    from ml_stack.graph.looking import tools_for
-    from ml_stack.ingest.ask import graph_of
-    from ml_stack.sources import pdf
+    from poolhouse.graph.looking import tools_for
+    from poolhouse.ingest.ask import graph_of
+    from poolhouse.sources import pdf
     from tests.test_sources_pdf import a_textbook
 
     book = a_textbook(tmp_path / "lattice.pdf")
@@ -245,10 +245,10 @@ def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path
 
 
 def test_a_model_answering_with_citing_on_is_told_to_cite_and_can_quote():
-    from ml_stack.asking import Asking
-    from ml_stack.client import Reply
-    from ml_stack.graph.conversation import converse
-    from ml_stack.graph.prompts import CITE_SYSTEM_SENTENCE
+    from poolhouse.asking import Asking
+    from poolhouse.client import Reply
+    from poolhouse.graph.conversation import converse
+    from poolhouse.graph.prompts import CITE_SYSTEM_SENTENCE
 
     graph = {"nodes": [{"id": "concept:vault-current", "kind": "concept",
                         "label": "vault current", "mentions": 3,

@@ -20,16 +20,16 @@ from pathlib import Path
 import pytest
 from launch_support import arm, disarm
 
-from ml_stack.fleet import tls
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import in_cluster, primary_ip
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.onboard.pairing import unverified_context
-from ml_stack.fleet.session import Sessions, Throttle, parse_cookie
-from ml_stack.fleet.ui import UI, asset_bytes
-from ml_stack.http import Server
+from poolhouse.fleet import tls
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.discovery import in_cluster, primary_ip
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.onboard.pairing import unverified_context
+from poolhouse.fleet.session import Sessions, Throttle, parse_cookie
+from poolhouse.fleet.ui import UI, asset_bytes
+from poolhouse.http import Server
 from tests.cluster_support import a_keystore  # noqa: F401
 from tests.keystore_support import counting  # noqa: F401
 
@@ -48,7 +48,7 @@ def _maybe_json(raw: bytes) -> dict:
 @pytest.fixture(autouse=True)
 def no_release_lookup(monkeypatch):
     """The settings view asks the daemon for the newest release; a test does not ask GitHub."""
-    from ml_stack.fleet import updates
+    from poolhouse.fleet import updates
 
     def offline(*args, **kwargs):
         raise updates.UpdateError("no network in tests")
@@ -64,7 +64,7 @@ def the_passphrase_is_kept(a_keystore):  # noqa: F811
 @pytest.fixture(autouse=True)
 def nobody_else_is_on_the_network(monkeypatch):
     """No existing cluster answers the test discovery socket."""
-    from ml_stack.fleet.onboard import joining
+    from poolhouse.fleet.onboard import joining
 
     monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
 
@@ -89,16 +89,16 @@ class Serving:
         self.runner = JobRunner(root, self.files)
         self.ui = UI(name=name, cluster_key_path=self.keyfile,
                      setup_token=setup_token)
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
         self.ui.runner = self.runner
         self.ui.settings = Settings()
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
         self.rows = arm(self)
-        from ml_stack.fleet import invite_client, invite_routes
-        from ml_stack.fleet.discovery import memberships
-        from ml_stack.fleet.invites import Invitations
+        from poolhouse.fleet import invite_client, invite_routes
+        from poolhouse.fleet.discovery import memberships
+        from poolhouse.fleet.invites import Invitations
 
         identity = tls.identity(tmp_path / "tls", name) if secure else None
         context = tls.server_context(identity) if identity else None
@@ -118,7 +118,7 @@ class Serving:
 
     def _cluster_tokens(self):
         """Every token this daemon answers to, the way the real one works it out."""
-        from ml_stack.fleet.discovery import derive_token, memberships
+        from poolhouse.fleet.discovery import derive_token, memberships
 
         return {derive_token(m.key) for m in memberships(self.keyfile)}
 
@@ -136,7 +136,7 @@ class Serving:
         data = json.dumps(body).encode() if body is not None else None
         sent = {"Content-Type": "application/json"}
         if ui_header:
-            sent["X-ML-Stack-UI"] = "1"
+            sent["X-Poolhouse-UI"] = "1"
         if cookie:
             sent["Cookie"] = cookie
         sent.update(headers or {})
@@ -178,14 +178,14 @@ class TestAssets:
         assert asset_bytes("style.css") is not None, "style.css is missing from web/"
 
     def test_every_component_the_page_lists_is_on_disk(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES, components
+        from poolhouse.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES, components
 
         assert components(), "the page contains no components"
         for name in (*COMPONENTS, *MODULES):
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
     def test_every_component_defines_the_element_the_shell_holds(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, WEB
+        from poolhouse.fleet.page import COMPONENTS, COMPONENTS_DIR, WEB
 
         shell = (WEB / "shell.html").read_text(encoding="utf-8")
         for name in COMPONENTS:
@@ -197,7 +197,7 @@ class TestAssets:
                 f"{name}.html defines no <{name}>"
 
     def test_shared_modules_load_before_consumers_without_custom_elements(self):
-        from ml_stack.fleet.page import COMPONENTS, FIT_ONLY, MODULES, components
+        from poolhouse.fleet.page import COMPONENTS, FIT_ONLY, MODULES, components
 
         parts = components()
         names = [part.name for part in parts]
@@ -214,7 +214,7 @@ class TestAssets:
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
         import re
 
-        from ml_stack.fleet.page import render
+        from poolhouse.fleet.page import render
 
         html = render()
         refs = re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html)
@@ -226,7 +226,7 @@ class TestAssets:
         """node --check parses the file; it does not notice a screen that is gone."""
         import re
 
-        from ml_stack.fleet.page import COMPONENTS_DIR
+        from poolhouse.fleet.page import COMPONENTS_DIR
 
         js = (COMPONENTS_DIR / "first-run.html").read_text(encoding="utf-8")
         defined = set(re.findall(r"^    (?:async )?(\w+)\(", js, re.M))
@@ -302,7 +302,7 @@ class TestFirstRunIsNotUpForGrabs:
             assert refused == 403
             ok, body, _ = s.call("/ui/setup/join", method="POST",
                                  body={"mode": "create", "group": "home", "passphrase": WORDS}, host=primary_ip(),
-                                 headers={"X-ML-Stack-Setup": "abc123xyz"})
+                                 headers={"X-Poolhouse-Setup": "abc123xyz"})
             assert ok == 200, body
         finally:
             s.close()
@@ -337,7 +337,7 @@ class TestExplicitClusterActions:
         assert not in_cluster(serving.keyfile)
 
     def test_recreating_a_local_cluster_preserves_its_key(self, serving):
-        from ml_stack.fleet.discovery import memberships
+        from poolhouse.fleet.discovery import memberships
 
         status, body, headers = serving.call("/ui/setup/join", method="POST",
             body={"passphrase": WORDS, "group": "home", "mode": "create"})
@@ -373,7 +373,7 @@ class TestOnItsOwn:
         assert not in_cluster(serving.keyfile)
 
     def test_finishing_is_remembered_between_runs(self, serving):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         self.finished(serving)
         assert Settings.load(serving.ui.settings_path).setup_done is True
@@ -454,7 +454,7 @@ class TestSignIn:
     @pytest.mark.redteam
     def test_correct_passphrase_for_a_different_group_is_refused(self, joined):
         status, body, headers = joined.call('/ui/session', method='POST',
-                                            body={'passphrase':WORDS,'group':'ml-stack'})
+                                            body={'passphrase':WORDS,'group':'poolhouse'})
         assert status == 401 and not body.get('signed_in')
         assert 'Set-Cookie' not in headers
 
@@ -516,7 +516,7 @@ class TestSignIn:
             page.goto(f'http://127.0.0.1:{joined.port}/ui/?launch_ticket={body["ticket"]}#tasks')
             page.wait_for_function("() => !location.search.includes('launch_ticket')")
             page.wait_for_function("() => document.cookie !== undefined && window.fleetModel !== undefined")
-            status=page.evaluate("async () => (await fetch('/ui/session',{headers:{'X-ML-Stack-UI':'1'}})).json()")
+            status=page.evaluate("async () => (await fetch('/ui/session',{headers:{'X-Poolhouse-UI':'1'}})).json()")
             assert status['signed_in']
             assert page.url.endswith('#tasks')
             browser.close()
@@ -559,7 +559,7 @@ class TestSessions:
         assert Sessions().get(sid) is None
 
     def test_a_cookie_value_is_read_out_of_a_real_header(self):
-        assert parse_cookie("other=1; ml_stack_ui=abc; x=2") == "abc"
+        assert parse_cookie("other=1; poolhouse_ui=abc; x=2") == "abc"
         assert parse_cookie("nothing=here") == ""
 
 
@@ -608,14 +608,14 @@ class TestPreferences:
         return serving
 
     def test_a_gpu_machine_is_suggested_for_training(self):
-        from ml_stack.fleet.settings import suggest
+        from poolhouse.fleet.settings import suggest
 
         got = suggest({"accelerator": True, "gpu": "RTX 4090", "cpus": 16})
         assert got["labels"].value == ["train"]
         assert "RTX 4090" in got["labels"].why
 
     def test_a_machine_with_no_gpu_is_suggested_for_data(self):
-        from ml_stack.fleet.settings import suggest
+        from poolhouse.fleet.settings import suggest
 
         got = suggest({"accelerator": False, "cpus": 12})
         assert got["labels"].value == ["prep"]
@@ -623,7 +623,7 @@ class TestPreferences:
     def test_no_machine_is_offered_more_than_one_job_at_a_time(self):
         """Two jobs on one card contend for memory and both get slower, with nothing
         in the logs to say so."""
-        from ml_stack.fleet.settings import suggest
+        from poolhouse.fleet.settings import suggest
 
         for machine in ({"accelerator": True, "cpus": 16},
                         {"accelerator": False, "cpus": 64}):
@@ -632,7 +632,7 @@ class TestPreferences:
             assert "slots" not in offered
 
     def test_every_suggestion_carries_a_reason(self):
-        from ml_stack.fleet.settings import suggest
+        from poolhouse.fleet.settings import suggest
 
         offered = suggest({"accelerator": True, "cpus": 8})
         assert offered, "suggesting nothing at all would pass the loop below"
@@ -642,7 +642,7 @@ class TestPreferences:
             assert s.why, f"{key} was pre-selected with no reason shown"
 
     def test_settings_survive_a_restart(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         Settings(slots=6, labels=["prep"], on_paused="finish").save(tmp_path / "s.json")
         back = Settings.load(tmp_path / "s.json")
@@ -651,7 +651,7 @@ class TestPreferences:
         assert back.on_paused == "finish"
 
     def test_a_corrupt_settings_file_costs_preferences_not_the_daemon(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         (tmp_path / "s.json").write_text("{ not json")
         assert Settings.load(tmp_path / "s.json").slots == 1
@@ -675,7 +675,7 @@ class TestPreferences:
         assert joined.call("/health")[1]["slots"] == 1
 
     def test_the_name_the_wizard_asked_for_reaches_the_machine(self, joined, tmp_path):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         _, _, headers = joined.call("/ui/session", method="POST",
                                     body={"passphrase": WORDS})
@@ -726,12 +726,12 @@ class TestClosingTheWindow:
     WINDOW = Path(__file__).resolve().parent.parent / "app" / "src-tauri" / "src"
 
     def test_a_fresh_machine_has_no_saved_answer(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         assert Settings.load(tmp_path / "settings.json").on_close == ""
 
     def test_the_answer_is_kept_where_the_daemon_reads_it(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         path = tmp_path / "settings.json"
         Settings(on_close="background").save(path)
@@ -748,20 +748,20 @@ class TestClosingTheWindow:
 
     def test_the_window_asks_the_page_by_name(self):
         source = (self.WINDOW / "main.rs").read_text()
-        assert "window.mlStackAskOnClose && window.mlStackAskOnClose()" in source
+        assert "window.poolhouseAskOnClose && window.poolhouseAskOnClose()" in source
 
     def test_the_page_offers_the_question(self):
         """The native window calls this by name when the close button is clicked."""
-        from ml_stack.fleet.page import render
+        from poolhouse.fleet.page import render
 
         html = render()
-        assert "mlStackAskOnClose" in html
+        assert "poolhouseAskOnClose" in html
         assert 'invoke("close_choice", { mode, remember })' in html
         assert 'id="remember" checked="1"' in html, "the box must start ticked"
 
     def test_the_page_finds_no_window_in_a_browser(self):
         """The same page is served to a browser, where there is no bridge at all."""
-        from ml_stack.fleet.page import render
+        from poolhouse.fleet.page import render
 
         html = render()
         assert "window.__TAURI__ && window.__TAURI__.core" in html
@@ -791,7 +791,7 @@ class TestSettingsScreen:
         assert serving.call("/ui/settings")[0] == 401
 
     def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         serving, cookie = signed_in
         serving.call("/ui/settings", method="POST", cookie=cookie,
@@ -803,7 +803,7 @@ class TestSettingsScreen:
         assert saved.slots == 1 and saved.labels == ["prep"]
 
     def test_the_close_preference_can_be_set_from_settings(self, signed_in):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         serving, cookie = signed_in
         serving.call("/ui/settings", method="POST", cookie=cookie,
@@ -811,7 +811,7 @@ class TestSettingsScreen:
         assert Settings.load(serving.ui.settings_path).on_close == "background"
 
     def test_automatic_updates_are_on_unless_turned_off(self, signed_in):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         serving, cookie = signed_in
         assert Settings().auto_update is True
@@ -820,7 +820,7 @@ class TestSettingsScreen:
         assert Settings.load(serving.ui.settings_path).auto_update is False
 
     def test_getting_models_automatically_is_on_unless_turned_off(self, signed_in):
-        from ml_stack.fleet.settings import Settings
+        from poolhouse.fleet.settings import Settings
 
         serving, cookie = signed_in
         assert Settings().autodownload_models is True
@@ -847,7 +847,7 @@ class TestTheInterfaceAndTheDaemonAgree:
     def called_paths(self):
         import re
 
-        from ml_stack.fleet.page import render
+        from poolhouse.fleet.page import render
 
         source = render()
         found = set(re.findall(r"""api\(\s*[`"']([^`"']+)""", source))
@@ -869,13 +869,13 @@ class TestTheInterfaceAndTheDaemonAgree:
                                                               monkeypatch):
 
         serving, cookie = signed_in
-        from ml_stack.fleet import catalogue as catalogue_mod
-        from ml_stack.fleet.conversations import Conversations
-        from ml_stack.fleet.models import Models
+        from poolhouse.fleet import catalogue as catalogue_mod
+        from poolhouse.fleet.conversations import Conversations
+        from poolhouse.fleet.models import Models
         serving.ui.conversations = Conversations(serving.files.parent / "chats")
         serving.ui.models = Models([serving.files], serving.files)
         # The bench routes read the bench's home; a probe of every route reads nothing real.
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(serving.files.parent / "bench"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(serving.files.parent / "bench"))
 
         # No hub: the popular route must still answer, and a test must not wait on
         # the internet to find out whether a route exists.
@@ -902,7 +902,7 @@ class TestTheInterfaceAndTheDaemonAgree:
 
 class TestUpdates:
     def test_versions_compare_numerically(self):
-        from ml_stack.fleet.updates import Release
+        from poolhouse.fleet.updates import Release
 
         r = Release(version="0.2.0", url="", notes="", assets=(), checked_at=0)
         assert r.newer_than("0.1.9")
@@ -911,14 +911,14 @@ class TestUpdates:
         assert not r.newer_than("1.0.0")
 
     def test_two_digit_parts_do_not_sort_as_text(self):
-        from ml_stack.fleet.updates import Release
+        from poolhouse.fleet.updates import Release
 
         assert Release("0.10.0", "", "", (), 0).newer_than("0.9.0")
 
     def test_nothing_is_newer_than_a_version_nobody_knows(self):
         """A source tree used to report 0.0.0, so every release looked newer and the
         screen offered to move backwards onto the last tag."""
-        from ml_stack.fleet.updates import Release
+        from poolhouse.fleet.updates import Release
 
         older = Release("0.1.3", "", "", (), 0)
         assert older.newer_than("") is False
@@ -930,13 +930,13 @@ class TestUpdates:
         import tomllib
         from pathlib import Path as P
 
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         def no_metadata(*a, **k):
             raise LookupError("not installed")
 
         monkeypatch.setattr("importlib.metadata.version", no_metadata)
-        monkeypatch.delenv("ML_STACK_VERSION", raising=False)
+        monkeypatch.delenv("POOLHOUSE_VERSION", raising=False)
 
         got = updates.current_version()
         here = P(updates.__file__).resolve()
@@ -947,50 +947,50 @@ class TestUpdates:
         assert got == want, f"reported {got!r}, the checkout says {want!r}"
 
     def test_being_told_the_version_wins_over_guessing(self, monkeypatch):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         def no_metadata(*a, **k):
             raise LookupError("not installed")
 
         monkeypatch.setattr("importlib.metadata.version", no_metadata)
-        monkeypatch.setenv("ML_STACK_VERSION", "9.9.9")
+        monkeypatch.setenv("POOLHOUSE_VERSION", "9.9.9")
         assert updates.current_version() == "9.9.9"
 
     def test_with_no_way_to_tell_it_says_nothing_rather_than_zero(self, monkeypatch):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         def no_metadata(*a, **k):
             raise LookupError("not installed")
 
         monkeypatch.setattr("importlib.metadata.version", no_metadata)
-        monkeypatch.delenv("ML_STACK_VERSION", raising=False)
+        monkeypatch.delenv("POOLHOUSE_VERSION", raising=False)
         monkeypatch.setattr(updates, "_version_in_source", lambda: "")
         assert updates.current_version() == ""
 
     def test_the_download_for_this_machine_is_picked(self):
-        from ml_stack.fleet.updates import Release, asset_for, platform_key
+        from poolhouse.fleet.updates import Release, asset_for, platform_key
 
         key = platform_key()
         release = Release("9.9.9", "", "", (
-            {"name": "ml-stack-somewhere-else.zip"},
-            {"name": f"ml-stack-{key}.zip"},
+            {"name": "poolhouse-somewhere-else.zip"},
+            {"name": f"poolhouse-{key}.zip"},
         ), 0)
-        assert asset_for(release)["name"] == f"ml-stack-{key}.zip"
+        assert asset_for(release)["name"] == f"poolhouse-{key}.zip"
 
     def test_a_download_named_after_its_release_is_still_picked(self):
         """v0.1.4 is out there looking for its next download by this name. The version
         went on the end so those copies keep updating."""
-        from ml_stack.fleet.updates import Release, asset_for, platform_key
+        from poolhouse.fleet.updates import Release, asset_for, platform_key
 
         key = platform_key()
         release = Release("9.9.9", "", "", (
             {"name": "install.sh"},
-            {"name": f"ml-stack-{key}-v9.9.9.zip"},
+            {"name": f"poolhouse-{key}-v9.9.9.zip"},
         ), 0)
-        assert asset_for(release)["name"] == f"ml-stack-{key}-v9.9.9.zip"
+        assert asset_for(release)["name"] == f"poolhouse-{key}-v9.9.9.zip"
 
     def test_a_release_with_nothing_for_this_machine_returns_none(self):
-        from ml_stack.fleet.updates import Release, asset_for
+        from poolhouse.fleet.updates import Release, asset_for
 
         assert asset_for(Release("9.9.9", "", "", ({"name": "source.tar.gz"},), 0)) is None
 
@@ -998,7 +998,7 @@ class TestUpdates:
         import http.server
         import threading
 
-        from ml_stack.fleet.updates import UpdateError, download
+        from poolhouse.fleet.updates import UpdateError, download
 
         payload = b"not the right bytes"
 
@@ -1027,7 +1027,7 @@ class TestUpdates:
     def test_an_archive_that_escapes_its_directory_is_refused(self, tmp_path):
         import zipfile
 
-        from ml_stack.fleet.updates import UpdateError, install
+        from poolhouse.fleet.updates import UpdateError, install
 
         bad = tmp_path / "bad.zip"
         with zipfile.ZipFile(bad, "w") as zf:
@@ -1036,7 +1036,7 @@ class TestUpdates:
             install(bad, app_path=tmp_path / "app")
 
     def test_a_pip_install_is_told_to_update_with_pip(self, tmp_path):
-        from ml_stack.fleet.ui import UI
+        from poolhouse.fleet.ui import UI
 
         ui = UI(name="x", cluster_key_path=tmp_path / "k")
         got = ui.install_update()
@@ -1048,8 +1048,8 @@ def test_every_components_script_parses(tmp_path):
     import shutil
     import subprocess
 
-    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES
-    from ml_stack.ui import load
+    from poolhouse.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES
+    from poolhouse.ui import load
 
     node = shutil.which("node")
     if node is None:
@@ -1069,13 +1069,13 @@ class TestUpdatingItself:
 
     def test_a_newer_release_is_put_on_and_the_copy_restarts(self, monkeypatch,
                                                              tmp_path):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         seen = {}
-        monkeypatch.setattr(updates, "running_path", lambda: tmp_path / "ml-stack")
+        monkeypatch.setattr(updates, "running_path", lambda: tmp_path / "poolhouse")
         monkeypatch.setattr(updates, "current_version", lambda: "0.1.0")
         monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
-            "0.2.0", "", "", ({"name": "ml-stack-macos-arm64.zip"},), 0))
+            "0.2.0", "", "", ({"name": "poolhouse-macos-arm64.zip"},), 0))
         monkeypatch.setattr(updates, "asset_for", lambda r, key="": r.assets[0])
         monkeypatch.setattr(updates, "download_release",
                             lambda r, a, into, **k: tmp_path / "a.zip")
@@ -1086,9 +1086,9 @@ class TestUpdatingItself:
         assert "put" in seen, "it never unpacked anything"
 
     def test_an_older_release_is_left_alone(self, monkeypatch, tmp_path):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
-        monkeypatch.setattr(updates, "running_path", lambda: tmp_path / "ml-stack")
+        monkeypatch.setattr(updates, "running_path", lambda: tmp_path / "poolhouse")
         monkeypatch.setattr(updates, "current_version", lambda: "0.2.0")
         monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
             "0.1.0", "", "", (), 0))
@@ -1101,7 +1101,7 @@ class TestUpdatingItself:
         assert got["installed"] is False
 
     def test_a_pip_install_is_told_to_use_pip(self, monkeypatch):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         monkeypatch.setattr(updates, "running_path", lambda: None)
         got = updates.apply_if_newer()
@@ -1114,7 +1114,7 @@ class TestUpdatingItself:
         The loop swallows exceptions so a bad network does not stop it, so this
         counts the calls rather than raising inside it.
         """
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         tried = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
@@ -1132,7 +1132,7 @@ class TestUpdatingItself:
         assert thread.is_alive()
 
     def test_the_watcher_does_nothing_when_it_is_turned_off(self, monkeypatch):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         tried = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
@@ -1150,7 +1150,7 @@ class TestUpdatingItself:
 
     def test_an_idle_machine_with_the_setting_on_updates_and_restarts(self,
                                                                      monkeypatch):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         done = threading.Event()
         monkeypatch.setattr(updates, "apply_if_newer",
@@ -1168,15 +1168,15 @@ class TestUpdatingItself:
         assert done.wait(3.0), "it never restarted itself"
 
     def test_relaunch_says_no_when_this_is_not_a_bundle(self, monkeypatch):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
         monkeypatch.setattr(updates, "running_path", lambda: None)
         assert updates.relaunch() is False
 
     def test_relaunch_starts_the_replaced_copy(self, monkeypatch, tmp_path):
-        from ml_stack.fleet import updates
+        from poolhouse.fleet import updates
 
-        target = tmp_path / "ml-stack"
+        target = tmp_path / "poolhouse"
         target.write_text("#!/bin/sh\n")
         started = []
         monkeypatch.setattr(updates, "running_path", lambda: target)
@@ -1193,14 +1193,14 @@ class TestUpdatingItself:
 
 
 class TestTheBenchOnThePage:
-    """`UI.bench_state` is the bench half of `/ui/fleet`: what `ml-stack-bench status` says."""
+    """`UI.bench_state` is the bench half of `/ui/fleet`: what `poolhouse-bench status` says."""
 
     def _ui(self, tmp_path):
         return UI(name="studio", cluster_key_path=tmp_path / "cluster.key")
 
     def test_an_idle_machine_reports_the_bench_with_nothing_measuring(self, tmp_path,
                                                                      monkeypatch):
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
         state = self._ui(tmp_path).bench_state()
 
         assert sorted(state) == ["available", "measuring", "text"]
@@ -1212,9 +1212,9 @@ class TestTheBenchOnThePage:
                                                                            monkeypatch):
         import os
 
-        from ml_stack.bench.underway import remember
+        from poolhouse.bench.underway import remember
 
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
         remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid(),
                  started="2026-09-05T10:00:00")
         state = self._ui(tmp_path).bench_state()
@@ -1222,16 +1222,16 @@ class TestTheBenchOnThePage:
         assert state["available"] is True
         assert state["measuring"]["pid"] == os.getpid()
         assert state["measuring"]["argv"] == ["sweep", "--serve", "models/beacon.gguf"]
-        assert "ml-stack-bench sweep --serve models/beacon.gguf" in state["text"]
+        assert "poolhouse-bench sweep --serve models/beacon.gguf" in state["text"]
         assert str(os.getpid()) in state["text"]
 
     def test_an_install_without_the_bench_says_so_rather_than_breaking_the_page(
             self, tmp_path, monkeypatch):
-        """A device-tier install has no `ml_stack.bench`. The page still wants the three
+        """A device-tier install has no `poolhouse.bench`. The page still wants the three
         keys, so the import failure is reported in the same shape as an answer."""
         import sys
 
-        for name in ("ml_stack.bench.underway", "ml_stack.bench.progress"):
+        for name in ("poolhouse.bench.underway", "poolhouse.bench.progress"):
             monkeypatch.setitem(sys.modules, name, None)
         state = self._ui(tmp_path).bench_state()
 
@@ -1241,7 +1241,7 @@ class TestTheBenchOnThePage:
         assert state["text"].startswith("the bench is not installed here: ")
 
     def test_the_fleet_view_carries_the_same_bench_state(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
         ui = self._ui(tmp_path)
         monkeypatch.setattr(ui, "peers", lambda *a, **k: [])
 

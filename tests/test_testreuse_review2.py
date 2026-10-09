@@ -15,11 +15,11 @@ from taskboard_kit import board  # noqa: F401  (fixture)
 from test_testreuse import FILE, Recorder, hows, project  # noqa: F401  (fixture)
 from test_testreuse_review import attempt, kinds
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import testboard, testruns
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import testboard, testruns
 
 pytestmark = pytest.mark.slow
-HELPER = "src/ml_stack/helper.py"
+HELPER = "src/poolhouse/helper.py"
 
 
 # -- N1: the key a result is stored under is the key of the bytes that ran ------------------------------
@@ -181,7 +181,7 @@ def test_job_done_survives_any_error_from_the_board():
 
 def test_acting_survives_any_error_from_the_workspace(monkeypatch):
     monkeypatch.setattr(testboard.cli, "_context", lambda args: (_ for _ in ()).throw(ZeroDivisionError("x")))
-    monkeypatch.setenv("ML_STACK_WORKSPACE_AGENT", "someone")
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_AGENT", "someone")
     assert testboard.acting() is None
 
 
@@ -214,19 +214,19 @@ def test_option_values_the_digest_does_not_know_are_still_in_it(project):
 
 def test_a_pytest_plugins_module_named_by_a_conftest_is_part_of_the_hit(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    (project / "tests/conftest.py").write_text("pytest_plugins = ['ml_stack.other']\n")
+    (project / "tests/conftest.py").write_text("pytest_plugins = ['poolhouse.other']\n")
     attempt(project, store)
     assert hows(attempt(project, store)[0]) == ["reused"]
-    (project / "src/ml_stack/other.py").write_text("OTHER = 2\n")
+    (project / "src/poolhouse/other.py").write_text("OTHER = 2\n")
     assert hows(attempt(project, store)[0]) == ["ran"]
 
 
 def test_a_dash_p_module_is_part_of_the_hit(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    attempt(project, store, extra=("-p", "ml_stack.other"))
-    assert hows(attempt(project, store, extra=("-p", "ml_stack.other"))[0]) == ["reused"]
-    (project / "src/ml_stack/other.py").write_text("OTHER = 2\n")
-    assert hows(attempt(project, store, extra=("-p", "ml_stack.other"))[0]) == ["ran"]
+    attempt(project, store, extra=("-p", "poolhouse.other"))
+    assert hows(attempt(project, store, extra=("-p", "poolhouse.other"))[0]) == ["reused"]
+    (project / "src/poolhouse/other.py").write_text("OTHER = 2\n")
+    assert hows(attempt(project, store, extra=("-p", "poolhouse.other"))[0]) == ["ran"]
 
 
 def submission(commit: str) -> dict:
@@ -307,7 +307,7 @@ def test_a_module_an_earlier_file_already_imported_is_still_in_a_later_files_man
     store = storage.Store(tmp_path / "store")
     for name in ("a", "b"):
         (project / f"tests/test_{name}.py").write_text(
-            "from ml_stack.helper import VALUE\n\n\ndef test_x():\n    assert VALUE == 1\n")
+            "from poolhouse.helper import VALUE\n\n\ndef test_x():\n    assert VALUE == 1\n")
     attempt(project, store, "tests/test_a.py", "tests/test_b.py")
     (project / HELPER).write_text("VALUE = 1  # edited\n")
     assert hows(attempt(project, store, "tests/test_a.py", "tests/test_b.py")[0]) == ["ran", "ran"]

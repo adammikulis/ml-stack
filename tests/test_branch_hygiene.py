@@ -24,8 +24,8 @@ def load(name: str, where: Path):
     return module
 
 
-worktrees = load("_ml_stack_worktrees", REPO / "scripts" / "worktrees")
-hook = load("_ml_stack_weakened", REPO / "scripts" / "hooks" / "weakened-assertions")
+worktrees = load("_poolhouse_worktrees", REPO / "scripts" / "worktrees")
+hook = load("_poolhouse_weakened", REPO / "scripts" / "hooks" / "weakened-assertions")
 HOOK = REPO / "scripts" / "hooks" / "weakened-assertions"
 
 

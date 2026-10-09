@@ -16,14 +16,14 @@ def test_failed_preparation_removes_the_control_directory(monkeypatch):
         monkeypatch.setattr(isolation, "supervisor_storage", lambda environment: storage)
 
         def refuse(*arguments, **options):
-            assert list(storage.glob("ml-stack-confined-*")), "the control directory exists before the failure"
+            assert list(storage.glob("poolhouse-confined-*")), "the control directory exists before the failure"
             raise RuntimeError("forced holder preparation failure")
 
         monkeypatch.setattr(isolation, "prepare_holder", refuse)
         command = [sys.executable, "-m", "pytest", "tests/test_layers.py"]
         with pytest.raises(RuntimeError, match="forced holder preparation failure"):
             isolation.ConfinedRun(command, {key: value for key, value in os.environ.items()
-                                                if key not in ("ML_STACK_HOME", "ML_STACK_CACHE")}, "unused-endpoint")
+                                                if key not in ("POOLHOUSE_HOME", "POOLHOUSE_CACHE")}, "unused-endpoint")
         assert list(storage.iterdir()) == []
     finally:
         shutil.rmtree(storage, ignore_errors=True)

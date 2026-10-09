@@ -9,14 +9,14 @@ from ._perfile import finder
 from ._util import calls, dotted, exempt, parse
 
 NAME = "process-scans"
-OWNER = "ml_stack.serve.process"
+OWNER = "poolhouse.serve.process"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/serve/process.py",)
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/serve/process.py",)
 
 
 def describe() -> str:
-    return "A walk of the process table; ml_stack.serve.process finds and stops servers."
+    return "A walk of the process table; poolhouse.serve.process finds and stops servers."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

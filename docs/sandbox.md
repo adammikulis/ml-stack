@@ -1,7 +1,7 @@
 # Sandboxing and egress control for tool execution
 
-Status: accepted 2026-10-02 (issue #27). One package, `ml_stack.sandbox`, runs a command under an
-operating-system sandbox with a deny-by-default policy. Every place ml-stack starts an
+Status: accepted 2026-10-02 (issue #27). One package, `poolhouse.sandbox`, runs a command under an
+operating-system sandbox with a deny-by-default policy. Every place Poolhouse starts an
 agent-chosen command or an untrusted tool goes through it.
 
 ## Decision
@@ -44,11 +44,11 @@ used here anyway.
 
 - **Date and decision:** 2026-10-02, the owner, recorded on issue #27: on macOS it is the best
   available command-line sandbox.
-- **Scope:** every use of the tool is in `src/ml_stack/sandbox/seatbelt.py`. Nothing else names
-  it. Claude Code's own Bash sandbox (enabled by `ml_stack.harness`) is Anthropic's code and uses
+- **Scope:** every use of the tool is in `src/poolhouse/sandbox/seatbelt.py`. Nothing else names
+  it. Claude Code's own Bash sandbox (enabled by `poolhouse.harness`) is Anthropic's code and uses
   the same tool underneath.
 - **Mitigations:** it logs one warning per process saying the tool is deprecated;
-  `ml-stack security sandbox status` and `ml-stack security status` print it; the binary's
+  `poolhouse security sandbox status` and `poolhouse security status` print it; the binary's
   existence is checked before each use; untrusted execution is refused when it is missing.
 - **Replacement path:** a container backend (below) for CPU-only work, behind the same
   `Backend` protocol, so the change is one file.
@@ -74,7 +74,7 @@ not go away. Its read model (allow everywhere, deny some paths) is the opposite 
 asked for here, it passes the environment through, and it cannot express an exec list or the
 GPU. It also adds a Node runtime to a Python library. Its useful part is the host-name egress
 proxy; a host allow-list is not built here (web tools run inside the net pipeline,
-`ml_stack.httpguard`), and an optional `srt` backend for that is the follow-up.
+`poolhouse.httpguard`), and an optional `srt` backend for that is the follow-up.
 
 ## What is enforced where
 
@@ -126,14 +126,14 @@ linked by absolute path) and a working directory it can read. The base profile a
 
 | Call site | Policy | Layer behind it |
 |---|---|---|
-| `ml_stack.sandbox.tools.SandboxedBash`, the shell tool for an `Agent` | `bash`: read the project, write a scratch directory, no network, 120 s | the guard's tool-policy and taint rails (`bash` is an `exec` sink: text from outside cannot reach it) |
+| `poolhouse.sandbox.tools.SandboxedBash`, the shell tool for an `Agent` | `bash`: read the project, write a scratch directory, no network, 120 s | the guard's tool-policy and taint rails (`bash` is an `exec` sink: text from outside cannot reach it) |
 | `McpTools.stdio(...)` | `mcp_server`: read the interpreter, project and `reads`, write a scratch directory, loopback only, `env` as the whole environment | the guard; the server is not started when no sandbox is available |
-| `ml_stack.harness` (Claude Agent SDK) | Claude Code's sandbox for Bash: on, no per-command opt-out, `failIfUnavailable`, no network domains | the guard's `PreToolUse` hooks; not driven end to end in this change (see below) |
-| `LlamaServerBackend(sandboxed=True)` or `ML_STACK_SANDBOX_SERVE=1` | `model_server`: read the binary's directory and the files in the command line, loopback, GPU | opt-in; the Broker leases the server as before |
+| `poolhouse.harness` (Claude Agent SDK) | Claude Code's sandbox for Bash: on, no per-command opt-out, `failIfUnavailable`, no network domains | the guard's `PreToolUse` hooks; not driven end to end in this change (see below) |
+| `LlamaServerBackend(sandboxed=True)` or `POOLHOUSE_SANDBOX_SERVE=1` | `model_server`: read the binary's directory and the files in the command line, loopback, GPU | opt-in; the Broker leases the server as before |
 
 Not routed: `llama-server` and the Broker daemon by default (opt-in only), `checks.py`'s
 `shell=True` fix line (typed by the person and confirmed), `subprocess` calls in `serve`, `bench`,
-`fleet`, `gguf`, `speech` and `doctor` that run ml-stack's own commands with arguments the code
+`fleet`, `gguf`, `speech` and `doctor` that run Poolhouse's own commands with arguments the code
 builds. Each is a candidate for review as it takes input from an agent.
 
 Sandbox events go to the sentinel bus through `sentinel.adapters.sandbox_listener`:
@@ -160,13 +160,13 @@ additional enforcement.
 
 ## Commands
 
-`ml-stack security sandbox status` prints the backend, whether it can run and the deprecation
-note. `ml-stack security sandbox test` runs five guarantees against real confined processes and
+`poolhouse security sandbox status` prints the backend, whether it can run and the deprecation
+note. `poolhouse security sandbox test` runs five guarantees against real confined processes and
 exits 1 when one fails.
 
 ## Sandboxed model server
 
-`LlamaServerBackend(sandboxed=True)` or `ML_STACK_SANDBOX_SERVE=1` starts the model under
+`LlamaServerBackend(sandboxed=True)` or `POOLHOUSE_SANDBOX_SERVE=1` starts the model under
 the `model_server` policy: the GPU, the binary's install tree, the directories of the files
 on its command line, and the slot-save directory. The Windows WSL launcher enables this
 automatically. On Linux, the model has no network and listens on a private Unix socket in

@@ -8,9 +8,9 @@ import random
 
 import pytest
 
-from ml_stack.sentinel import Mode, Sentinel, State
-from ml_stack.sentinel.honey import Honey
-from ml_stack.sentinel.rates import PeerLimits, PeerWatch
+from poolhouse.sentinel import Mode, Sentinel, State
+from poolhouse.sentinel.honey import Honey
+from poolhouse.sentinel.rates import PeerLimits, PeerWatch
 
 # a fixed corpus: this test used to read docs/*.md, so editing a document changed which tool mix the random
 # draws produced and could tip a heuristic over its threshold for reasons unrelated to the code under test

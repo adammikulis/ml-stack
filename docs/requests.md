@@ -4,8 +4,8 @@ One place where everything that waits for a person is raised, shown and answered
 needs a yes, a fact the agent wants remembered, something sentinel holds: each is a request, and
 the terminal, the browser page and the desktop dialog are three ways to answer the same one.
 
-Code: `ml_stack.requests` (`raise_request`, `answer`, `list_requests`), the terminal command
-`ml-stack-requests`, the route `ml_stack.inbox.route` with the element `ml-requests`
+Code: `poolhouse.requests` (`raise_request`, `answer`, `list_requests`), the terminal command
+`poolhouse-requests`, the route `poolhouse.inbox.route` with the element `ml-requests`
 (`ui/assets/ml-requests.js`).
 
 ## What a request holds
@@ -37,10 +37,10 @@ unknown, or the choice is not one the request offered, the answer is refused. Th
 wins: a later one is refused with `already resolved: <state> by <way>`.
 
 Only a person answers. A terminal answer needs a terminal on stdin and stdout; every way is
-refused when an agent marker (`CLAUDECODE`, `ML_STACK_AGENT`, `ML_STACK_NONINTERACTIVE`) is set in
+refused when an agent marker (`CLAUDECODE`, `POOLHOUSE_AGENT`, `POOLHOUSE_NONINTERACTIVE`) is set in
 the process. No tool offered to a model, MCP tool, token or workspace message reaches `answer`: a
 tool named for a request or an answer is on the person-only floor, a call whose text names
-`ml-stack-requests` or the request store is refused, and `ml-stack-requests` refuses a process an
+`poolhouse-requests` or the request store is refused, and `poolhouse-requests` refuses a process an
 agent started. An answer that approves something human-only (a release, a host, a grant) is not
 the permission: the action checks again, in the process that carries it out, that no agent
 started it.
@@ -50,7 +50,7 @@ handle `raise_request` returns answers `denied` at once, and nothing is approved
 
 ## Where it is kept
 
-`~/.ml-stack/requests/requests.enc` (under the state root): AES-256-GCM under the `requests` subkey
+`~/.poolhouse/requests/requests.enc` (under the state root): AES-256-GCM under the `requests` subkey
 of the user's master key in the OS keystore, one file per user, no plaintext field. At most 100
 requests wait and 400 are kept; a resolved request is dropped after seven days. Every raise,
 answer and withdrawal is an activity record (`request.raised`, `request.answered`,
@@ -65,30 +65,30 @@ that process raised.
 ## Terminal
 
 ```
-ml-stack-requests list [--state S] [--agent A] [--project P] [--kind K] [--json]
-ml-stack-requests show ID
-ml-stack-requests answer ID CHOICE [--fingerprint FP]
-ml-stack-requests watch [--once]
+poolhouse-requests list [--state S] [--agent A] [--project P] [--kind K] [--json]
+poolhouse-requests show ID
+poolhouse-requests answer ID CHOICE [--fingerprint FP]
+poolhouse-requests watch [--once]
 ```
 
 `answer` shows the request and asks for a yes unless `--fingerprint` (the one `show` printed) is
-given. `ml-stack-security status` and `chip` carry the number waiting.
+given. `poolhouse-security status` and `chip` carry the number waiting.
 
 ## The chat, memory and sentinel
 
-* `ml-stack-chat`: each confirmation is a `tool_call` request carrying the classifier's reason. The
+* `poolhouse-chat`: each confirmation is a `tool_call` request carrying the classifier's reason. The
   prompt is unchanged (1 allow this time, 2 always allow, 3 never allow, Enter no). An answer made
   in the UI or the dialog while the terminal waits settles the prompt. Always allow saves a rule
   only from the terminal; from the UI the call runs once and no rule is saved.
 * `remember`: a `memory_remember` request with the same menu.
 * Sentinel: a quarantine that needs a person raises one `quarantine_release` request listing what
   is held. The single-flight dialog shows the oldest waiting request and answers it through the same
-  module (`ML_STACK_NOTIFY=off`, the cooldown and one dialog at a time are unchanged). Release,
+  module (`POOLHOUSE_NOTIFY=off`, the cooldown and one dialog at a time are unchanged). Release,
   Keep held and Later are carried out by sentinel for the ids the answered request lists.
 
 ## The page
 
-A shell mounts `RequestsApp.dispatch(method, path, headers, body)` from `ml_stack.inbox.route`
+A shell mounts `RequestsApp.dispatch(method, path, headers, body)` from `poolhouse.inbox.route`
 under `/requests` in its own server (no server of its own lives here). A person's terminal gets
 `RequestsApp.launch_key`; the link `/requests?k=KEY` opens one browser session once; the session
 cookie (`HttpOnly`, `SameSite=Strict`, path `/requests`) and a CSRF token are delivered only inside
@@ -112,7 +112,7 @@ The shell puts `<ml-requests></ml-requests>` in its page with the `<meta>` from
 
 * The launch key and session protect the browser path from a program that is not given the link;
   a program that can read the person's terminal or browser can use it.
-* Fleet join requests (`fleet/onboard/requests.py`) and `ml-stack-security approve-host` keep their
+* Fleet join requests (`fleet/onboard/requests.py`) and `poolhouse-security approve-host` keep their
   own state machines and typed confirmations; they are not raised here yet.
 * The reputation notice (`reputation/notice.py`) keeps its own dialog.
 * A dialog raised for sentinel can show another component's older request first.

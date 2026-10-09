@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import (
+from poolhouse import (
     claude,
     codex,
     coding,
@@ -24,9 +24,9 @@ from ml_stack import (
     private_path,
     requests,
 )
-from ml_stack.harnesspolicy import decide
-from ml_stack.workspace import tokens
-from ml_stack.workspace.project import describe
+from poolhouse.harnesspolicy import decide
+from poolhouse.workspace import tokens
+from poolhouse.workspace.project import describe
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 
@@ -34,7 +34,7 @@ SRC = str(Path(__file__).resolve().parent.parent / "src")
 def _hook(event, payload, *args, env=None):
     """Run the hook as a harness does: a child process, the event on stdin."""
     base = {**os.environ, "PYTHONPATH": SRC, **(env or {})}
-    return subprocess.run([sys.executable, "-m", "ml_stack.harnesshook", event, *args],
+    return subprocess.run([sys.executable, "-m", "poolhouse.harnesshook", event, *args],
                           input=payload if isinstance(payload, str) else json.dumps(payload),
                           capture_output=True, text=True, env=base, timeout=60, check=False)
 
@@ -75,13 +75,13 @@ class TestPolicy:
             hit = decide(role, "Edit", {"file_path": "/state/harness/ab/settings.json", "old_string": "a",
                                         "new_string": "b"}, roots=("/state",), protected=("/state/harness/ab",))
             assert hit.action == "deny"
-            answer = decide(role, "Bash", {"command": "ml-stack-requests answer rq_1 allow-once"})
-            assert answer.action == "deny" and "ml-stack-requests answer" in answer.reason
+            answer = decide(role, "Bash", {"command": "poolhouse-requests answer rq_1 allow-once"})
+            assert answer.action == "deny" and "poolhouse-requests answer" in answer.reason
 
     def test_nothing_in_the_call_or_the_environment_changes_the_role(self, monkeypatch):
-        for name in ("ML_STACK_ROLE", "ML_STACK_GUARD", "MLSTACK_GUARD", "CLAUDE_ROLE"):
+        for name in ("POOLHOUSE_ROLE", "POOLHOUSE_GUARD", "POOLHOUSE_GUARD", "CLAUDE_ROLE"):
             monkeypatch.setenv(name, "off")
-        call = {"command": "rm -rf /tmp/x", "role": "plan-and-go", "ml_stack_role": "plan-and-go",
+        call = {"command": "rm -rf /tmp/x", "role": "plan-and-go", "poolhouse_role": "plan-and-go",
                 "permission_mode": "bypassPermissions", "dangerouslyDisableSandbox": True}
         assert decide("read-only", "Bash", call, roots=("/w",)).action == "deny"
         assert decide("approve-first", "Bash", call, roots=("/w",)).action == "ask"
@@ -142,7 +142,7 @@ class TestHook:
         began = time.time()
         done = _hook("pre", {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x"}},
                      "--role", "approve-first", "--root", "/w", "--wait", "120",
-                     env={"ML_STACK_HOME": str(Path(os.environ["ML_STACK_HOME"]) / "hook")})
+                     env={"POOLHOUSE_HOME": str(Path(os.environ["POOLHOUSE_HOME"]) / "hook")})
         assert _verdict(done)["permissionDecision"] == "deny"
         assert time.time() - began < 60, "the hook does not wait on a keystore it cannot open"
 
@@ -150,7 +150,7 @@ class TestHook:
         done = _hook("pre", {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x",
                                                                  "role": "plan-and-go"}},
                      "--role", "read-only", "--root", "/w",
-                     env={"ML_STACK_ROLE": "plan-and-go", "MLSTACK_GUARD": "off", "ML_STACK_GUARD": "off"})
+                     env={"POOLHOUSE_ROLE": "plan-and-go", "POOLHOUSE_GUARD": "off", "POOLHOUSE_GUARD": "off"})
         assert _verdict(done)["permissionDecision"] == "deny"
 
     def test_a_hook_that_fails_blocks_the_call(self):
@@ -192,14 +192,14 @@ class TestSessionFiles:
                 assert "'--role' 'approve-first'" in command
             else:
                 assert "--role approve-first" in command
-            assert "ml_stack.harnesshook" in command
+            assert "poolhouse.harnesshook" in command
             assert "disableAllHooks" not in text
         finally:
             files.release()
         assert not files.path.exists()
 
     def test_a_working_directory_that_holds_the_session_is_refused(self):
-        from ml_stack import home
+        from poolhouse import home
 
         with pytest.raises(ValueError, match="overlap"):
             harnessing.session_files(home.state("harness"))
@@ -235,7 +235,7 @@ class TestAdmission:
             enough_now, needed_mb, current_mb, default_mb = False, 120000, 98000, 98000
 
         assert harnessing.admitted("/m/big.gguf", 262144, said.append, plan=lambda *a: Plan()) is False
-        assert "ml-stack-serve memory --for big.gguf --ctx 262144 --kv q8_0 --apply" in said[0]
+        assert "poolhouse-serve memory --for big.gguf --ctx 262144 --kv q8_0 --apply" in said[0]
         assert harnessing.admitted("/m/big.gguf", 262144, said.append,
                                    plan=lambda *a: type("P", (), {"enough_now": True})()) is True
 
@@ -244,8 +244,8 @@ class TestCodex:
     def test_the_config_names_the_provider_the_window_and_the_hook(self):
         text = codex.config_toml("http://127.0.0.1:8080/", "qwen", 262144, ("PRE", "POST", 300.0))
         got = tomllib.loads(text)
-        assert got["model_provider"] == "mlstack" and got["model"] == "qwen"
-        provider = got["model_providers"]["mlstack"]
+        assert got["model_provider"] == "poolhouse" and got["model"] == "qwen"
+        provider = got["model_providers"]["poolhouse"]
         assert provider["base_url"] == "http://127.0.0.1:8080/v1" and provider["wire_api"] == "responses"
         assert got["model_context_window"] == 262144
         assert got["model_auto_compact_token_limit"] == int(262144 * 0.9)
@@ -331,7 +331,7 @@ class TestLaunch:
         assert scope["required"] is True
         assert scope["command"] == sys.executable
         assert scope["args"][-1] == "--workspace-only"
-        assert scope["env"]["ML_STACK_WORKSPACE_TOKEN"] == "assigned-test-seat"
+        assert scope["env"]["POOLHOUSE_WORKSPACE_TOKEN"] == "assigned-test-seat"
         assert "--dangerously-bypass-hook-trust" in seen["command"] and seen["command"][-2:] == ["exec", "fix it"]
         assert tmp_path / "tree" not in seen["home"].parents and not seen["home"].exists()
 
@@ -344,7 +344,7 @@ class TestLaunch:
 
 class TestWorkspaceCommands:
     def _fake_workspace(self, tmp_path, monkeypatch):
-        exe = tmp_path / "bin" / "ml-stack-workspace"
+        exe = tmp_path / "bin" / "poolhouse-workspace"
         exe.parent.mkdir()
         script = ('import sys\nfrom pathlib import Path\n'
                   'Path(sys.argv[0] + ".argv").write_text("\\n".join(sys.argv[1:]))\n'
@@ -356,7 +356,7 @@ class TestWorkspaceCommands:
             maker.variants = {""}
             maker.executable = sys.executable
             maker.script_template = script
-            exe = Path(maker.make("ml-stack-workspace = unused:main")[0])
+            exe = Path(maker.make("poolhouse-workspace = unused:main")[0])
         else:
             exe.write_text(f"#!{sys.executable}\n{script}")
             exe.chmod(0o755)
@@ -376,7 +376,7 @@ class TestWorkspaceCommands:
         monkeypatch.setattr(harnesshook, '_reader_run', run)
         assert harnesshook.nudge(hostile) == "nudge text"
         command, options = seen[0]
-        assert command == [sys.executable, '-m', 'ml_stack.workspace.notification_reader',
+        assert command == [sys.executable, '-m', 'poolhouse.workspace.notification_reader',
                            hostile, str(Path.cwd()), '']
         assert options.get('shell', False) is False
         assert options['timeout'] == harnesshook.NUDGE_S
@@ -396,7 +396,7 @@ class TestSeat:
 
     @pytest.fixture
     def person(self, monkeypatch):
-        from ml_stack import authority
+        from poolhouse import authority
 
         real = authority.require_person
         monkeypatch.setattr(authority, "require_person",
@@ -409,7 +409,7 @@ class TestSeat:
         assert harnessid.agent_name("m", "codex", "mine") == "mine"
 
     def test_a_launcher_connects_a_persistent_agent_without_printing_a_token(self, person, tmp_path):
-        from ml_stack.workspace import Workspace, tokens
+        from poolhouse.workspace import Workspace, tokens
 
         said = []
         project = tmp_path / "proj"
@@ -427,7 +427,7 @@ class TestSeat:
         assert again.persistent and tokens.load(ws.base, again.name) == secret
 
     def test_the_seat_is_on_the_project_board_with_the_quiet_defaults(self, person, tmp_path):
-        from ml_stack.workspace import Workspace
+        from poolhouse.workspace import Workspace
 
         project = tmp_path / "proj"
         project.mkdir()
@@ -437,7 +437,7 @@ class TestSeat:
         assert not subs.get("local-test-codex")
 
     def test_a_launcher_records_its_model_as_claimed(self, person, monkeypatch, tmp_path):
-        from ml_stack.workspace import Workspace
+        from poolhouse.workspace import Workspace
 
         seat = harnessid.invite("local-test-codex", tmp_path, "claude", lambda _: None)
         assert seat.record_model("qwen-27b", "codex") is True
@@ -448,7 +448,7 @@ class TestSeat:
         assert harnessid.Seat("x").record_model("m", "codex") is False
 
     def test_ending_the_session_keeps_identity_and_removes_harness_files(self, person, monkeypatch, tmp_path):
-        from ml_stack.workspace import Workspace, tokens
+        from poolhouse.workspace import Workspace, tokens
 
         seen = {}
         monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
@@ -508,8 +508,8 @@ class TestSeat:
         assert not seat.revoke()
 
     def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):
-        from ml_stack.testing import FakeLlamaServer, Served
-        from ml_stack.workspace import Workspace, tokens
+        from poolhouse.testing import FakeLlamaServer, Served
+        from poolhouse.workspace import Workspace, tokens
 
         ws = Workspace()
         owner = ws.init("owner")
@@ -526,7 +526,7 @@ class TestSeat:
             seat.revoke()
 
     def test_an_agent_launcher_delegates_a_distinct_private_child_without_changing_invite_policy(self, monkeypatch, tmp_path):
-        from ml_stack.workspace import Workspace, tokens
+        from poolhouse.workspace import Workspace, tokens
 
         ws = Workspace()
         owner = ws.init("owner")
@@ -543,7 +543,7 @@ class TestSeat:
         assert secret not in "".join(said)
         assert ws.limits.agent_invite_ask == "approve-first" and ws.invites.made_by("codex") == []
         assert seat.revoke() and ws.auth(parent).id == "codex"
-        from ml_stack.workspace import Denied
+        from poolhouse.workspace import Denied
 
         with pytest.raises(Denied, match="revoked"):
             ws.delegate(secret, "nested")
@@ -594,8 +594,8 @@ class TestCodingAgent:
 def test_explicit_head_and_none_override_measured_profile(monkeypatch):
     from types import SimpleNamespace
 
-    from ml_stack import hub
-    from ml_stack.serve.serving import Config, Serving
+    from poolhouse import hub
+    from poolhouse.serve.serving import Config, Serving
 
     measured = Config(serving=Serving(model="qwen.gguf", draft="old-head.gguf", spec_type="draft-mtp"))
     monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: SimpleNamespace(config=lambda **_: measured))
@@ -615,7 +615,7 @@ def test_explicit_head_and_none_override_measured_profile(monkeypatch):
 def test_automatic_context_comes_from_the_device_model_fit(monkeypatch):
     from types import SimpleNamespace
 
-    from ml_stack import hub
+    from poolhouse import hub
     monkeypatch.setattr(hub, "located", lambda model, loose=True: Path("qwen.gguf"))
     monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 200000)
     monkeypatch.setattr(harnessing.suggest, "suggest", lambda *a, **k: SimpleNamespace(context=98304, verdict="yellow", n_gpu_layers="auto",
@@ -629,16 +629,16 @@ def test_automatic_context_comes_from_the_device_model_fit(monkeypatch):
 
 
 @pytest.mark.parametrize("line, expected", [
-    ("ml-stack-workspace inbox --agent own", "allow"),
-    ("ml-stack-workspace send codex note 'sensor count 8' --agent own", "allow"),
-    ("ml-stack-workspace inbox --agent other", "deny"),
-    ("env ML_STACK_WORKSPACE_AGENT=other ml-stack-workspace inbox --agent other", "deny"),
-    ("command ml-stack-workspace inbox --agent other", "deny"),
-    ("ml-stack-workspace inbox --agent own --agent other", "deny"),
-    ("ml-stack-workspace inbox --agent own --token-file /tmp/other", "deny"),
-    ("ml-stack-workspace inbox", "deny"),
-    ("ml-stack-workspace setup --agents own --agent own", "deny"),
-    ("ml-stack-workspace inbox --agent own && rm README.md", "deny"),
+    ("poolhouse-workspace inbox --agent own", "allow"),
+    ("poolhouse-workspace send codex note 'sensor count 8' --agent own", "allow"),
+    ("poolhouse-workspace inbox --agent other", "deny"),
+    ("env POOLHOUSE_WORKSPACE_AGENT=other poolhouse-workspace inbox --agent other", "deny"),
+    ("command poolhouse-workspace inbox --agent other", "deny"),
+    ("poolhouse-workspace inbox --agent own --agent other", "deny"),
+    ("poolhouse-workspace inbox --agent own --token-file /tmp/other", "deny"),
+    ("poolhouse-workspace inbox", "deny"),
+    ("poolhouse-workspace setup --agents own --agent own", "deny"),
+    ("poolhouse-workspace inbox --agent own && rm README.md", "deny"),
 ])
 def test_workspace_hook_binds_own_identity_and_keeps_human_commands_blocked(line, expected, tmp_path):
     payload = {"tool_name": "Bash", "tool_input": {"command": line}, "cwd": str(tmp_path)}

@@ -9,10 +9,10 @@ from ._perfile import finder
 from ._util import calls, exempt, parse
 
 NAME = "atomic-writes"
-OWNER = "ml_stack.files.write_json"
+OWNER = "poolhouse.files.write_json"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/files.py",)
+ROOTS = ("src/poolhouse",)
+OWNS = ("src/poolhouse/files.py",)
 TARGETS = {"os.replace", "os.rename", "shutil.move"}
 # ``Path.replace``/``Path.rename`` are the same syscall under another spelling. A string's
 # ``replace`` takes two arguments and a string has no ``rename``, so one argument tells them
@@ -21,7 +21,7 @@ METHODS = {"replace": 1, "rename": 1}
 
 
 def describe() -> str:
-    return "A write-then-replace done by hand; ml_stack.files.write_json is the atomic write."
+    return "A write-then-replace done by hand; poolhouse.files.write_json is the atomic write."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

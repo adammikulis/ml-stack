@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.memory import vault
-from ml_stack.reputation import economy
-from ml_stack.reputation.sealed import SealedGraph
-from ml_stack.reputation.store import Ledger
-from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import tokens
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.work_reputation import scope, standings
+from poolhouse.memory import vault
+from poolhouse.reputation import economy
+from poolhouse.reputation.sealed import SealedGraph
+from poolhouse.reputation.store import Ledger
+from poolhouse.reputation.work import WorkLedger
+from poolhouse.workspace import tokens
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.work_reputation import scope, standings
 
 
 @pytest.fixture
@@ -99,8 +99,8 @@ def test_person_reputation_route_is_read_only_and_session_guarded(work, tmp_path
     from launch_support import signed
     from test_fleet_ui import Serving
 
-    from ml_stack.fleet import routes
-    from ml_stack.workspace import work_reputation
+    from poolhouse.fleet import routes
+    from poolhouse.workspace import work_reputation
 
     tokens.store(work.base, tokens.OWNER_FILE, work.owner)
     monkeypatch.setattr(work_reputation, 'WorkLedger', lambda: work.ledger)
@@ -127,10 +127,10 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
     from playwright.sync_api import expect
     from test_fleet_ui import Serving
 
-    from ml_stack.activity import writer
-    from ml_stack.activity.log import ActivityLog
-    from ml_stack.activity.schema import build
-    from ml_stack.workspace import localagent, work_reputation
+    from poolhouse.activity import writer
+    from poolhouse.activity.log import ActivityLog
+    from poolhouse.activity.schema import build
+    from poolhouse.workspace import localagent, work_reputation
 
     tokens.store(work.base, tokens.OWNER_FILE, work.owner)
     monkeypatch.setattr(work_reputation, 'WorkLedger', lambda: work.ledger)
@@ -154,7 +154,7 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
             expect(viewer.get_by_text('result.json', exact=False)).to_be_visible()
             expect(viewer.get_by_text(f'Account identity: {work.agent_id}', exact=True)).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-            page.screenshot(path='/private/tmp/ml-stack-work-reputation-history.png', full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-work-reputation-history.png', full_page=True)
     finally:
         server.close()
 
@@ -174,8 +174,8 @@ def test_reputation_read_requires_valid_token_and_read_capability(work):
 
 @pytest.mark.redteam
 def test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awareness(work, monkeypatch):
-    from ml_stack.workspace import localloop, localtools, tools, work_reputation
-    from ml_stack.workspace.identity import TOKEN_ENV
+    from poolhouse.workspace import localloop, localtools, tools, work_reputation
+    from poolhouse.workspace.identity import TOKEN_ENV
 
     _historical(work)
     monkeypatch.setattr(work_reputation, 'WorkLedger', lambda: work.ledger)
@@ -275,7 +275,7 @@ def test_model_switches_keep_one_authenticated_agent_account(work):
 
 
 def test_historical_awards_without_verified_family_stay_with_their_workers(work, monkeypatch):
-    from ml_stack.workspace import device_agent, localagent
+    from poolhouse.workspace import device_agent, localagent
 
     monkeypatch.setattr(device_agent, 'device_id', lambda: 'physical-one')
     localagent.save(work.ws, localagent.Agent('worker-one', 'first.gguf', identity=work.agent_id))
@@ -304,7 +304,7 @@ def test_historical_awards_without_verified_family_stay_with_their_workers(work,
 
 @pytest.mark.redteam
 def test_foreign_device_rebinding_and_agent_enrollment_cannot_steal_credits(work, monkeypatch):
-    from ml_stack.workspace import device_agent, localagent
+    from poolhouse.workspace import device_agent, localagent
 
     localagent.save(work.ws, localagent.Agent('worker', 'model.gguf', identity=work.agent_id))
     monkeypatch.setattr(device_agent, 'device_id', lambda: 'first-device')
@@ -342,7 +342,7 @@ def test_awards_ratings_and_usage_are_linked_graph_evidence_and_migration_is_onc
     assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['pending_awards'] == 1
     assert work.ledger.migrate_credit_awards() == 1
     assert work.ledger.migrate_credit_awards() == 0
-    monkeypatch.setattr('ml_stack.reputation.economy.BASE_CREDITS', 1000)
+    monkeypatch.setattr('poolhouse.reputation.economy.BASE_CREDITS', 1000)
     assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['balance'] == 10
 
 

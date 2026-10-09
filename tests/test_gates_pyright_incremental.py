@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 from gates import _imports, _pyright_incremental, _store, pyright_errors  # noqa: E402
 
 PYPROJECT = """[tool.pyright]
-include = ["src/ml_stack"]
+include = ["src/poolhouse"]
 typeCheckingMode = "off"
 reportUndefinedVariable = "error"
 reportUnusedCoroutine = "error"
@@ -22,14 +22,14 @@ reportUnusedCoroutine = "error"
 FILES = {
     "__init__.py": "",
     "core.py": "async def fetch():\n    return 1\n",
-    "a.py": "from ml_stack.core import fetch\n\n\ndef run():\n    fetch()\n",
-    "b.py": "from ml_stack import a\n\n\ndef go():\n    return a.run()\n",
+    "a.py": "from poolhouse.core import fetch\n\n\ndef run():\n    fetch()\n",
+    "b.py": "from poolhouse import a\n\n\ndef go():\n    return a.run()\n",
     "d.py": "from . import core\n\n\ndef again():\n    core.fetch()\n",
-    "leaf.py": "from ml_stack.b import go\n\nresult = go()\n",
+    "leaf.py": "from poolhouse.b import go\n\nresult = go()\n",
     "c0.py": "def broken():\n    return nowhere_c0\n",
     **{f"c{n}.py": f"VALUE_{n} = {n}\n" for n in range(1, 7)},
 }
-PACKAGE = "src/ml_stack"
+PACKAGE = "src/poolhouse"
 
 
 @pytest.fixture
@@ -121,11 +121,11 @@ def test_deleting_a_file_rechecks_what_imported_it(project):
 def test_a_new_file_that_an_old_one_imports_is_picked_up(project):
     asked = Asked(project)
     edit(project, "late.py", "")
-    edit(project, "c1.py", "from ml_stack import late\n")
+    edit(project, "c1.py", "from poolhouse import late\n")
     asked.findings()
     asked.runs.clear()
     edit(project, "late.py", "async def wait():\n    return 1\n")
-    edit(project, "c1.py", "from ml_stack import late\n\n\ndef f():\n    late.wait()\n")
+    edit(project, "c1.py", "from poolhouse import late\n\n\ndef f():\n    late.wait()\n")
     assert asked.agrees_with_a_full_run()
     assert any(f.path.endswith("c1.py") for f in asked.findings())
 
@@ -162,7 +162,7 @@ def test_a_changed_pyright_configuration_falls_back_to_a_full_run(project):
 
 def test_a_configuration_the_cache_cannot_follow_runs_the_whole_project(project):
     asked = Asked(project)
-    (project / "pyproject.toml").write_text(PYPROJECT + 'exclude = ["src/ml_stack/c0.py"]\n',
+    (project / "pyproject.toml").write_text(PYPROJECT + 'exclude = ["src/poolhouse/c0.py"]\n',
                                             encoding="utf-8")
     asked.findings()
     asked.findings()
@@ -174,5 +174,5 @@ def test_imports_resolve_absolute_relative_and_submodule_forms(project):
     importer = (project / PACKAGE / "d.py").resolve()
     here = (project / PACKAGE).resolve()
     assert files.resolve((".", 1, ("core",)), importer) == {here / "__init__.py", here / "core.py"}
-    assert files.resolve(("ml_stack.core", 0, ()), importer) == {here / "__init__.py", here / "core.py"}
+    assert files.resolve(("poolhouse.core", 0, ()), importer) == {here / "__init__.py", here / "core.py"}
     assert files.resolve(("os.path", 0, ()), importer) == set()

@@ -1,4 +1,4 @@
-"""What ml-stack may take on a machine, and stopping the servers nobody is using.
+"""What poolhouse may take on a machine, and stopping the servers nobody is using.
 
 Every limit file is in ``tmp_path``; nothing reads or writes the machine's own.
 """
@@ -12,14 +12,14 @@ from http.server import BaseHTTPRequestHandler
 import pytest
 from conftest import threaded_server
 
-from ml_stack import limits as caps
-from ml_stack.serve import reclaim as reclaimer
+from poolhouse import limits as caps
+from poolhouse.serve import reclaim as reclaimer
 
 
 @pytest.fixture(autouse=True)
 def own_file(tmp_path, monkeypatch):
     """Every test in here reads and writes its own limits file."""
-    monkeypatch.setenv("MLSTACK_LIMITS_FILE", str(tmp_path / "limits.json"))
+    monkeypatch.setenv("POOLHOUSE_LIMITS_FILE", str(tmp_path / "limits.json"))
     return tmp_path / "limits.json"
 
 
@@ -43,7 +43,7 @@ def test_the_memory_limit_caps_what_the_machine_allows_and_stands_alone():
 
 def test_a_lease_over_the_server_or_slot_limit_is_refused_with_what_to_do():
     said = caps.Limits(servers=2).refusal(running=2)
-    assert "2 server(s) at once" in said and "ml-stack-serve limits --servers" in said
+    assert "2 server(s) at once" in said and "poolhouse-serve limits --servers" in said
     assert caps.Limits(servers=2).refusal(running=1) == ""
     said = caps.Limits(slots=1).refusal(slots=4)
     assert "asks for 4 slot(s)" in said and "--slots" in said
@@ -77,7 +77,7 @@ def test_a_limit_nobody_has_is_refused_by_name():
 def test_the_room_a_model_may_use_reads_the_limit_without_anybody_passing_it(monkeypatch):
     """`hub.room` is what every preflight, fit and lease asks. Mutation: have it return
     `machine_room` unchanged."""
-    import ml_stack.hub as hub
+    import poolhouse.hub as hub
 
     monkeypatch.setattr(hub, "machine_room", lambda: 100 * 2**30)
     assert hub.room() == 100 * 2**30
@@ -89,14 +89,14 @@ def test_the_room_a_model_may_use_reads_the_limit_without_anybody_passing_it(mon
 
 def test_a_lease_past_the_server_limit_never_starts_a_process(tmp_path, monkeypatch):
     """The refusal comes before the backend is asked to start anything."""
-    from ml_stack.serve.backend import ServerSpec
-    from ml_stack.serve.manager import ServerFailed, ServerManager
+    from poolhouse.serve.backend import ServerSpec
+    from poolhouse.serve.manager import ServerFailed, ServerManager
 
     state = tmp_path / "servers.json"
     state.write_text(json.dumps({
         "8100": {"port": 8100, "pid": 4242, "model": "one.gguf", "owner_pid": 4242},
     }))
-    monkeypatch.setattr("ml_stack.serve.manager.pid_exists", lambda pid: True)
+    monkeypatch.setattr("poolhouse.serve.manager.pid_exists", lambda pid: True)
     started: list = []
 
     class Backend:
@@ -296,7 +296,7 @@ def test_watching_reclaims_in_the_background_until_the_block_ends():
 # ------------------------------------------------------------------------ the commands
 
 def test_the_limits_command_prints_what_is_set_and_sets_what_it_is_told(capsys, own_file):
-    from ml_stack.serve import cli
+    from poolhouse.serve import cli
 
     assert cli.main(["limits"]) == 0
     assert "nothing is limited here" in capsys.readouterr().out
@@ -313,7 +313,7 @@ def test_the_limits_command_prints_what_is_set_and_sets_what_it_is_told(capsys, 
 
 
 def test_the_limits_command_refuses_what_it_cannot_read(capsys):
-    from ml_stack.serve import cli
+    from poolhouse.serve import cli
 
     assert cli.main(["limits", "--memory", "a lot"]) == 2
     assert "cannot read" in capsys.readouterr().err
@@ -322,14 +322,14 @@ def test_the_limits_command_refuses_what_it_cannot_read(capsys):
 
 
 def test_the_reclaim_command_needs_an_idle_time_from_somewhere(capsys):
-    from ml_stack.serve import cli
+    from poolhouse.serve import cli
 
     assert cli.main(["reclaim"]) == 2
     assert "no idle time given" in capsys.readouterr().err
 
 
 def test_the_reclaim_command_takes_its_default_from_the_limits(capsys, monkeypatch):
-    from ml_stack.serve import cli
+    from poolhouse.serve import cli
 
     caps.changed(idle_s=300.0)
     asked = {}
@@ -339,15 +339,15 @@ def test_the_reclaim_command_takes_its_default_from_the_limits(capsys, monkeypat
         say("reclaimed port 8100 after 900s idle")
         return [8100]
 
-    monkeypatch.setattr("ml_stack.serve.reclaim.reclaim_idle", reclaim_idle)
-    monkeypatch.setattr("ml_stack.serve.reclaim.Idleness.look", lambda self, servers: {})
+    monkeypatch.setattr("poolhouse.serve.reclaim.reclaim_idle", reclaim_idle)
+    monkeypatch.setattr("poolhouse.serve.reclaim.Idleness.look", lambda self, servers: {})
     assert cli.main(["reclaim", "--settle", "0"]) == 0
     assert asked["older_than"] == 300.0
     assert "reclaimed port 8100" in capsys.readouterr().out
 
 
 def test_the_adoption_setting_is_set_from_the_command_line_and_read_back(capsys):
-    from ml_stack.serve import cli, unmanaged
+    from poolhouse.serve import cli, unmanaged
 
     assert cli.main(["limits", "--adopt-unmanaged", "auto"]) == 0
     assert "adopt    unmanaged servers: auto" in capsys.readouterr().out

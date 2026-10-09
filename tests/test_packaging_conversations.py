@@ -15,9 +15,9 @@ import pytest
 
 @pytest.mark.slow
 def test_frozen_daemon_keeps_graph_conversations_after_restart(tmp_path):
-    binary = os.environ.get("ML_STACK_FROZEN_BINARY", "")
+    binary = os.environ.get("POOLHOUSE_FROZEN_BINARY", "")
     if not binary:
-        pytest.skip("set ML_STACK_FROZEN_BINARY to the built standalone daemon")
+        pytest.skip("set POOLHOUSE_FROZEN_BINARY to the built standalone daemon")
     root = tmp_path / "daemon"
     (root / "chats").mkdir(parents=True)
     legacy = {"id": "saved", "title": "Saved before packaging", "model": "saved-model", "created": 1,
@@ -27,14 +27,14 @@ def test_frozen_daemon_keeps_graph_conversations_after_restart(tmp_path):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    from ml_stack.workspace import Workspace, tokens
+    from poolhouse.workspace import Workspace, tokens
 
     workspace_root = tmp_path / "workspace"
     workspace = Workspace(workspace_root)
     owner = workspace.init("person")
     tokens.store(workspace_root, tokens.OWNER_FILE, owner)
-    environment = {**os.environ, "ML_STACK_HOME": str(tmp_path / "home"),
-                   "ML_STACK_WORKSPACE_HOME": str(workspace_root), "PYTHONPATH": "",
+    environment = {**os.environ, "POOLHOUSE_HOME": str(tmp_path / "home"),
+                   "POOLHOUSE_WORKSPACE_HOME": str(workspace_root), "PYTHONPATH": "",
                    "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
     with running(Path(binary), root, port, environment, tmp_path / "first.log"):
         readiness = call(port, "GET", "/ui/chat")
@@ -67,7 +67,7 @@ def call(port, method, path, body=None, headers=None):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     try:
         connection.request(method, path, None if body is None else json.dumps(body),
-                           {"X-ML-Stack-UI": "1", "Content-Type": "application/json",
+                           {"X-Poolhouse-UI": "1", "Content-Type": "application/json",
                             "Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin",
                             **({"Cookie": COOKIES[port]} if port in COOKIES else {}), **(headers or {})})
         response = connection.getresponse()
@@ -87,7 +87,7 @@ def sign_in(port, root):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     try:
         connection.request("POST", "/ui/launch/ticket", b"{}",
-                           {"X-ML-Stack-UI": "1", "X-ML-Stack-Launch": record["secret"],
+                           {"X-Poolhouse-UI": "1", "X-Poolhouse-Launch": record["secret"],
                             "Content-Type": "application/json"})
         ticket = json.loads(connection.getresponse().read())["ticket"]
     finally:

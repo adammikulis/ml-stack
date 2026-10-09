@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harnesshook
-from ml_stack.workspace.identity import BoardUnavailable, Denied
+from poolhouse import harnesshook
+from poolhouse.workspace.identity import BoardUnavailable, Denied
 
 
 def unavailable(*args, **kwargs):
@@ -58,7 +58,7 @@ def test_pre_outage_degrades_to_a_warning_and_a_real_denial_still_denies(monkeyp
                                    'https://owner:private-password@example.invalid',
                                    '-----BEGIN PRIVATE KEY-----hidden-----END PRIVATE KEY-----'])
 def test_diagnostic_redacts_credentials(secret, monkeypatch):
-    monkeypatch.setenv('ML_STACK_TEST_TOKEN', 'opaque-local-credential')
+    monkeypatch.setenv('POOLHOUSE_TEST_TOKEN', 'opaque-local-credential')
     result = harnesshook._diagnostic(Denied('cannot connect ' + secret + ' opaque-local-credential'))
     assert secret not in result and 'opaque-local-credential' not in result
     assert 'cannot connect' in result
@@ -71,7 +71,7 @@ def test_launcher_keeps_normal_role_policy_without_admission(monkeypatch, tmp_pa
         pytest.fail('resource-free launcher requested mutation authority')
     monkeypatch.setattr(harnesshook.harness_remote, 'context', no_board_context)
     monkeypatch.setattr(harnesshook, '_ask', lambda *args, **kwargs: (False, 'test declined'))
-    args = {'command': 'ml-stack --no-browser'}
+    args = {'command': 'poolhouse --no-browser'}
     rail = harnesshook.Rail(role, 'worker', [str(tmp_path)])
     expected = harnesshook.decide(role, 'Bash', args, roots=rail.roots)
     result = harnesshook.pre({'tool_name': 'Bash', 'tool_input': args, 'cwd': str(tmp_path)}, rail)
@@ -82,7 +82,7 @@ def test_launcher_keeps_normal_role_policy_without_admission(monkeypatch, tmp_pa
 def test_a_board_outage_never_waives_the_destructive_call_guard(monkeypatch, tmp_path):
     monkeypatch.setattr(harnesshook.harness_remote, 'context', unavailable)
     monkeypatch.setattr(harnesshook, '_ask', lambda *args, **kwargs: (False, 'test declined'))
-    args = {'command': f'ml-stack --no-browser; rm -rf {tmp_path / "owned"}'}
+    args = {'command': f'poolhouse --no-browser; rm -rf {tmp_path / "owned"}'}
     result = harnesshook.pre({'tool_name': 'Bash', 'tool_input': args, 'cwd': str(tmp_path)},
                             harnesshook.Rail('plan-and-go', 'worker', [str(tmp_path)]))
     assert result['hookSpecificOutput']['permissionDecision'] == 'deny'

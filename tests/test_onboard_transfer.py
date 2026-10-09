@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from onboard_support import Recorder
 
-from ml_stack import macauth
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard import (
+from poolhouse import macauth
+from poolhouse.fleet import tls
+from poolhouse.fleet.onboard import (
     manifest as mf,
     transfer,
 )
@@ -82,7 +82,7 @@ def peers(tmp_path, signer):
 
 @pytest.fixture
 def entry(tmp_path, signer):
-    src = tmp_path / "source" / "ml_stack-0.2-py3-none-any.whl"
+    src = tmp_path / "source" / "poolhouse-0.2-py3-none-any.whl"
     src.parent.mkdir()
     src.write_bytes(PAYLOAD)
     return signer.entry(src, kind="wheel", chunk_size=CHUNK)
@@ -252,7 +252,7 @@ def test_the_staged_file_is_handed_to_the_scan_hook_and_not_installed(tmp_path, 
 def test_names_that_climb_out_are_refused_before_any_request(tmp_path, signer, entry):
     d = downloader(manifest_of(signer, entry), [transfer.PeerSource("http://127.0.0.1:1")],
                             tmp_path / "stage")
-    from ml_stack.safenames import Unsafe
+    from poolhouse.safenames import Unsafe
     with pytest.raises(Unsafe):
         d.download("../../etc/passwd")
 

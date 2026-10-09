@@ -1,7 +1,7 @@
-"""``ml-stack-walk``: which screens it walks, what it prints, and a real walk of a daemon.
+"""``poolhouse-walk``: which screens it walks, what it prints, and a real walk of a daemon.
 
 The browser tests drive headless Chromium against `test_fleet_ui.Serving` -- the daemon on
-a real socket with the real routes behind it -- through `ml_stack.walk.ops`, which is the
+a real socket with the real routes behind it -- through `poolhouse.walk.ops`, which is the
 same path the command takes.
 """
 
@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.log import to
-from ml_stack.walk import ops
-from ml_stack.walk.cli import report
-from ml_stack.walk.ops import FLEET, GRAPH, Stop, Walk
+from poolhouse.log import to
+from poolhouse.walk import ops
+from poolhouse.walk.cli import report
+from poolhouse.walk.ops import FLEET, GRAPH, Stop, Walk
 
 
 class TestWhichScreens:
@@ -73,7 +73,7 @@ class TestWhatItPrints:
 
 # -- a real daemon, driven ------------------------------------------------------------------
 
-pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+pw = pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def daemon(tmp_path, monkeypatch):
     """A daemon on a real socket that has not been set up, and a cache to walk it from."""
     from test_fleet_ui import Serving
 
-    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
     served = Serving(tmp_path)
     try:
         yield served
@@ -131,7 +131,7 @@ class TestWalkingTheDaemon:
                                                                      playwright):
         import socket
 
-        monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+        monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             dead = sock.getsockname()[1]
@@ -158,7 +158,7 @@ GRAPH_OF_TWO = {
 @pytest.fixture
 def slow_model(monkeypatch):
     """A model streaming for longer than a screen is given to settle."""
-    from ml_stack.testing.fakes import FakeLlamaServer, Served
+    from poolhouse.testing.fakes import FakeLlamaServer, Served
 
     monkeypatch.setattr(ops, "SETTLE_MS", 300)
     fake = FakeLlamaServer(Served(pieces=SLOW, gap=0.4))
@@ -173,11 +173,11 @@ def test_asking_the_graph_page_waits_for_the_whole_streamed_answer(slow_model, t
                                                                     monkeypatch, playwright):
     from conftest import threaded_server
 
-    from ml_stack.client import Client
-    from ml_stack.graph.page import render
-    from ml_stack.graph.serve import Handler
+    from poolhouse.client import Client
+    from poolhouse.graph.page import render
+    from poolhouse.graph.serve import Handler
 
-    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
     page = tmp_path / "page.html"
     page.write_text(render(GRAPH_OF_TWO, title="Invented"), encoding="utf-8")
 
@@ -207,11 +207,11 @@ def test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply(slow_model
 
     from test_fleet_ui import WORDS, Serving
 
-    from ml_stack.fleet.conversations import Conversations
-    from ml_stack.fleet.serving import Serving as Models
+    from poolhouse.fleet.conversations import Conversations
+    from poolhouse.fleet.serving import Serving as Models
     from tests.cluster_support import join_cluster
 
-    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
     served = Serving(tmp_path, name="laptop")
     try:
         join_cluster(WORDS, group="home", path=served.keyfile)
@@ -236,12 +236,12 @@ def test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply(slow_model
 def test_the_review_pane_is_opened_and_read(tmp_path, monkeypatch, playwright):
     from conftest import threaded_server
 
-    from ml_stack.files import write_json
-    from ml_stack.graph.page import render
-    from ml_stack.graph.review import Queue
-    from ml_stack.graph.serve import Handler
+    from poolhouse.files import write_json
+    from poolhouse.graph.page import render
+    from poolhouse.graph.review import Queue
+    from poolhouse.graph.serve import Handler
 
-    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
     page = tmp_path / "page.html"
     page.write_text(render(GRAPH_OF_TWO, title="Invented"), encoding="utf-8")
     write_json(tmp_path / "review.json", {"2026-01-02T00:00:00Z|drop my topic": {

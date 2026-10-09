@@ -2,7 +2,7 @@
 
 The rule (``tests/README.md``, "Writes under the real state root"): a changed file that no
 existing attribution explains and that is not a zero-byte ``*.lock`` is a failure when no other
-live ml-stack process was seen at the start or the end of the run, and a warning, naming the
+live poolhouse process was seen at the start or the end of the run, and a warning, naming the
 files and the writers, when one was.
 """
 
@@ -17,15 +17,15 @@ from pathlib import Path
 import psutil
 
 Row = tuple[int, str]  # pid, command line
-FIXED_WRITERS = "ML_STACK_TEST_OTHER_WRITERS"
+FIXED_WRITERS = "POOLHOUSE_TEST_OTHER_WRITERS"
 
 
-def _is_ml_stack(argv: list[str]) -> bool:
-    """A process started as an ml-stack console script or as ``python -m ml_stack...``."""
+def _is_poolhouse(argv: list[str]) -> bool:
+    """A process started as a poolhouse console script or as ``python -m poolhouse...``."""
     heads = [Path(a).name for a in argv[:3]]
-    if any(h.startswith("ml-stack") for h in heads):
+    if any(h.startswith("poolhouse") for h in heads):
         return True
-    return any(a == "-m" and i + 1 < len(argv) and argv[i + 1].startswith("ml_stack")
+    return any(a == "-m" and i + 1 < len(argv) and argv[i + 1].startswith("poolhouse")
                for i, a in enumerate(argv))
 
 
@@ -47,16 +47,16 @@ def session_tree() -> set[int]:
         return {me.pid}
 
 
-def live_ml_stack_processes() -> list[Row]:
-    """Every live ml-stack process outside this test session; a test fixes the answer by
-    putting a JSON list of ``[pid, command line]`` in ``ML_STACK_TEST_OTHER_WRITERS``."""
+def live_poolhouse_processes() -> list[Row]:
+    """Every live poolhouse process outside this test session; a test fixes the answer by
+    putting a JSON list of ``[pid, command line]`` in ``POOLHOUSE_TEST_OTHER_WRITERS``."""
     if (fixed := os.environ.get(FIXED_WRITERS)) is not None:
         return [(int(pid), str(line)) for pid, line in json.loads(fixed)]
     ours = session_tree()
     rows = []
     for process in psutil.process_iter(["pid", "cmdline"]):
         argv = process.info.get("cmdline") or []
-        if process.info["pid"] not in ours and _is_ml_stack(argv):
+        if process.info["pid"] not in ours and _is_poolhouse(argv):
             rows.append((process.info["pid"], " ".join(argv)[:120]))
     return rows
 
@@ -75,7 +75,7 @@ class Watch:
 
     def __init__(self, root: Path, mtimes: Callable[[Path], dict[str, int]],
                  changes: Callable[[dict, dict], list[str]],
-                 processes: Callable[[], list[Row]] = live_ml_stack_processes) -> None:
+                 processes: Callable[[], list[Row]] = live_poolhouse_processes) -> None:
         self.root, self.mtimes, self.changes, self.processes = root, mtimes, changes, processes
         self.writers = dict(self.processes())
         self.before = self.mtimes(root)
@@ -93,7 +93,7 @@ class Watch:
         if possible:
             seen = "; ".join(f"{pid} {line}" for pid, line in sorted(writers.items())[:5])
             warnings.warn(f"the real state root {self.root} changed during the run, with other "
-                          f"ml-stack processes live ({seen}): " + ", ".join(possible[:20]),
+                          f"poolhouse processes live ({seen}): " + ", ".join(possible[:20]),
                           stacklevel=2)
         if failed:
             return (f"the real state root {self.root} was written during the run: "

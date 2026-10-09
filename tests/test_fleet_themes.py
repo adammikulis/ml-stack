@@ -4,9 +4,9 @@ from copy import deepcopy
 
 import pytest
 
-from ml_stack.fleet.settings import Settings
-from ml_stack.fleet.themes import BRAND, default_appearance, registry, resolve, validate_appearance
-from ml_stack.fleet.ui import UI
+from poolhouse.fleet.settings import Settings
+from poolhouse.fleet.themes import BRAND, default_appearance, registry, resolve, validate_appearance
+from poolhouse.fleet.ui import UI
 
 
 def custom():

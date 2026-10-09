@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home, sentinel
+from poolhouse import home, sentinel
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 CHILD = (
     "import threading\n"
-    "from ml_stack import sentinel\n"
+    "from poolhouse import sentinel\n"
     "node = sentinel.default()\n"
     "for _ in range(SCANS):\n"
     "    node.scan(deep=True)\n"
@@ -40,12 +40,12 @@ def desk(tmp_path):
         (shims / name).write_text(body % answer)
         (shims / name).chmod(0o755)
     env = {k: v for k, v in os.environ.items()
-           if k not in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")}
-    env.update(PATH=f"{shims}{os.pathsep}{env['PATH']}", DESK_LOG=str(log), ML_STACK_NOTIFY="system",
+           if k not in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE")}
+    env.update(PATH=f"{shims}{os.pathsep}{env['PATH']}", DESK_LOG=str(log), POOLHOUSE_NOTIFY="system",
                PYTHONPATH=os.pathsep.join([SRC, str(Path(__file__).parent)]),
-               ML_STACK_HOME=os.environ["ML_STACK_HOME"],
+               POOLHOUSE_HOME=os.environ["POOLHOUSE_HOME"],
                PYTHON_KEYRING_BACKEND="onboard_support.FileKeyring",
-               ML_STACK_TEST_KEYRING=str(tmp_path / "keyring.json"))
+               POOLHOUSE_TEST_KEYRING=str(tmp_path / "keyring.json"))
     return env, log
 
 
@@ -103,7 +103,7 @@ def test_four_changed_files_scanned_by_many_processes_are_one_dialog(desk):
     assert len(sentinel.default().store.records(state=sentinel.State.QUARANTINED)) == 4
 
 
-REVIEW = "import sys\nfrom ml_stack.sentinel.cli import command\nsys.exit(command(['review']))\n"
+REVIEW = "import sys\nfrom poolhouse.sentinel.cli import command\nsys.exit(command(['review']))\n"
 
 
 def review_without_a_terminal(env, **extra) -> subprocess.CompletedProcess:
@@ -134,7 +134,7 @@ def test_review_with_no_terminal_started_by_an_agent_prints_the_list_and_shows_n
 
 def test_notify_off_stops_every_dialog_of_every_process(desk):
     env, log = desk
-    env = {**env, "ML_STACK_NOTIFY": "off"}
+    env = {**env, "POOLHOUSE_NOTIFY": "off"}
     for path in pinned(3):
         path.write_bytes(b"tampered")
     scan_in_processes(env, processes=3, scans=2)

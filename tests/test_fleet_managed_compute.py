@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import device, managed_compute
+from poolhouse.fleet import device, managed_compute
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def test_missing_environment_and_unfrozen_daemon_do_not_spawn_probe(environment,
 
 
 def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, monkeypatch, tmp_path):
-    from ml_stack.fleet.jobs import JobRunner
+    from poolhouse.fleet.jobs import JobRunner
 
     def stale():
         raise OSError("Refresh Training essentials")
@@ -88,7 +88,7 @@ def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, mon
     assert expected["compute_runtime"]["ready"] is False
     monkeypatch.setattr(JobRunner, "_spawn", lambda self, upto: None)
     runner = JobRunner(tmp_path, environment=environment)
-    job = runner.submit("training", ["python", "-m", "ml_stack.train"], str(tmp_path))
+    job = runner.submit("training", ["python", "-m", "poolhouse.train"], str(tmp_path))
     runner._run_one(job)
     assert job.state == "failed" and job.pid is None
     assert "Refresh Training essentials" in runner.log_path(job.id).read_text()
@@ -97,7 +97,7 @@ def test_stale_runtime_does_not_advertise_compute_or_start_jobs(environment, mon
 def test_non_python_job_runs_with_stale_managed_runtime(environment, monkeypatch, tmp_path):
     import sys
 
-    from ml_stack.fleet.jobs import JobRunner
+    from poolhouse.fleet.jobs import JobRunner
 
     def stale():
         pytest.fail("non-Python job must not require a managed runtime")

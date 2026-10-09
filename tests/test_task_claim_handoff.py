@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from taskboard_kit import board as _board_fixture
 
-from ml_stack import harness_claims, harnesshook
-from ml_stack.net import git
-from ml_stack.workspace import localagent, resource_allocations, task_worktrees
-from ml_stack.workspace.project import describe
+from poolhouse import harness_claims, harnesshook
+from poolhouse.net import git
+from poolhouse.workspace import localagent, resource_allocations, task_worktrees
+from poolhouse.workspace.project import describe
 
 board = _board_fixture
 pytestmark = pytest.mark.redteam
@@ -77,7 +77,7 @@ def test_released_allocation_and_unrelated_parent_file_claim_remain_refused(nati
 
 
 def test_unassigned_task_is_open_to_any_registered_worker_and_assignment_closes_it(board):
-    from ml_stack.workspace import task_scope
+    from poolhouse.workspace import task_scope
 
     peer = board.ws.auth(board.agent('peer'))
     open_task = board.board.create(board.parent, {**board.spec, 'source_key': 'open-task'})

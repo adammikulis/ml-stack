@@ -11,22 +11,22 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
-from ml_stack.sentinel.store import Store
+from poolhouse.sentinel.events import Bus, Event, EventLog, Severity
+from poolhouse.sentinel.store import Store
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 
 STATE_WRITER = (
     "import sys, itertools\n"
-    "from ml_stack.sentinel.store import Store\n"
-    "from ml_stack.sentinel.events import Bus\n"
+    "from poolhouse.sentinel.store import Store\n"
+    "from poolhouse.sentinel.events import Bus\n"
     "s = Store(sys.argv[1], Bus())\n"
     "for i in itertools.count():\n"
     "    s.quarantine(('peer', f'{sys.argv[2]}-{i}'), 'x', None)\n")
 
 LOG_WRITER = (
     "import sys, itertools\n"
-    "from ml_stack.sentinel.events import Event, EventLog, Severity\n"
+    "from poolhouse.sentinel.events import Event, EventLog, Severity\n"
     "log = EventLog(__import__('pathlib').Path(sys.argv[1]) / 'events.log', max_bytes=4000)\n"
     "for i in itertools.count():\n"
     "    log.append(Event('t.x', Severity.INFO, 't', f'peer:{i}', {'n': i}))\n")
@@ -73,7 +73,7 @@ def test_a_line_appended_without_the_key_is_found(tmp_path):
 
 
 def test_a_crash_in_the_middle_of_a_rotation_leaves_a_chain_that_verifies(tmp_path, monkeypatch):
-    from ml_stack.sentinel import events
+    from poolhouse.sentinel import events
 
     log = EventLog(tmp_path / "events.log", max_bytes=500, keep=3)
     for i in range(40):

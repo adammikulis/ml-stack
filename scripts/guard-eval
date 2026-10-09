@@ -11,7 +11,7 @@
                                              model being the llama-server at URL (run in an
                                              environment with the `guardrails` extra)
 
-Each screen is scored on `EVAL`, `FRESH`, `REDTEAM`, `ADAPTIVE` and `HARD` (`ml_stack.testing.injection_corpus`). Prints
+Each screen is scored on `EVAL`, `FRESH`, `REDTEAM`, `ADAPTIVE` and `HARD` (`poolhouse.testing.injection_corpus`). Prints
 one line per miss and false positive, then the totals and the time per text.
 """
 
@@ -21,8 +21,8 @@ import argparse
 import sys
 import time
 
-from ml_stack.guard.untrusted import injection_markers
-from ml_stack.testing.injection_corpus import ADAPTIVE, EVAL, FRESH, HARD, REDTEAM
+from poolhouse.guard.untrusted import injection_markers
+from poolhouse.testing.injection_corpus import ADAPTIVE, EVAL, FRESH, HARD, REDTEAM
 
 TASK = "look things up with the tools and tell me what you find"
 
@@ -33,7 +33,7 @@ def markers(text: str) -> bool:
 
 def classifier_screen():
     """A screen over the ONNX injection classifier, flagging a score of 0.5 or more."""
-    from ml_stack.guard.classifier import InjectionClassifierRail, cached
+    from poolhouse.guard.classifier import InjectionClassifierRail, cached
 
     rail = InjectionClassifierRail(cached())
     return lambda text: rail.score(text) >= 0.5
@@ -42,9 +42,9 @@ def classifier_screen():
 def judge_screen(url: str = ""):
     """A screen over the native judge, flagging what `TextScreen` would not let through
     untouched; with no ``url`` the judge model is leased through the broker."""
-    from ml_stack.guard.judge import SYSTEM, Judge, TextScreen
-    from ml_stack.guard.native import Leased
-    from ml_stack.interventions import Call, Context, Proceed
+    from poolhouse.guard.judge import SYSTEM, Judge, TextScreen
+    from poolhouse.guard.native import Leased
+    from poolhouse.interventions import Call, Context, Proceed
 
     leased = Leased(url=url)
     screen = TextScreen(Judge(leased.asking(SYSTEM)))
@@ -59,7 +59,7 @@ def judge_screen(url: str = ""):
 
 def nemo_screen(url: str):
     """A screen that asks NeMo Guardrails' self-check input rail, answered by the model at URL."""
-    from ml_stack.guard.nemo import quiet
+    from poolhouse.guard.nemo import quiet
 
     quiet()
     from nemoguardrails import LLMRails, RailsConfig

@@ -1,7 +1,7 @@
 # Draft trees for `llama-server`
 
 A patch for `ggml-org/llama.cpp`, carried in `patches/llama.cpp/0003-speculative-tree.patch`
-and applied by `ml-stack-serve build --from source`. Not sent upstream; this note is what a
+and applied by `poolhouse-serve build --from source`. Not sent upstream; this note is what a
 pull request would say.
 
 ## What it enables
@@ -13,7 +13,7 @@ children — and the target verifies all of them in a single forward pass, keepi
 it agrees with.
 
 ```
-ml-stack-serve up MODEL --parallel 1 --spec draft-mtp --spec-n-max 12 --spec-tree 3
+poolhouse-serve up MODEL --parallel 1 --spec draft-mtp --spec-n-max 12 --spec-tree 3
 ```
 
 `--spec-tree W` expands `W` branches per depth, each proposing `W` children, ranked by path

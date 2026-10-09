@@ -1,4 +1,4 @@
-"""`ml-stack-models layout`: the attention layout off a GGUF header, as words and as JSON."""
+"""`poolhouse-models layout`: the attention layout off a GGUF header, as words and as JSON."""
 from __future__ import annotations
 
 import json
@@ -7,8 +7,8 @@ import pytest
 from conftest import write_gguf
 from test_serve_fit import F16, IQ4_NL, Q4_K, with_tensors
 
-from ml_stack import hub
-from ml_stack.serve.layout import Layout, _ranges, layout, render
+from poolhouse import hub
+from poolhouse.serve.layout import Layout, _ranges, layout, render
 
 
 def gemma_shaped(tmp_path):

@@ -3,8 +3,8 @@ import threading
 import time
 from types import SimpleNamespace
 
-from ml_stack.fleet import setup_jobs
-from ml_stack.fleet.routes import ModelRoutes, SettingsRoutes
+from poolhouse.fleet import setup_jobs
+from poolhouse.fleet.routes import ModelRoutes, SettingsRoutes
 
 
 def wait_job(jobs, state):
@@ -84,7 +84,7 @@ def test_server_route_queues_progress_and_failure(tmp_path, monkeypatch):
         entered.set()
         assert release.wait(5)
         raise RuntimeError('download interrupted')
-    from ml_stack.fleet import llama, routes
+    from poolhouse.fleet import llama, routes
     monkeypatch.setattr(llama, 'ensure_server', ensure)
     monkeypatch.setattr(routes, '_can_serve', lambda: True)
     route = ModelRoutes()
@@ -100,7 +100,7 @@ def test_server_route_queues_progress_and_failure(tmp_path, monkeypatch):
 
 
 def test_direct_environment_callers_share_the_install_lock(tmp_path, monkeypatch):
-    from ml_stack.fleet.environment import Environment
+    from poolhouse.fleet.environment import Environment
     first, release, second = threading.Event(), threading.Event(), threading.Event()
     seen = []
     def install(self, names, on_progress=None):

@@ -4,8 +4,8 @@ step of a pairing leaves its event. The sentinel half runs only where sentinel i
 import pytest
 from onboard_support import Clock, Recorder, identity, info, requests
 
-from ml_stack.fleet.onboard.pairing import Grant, Hooks, PairError, PairingClient, PairingServer
-from ml_stack.fleet.onboard.requests import Refused
+from poolhouse.fleet.onboard.pairing import Grant, Hooks, PairError, PairingClient, PairingServer
+from poolhouse.fleet.onboard.requests import Refused
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +52,7 @@ def test_every_refusal_and_lock_is_an_event(tmp_path):
 
 
 def test_the_adapter_hands_events_to_a_real_sentinel(tmp_path):
-    sentinel = pytest.importorskip("ml_stack.sentinel")
+    sentinel = pytest.importorskip("poolhouse.sentinel")
     rec = Recorder()
     s = sentinel.Sentinel(tmp_path / "sentinel")
     stop = watch_onboarding(rec.bus, s, sentinel.Event, sentinel.Severity)

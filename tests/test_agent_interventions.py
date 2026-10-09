@@ -8,8 +8,8 @@ import json
 
 import pytest
 
-from ml_stack import guard
-from ml_stack.agent import (
+from poolhouse import guard
+from poolhouse.agent import (
     Agent,
     Confirm,
     ConfirmRequest,
@@ -22,8 +22,8 @@ from ml_stack.agent import (
     ToolCall,
     ToolResult,
 )
-from ml_stack.client import Client
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse.client import Client
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 
 SPEC = {"name": "wipe", "description": "Delete a path.", "inputSchema": {
     "type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}

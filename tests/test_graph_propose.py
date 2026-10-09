@@ -7,7 +7,7 @@ tools return proposals and something else decides.
 import copy
 import json
 
-from ml_stack.graph.propose import Change, check, proposing, tools_for
+from poolhouse.graph.propose import Change, check, proposing, tools_for
 
 GRAPH = {
     "nodes": [

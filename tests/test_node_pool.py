@@ -1,13 +1,13 @@
-"""A machine that joined the node's pool lists it with `ml-stack-peers ls` and needs no cluster key file."""
+"""A machine that joined the node's pool lists it with `poolhouse-peers ls` and needs no cluster key file."""
 
 import argparse
 import json
 
 import pytest
 
-from ml_stack import node_pool
-from ml_stack.fleet import peers
-from ml_stack.fleet.discovery import DiscoveryError
+from poolhouse import node_pool
+from poolhouse.fleet import peers
+from poolhouse.fleet.discovery import DiscoveryError
 
 POOL = {"pool": "0123456789abcdef", "project": "ab" * 8, "policy": "open", "members": [
     {"fingerprint": "a" * 64, "name": "desk", "status": "active", "self": True, "connected": False, "addr": None},

@@ -6,7 +6,7 @@ import json
 import pytest
 from test_fleet_ui import Serving
 
-from ml_stack.fleet.conversations import Conversations
+from poolhouse.fleet.conversations import Conversations
 
 pytestmark = pytest.mark.slow
 
@@ -229,7 +229,7 @@ def test_learning_prompts_preserve_draft_and_team_channels_are_connected(chat_br
     _open(served, page)
     expect(page.locator("chat-view .chat-welcome strong")).to_have_text("Start a conversation")
     expect(page.locator("chat-view .conversation-space small")).to_have_count(0)
-    page.screenshot(path="/private/tmp/poolside-conversations-welcome.png", full_page=True)
+    page.screenshot(path="/private/tmp/poolhouse-conversations-welcome.png", full_page=True)
     page.get_by_role("button", name="Plan an experiment", exact=True).click()
     composer = page.get_by_role("textbox", name="Message", exact=True)
     expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
@@ -239,13 +239,13 @@ def test_learning_prompts_preserve_draft_and_team_channels_are_connected(chat_br
     expect(page.locator("chat-view .chats")).to_be_visible()
     page.get_by_role("button", name="● model-a", exact=True).click()
     expect(composer).to_have_value("Help me design a reproducible training experiment. Ask me about the model, data, and success criteria.")
-    page.screenshot(path="/private/tmp/poolside-conversations-desktop.png", full_page=True)
+    page.screenshot(path="/private/tmp/poolhouse-conversations-desktop.png", full_page=True)
     page.set_viewport_size({"width": 390, "height": 844})
     expect(page.locator("chat-view .chats")).to_be_hidden()
     page.get_by_role("button", name="Channels and model chats ▾").click()
     expect(page.locator("chat-view .chats")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    page.screenshot(path="/private/tmp/poolside-conversations-mobile.png", full_page=True)
+    page.screenshot(path="/private/tmp/poolhouse-conversations-mobile.png", full_page=True)
 
 
 def test_saved_model_switch_updates_visible_picker(chat_browser):

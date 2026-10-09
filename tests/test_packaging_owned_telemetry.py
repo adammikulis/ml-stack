@@ -72,14 +72,14 @@ def test_dependency_wheelhouse_reuses_owned_and_existing_wheel_links(builder, mo
     command = calls[0]
     links = [command[index+1] for index, value in enumerate(command) if value == '--find-links']
     assert links == [str(builder.DIST), str(output)]
-    assert any(argument.startswith('ml-stack[') for argument in command)
+    assert any(argument.startswith('poolhouse[') for argument in command)
 
 
 def test_project_wheel_rebuild_preserves_owned_and_dependency_wheels(builder, monkeypatch):
     builder.DIST.mkdir()
     owned = builder.DIST / 'metal_smi-1.1.0-py3-none-any.whl'
     owned.write_bytes(b'owned fixture')
-    previous = builder.DIST / 'ml_stack-0.1.0-py3-none-any.whl'
+    previous = builder.DIST / 'poolhouse-0.1.0-py3-none-any.whl'
     previous.write_bytes(b'project fixture')
     dependencies = builder.DIST / 'wheels'
     dependencies.mkdir()

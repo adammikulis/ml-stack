@@ -7,8 +7,8 @@ import sys
 import tomllib
 from pathlib import Path
 
-from ml_stack.cli import PREFIX, commands
-from ml_stack.cli.reference import HELP, TABLE, table
+from poolhouse.cli import PREFIX, commands
+from poolhouse.cli.reference import HELP, TABLE, table
 
 REPO = Path(__file__).resolve().parent.parent
 PAGE = REPO / "docs" / "commands.md"
@@ -25,7 +25,7 @@ def committed() -> list[str]:
 
 def test_the_committed_table_is_the_one_the_registry_makes():
     assert committed() == table().splitlines(), (
-        "docs/commands.md's table and ml_stack.cli.reference disagree; "
+        "docs/commands.md's table and poolhouse.cli.reference disagree; "
         "scripts/reference --write writes the registry's")
 
 
@@ -60,7 +60,7 @@ def test_reference_check_rejects_a_stale_table_without_writing(tmp_path):
     page.write_text(original, encoding="utf-8")
     command = [sys.executable, str(REPO / "scripts/reference"), "--check", "--page", str(page)]
     assert subprocess.run(command, capture_output=True).returncode == 0
-    stale = original.replace("| `ml-stack-gym", "| `stale-gym", 1)
+    stale = original.replace("| `poolhouse-gym", "| `stale-gym", 1)
     assert stale != original
     page.write_text(stale, encoding="utf-8")
     result = subprocess.run(command, capture_output=True, text=True)

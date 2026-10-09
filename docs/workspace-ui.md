@@ -20,8 +20,8 @@ A simulator's installed interpreter is reused for live Gym sessions and queued G
 
 ## UI route extensions
 
-Fleet discovers optional higher-level routes through the installed distribution's `ml_stack.ui_routes` entry points. A named extension handles only `/ui/<name>/…` after Fleet's UI-header and session checks. The `board` entry point is owned by `ml_stack.workspace.fleet_routes`; Fleet imports neither the workspace service nor its adapter directly.
+Fleet discovers optional higher-level routes through the installed distribution's `poolhouse.ui_routes` entry points. A named extension handles only `/ui/<name>/…` after Fleet's UI-header and session checks. The `board` entry point is owned by `poolhouse.workspace.fleet_routes`; Fleet imports neither the workspace service nor its adapter directly.
 
-Wheels publish this registration. After changing entry points, build an immutable wheel (`python -m pip wheel --no-deps --wheel-dir dist .`), install that exact wheel into the intended runtime, and restart only the owned UI process using that artifact. This refreshes distribution metadata without changing a shared environment through an editable checkout. Frozen packaging must copy the `ml-stack` distribution metadata and include the dynamically loaded workspace adapter.
+Wheels publish this registration. After changing entry points, build an immutable wheel (`python -m pip wheel --no-deps --wheel-dir dist .`), install that exact wheel into the intended runtime, and restart only the owned UI process using that artifact. This refreshes distribution metadata without changing a shared environment through an editable checkout. Frozen packaging must copy the `poolhouse` distribution metadata and include the dynamically loaded workspace adapter.
 
 See [Response limits and streaming](response-limits.md) for independent output budgets, live delta behavior, and the current execution/context limits.

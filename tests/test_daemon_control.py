@@ -6,16 +6,16 @@ from http.server import BaseHTTPRequestHandler
 
 import pytest
 
-from ml_stack import macauth, sealing
-from ml_stack.fleet.daemon_control import (
+from poolhouse import macauth, sealing
+from poolhouse.fleet.daemon_control import (
     ROUTE,
     Control,
     ControlError,
     protected,
     request_replacement,
 )
-from ml_stack.http import Server, ServerError, request_json
-from ml_stack.lock import Busy, only_one
+from poolhouse.http import Server, ServerError, request_json
+from poolhouse.lock import Busy, only_one
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ def test_control_record_rejects_symlink_and_public_mode(device, tmp_path):
 def test_disconnected_response_still_starts_accepted_shutdown(device):
     from types import SimpleNamespace
 
-    from ml_stack.macauth import sign
+    from poolhouse.macauth import sign
 
     _root, port, control, _busy, stopped, _active, _release = device
     body = json.dumps({'instance': control.instance}).encode()
@@ -211,7 +211,7 @@ def test_failed_idle_check_releases_admission_and_allows_retry(device, failure):
 def test_valid_machine_control_signature_from_lan_is_refused_before_body(device):
     from types import SimpleNamespace
 
-    from ml_stack.macauth import sign
+    from poolhouse.macauth import sign
 
     _root, port, control, _busy, stopped, _active, _release = device
     body = json.dumps({'instance': control.instance}).encode()
@@ -230,8 +230,8 @@ def test_runtime_control_preserves_queued_jobs_even_when_otherwise_idle(tmp_path
     from contextlib import nullcontext
     from types import SimpleNamespace
 
-    from ml_stack.fleet.daemon_control import create
-    from ml_stack.macauth import sign
+    from poolhouse.fleet.daemon_control import create
+    from poolhouse.macauth import sign
 
     stopped = threading.Event()
     queued = [1]
@@ -357,7 +357,7 @@ def restart_runtime(tmp_path):
     from contextlib import nullcontext
     from types import SimpleNamespace
 
-    from ml_stack.fleet.serving import Serving
+    from poolhouse.fleet.serving import Serving
 
     state = {'background': False, 'queued': 0, 'measuring': False}
     serving = Serving(tmp_path / "serving.json")
@@ -379,7 +379,7 @@ def restart_runtime(tmp_path):
 ])
 def test_restart_admission_preserves_idle_loaded_models_and_blocks_busy_or_unknown_slots(
         restart_runtime, slots, idle):
-    from ml_stack.fleet.daemon_control import create
+    from poolhouse.fleet.daemon_control import create
 
     class Slots(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -412,7 +412,7 @@ def test_restart_admission_preserves_idle_loaded_models_and_blocks_busy_or_unkno
 
 @pytest.mark.parametrize('field', ['background', 'queued', 'measuring'])
 def test_restart_admission_blocks_other_active_work(restart_runtime, field):
-    from ml_stack.fleet.daemon_control import create
+    from poolhouse.fleet.daemon_control import create
 
     runtime, state = restart_runtime
     state[field] = True
@@ -425,7 +425,7 @@ def test_restart_admission_blocks_other_active_work(restart_runtime, field):
 
 @pytest.mark.parametrize('content', ['{', '{}', '[{}]', '[{"port":true}]', '[{"port":8771,"slots":"bad"}]'])
 def test_restart_admission_refuses_unreadable_or_corrupt_serving_state(restart_runtime, content):
-    from ml_stack.fleet.daemon_control import create
+    from poolhouse.fleet.daemon_control import create
 
     runtime, _state = restart_runtime
     runtime.serving.path.write_text(content)
@@ -438,7 +438,7 @@ def test_restart_admission_refuses_unreadable_or_corrupt_serving_state(restart_r
 
 
 def test_restart_admission_refuses_a_registered_unreachable_server(restart_runtime):
-    from ml_stack.fleet.daemon_control import create
+    from poolhouse.fleet.daemon_control import create
 
     runtime, _state = restart_runtime
     server = Server(('127.0.0.1', 0), BaseHTTPRequestHandler)
@@ -453,7 +453,7 @@ def test_restart_admission_refuses_a_registered_unreachable_server(restart_runti
 
 
 def test_restart_admission_refuses_serving_storage_that_cannot_be_read(restart_runtime):
-    from ml_stack.fleet.daemon_control import create
+    from poolhouse.fleet.daemon_control import create
 
     runtime, _state = restart_runtime
     runtime.serving.path.mkdir()
@@ -509,7 +509,7 @@ def test_restart_control_rejects_unknown_version_flags_and_fields(device, payloa
 def test_preserving_restart_keeps_unsafe_background_work_running(busy):
     from types import SimpleNamespace
 
-    from ml_stack.fleet.daemon_control import _preserve
+    from poolhouse.fleet.daemon_control import _preserve
     runtime = SimpleNamespace(web=busy == 'setup', initial_setup=True,
         settings=SimpleNamespace(setup_done=False), interface=None,
         downloads=SimpleNamespace(active=lambda: [SimpleNamespace(state='getting')] if busy == 'download' else []),
@@ -520,7 +520,7 @@ def test_preserving_restart_keeps_unsafe_background_work_running(busy):
 
 
 def test_a_preserving_restart_drains_a_long_lived_request_instead_of_refusing_for_ever(device, monkeypatch):
-    from ml_stack.fleet import daemon_control
+    from poolhouse.fleet import daemon_control
     monkeypatch.setattr(daemon_control, 'DRAIN_S', 0.3, raising=False)
     root, port, control, _busy, stopped, active, release = device
     thread = threading.Thread(target=lambda: request_json(f'http://127.0.0.1:{port}/jobs', method='POST', payload={}))
@@ -536,7 +536,7 @@ def test_a_preserving_restart_drains_a_long_lived_request_instead_of_refusing_fo
 
 
 def test_a_preserving_restart_waits_for_a_request_that_finishes_within_the_drain(device, monkeypatch):
-    from ml_stack.fleet import daemon_control
+    from poolhouse.fleet import daemon_control
     monkeypatch.setattr(daemon_control, 'DRAIN_S', 5.0, raising=False)
     root, port, control, _busy, stopped, active, release = device
     done = []

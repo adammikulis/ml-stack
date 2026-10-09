@@ -1,7 +1,7 @@
 """What the test runner does beyond running the tests it was asked for: behind the `test-runner-extras` feature, off by default.
 
 Plain `scripts/test` runs the named or affected tests, in the order pytest finds them. With the feature on
-(`ml-stack features enable test-runner-extras`) it also starts the files that took longest last time first
+(`poolhouse features enable test-runner-extras`) it also starts the files that took longest last time first
 (`testorder`) and remembers each full run's time for `scripts/test ratchet`.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import testhistory
 
-from ml_stack import features
+from poolhouse import features
 
 NAME = "test-runner-extras"
 

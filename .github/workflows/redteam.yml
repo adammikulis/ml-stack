@@ -35,7 +35,7 @@ jobs:
         run: python -m pytest tests/test_redteam_*.py -q --redteam -n 0
       - name: attacks that need no model, against the recorded baseline
         run: >
-          python -m ml_stack.redteam run --model stub --out redteam-stub
+          python -m poolhouse.redteam run --model stub --out redteam-stub
           --scenarios extraction,fleet,sentinel
           --against docs/redteam/baseline-deterministic-2026-10-03.json
           --success-tolerance 0 --ttd-tolerance 1

@@ -1,6 +1,6 @@
 """What a full install has, checked against what pyproject.toml offers.
 
-`ml_stack.installed.STANDARD` is what `install.sh` asks pip for and what `ml-stack-setup`
+`poolhouse.installed.STANDARD` is what `install.sh` asks pip for and what `poolhouse-setup`
 reports one line per. An extra renamed in pyproject.toml and not here would install
 nothing and report nothing missing.
 """
@@ -16,8 +16,8 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
-from ml_stack import installed
-from ml_stack.installed import STANDARD, Capability, extras, missing
+from poolhouse import installed
+from poolhouse.installed import STANDARD, Capability, extras, missing
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
@@ -73,7 +73,7 @@ def test_every_installed_extra_holds_the_version_its_pin_asks_for():
 
 
 def test_a_package_nobody_installed_is_not_a_finding():
-    assert installed.unmet({"absent": ["ml-stack-no-such-package>=9"]}) == []
+    assert installed.unmet({"absent": ["poolhouse-no-such-package>=9"]}) == []
 
 
 def test_a_package_at_its_floor_is_not_a_finding():
@@ -119,7 +119,7 @@ def test_a_requirement_nothing_can_parse_is_skipped():
 
 
 def test_a_requirement_naming_another_extra_is_not_looked_up():
-    assert installed.unmet({"one": ["ml-stack[two]"], "two": ["nope>=9"]}) == []
+    assert installed.unmet({"one": ["poolhouse[two]"], "two": ["nope>=9"]}) == []
 
 
 def test_the_pins_are_read_from_the_installed_distributions_own_metadata():

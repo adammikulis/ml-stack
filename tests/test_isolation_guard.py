@@ -94,12 +94,12 @@ class TestCacheGuard:
                 where.parent.mkdir(parents=True, exist_ok=True)
                 where.write_text("{}")
         """
-        env = {**os.environ, "ML_STACK_HOME": str(fake_home_cache),
+        env = {**os.environ, "POOLHOUSE_HOME": str(fake_home_cache),
                "REAL_STATE_ROOT": str(fake_home_cache)}
         try:
             code, out = _run_generated(tmp_path, body, env=env)
             assert code != 0, out
-            assert "real ml_stack state changed" in out, out
+            assert "real poolhouse state changed" in out, out
             assert "servers.json" in out, out
         finally:
             shutil.rmtree(fake_home_cache, ignore_errors=True)
@@ -120,7 +120,7 @@ class TestCacheGuard:
                 # a pid past this machine's ceiling: no process of ours owns it
                 where.write_text(json.dumps({"8080": {"owner_pid": 999999, "port": 8080}}))
         """
-        env = {**os.environ, "ML_STACK_HOME": str(fake_home_cache),
+        env = {**os.environ, "POOLHOUSE_HOME": str(fake_home_cache),
                "REAL_STATE_ROOT": str(fake_home_cache)}
         try:
             code, out = _run_generated(tmp_path, body, env=env)
@@ -140,14 +140,14 @@ class TestCacheGuard:
                 where.parent.mkdir(parents=True, exist_ok=True)
                 where.write_text("[]")
         """
-        env = {**os.environ, "ML_STACK_HOME": str(fake_home), "REAL_STATE_ROOT": str(fake_home),
-               "ML_STACK_TEST_OTHER_WRITERS": "[]"}
+        env = {**os.environ, "POOLHOUSE_HOME": str(fake_home), "REAL_STATE_ROOT": str(fake_home),
+               "POOLHOUSE_TEST_OTHER_WRITERS": "[]"}
         code, out = _run_generated(tmp_path, body, env=env)
         assert code != 0, out
         assert "traind/serving.json" in out, out
-        live = {**env, "ML_STACK_TEST_OTHER_WRITERS": '[[4242, "ml-stack-bench prepare"]]'}
+        live = {**env, "POOLHOUSE_TEST_OTHER_WRITERS": '[[4242, "poolhouse-bench prepare"]]'}
         code, out = _run_generated(tmp_path, body, env=live)
-        assert code == 0 and "4242 ml-stack-bench prepare" in out, out
+        assert code == 0 and "4242 poolhouse-bench prepare" in out, out
 
     def test_a_test_sees_neither_the_real_home_nor_the_real_state_root(self, tmp_path):
         fake_home = tmp_path / "impersonated-real-home"
@@ -155,17 +155,17 @@ class TestCacheGuard:
             import os
             from pathlib import Path
 
-            from ml_stack import home
+            from poolhouse import home
 
 
             def test_where_home_is():
                 real = Path(os.environ["REAL_STATE_ROOT"])
                 assert Path.home() != real.parent
                 assert not home.home().is_relative_to(real)
-                assert not Path("~/.ml-stack").expanduser().is_relative_to(real)
+                assert not Path("~/.poolhouse").expanduser().is_relative_to(real)
         """
-        env = {**os.environ, "HOME": str(fake_home), "ML_STACK_HOME": str(fake_home / ".ml-stack"),
-               "REAL_STATE_ROOT": str(fake_home / ".ml-stack")}
+        env = {**os.environ, "HOME": str(fake_home), "POOLHOUSE_HOME": str(fake_home / ".poolhouse"),
+               "REAL_STATE_ROOT": str(fake_home / ".poolhouse")}
         code, out = _run_generated(tmp_path, body, env=env)
         assert code == 0, out
 
@@ -175,7 +175,7 @@ class TestCacheGuard:
             def test_does_nothing():
                 assert True
         """
-        env = {**os.environ, "ML_STACK_HOME": str(fake_home_cache)}
+        env = {**os.environ, "POOLHOUSE_HOME": str(fake_home_cache)}
         try:
             code, out = _run_generated(tmp_path, body, env=env)
             assert code == 0, out
@@ -185,7 +185,7 @@ class TestCacheGuard:
 
 class TestBrokerGuard:
     def test_a_broker_left_running_fails_the_test_and_is_stopped(self, tmp_path):
-        from ml_stack.serve.process import kill_process_tree, pid_exists
+        from poolhouse.serve.process import kill_process_tree, pid_exists
 
         told = tmp_path / "broker-pid"
         body = """
@@ -193,7 +193,7 @@ class TestBrokerGuard:
             import os
             from pathlib import Path
 
-            from ml_stack.serve import broker_wire
+            from poolhouse.serve import broker_wire
 
 
             def test_starts_a_broker_and_walks_away():

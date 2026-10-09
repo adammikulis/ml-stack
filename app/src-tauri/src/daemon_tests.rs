@@ -9,7 +9,7 @@ const SECRET: [u8; 32] = [0x5a; 32];
 const BODY: &str = r#""ok":true,"name":"demo","slots":1,"free":1,"busy":false"#;
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("poolside-health-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("poolhouse-health-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir

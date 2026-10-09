@@ -16,10 +16,10 @@ import tarfile
 import pytest
 from testfarm_kit import enable, jobs_on, peer, until
 
-from ml_stack import node_health
-from ml_stack.board import session as board_session
-from ml_stack.board.client import NodeError
-from ml_stack.testfarm.client import ShardError, Shards
+from poolhouse import node_health
+from poolhouse.board import session as board_session
+from poolhouse.board.client import NodeError
+from poolhouse.testfarm.client import ShardError, Shards
 
 pytest_plugins = ("testfarm_kit",)
 pytestmark = pytest.mark.redteam

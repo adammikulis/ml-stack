@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.graph.access import (
+from poolhouse.graph.access import (
     LockError,
     holder,
     lock_path,
@@ -90,7 +90,7 @@ def test_another_process_holding_it_is_named_rather_than_guessed(tmp_path):
     script = textwrap.dedent(f"""
         import sys, time
         sys.path.insert(0, {str(Path(__file__).parent.parent / 'src')!r})
-        from ml_stack.graph.access import write_lock
+        from poolhouse.graph.access import write_lock
         with write_lock({str(path)!r}, timeout_s=5):
             print("held", flush=True)
             time.sleep(8)
@@ -127,7 +127,7 @@ def test_a_dead_owner_does_not_keep_the_next_writer_out(tmp_path):
     script = textwrap.dedent(f"""
         import sys, os, signal, time
         sys.path.insert(0, {str(Path(__file__).parent.parent / 'src')!r})
-        from ml_stack.graph.access import write_lock
+        from poolhouse.graph.access import write_lock
         with write_lock({str(path)!r}, timeout_s=5):
             print("held", flush=True)
             os.kill(os.getpid(), signal.SIGKILL)
@@ -195,7 +195,7 @@ def _child(body: str) -> subprocess.Popen:
         import sys, time
         sys.path.insert(0, {str(Path(__file__).parent.parent / 'src')!r})
         from pathlib import Path
-        from ml_stack.graph.access import read_lock, write_lock
+        from poolhouse.graph.access import read_lock, write_lock
     """) + textwrap.dedent(body)
     return subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True)
 

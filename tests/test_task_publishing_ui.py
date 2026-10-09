@@ -44,7 +44,7 @@ def test_mobile_publishing_details_escape_evidence_and_survive_refresh(tmp_path,
             expect(project_view.locator('code')).not_to_be_visible()
             publishing = viewer.locator('.task-publishing')
             expect(publishing.locator('.publishing-reason').first).not_to_be_visible()
-            page.screenshot(path='/private/tmp/ml-stack-task-publishing-collapsed-mobile.png', full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-task-publishing-collapsed-mobile.png', full_page=True)
             publishing.locator(':scope > summary').focus()
             page.keyboard.press('Enter')
             expect(publishing.get_by_text('other-device', exact=True).first).to_be_visible()
@@ -68,6 +68,6 @@ def test_mobile_publishing_details_escape_evidence_and_survive_refresh(tmp_path,
             assert viewer.locator('img').count() == 0 and publishing.get_by_role('button').count() == 0
             assert posts == []
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-            page.screenshot(path='/private/tmp/ml-stack-task-publishing-mobile.png', full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-task-publishing-mobile.png', full_page=True)
     finally:
         server.close()

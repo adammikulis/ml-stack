@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.drift import resting_on, superseded
+from poolhouse.graph.drift import resting_on, superseded
 
 GRAPH = {
     "nodes": [
@@ -91,10 +91,10 @@ def _edge(a, rel, b, weight=1):
 
 
 def test_supersedes_folds_from_its_stated_inverse_and_survives_a_store_round_trip(tmp_path):
-    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    from ml_stack.graph.relations import standard_direction
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import tidy
+    pytest.importorskip("ladybug", reason="the store needs poolhouse[store]")
+    from poolhouse.graph.relations import standard_direction
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.graph.tidy import tidy
 
     assert standard_direction("superseded_by") == ("supersedes", True)
 

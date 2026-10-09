@@ -29,11 +29,11 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
         assert page.get_by_label('Dataset path (relative to files root)').input_value() == 'datasets/demo.jsonl'
         reach(page, 'tools')
         page.get_by_role('tab', name='Command library', exact=True).click()
-        page.get_by_label('Installed command').select_option('ml-stack-doctor')
+        page.get_by_label('Installed command').select_option('poolhouse-doctor')
         page.get_by_role('button', name='Review', exact=True).click()
-        pw.expect(page.locator('tools-view #runner pre')).to_contain_text('ml-stack-doctor --help')
+        pw.expect(page.locator('tools-view #runner pre')).to_contain_text('poolhouse-doctor --help')
         args = page.evaluate("document.querySelector('training-view').spec()")
-        from ml_stack.train.run import _parser
+        from poolhouse.train.run import _parser
         parsed = _parser().parse_args(args['args'])
         assert parsed.recipe == 'text-lm'
         assert parsed.data == 'datasets/demo.jsonl'
@@ -65,7 +65,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
 
 
 def check_training_controls(page, pw):
-    from ml_stack.train.run import _parser
+    from poolhouse.train.run import _parser
 
     reach(page, 'training')
     page.get_by_label('Recipe', exact=True).select_option('tool-calls')

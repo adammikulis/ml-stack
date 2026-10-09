@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from ml_stack.speech import asr
+from poolhouse.speech import asr
 
 
 def test_ffmpeg_is_limited_to_pipe_file_and_crypto_with_no_playlist_files(monkeypatch):

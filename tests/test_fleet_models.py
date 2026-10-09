@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from conftest import threaded_server
 
-from ml_stack.fleet.models import Models
-from ml_stack.fleet.weights import ModelError, resolve
-from ml_stack.http import Server
+from poolhouse.fleet.models import Models
+from poolhouse.fleet.weights import ModelError, resolve
+from poolhouse.http import Server
 from tests.net_site import gguf_bytes
 
 
@@ -27,7 +27,7 @@ def free_port() -> int:
 @pytest.fixture(autouse=True)
 def loopback_is_the_internet(monkeypatch):
     """These tests download from a server on this machine, which has to be named."""
-    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1")
+    monkeypatch.setenv("POOLHOUSE_FETCH_ALLOW_HOSTS", "127.0.0.1")
 
 
 @pytest.fixture
@@ -112,12 +112,12 @@ class TestSources:
             "README.md", "m-q8_0.gguf", "m-q4_k_m.gguf", "mmproj-f16.gguf",
             "m-q4_k_m-00001-of-00002.gguf")]}
         with threaded_server(handler_replying(200, listing)) as base:
-            monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
+            monkeypatch.setattr("poolhouse.fleet.weights.LISTING", base + "/api/models")
             assert resolve("hf:owner/repo").endswith("/owner/repo/resolve/main/m-q4_k_m.gguf?download=true")
 
     def test_a_repository_the_hub_does_not_know_is_refused(self, monkeypatch, loopback_net):
         with threaded_server(handler_replying(404, {"error": "not found"})) as base:
-            monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
+            monkeypatch.setattr("poolhouse.fleet.weights.LISTING", base + "/api/models")
             with pytest.raises(ModelError, match="could not read hf:owner/repo"):
                 resolve("hf:owner/repo")
 
@@ -317,13 +317,13 @@ class TestChoosingAQuant:
         (["only-f16.gguf"], "only-f16.gguf"),
     ])
     def test_it_prefers_q4(self, names, want, monkeypatch):
-        from ml_stack.fleet import weights as mod
+        from poolhouse.fleet import weights as mod
 
         monkeypatch.setattr(mod, "repo_files", lambda o, r: names)
         assert mod.quant_in("o", "r") == want
 
     def test_a_sharded_model_is_not_offered_as_one_file(self, monkeypatch):
-        from ml_stack.fleet import weights as mod
+        from poolhouse.fleet import weights as mod
 
         monkeypatch.setattr(mod, "repo_files", lambda o, r: [
             "big-Q4_K_M-00001-of-00003.gguf", "big-Q4_K_M-00002-of-00003.gguf",
@@ -331,14 +331,14 @@ class TestChoosingAQuant:
         assert mod.quant_in("o", "r") == "small-Q8_0.gguf"
 
     def test_a_repository_with_no_gguf_says_so(self, monkeypatch):
-        from ml_stack.fleet import weights as mod
+        from poolhouse.fleet import weights as mod
 
         monkeypatch.setattr(mod, "repo_files", lambda o, r: ["README.md"])
         with pytest.raises(ModelError, match="no single-file gguf"):
             mod.quant_in("o", "r")
 
     def test_naming_a_file_still_takes_that_file(self, monkeypatch):
-        from ml_stack.fleet import weights as mod
+        from poolhouse.fleet import weights as mod
 
         def refuse(*a):
             raise AssertionError("went to the network for a reference that named a file")
@@ -357,7 +357,7 @@ class TestReadingWhatAModelIs:
         ("something-with-no-size", 0.0, 0.0),
     ])
     def test_it_reads_the_sizes_out_of_a_name(self, name, total, active):
-        from ml_stack.fleet.catalogue import _params_in
+        from poolhouse.fleet.catalogue import _params_in
 
         assert _params_in(name) == (total, active)
 
@@ -366,7 +366,7 @@ class TestReadingWhatAModelIs:
         "model-draft-Q4_K_M.gguf", "imatrix_unsloth.gguf", "adapter-Q4.gguf",
     ])
     def test_a_file_that_sits_beside_a_model_is_not_the_model(self, bad):
-        from ml_stack.fleet.weights import is_beside
+        from poolhouse.fleet.weights import is_beside
 
         assert is_beside(bad) is True
 
@@ -374,18 +374,18 @@ class TestReadingWhatAModelIs:
         "Qwen3-8B-Q4_K_M.gguf", "Bonsai-27B-dspark-Q4_1.gguf",
     ])
     def test_a_real_build_is_not_mistaken_for_an_accessory(self, good):
-        from ml_stack.fleet.weights import is_beside
+        from poolhouse.fleet.weights import is_beside
 
         assert is_beside(good) is False
 
     def test_a_vision_projector_means_it_reads_pictures(self):
-        from ml_stack.fleet.catalogue import Suggestion
+        from poolhouse.fleet.catalogue import Suggestion
 
         seeing = Suggestion("m", "hf:o/r/m.gguf", 1.0, "", takes=("text", "image"))
         assert seeing.public()["takes"] == ["\U0001f4ac", "\U0001f5bc"]
 
     def test_modalities_come_from_how_the_hub_files_it(self):
-        from ml_stack.fleet.catalogue import _modalities
+        from poolhouse.fleet.catalogue import _modalities
 
         assert _modalities({"pipeline_tag": "text-generation"}) == (
             ("text",), ("text",))
@@ -403,26 +403,26 @@ class TestReadingWhatAModelIs:
         ("Bonsai-27B-gguf", "Bonsai"),
     ])
     def test_the_family_is_read_off_the_name(self, name, family):
-        from ml_stack.fleet.catalogue import family_of
+        from poolhouse.fleet.catalogue import family_of
 
         assert family_of(name) == family
 
     def test_a_model_named_after_no_family_goes_under_the_one_it_came_from(self):
         """Gemmable 4 12B is Gemma 4 12B fine-tuned, and the hub says nothing about
         that: the repository carries no base_model tag."""
-        from ml_stack.fleet.catalogue import family_of
+        from poolhouse.fleet.catalogue import family_of
 
         assert family_of("Gemmable-4-12B-MTP") == "Gemma"
         assert family_of("Mia-AiLab/Gemmable-4-12B-MTP-GGUF") == "Gemma"
 
     def test_a_name_that_merely_starts_the_same_is_not_folded_in(self):
-        from ml_stack.fleet.catalogue import family_of
+        from poolhouse.fleet.catalogue import family_of
 
         assert family_of("Gemstone-7B") == "Gemstone"
         assert family_of("Llamafile-3B") == "Llamafile"
 
     def test_a_family_nobody_has_heard_of_still_groups(self):
-        from ml_stack.fleet.catalogue import family_of
+        from poolhouse.fleet.catalogue import family_of
 
         assert family_of("Zarquon-9000-70B-Instruct") == "Zarquon"
         assert family_of("owner/Zarquon-9000-70B-GGUF") == "Zarquon"
@@ -433,7 +433,7 @@ class TestDraftModels:
 
     def test_a_draft_is_kept_beside_its_model_and_not_listed_as_one(self, store,
                                                                    tmp_path):
-        from ml_stack.fleet.models import draft_beside
+        from poolhouse.fleet.models import draft_beside
 
         big = a_model(tmp_path / "models", name="big.gguf", mb=2)
         draft = big.with_suffix(".draft.gguf")
@@ -443,7 +443,7 @@ class TestDraftModels:
         assert draft_beside(big) == draft
 
     def test_with_no_draft_there_is_nothing_beside_it(self, store, tmp_path):
-        from ml_stack.fleet.models import draft_beside
+        from poolhouse.fleet.models import draft_beside
 
         big = a_model(tmp_path / "models", name="lonely.gguf", mb=2)
         assert draft_beside(big) is None
@@ -478,10 +478,10 @@ class TestDraftModels:
     def test_a_draft_is_copied_from_a_machine_that_has_it(self, store, tmp_path,
                                                           monkeypatch):
         """The internet is only for what nobody nearby holds."""
-        from ml_stack.fleet.api import Daemon, make_handler
-        from ml_stack.fleet.daemon import load_or_create_token
-        from ml_stack.fleet.jobs import JobRunner
-        from ml_stack.http import Server
+        from poolhouse.fleet.api import Daemon, make_handler
+        from poolhouse.fleet.daemon import load_or_create_token
+        from poolhouse.fleet.jobs import JobRunner
+        from poolhouse.http import Server
 
         theirs = tmp_path / "theirs"
         payload = a_model(theirs, name="pair.draft.gguf", mb=2).read_bytes()
@@ -535,7 +535,7 @@ class TestDraftModels:
         assert store.ensure_draft(model, "http://127.0.0.1:1/none.gguf") == draft
 
     def test_a_repository_that_ships_a_draft_offers_it(self):
-        from ml_stack.fleet.catalogue import Suggestion
+        from poolhouse.fleet.catalogue import Suggestion
 
         pick = Suggestion("m", "hf:o/r/m.gguf", 5.0, "", draft_ref="hf:o/r/m-draft.gguf",
                           draft_gb=0.5)
@@ -550,7 +550,7 @@ class TestUncensoredBuilds:
         "something-nsfw-7B",
     ])
     def test_a_build_with_its_refusals_removed_is_marked(self, name):
-        from ml_stack.fleet.catalogue import is_unfiltered
+        from poolhouse.fleet.catalogue import is_unfiltered
 
         assert is_unfiltered(name) is True
 
@@ -558,12 +558,12 @@ class TestUncensoredBuilds:
         "Qwen3-Coder-30B-A3B-Instruct", "Ornith-1.5-9B", "gpt-oss-20b",
     ])
     def test_an_ordinary_build_is_not(self, name):
-        from ml_stack.fleet.catalogue import is_unfiltered
+        from poolhouse.fleet.catalogue import is_unfiltered
 
         assert is_unfiltered(name) is False
 
     def test_the_flag_reaches_the_screen(self):
-        from ml_stack.fleet.catalogue import Suggestion
+        from poolhouse.fleet.catalogue import Suggestion
 
         assert Suggestion("Qwen3-Uncensored", "hf:o/r/m.gguf", 1.0, "").public()[
             "unfiltered"] is True
@@ -573,7 +573,7 @@ class TestUncensoredBuilds:
 
 class TestPagingAndSearching:
     def rows(self, n, unfiltered_every=0):
-        from ml_stack.fleet.catalogue import Suggestion
+        from poolhouse.fleet.catalogue import Suggestion
 
         out = []
         for i in range(n):
@@ -586,7 +586,7 @@ class TestPagingAndSearching:
 
     def test_a_page_is_cut_after_filtering_not_before(self, monkeypatch):
         """Filtering the page would leave it half empty."""
-        from ml_stack.fleet import catalogue as mod
+        from poolhouse.fleet import catalogue as mod
 
         monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(40, 2)))
         page = mod.popular(free_gb=999, ram_gb=999, limit=10, page=0, rude=False)
@@ -594,7 +594,7 @@ class TestPagingAndSearching:
         assert all(not p.public()["unfiltered"] for p in page)
 
     def test_pages_do_not_repeat_or_skip(self, monkeypatch):
-        from ml_stack.fleet import catalogue as mod
+        from poolhouse.fleet import catalogue as mod
 
         monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(25)))
         seen = []
@@ -604,7 +604,7 @@ class TestPagingAndSearching:
         assert len(set(seen)) == 25
 
     def test_showing_uncensored_builds_adds_them_back(self, monkeypatch):
-        from ml_stack.fleet import catalogue as mod
+        from poolhouse.fleet import catalogue as mod
 
         monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(20, 2)))
         assert mod.how_many(999, 999, rude=False) == 10
@@ -612,8 +612,8 @@ class TestPagingAndSearching:
 
     def test_families_cover_the_whole_list_not_one_page(self, monkeypatch):
         """A family further down still needs a box on the first page."""
-        from ml_stack.fleet import catalogue as mod
-        from ml_stack.fleet.catalogue import Suggestion
+        from poolhouse.fleet import catalogue as mod
+        from poolhouse.fleet.catalogue import Suggestion
 
         rows = [Suggestion(f"Qwen3-{i}B", "hf:o/r/m.gguf", float(i), "", family="Qwen")
                 for i in range(1, 20)]
@@ -625,7 +625,7 @@ class TestPagingAndSearching:
         assert mod.families(999, 999) == ["Gemma", "Qwen"]
 
     def test_a_search_asks_the_hub_and_is_paged_the_same_way(self, monkeypatch):
-        from ml_stack.fleet import catalogue as mod
+        from poolhouse.fleet import catalogue as mod
 
         asked = []
 
@@ -643,7 +643,7 @@ class TestPagingAndSearching:
         assert mod.searched_count("thing", 999, 999) == 6
 
     def test_an_empty_search_goes_back_to_the_popular_list(self, monkeypatch):
-        from ml_stack.fleet import catalogue as mod
+        from poolhouse.fleet import catalogue as mod
 
         monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(5)))
         assert len(mod.popular(999, 999, limit=10, query="   ")) == 5
@@ -651,8 +651,8 @@ class TestPagingAndSearching:
 
 class TestSuggestions:
     def test_every_one_is_a_reference_this_code_can_resolve(self):
-        from ml_stack.fleet.catalogue import SUGGESTED
-        from ml_stack.fleet.weights import resolve
+        from poolhouse.fleet.catalogue import SUGGESTED
+        from poolhouse.fleet.weights import resolve
 
         assert SUGGESTED, "nothing offered at all would pass every check below"
         for pick in SUGGESTED:
@@ -663,14 +663,14 @@ class TestSuggestions:
             assert pick.gb > 0 and pick.what and pick.name
 
     def test_names_and_files_do_not_repeat(self):
-        from ml_stack.fleet.catalogue import SUGGESTED
+        from poolhouse.fleet.catalogue import SUGGESTED
 
         assert SUGGESTED, "an empty list has no repeats either"
         assert len({p.name for p in SUGGESTED}) == len(SUGGESTED)
         assert len({p.file for p in SUGGESTED}) == len(SUGGESTED)
 
     def test_what_will_not_fit_is_not_offered(self):
-        from ml_stack.fleet.catalogue import suggestions
+        from poolhouse.fleet.catalogue import suggestions
 
         small = suggestions(free_gb=3.0, ram_gb=64.0)
         assert small, "nothing offered on a machine with 3 GB free"
@@ -678,18 +678,18 @@ class TestSuggestions:
         assert not suggestions(free_gb=0.001, ram_gb=64.0)
 
     def test_a_machine_short_of_memory_is_not_offered_a_big_one(self):
-        from ml_stack.fleet.catalogue import suggestions
+        from poolhouse.fleet.catalogue import suggestions
 
         assert all(p.gb <= 4.0 for p in suggestions(free_gb=999.0, ram_gb=4.0))
 
     def test_the_smallest_comes_first(self):
-        from ml_stack.fleet.catalogue import suggestions
+        from poolhouse.fleet.catalogue import suggestions
 
         got = suggestions(free_gb=999.0, ram_gb=999.0)
         assert [p.gb for p in got] == sorted(p.gb for p in got)
 
     def test_with_no_limits_known_everything_is_offered(self):
-        from ml_stack.fleet.catalogue import SUGGESTED, suggestions
+        from poolhouse.fleet.catalogue import SUGGESTED, suggestions
 
         assert len(suggestions()) == len(SUGGESTED)
 
@@ -763,7 +763,7 @@ class TestGettingInTheBackground:
         raise AssertionError(f"still {row.state} after {timeout}s: {row.error}")
 
     def test_a_download_runs_without_holding_the_caller(self, store):
-        from ml_stack.fleet.models import Downloads
+        from poolhouse.fleet.models import Downloads
 
         payload = gguf_bytes(extra=1024 * 1024)
         srv = self.serve(payload)
@@ -784,7 +784,7 @@ class TestGettingInTheBackground:
     def test_how_far_along_it_is_can_be_read_while_it_runs(self, store):
         """Bigger than one CHUNK, or the whole body arrives in a single read and
         the only counts ever seen are nothing and everything."""
-        from ml_stack.fleet.models import CHUNK, Downloads
+        from poolhouse.fleet.models import CHUNK, Downloads
 
         payload = gguf_bytes(extra=4 * CHUNK)
         srv = self.serve(payload, delay=0.01)
@@ -809,7 +809,7 @@ class TestGettingInTheBackground:
             f"only ever saw {sorted(set(seen))}")
 
     def test_a_failure_is_reported_rather_than_raised_into_nowhere(self, store):
-        from ml_stack.fleet.models import Downloads
+        from poolhouse.fleet.models import Downloads
 
         downloads = Downloads(store)
         started = downloads.start("nope.gguf", source="http://127.0.0.1:1/nope.gguf")
@@ -818,7 +818,7 @@ class TestGettingInTheBackground:
         assert not (store.store / "nope.gguf").exists()
 
     def test_asking_twice_for_the_same_model_does_not_start_it_twice(self, store):
-        from ml_stack.fleet.models import Downloads
+        from poolhouse.fleet.models import Downloads
 
         payload = gguf_bytes(extra=512 * 1024)
         srv = self.serve(payload, delay=0.05)
@@ -900,11 +900,11 @@ class TestOverHTTP:
 
     @pytest.fixture
     def served(self, tmp_path):
-        from ml_stack.fleet.api import Daemon, make_handler
-        from ml_stack.fleet.daemon import load_or_create_token
-        from ml_stack.fleet.jobs import JobRunner
-        from ml_stack.fleet.remote import Peer
-        from ml_stack.http import Server
+        from poolhouse.fleet.api import Daemon, make_handler
+        from poolhouse.fleet.daemon import load_or_create_token
+        from poolhouse.fleet.jobs import JobRunner
+        from poolhouse.fleet.remote import Peer
+        from poolhouse.http import Server
 
         root = tmp_path / "traind"
         files = root / "files"
@@ -940,7 +940,7 @@ class TestOverHTTP:
         assert got["size"] == (theirs / "qwen3-4b-q4.gguf").stat().st_size
 
     def test_asking_for_one_nobody_has_is_refused_not_crashed(self, served):
-        from ml_stack.fleet.remote import PeerError
+        from poolhouse.fleet.remote import PeerError
 
         peer, _ = served
         with pytest.raises(PeerError):
@@ -950,7 +950,7 @@ class TestOverHTTP:
 class TestCaches:
     def test_each_existing_root_is_listed_with_its_weight_files_and_bytes(self, tmp_path,
                                                                         monkeypatch):
-        from ml_stack.fleet.models import caches, holding, sized
+        from poolhouse.fleet.models import caches, holding, sized
 
         hub = tmp_path / "hf" / "hub"
         blobs = hub / "models--maker--big-GGUF" / "blobs"
@@ -963,7 +963,7 @@ class TestCaches:
         (snapshot / "README.md").write_text("words")
         mine = tmp_path / "models"
         a_model(mine, "small.gguf", mb=1)
-        monkeypatch.setattr("ml_stack.hub.default_roots",
+        monkeypatch.setattr("poolhouse.hub.default_roots",
                             lambda root: [tmp_path / "absent", hub, mine])
 
         assert holding(hub) == (2, 4000), "the symlink reads through to its blob"
@@ -973,7 +973,7 @@ class TestCaches:
         assert sized(int(86.2 * 2**30)) == "86.2G"
 
     def test_hf_home_names_the_hub_cache(self, tmp_path, monkeypatch):
-        from ml_stack.hub import default_roots
+        from poolhouse.hub import default_roots
 
         monkeypatch.setenv("HF_HOME", str(tmp_path / "elsewhere"))
         assert tmp_path / "elsewhere" / "hub" in default_roots(tmp_path)
@@ -988,8 +988,8 @@ class TestTheResumeStamp:
     is unknown would resume a download against the wrong validator."""
 
     def test_a_stamp_round_trips_with_its_version(self, tmp_path):
-        from ml_stack.files import version_of
-        from ml_stack.fleet.models import STAMP_VERSION, _read_stamp, _write_stamp
+        from poolhouse.files import version_of
+        from poolhouse.fleet.models import STAMP_VERSION, _read_stamp, _write_stamp
 
         stamp = tmp_path / "m.gguf.part.from"
         _write_stamp(stamp, "http://x/y.gguf", {"ETag": "abc"})
@@ -998,14 +998,14 @@ class TestTheResumeStamp:
                                  "validator": "abc"}
 
     def test_a_stamp_written_before_the_key_existed_is_still_read(self, tmp_path):
-        from ml_stack.fleet.models import _read_stamp
+        from poolhouse.fleet.models import _read_stamp
 
         stamp = tmp_path / "m.gguf.part.from"
         stamp.write_text(json.dumps({"url": "http://x/y.gguf", "validator": "abc"}))
         assert _read_stamp(stamp)["url"] == "http://x/y.gguf"
 
-    def test_a_stamp_from_a_newer_ml_stack_is_not_resumed_against(self, tmp_path):
-        from ml_stack.fleet.models import STAMP_VERSION, _read_stamp
+    def test_a_stamp_from_a_newer_poolhouse_is_not_resumed_against(self, tmp_path):
+        from poolhouse.fleet.models import STAMP_VERSION, _read_stamp
 
         stamp = tmp_path / "m.gguf.part.from"
         stamp.write_text(json.dumps({"version": STAMP_VERSION + 1, "url": "http://x/y.gguf",
@@ -1016,7 +1016,7 @@ class TestTheResumeStamp:
 class TestWhereADownloadMayComeFrom:
     def test_a_source_on_this_machine_or_its_network_is_refused_unless_named(
             self, store, monkeypatch):
-        monkeypatch.delenv("ML_STACK_FETCH_ALLOW_HOSTS")
+        monkeypatch.delenv("POOLHOUSE_FETCH_ALLOW_HOSTS")
         for source in ("http://127.0.0.1:9/m.gguf", "http://169.254.169.254/latest/m.gguf",
                        "http://localhost/m.gguf", "http://192.168.1.9/m.gguf",
                        "http://[::1]/m.gguf"):

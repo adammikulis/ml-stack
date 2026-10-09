@@ -7,17 +7,17 @@ import re
 
 import pytest
 
-from ml_stack.bench.ranking import ndcg_at, recall_at, reciprocal_rank
-from ml_stack.bench.retrieval import MODES, Finder, compare, node_texts, report, table
-from ml_stack.client import rerank as rerank_client
-from ml_stack.client.rerank import RerankError, rerank
-from ml_stack.graph.search import RERANK, hybrid, reranked_by
-from ml_stack.http import ServerError
-from ml_stack.serve import admission
-from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
-from ml_stack.serve.broker import Ask, Held
-from ml_stack.serve.lifecycle_cli import _asked_spec
-from ml_stack.testing.fakes import fake_llama_binary, fake_llama_server
+from poolhouse.bench.ranking import ndcg_at, recall_at, reciprocal_rank
+from poolhouse.bench.retrieval import MODES, Finder, compare, node_texts, report, table
+from poolhouse.client import rerank as rerank_client
+from poolhouse.client.rerank import RerankError, rerank
+from poolhouse.graph.search import RERANK, hybrid, reranked_by
+from poolhouse.http import ServerError
+from poolhouse.serve import admission
+from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
+from poolhouse.serve.broker import Ask, Held
+from poolhouse.serve.lifecycle_cli import _asked_spec
+from poolhouse.testing.fakes import fake_llama_binary, fake_llama_server
 
 
 def test_a_reranking_spec_starts_llama_server_with_the_reranking_flag(tmp_path):
@@ -182,7 +182,7 @@ def test_the_command_runs_all_three_modes_against_a_served_reranker():
 
 
 def test_a_model_reranker_over_http_orders_the_hits_by_the_servers_scores():
-    from ml_stack.bench.retrieval import model_reranker
+    from poolhouse.bench.retrieval import model_reranker
 
     graph = {**GRAPH, "nodes": [{**n, "label": f"robots {'fix machines' if i == 5 else i}"}
                                 for i, n in enumerate(GRAPH["nodes"])]}
@@ -201,7 +201,7 @@ import time  # noqa: E402
 from contextlib import contextmanager  # noqa: E402
 from http.server import BaseHTTPRequestHandler  # noqa: E402
 
-from ml_stack.http import Server  # noqa: E402
+from poolhouse.http import Server  # noqa: E402
 
 
 @contextmanager

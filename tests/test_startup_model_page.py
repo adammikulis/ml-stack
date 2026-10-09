@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from ml_stack.fleet.page import WEB, render
-from ml_stack.ui import assets_dir
+from poolhouse.fleet.page import WEB, render
+from poolhouse.ui import assets_dir
 
 pytestmark = pytest.mark.slow
 

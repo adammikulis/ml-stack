@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import chat, do, guard as rails, mcp
-from ml_stack.interventions import Call, Context, Deny, Proceed, Rewrite
-from ml_stack.testing import ScriptedModel
+from poolhouse import chat, do, guard as rails, mcp
+from poolhouse.interventions import Call, Context, Deny, Proceed, Rewrite
+from poolhouse.testing import ScriptedModel
 
 YAML = """
 models: []
@@ -38,7 +38,7 @@ def intake(rail, text, tool="models_find"):
 
 def nemo():
     pytest.importorskip("nemoguardrails")
-    from ml_stack.guard.nemo import NemoRail
+    from poolhouse.guard.nemo import NemoRail
 
     return NemoRail.from_yaml(YAML)
 
@@ -86,11 +86,11 @@ def test_the_do_loop_withholds_a_tool_result_nemo_blocks_and_the_model_never_see
 def classifier(_real_home):
     pytest.importorskip("onnxruntime")
     pytest.importorskip("tokenizers")
-    from ml_stack.guard import classifier as module
+    from poolhouse.guard import classifier as module
 
     folder = module.cached(_real_home.cache / "guard" / "classifier" / module.MODEL.replace("/", "--"))
     if folder is None or not (folder / "model.onnx").exists():
-        pytest.skip("the injection model is not fetched: python -c 'from ml_stack.guard.classifier import fetch; fetch()'")
+        pytest.skip("the injection model is not fetched: python -c 'from poolhouse.guard.classifier import fetch; fetch()'")
     return module.InjectionClassifierRail(folder)
 
 

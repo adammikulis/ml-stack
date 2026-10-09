@@ -31,8 +31,8 @@ from test_testreuse import (  # noqa: F401  (fixture)
     project,
 )
 
-from ml_stack.activity import reuse
-from ml_stack.workspace import testboard, testruns
+from poolhouse.activity import reuse
+from poolhouse.workspace import testboard, testruns
 
 pytestmark = pytest.mark.slow
 
@@ -92,10 +92,10 @@ def test_a_tree_that_changed_during_the_run_stores_nothing_and_fails_the_run(pro
 # -- (3) the conftest chain is part of the closure ---------------------------------------------------
 def test_a_module_imported_only_by_conftest_is_part_of_the_hit(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    (project / "tests/conftest.py").write_text("from ml_stack.other import OTHER  # noqa\n")
+    (project / "tests/conftest.py").write_text("from poolhouse.other import OTHER  # noqa\n")
     attempt(project, store)
     assert hows(attempt(project, store)[0]) == ["reused"]
-    (project / "src/ml_stack/other.py").write_text("OTHER = 2\n")
+    (project / "src/poolhouse/other.py").write_text("OTHER = 2\n")
     assert hows(attempt(project, store)[0]) == ["ran"]
 
 
@@ -110,25 +110,25 @@ def test_the_runners_own_code_is_part_of_the_key(project):
 # -- (4) run-time imports do not depend on file order ------------------------------------------------
 def test_a_module_imported_by_computed_name_is_not_missed_by_the_second_file(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    body = "import importlib\n\nNAME = 'ml_stack.helper'\n\n\ndef test_x():\n    assert importlib.import_module(NAME).VALUE == 1\n"
+    body = "import importlib\n\nNAME = 'poolhouse.helper'\n\n\ndef test_x():\n    assert importlib.import_module(NAME).VALUE == 1\n"
     (project / "tests/test_a.py").write_text(body)
     (project / "tests/test_b.py").write_text(body)
     attempt(project, store, "tests/test_a.py", "tests/test_b.py")
-    (project / "src/ml_stack/helper.py").write_text("VALUE = 1  # edited\n")
+    (project / "src/poolhouse/helper.py").write_text("VALUE = 1  # edited\n")
     assert hows(attempt(project, store, "tests/test_a.py", "tests/test_b.py")[0]) == ["ran", "ran"]
 
 
 # -- (5) a process spawned from library code is covered ----------------------------------------------
 def test_a_child_process_spawned_by_library_code_does_not_hide_a_data_change(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    (project / "src/ml_stack/data.txt").write_text("1")
-    (project / "src/ml_stack/helper.py").write_text(
+    (project / "src/poolhouse/data.txt").write_text("1")
+    (project / "src/poolhouse/helper.py").write_text(
         "import subprocess\nimport sys\nfrom pathlib import Path\n\nDATA = Path(__file__).with_name('data.txt')\n"
         "VALUE = int(subprocess.run([sys.executable, '-c', f'print(open({str(DATA)!r}).read())'],\n"
         "                           capture_output=True, text=True, check=True).stdout)\n")
     attempt(project, store)
     assert hows(attempt(project, store)[0]) == ["reused"]
-    (project / "src/ml_stack/data.txt").write_text("2")
+    (project / "src/poolhouse/data.txt").write_text("2")
     assert hows(attempt(project, store)[0]) == ["ran"]
 
 
@@ -314,7 +314,7 @@ def test_a_torn_last_chain_line_is_recovered_not_fatal(project, tmp_path):
     with store.chain.open("a") as handle:
         handle.write('{"seq": 1, "kind": "pa')
     assert reuse.chain_ok(store.folder) and hows(attempt(project, store)[0]) == ["reused"]
-    (project / "src/ml_stack/helper.py").write_text("VALUE = 1  # edited\n")
+    (project / "src/poolhouse/helper.py").write_text("VALUE = 1  # edited\n")
     attempt(project, store)
     assert reuse.chain_ok(store.folder) and kinds(store)[-1] == "pass"
 

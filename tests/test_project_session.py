@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import home, private_path
-from ml_stack.workspace import (
+from poolhouse import home, private_path
+from poolhouse.workspace import (
     automatic_connection,
     cli,
     project_connection,
@@ -16,14 +16,14 @@ from ml_stack.workspace import (
     render,
     tokens,
 )
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace.identity import Denied
 
 PROJECT = "a" * 32
 
 
 @pytest.fixture
 def sessions(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("CODEX_SESSION_ID", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
     root = tmp_path / "project"
@@ -203,21 +203,21 @@ def test_claim_owner_is_readable_and_json_is_unchanged(capsys):
 
 @pytest.fixture(autouse=True)
 def native_environment(monkeypatch):
-    monkeypatch.delenv("ML_STACK_SESSION_ID", raising=False)
-    monkeypatch.delenv("ML_STACK_SESSION_HARNESS", raising=False)
+    monkeypatch.delenv("POOLHOUSE_SESSION_ID", raising=False)
+    monkeypatch.delenv("POOLHOUSE_SESSION_HARNESS", raising=False)
 
 
 @pytest.mark.parametrize("native", ["claude-code", "codex"])
 def test_native_sessions_are_distinct_stable_and_preserve_legacy_binding(sessions, monkeypatch, native):
     root, _, enrolled, _ = sessions
     monkeypatch.setenv("CODEX_THREAD_ID", "inherited-parent-codex")
-    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", native)
-    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-one")
+    monkeypatch.setenv("POOLHOUSE_SESSION_HARNESS", native)
+    monkeypatch.setenv("POOLHOUSE_SESSION_ID", "native-one")
     first = join(root, agent=native)
-    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-two")
+    monkeypatch.setenv("POOLHOUSE_SESSION_ID", "native-two")
     second = join(root, agent=native)
     assert first != second
-    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-one")
+    monkeypatch.setenv("POOLHOUSE_SESSION_ID", "native-one")
     assert join(root, agent=native) == first
     assert join(root, "child-label", agent=native) == first
     assert enrolled == [first, second]
@@ -228,8 +228,8 @@ def test_native_sessions_are_distinct_stable_and_preserve_legacy_binding(session
 def test_native_context_does_not_select_inherited_other_harness(monkeypatch):
     monkeypatch.setenv("CODEX_THREAD_ID", "same-native-session")
     codex = project_session.current()
-    monkeypatch.setenv("ML_STACK_SESSION_ID", "same-native-session")
-    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", "claude-code")
+    monkeypatch.setenv("POOLHOUSE_SESSION_ID", "same-native-session")
+    monkeypatch.setenv("POOLHOUSE_SESSION_HARNESS", "claude-code")
     assert project_session.current() != codex
     assert project_session.current("codex") == ""
     assert project_session.name("codex") == "codex"
@@ -240,16 +240,16 @@ def test_native_context_does_not_select_inherited_other_harness(monkeypatch):
     ("claude-code", "bad\nvalue"), ("claude-code", "bad value"),
     ("claude-code", "x" * 257), ("not/a/harness", "event")])
 def test_invalid_native_context_is_refused(monkeypatch, native, session):
-    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", native)
-    monkeypatch.setenv("ML_STACK_SESSION_ID", session)
+    monkeypatch.setenv("POOLHOUSE_SESSION_HARNESS", native)
+    monkeypatch.setenv("POOLHOUSE_SESSION_ID", session)
     with pytest.raises(Denied, match="native session"):
         project_session.current()
 
 
 def test_native_saved_foreign_harness_and_revocation_are_not_replaced(sessions, monkeypatch):
     root, _, enrolled, revoked = sessions
-    monkeypatch.setenv("ML_STACK_SESSION_HARNESS", "claude-code")
-    monkeypatch.setenv("ML_STACK_SESSION_ID", "native-session")
+    monkeypatch.setenv("POOLHOUSE_SESSION_HARNESS", "claude-code")
+    monkeypatch.setenv("POOLHOUSE_SESSION_ID", "native-session")
     actor = join(root, agent="claude-code")
     revoked.add(actor)
     with pytest.raises(Denied, match="revoked"):

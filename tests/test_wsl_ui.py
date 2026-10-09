@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import wsl_ui
+from poolhouse.fleet import wsl_ui
 
 
 def _helper(monkeypatch, port):
@@ -21,14 +21,14 @@ def _helper(monkeypatch, port):
     children = []
 
     def spawn(argv, **kwargs):
-        assert argv == [sys.executable, "-m", "ml_stack.fleet.wsl_ui", str(port)]
+        assert argv == [sys.executable, "-m", "poolhouse.fleet.wsl_ui", str(port)]
         assert not kwargs.get("shell")
         child = original(argv, env=environment, **kwargs)
         children.append(child)
         return child
 
     monkeypatch.setattr(wsl_ui, "start_process", spawn)
-    return [sys.executable, "-m", "ml_stack.fleet.wsl_ui", str(port)], children
+    return [sys.executable, "-m", "poolhouse.fleet.wsl_ui", str(port)], children
 
 
 def test_local_ui_relay_preserves_bytes_and_actual_loopback_peer(monkeypatch):

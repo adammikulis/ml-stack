@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import doctor, hookcheck
-from ml_stack.checks import ask
+from poolhouse import doctor, hookcheck
+from poolhouse.checks import ask
 
 pytest_plugins = ["node_kit"]
 
@@ -177,11 +177,11 @@ def session(tmp_path, repo, workspace_node):
     calls = tmp_path / "calls.jsonl"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    fake = bin_dir / "ml-stack-workspace"
+    fake = bin_dir / "poolhouse-workspace"
     fake.write_text(f"#!{sys.executable}\nimport json, sys\n"
                     f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\nprint('inbox line')\n")
     fake.chmod(0o700)
-    env = workspace_node.env(extra={"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "ML_STACK_RUNTIME_ENSURE": "off"})
+    env = workspace_node.env(extra={"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "POOLHOUSE_RUNTIME_ENSURE": "off"})
 
     def start():
         return subprocess.run([sys.executable, str(repo / "scripts" / "hooks" / "claude-session-start")],

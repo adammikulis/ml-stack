@@ -7,11 +7,11 @@ approvals, model and broker lease rules. Repository text supplies a task, never 
 Enable a repository for an existing worker with an isolated git worktree:
 
 ```sh
-ml-stack-workspace agent backlog local-qwen --repo sample/project --project /path/to/worktree
+poolhouse-workspace agent backlog local-qwen --repo sample/project --project /path/to/worktree
 ```
 
 The person or a delegated worker's registered parent can configure the scope through
-`ml_stack.workspace.backlog.configure(workspace, token, name, repository, project)`.
+`poolhouse.workspace.backlog.configure(workspace, token, name, repository, project)`.
 Call `issuepump.start(workspace, token, name)` to detach the parent producer. It passes
 authenticated tasks through the maintained workspace inbox, and checkpoints receipts and
 replies in the graph. A restarted producer reconciles its outbox before sending another job.

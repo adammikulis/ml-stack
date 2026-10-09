@@ -6,10 +6,10 @@ from types import SimpleNamespace
 import pytest
 from test_project_source import repository  # noqa: F401
 
-from ml_stack.workspace import remote_task_client
-from ml_stack.workspace.identity import AGENT, Denied, Registry
-from ml_stack.workspace.remote_host import WorkspaceHost
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse.workspace import remote_task_client
+from poolhouse.workspace.identity import AGENT, Denied, Registry
+from poolhouse.workspace.remote_host import WorkspaceHost
+from poolhouse.workspace.taskboard import TaskBoard
 
 PROJECT = "a" * 32
 SCOPE = {"key": PROJECT, "name": "fixture-project", "cluster": "dev", "cluster_id": "c" * 64}

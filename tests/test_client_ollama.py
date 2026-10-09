@@ -15,9 +15,9 @@ import types
 import pytest
 from conftest import json_reply
 
-from ml_stack.client import Client, Request, Transport, ollama
-from ml_stack.client.spent import Spent
-from ml_stack.telemetry import Call
+from poolhouse.client import Client, Request, Transport, ollama
+from poolhouse.client.spent import Spent
+from poolhouse.telemetry import Call
 
 MODEL = "qwen3.8-flash-next:125b-mlx"
 
@@ -253,7 +253,7 @@ class TestCallFromAnOllamaReply:
         assert json.dumps(one.public())
 
     def test_a_llamacpp_reply_still_reads_zero_for_what_it_did_not_say(self):
-        from ml_stack.client.chat import Reply
+        from poolhouse.client.chat import Reply
 
         bare = Reply(content="ok", raw={"usage": {"prompt_tokens": 120, "completion_tokens": 8},
                                         "timings": {"prompt_n": 100, "predicted_n": 8}})
@@ -398,7 +398,7 @@ class TestFamilyOnOllama:
 
     def test_without_a_model_the_served_ids_are_asked_for(self, server):
         fake = an_ollama(server)
-        from ml_stack.client.chat import forget_families
+        from poolhouse.client.chat import forget_families
 
         forget_families()
         c = Client(fake.base_url, transport=Transport(api="ollama"))

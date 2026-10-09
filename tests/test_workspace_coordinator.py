@@ -14,21 +14,21 @@ import pytest
 import wheel_cache
 from workspace_kit import Kit, clean_env
 
-from ml_stack import http
-from ml_stack.fleet import projects, tls
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.discovery import derive_token, mint_cluster
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.onboard.requests import Device, Devices
-from ml_stack.fleet.remote import Peer
-from ml_stack.http import Server, ServerError
-from ml_stack.hub.peerbook import PeerBook
-from ml_stack.net import git
-from ml_stack.workspace import cli, coordinator, coordinator_client, coordinator_config, tokens
-from ml_stack.workspace.coordination import workspace_id
-from ml_stack.workspace.coordinator_client import Remote
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.taskboard import TaskBoard
+from poolhouse import http
+from poolhouse.fleet import projects, tls
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.discovery import derive_token, mint_cluster
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.onboard.requests import Device, Devices
+from poolhouse.fleet.remote import Peer
+from poolhouse.http import Server, ServerError
+from poolhouse.hub.peerbook import PeerBook
+from poolhouse.net import git
+from poolhouse.workspace import cli, coordinator, coordinator_client, coordinator_config, tokens
+from poolhouse.workspace.coordination import workspace_id
+from poolhouse.workspace.coordinator_client import Remote
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.taskboard import TaskBoard
 
 
 @pytest.fixture(scope='module')
@@ -46,7 +46,7 @@ def shared(tmp_path, monkeypatch, installed_metadata):
     coordinator_config.save(kit.base, {'mode': 'host', 'workspace': identity})
     runner = JobRunner(tmp_path / 'daemon')
     membership = mint_cluster('default', tmp_path / 'cluster.key')
-    monkeypatch.setenv('ML_STACK_CLUSTER_KEY', str(tmp_path / 'cluster.key'))
+    monkeypatch.setenv('POOLHOUSE_CLUSTER_KEY', str(tmp_path / 'cluster.key'))
     fleet_token = derive_token(membership.key)
     kit.project_dir = tmp_path / 'shared-project'
     kit.project_dir.mkdir()
@@ -68,7 +68,7 @@ def shared(tmp_path, monkeypatch, installed_metadata):
     kit.device = tmp_path / 'windows-device'
     kit.device.mkdir()
     installed_home = tmp_path / 'installed-home'
-    monkeypatch.setenv('ML_STACK_HOME', str(installed_home))
+    monkeypatch.setenv('POOLHOUSE_HOME', str(installed_home))
     certificate = tls.identity(tmp_path / 'tls', 'test-coordinator').beacon
     Devices(installed_home / 'onboard' / 'devices.json')._write([device])
     PeerBook(installed_home / 'onboard' / 'peers.json').add({
@@ -88,8 +88,8 @@ def shared(tmp_path, monkeypatch, installed_metadata):
 
 def test_real_distribution_registration_and_two_roots_share_messages_tasks_claims(shared):
     from importlib.metadata import entry_points
-    assert any(entry.value == 'ml_stack.workspace.coordinator:route'
-               for entry in entry_points(group='ml_stack.peer_routes'))
+    assert any(entry.value == 'poolhouse.workspace.coordinator:route'
+               for entry in entry_points(group='poolhouse.peer_routes'))
     sent = shared.ws.send(shared.alice, 'bob', 'task', 'Inspect shared state')
     assert shared.remote.command(['outbox'], shared.alice)[0]['seq'] == sent['seq']
     spec = {'title': 'Shared task', 'description': 'Read coordinator graph', 'acceptance': ['Exact graph state'],
@@ -151,7 +151,7 @@ def test_person_token_wrong_workspace_bounds_and_plaintext_remote_are_refused(sh
     with pytest.raises(ServerError) as large:
         shared.remote.command(['task-create', 'x' * coordinator.MAX_REQUEST], shared.alice)
     assert large.value.status == 413
-    from ml_stack.fleet.onboard.web import Call
+    from poolhouse.fleet.onboard.web import Call
     request = Call('GET', '/workspace/v1/info', {}, '192.0.2.1', False, lambda _max: b'')
     assert coordinator.answer(shared.ws, request)[0] == 403
     with pytest.raises(Denied):
@@ -173,7 +173,7 @@ def test_existing_invitation_enrolls_remote_agent_without_person_credentials(sha
 def test_declared_cli_arguments_roundtrip_without_credentials(shared):
     sent = shared.ws.send(shared.bob, 'alice', 'status', 'read me')
     args = cli.COMMANDS.parser().parse_args(['ack', str(sent['seq']), '--agent', 'alice', '--request-id', 'a' * 32])
-    from ml_stack.workspace.coordinator_client import argv_for
+    from poolhouse.workspace.coordinator_client import argv_for
     options = next(options for name, _help, options, _fn in cli.TABLE if name == args.cmd)
     argv = argv_for(args, [*cli.COMMON, *options])
     assert '--agent' not in argv and '--token-file' not in argv and '--request-id' not in argv
@@ -188,16 +188,16 @@ def test_installed_cli_on_second_device_reads_shared_state_without_local_fallbac
     spec = {'title': 'Shared CLI task', 'description': 'd', 'acceptance': ['a'], 'project': {}, 'capabilities': [],
             'limits': {}, 'source_key': 'second-device'}
     sent = shared.remote.command(['task-create', json.dumps(spec)], shared.bob)
-    environment = {**{k: v for k, v in os.environ.items() if k != 'ML_STACK_CLUSTER_KEY'}, 'ML_STACK_WORKSPACE_HOME': str(shared.device),
-                   'PYTHONPATH': str(installed_metadata), 'ML_STACK_WORKSPACE_AGENT': agent}
-    result = subprocess.run([sys.executable, '-m', 'ml_stack.workspace.cli', 'tasks', '--json'],
+    environment = {**{k: v for k, v in os.environ.items() if k != 'POOLHOUSE_CLUSTER_KEY'}, 'POOLHOUSE_WORKSPACE_HOME': str(shared.device),
+                   'PYTHONPATH': str(installed_metadata), 'POOLHOUSE_WORKSPACE_AGENT': agent}
+    result = subprocess.run([sys.executable, '-m', 'poolhouse.workspace.cli', 'tasks', '--json'],
                             cwd=shared.project_dir, env=environment, capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)['tasks'][0]['id'] == sent['id']
     registration = shared.ws.registry._load()[agent]
     assert registration['session_device'] == 'd' * 64
     assert registration['project'] == shared.project_scope
-    denied = subprocess.run([sys.executable, '-m', 'ml_stack.workspace.cli', 'init', '--json'],
+    denied = subprocess.run([sys.executable, '-m', 'poolhouse.workspace.cli', 'init', '--json'],
                             cwd=shared.project_dir, env=environment, capture_output=True, text=True, timeout=15)
     assert denied.returncode == 3
     assert not (shared.device / 'agents.json').exists()
@@ -205,7 +205,7 @@ def test_installed_cli_on_second_device_reads_shared_state_without_local_fallbac
 
 @pytest.mark.parametrize('tool', ['workspace_status', 'workspace_inbox', 'workspace_tasks'])
 def test_remote_mcp_never_falls_back_to_local_workspace(tmp_path, monkeypatch, tool):
-    from ml_stack.workspace import tools
+    from poolhouse.workspace import tools
 
     base = clean_env(monkeypatch, tmp_path)
     coordinator_config.save(base, {'mode': 'remote', 'workspace': 'workspace:' + 'a' * 32,
@@ -231,7 +231,7 @@ def test_remote_watchers_refuse_before_opening_a_local_board(tmp_path, monkeypat
     'https://example.org/callback', 'https://example.org?token=secret',
     'https://example.org#authority', '//example.org', 'ftp://example.org'])
 def test_hostile_saved_coordinator_origin_is_refused_before_transport(tmp_path, monkeypatch, endpoint):
-    from ml_stack.workspace import coordinator_client
+    from poolhouse.workspace import coordinator_client
 
     (tmp_path / 'coordinator.json').write_text(json.dumps({
         'version': 1, 'mode': 'remote', 'workspace': 'workspace:' + 'a' * 32, 'endpoint': endpoint}))

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.gguf import (
+from poolhouse.gguf import (
     ADD_SPACE_PREFIX,
     ConversionError,
     ToolNotFound,
@@ -29,8 +29,8 @@ from ml_stack.gguf import (
     tools,
 )
 
-gguf = pytest.importorskip("gguf", reason="ml-stack[gguf]")
-np = pytest.importorskip("numpy", reason="ml-stack[arrays]")
+gguf = pytest.importorskip("gguf", reason="poolhouse[gguf]")
+np = pytest.importorskip("numpy", reason="poolhouse[arrays]")
 
 
 def test_the_unsloth_checkout_is_searched():
@@ -87,7 +87,7 @@ class TestToolDiscovery:
         """An error that only says 'not found' makes the reader go hunting."""
         monkeypatch.delenv("LLAMA_CPP_ROOT", raising=False)
         monkeypatch.delenv("LLAMA_CPP_DIR", raising=False)
-        monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+        monkeypatch.setenv("POOLHOUSE_CACHE", str(tmp_path / "cache"))
 
         with pytest.raises(ToolNotFound) as excinfo:
             require_converter(tmp_path / "absent.py")
@@ -186,13 +186,13 @@ class TestExportVerification:
 
     def test_a_missing_space_prefix_key_is_a_failure_not_a_default(self, sample_gguf):
         """ABSENT is the dangerous state: llama.cpp reads it as TRUE."""
-        from ml_stack.gguf import verify_metadata
+        from poolhouse.gguf import verify_metadata
         r = verify_metadata(sample_gguf)
         assert not r.ok
         assert any("ABSENT" in c.detail for c in r.failures)
 
     def test_it_passes_once_the_key_is_written(self, sample_gguf):
-        from ml_stack.gguf import fix_space_prefix, verify_metadata
+        from poolhouse.gguf import fix_space_prefix, verify_metadata
         fix_space_prefix(sample_gguf)
         r = verify_metadata(sample_gguf)
         assert r.ok, str(r)
@@ -200,14 +200,14 @@ class TestExportVerification:
     def test_a_file_that_does_not_open_fails_the_first_check_and_stops(self, tmp_path):
         bad = tmp_path / "truncated.gguf"
         bad.write_bytes(b"GGUF\x03\x00\x00\x00garbage")
-        from ml_stack.gguf import verify_metadata
+        from poolhouse.gguf import verify_metadata
         r = verify_metadata(bad)
         assert not r.ok
         assert r.checks[0].name == "opens" and not r.checks[0].ok
         assert len(r.checks) == 1, "it kept checking a file it could not read"
 
     def test_the_wrong_value_is_caught_not_just_the_missing_one(self, sample_gguf):
-        from ml_stack.gguf import fix_space_prefix, verify_metadata
+        from poolhouse.gguf import fix_space_prefix, verify_metadata
         fix_space_prefix(sample_gguf, add_space_prefix=True)
         r = verify_metadata(sample_gguf, expect_space_prefix=False)
         assert not r.ok
@@ -237,7 +237,7 @@ class TestExportVerification:
         return _serve, _Client
 
     def test_identical_tokenisation_passes(self, sample_gguf):
-        from ml_stack.gguf import fix_space_prefix, verify_tokenizer_fidelity
+        from poolhouse.gguf import fix_space_prefix, verify_tokenizer_fidelity
         fix_space_prefix(sample_gguf)
         def enc(text):
             return [len(text), 7]
@@ -249,7 +249,7 @@ class TestExportVerification:
 
     def test_a_divergence_is_reported_with_both_sides_and_the_pieces(self, sample_gguf):
         """The whole point: show WHAT differs, or the next step is guesswork."""
-        from ml_stack.gguf import fix_space_prefix, verify_tokenizer_fidelity
+        from poolhouse.gguf import fix_space_prefix, verify_tokenizer_fidelity
         fix_space_prefix(sample_gguf)
         serve, client = self._fake_serving(lambda t: [999, 998])
         r = verify_tokenizer_fidelity(sample_gguf, lambda t: [1, 2], ["<user> go"],
@@ -262,7 +262,7 @@ class TestExportVerification:
     def test_a_leading_bos_from_the_server_is_not_a_divergence(self, sample_gguf):
         """llama.cpp prepends BOS and most reference tokenizers do not. Without
         this every single probe would report a false mismatch."""
-        from ml_stack.gguf import fix_space_prefix, verify_tokenizer_fidelity
+        from poolhouse.gguf import fix_space_prefix, verify_tokenizer_fidelity
         fix_space_prefix(sample_gguf)
         serve, client = self._fake_serving(lambda t: [1, 40, 41])
         r = verify_tokenizer_fidelity(sample_gguf, lambda t: [40, 41], ["x"],
@@ -278,15 +278,15 @@ class TestExportVerification:
             started.append(1)
             raise AssertionError("served a file that cannot be read")
 
-        from ml_stack.gguf import verify_tokenizer_fidelity
+        from poolhouse.gguf import verify_tokenizer_fidelity
         r = verify_tokenizer_fidelity(bad, lambda t: [], ["x"], serve_fn=_serve,
                                       client_cls=object)
         assert not r.ok and not started
 
 
 def test_the_sidecar_beside_a_converted_file_says_which_shape_it_is(tmp_path):
-    from ml_stack.files import version_of
-    from ml_stack.gguf.convert import SIDECAR_VERSION, _describe
+    from poolhouse.files import version_of
+    from poolhouse.gguf.convert import SIDECAR_VERSION, _describe
 
     made = tmp_path / "model-f16.gguf"
     made.write_bytes(b"GGUF" + b"\0" * 64)
@@ -298,7 +298,7 @@ def test_the_sidecar_beside_a_converted_file_says_which_shape_it_is(tmp_path):
 
 
 def test_convert_passes_the_dense_module_flag_to_the_converter(tmp_path):
-    from ml_stack.gguf.convert import convert
+    from poolhouse.gguf.convert import convert
 
     model = tmp_path / "model"
     model.mkdir()

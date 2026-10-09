@@ -10,13 +10,13 @@ import threading
 
 import pytest
 
-from ml_stack.client.health import is_healthy
-from ml_stack.http import Server, trust
+from poolhouse.client.health import is_healthy
+from poolhouse.http import Server, trust
 
 
 def _self_signed(directory) -> tuple[str, str]:
     """A certificate and key for 127.0.0.1, written into ``directory``."""
-    x509 = pytest.importorskip("cryptography.x509", reason="ml-stack[privacy]")
+    x509 = pytest.importorskip("cryptography.x509", reason="poolhouse[privacy]")
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.x509.oid import NameOID

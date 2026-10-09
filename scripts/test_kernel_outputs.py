@@ -119,12 +119,12 @@ class ArtifactOutputs:
     def __init__(self, environment: dict[str, str], *, strict: bool = False):
         import secrets
 
-        from ml_stack.activity.source_snapshot import private_namespace, protected_roots
+        from poolhouse.activity.source_snapshot import private_namespace, protected_roots
         self.roots = protected_roots(environment)
         self.observation_seconds = min(15, float(environment.get("DEV_TEST_WAIT_S", "3600")))
         if not math.isfinite(self.observation_seconds) or self.observation_seconds <= 0:
             raise RuntimeError("test confinement: observation deadline must be finite and positive")
-        self.directory = private_namespace(environment, "ml-stack-test-artifacts-")
+        self.directory = private_namespace(environment, "poolhouse-test-artifacts-")
         self.run_id = secrets.token_hex(32)
         self.sinks = {}
         self.proof = {}

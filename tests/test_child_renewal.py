@@ -3,8 +3,8 @@
 import pytest
 from workspace_kit import Kit
 
-from ml_stack.workspace import child_renewal, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import child_renewal, tokens
+from poolhouse.workspace.identity import Denied
 
 
 def test_parent_renews_same_token_and_identity(tmp_path):

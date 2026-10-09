@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import sandbox
-from ml_stack.sandbox import AllowUnsandboxed, Limits, Net, Policy
-from ml_stack.sandbox.policies import SYSTEM_EXEC
-from ml_stack.sandbox.seatbelt import Seatbelt
+from poolhouse import sandbox
+from poolhouse.sandbox import AllowUnsandboxed, Limits, Net, Policy
+from poolhouse.sandbox.policies import SYSTEM_EXEC
+from poolhouse.sandbox.seatbelt import Seatbelt
 
 
 @pytest.fixture

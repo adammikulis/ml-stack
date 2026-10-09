@@ -1,5 +1,5 @@
 {
-  "$comment": "What one message from an organised group states, read out by a model: the generic shape ml-stack-bench extract scores against a world's truth. A field the message does not give is an empty string, never a guess.",
+  "$comment": "What one message from an organised group states, read out by a model: the generic shape poolhouse-bench extract scores against a world's truth. A field the message does not give is an empty string, never a guess.",
   "type": "object",
   "properties": {
     "people": {

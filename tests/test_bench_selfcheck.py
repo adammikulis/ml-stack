@@ -2,7 +2,7 @@
 
 Everything here is invented: the models are named tiny.gguf and never exist, the community
 is the one that ships with the package, the world is `organisation.make`'s. Nothing reads
-~/.ml-stack, a server or a GPU -- the self-check's own scratch is a temporary directory,
+~/.poolhouse, a server or a GPU -- the self-check's own scratch is a temporary directory,
 and `bench.home_dir()` is pointed at `tmp_path` so `prepared()` cannot find a real store.
 """
 
@@ -12,15 +12,15 @@ import json
 
 import pytest
 
-from ml_stack import bench, hub
-from ml_stack.bench.selfcheck import (
+from poolhouse import bench, hub
+from poolhouse.bench.selfcheck import (
     ScriptedModel,
     ScriptedReader,
     SelfCheckFailed,
     _scratch_world,
     selfcheck,
 )
-from ml_stack.client import Request, Transport
+from poolhouse.client import Request, Transport
 
 # -- the fakes are strict -------------------------------------------------------------------------
 
@@ -134,11 +134,11 @@ def test_a_way_the_client_does_not_take_fails_the_self_check_naming_the_keyword(
 
 
 def test_main_refuses_with_exit_4_before_the_lock_and_before_any_fetch(monkeypatch, capsys):
-    import ml_stack.lock
+    import poolhouse.lock
 
     _broken_ways(monkeypatch)
     locked, fetched = [], []
-    monkeypatch.setattr(ml_stack.lock, "only_one", lambda *a, **k: locked.append(a))
+    monkeypatch.setattr(poolhouse.lock, "only_one", lambda *a, **k: locked.append(a))
     monkeypatch.setattr(bench, "prefetch", lambda refs, **k: fetched.append(refs))
     assert bench.main(["sweep", "--serve", "hf:someone/tiny-GGUF/tiny.gguf",
                        "--also", "terse"]) == 4
@@ -153,8 +153,8 @@ def test_no_selfcheck_skips_it_and_a_passing_one_is_said_before_the_lock(monkeyp
                                                                           tmp_path):
     """The lock is faked to record its call and refuse, so `main` stops right after the
     check either way: with the flag no check ran, without it the ok line came first."""
-    import ml_stack.lock
-    from ml_stack.bench import selfcheck as bench_selfcheck
+    import poolhouse.lock
+    from poolhouse.bench import selfcheck as bench_selfcheck
 
     checked = []
     real = bench_selfcheck.selfcheck
@@ -166,9 +166,9 @@ def test_no_selfcheck_skips_it_and_a_passing_one_is_said_before_the_lock(monkeyp
     monkeypatch.setattr(bench_selfcheck, "selfcheck", counting)
 
     def refusing(*a, **k):
-        raise ml_stack.lock.Busy("held by the test")
+        raise poolhouse.lock.Busy("held by the test")
 
-    monkeypatch.setattr(ml_stack.lock, "only_one", refusing)
+    monkeypatch.setattr(poolhouse.lock, "only_one", refusing)
     argv = ["run", "plain", "--no-prefetch", "--kept", str(tmp_path / "runs.ladybug")]
     assert bench.main([*argv, "--no-selfcheck"]) == 3
     said = capsys.readouterr()
@@ -185,13 +185,13 @@ def test_no_selfcheck_skips_it_and_a_passing_one_is_said_before_the_lock(monkeyp
 
 def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_fails(
         monkeypatch, tmp_path, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     from contextlib import contextmanager
 
-    import ml_stack.client
-    import ml_stack.serve
-    from ml_stack.bench import extract as bx
-    from ml_stack.serve import ServerInfo
+    import poolhouse.client
+    import poolhouse.serve
+    from poolhouse.bench import extract as bx
+    from poolhouse.serve import ServerInfo
 
     loads, readers = [], []
 
@@ -205,8 +205,8 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
         loads.append(model)
         yield ServerInfo(base_url="http://127.0.0.1:1", port=1, pid=None, backend="fake")
 
-    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
-    monkeypatch.setattr(ml_stack.client, "Client", Watched)
+    monkeypatch.setattr(poolhouse.serve, "serve", fake_serve)
+    monkeypatch.setattr(poolhouse.client, "Client", Watched)
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url, "model": "tiny.gguf"})
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     world = _scratch_world(tmp_path / "world")
@@ -225,7 +225,7 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
         def chat(self, messages, **kw):
             raise RuntimeError("the served model answers nothing")
 
-    monkeypatch.setattr(ml_stack.client, "Client", Failing)
+    monkeypatch.setattr(poolhouse.client, "Client", Failing)
     with pytest.raises(bench.SmokeFailed, match="every question failed"):
         bench._main(["extract", "again", "--world", str(world), "--serve", "tiny.gguf",
                      "--sample", "5", "--kept", str(kept)])
@@ -233,7 +233,7 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
         "the smoke was kept; the sample never ran"
 
     # --no-smoke: the sample alone
-    monkeypatch.setattr(ml_stack.client, "Client", Watched)
+    monkeypatch.setattr(poolhouse.client, "Client", Watched)
     assert bench._main(["extract", "alone", "--world", str(world), "--serve", "tiny.gguf",
                         "--sample", "5", "--kept", str(kept), "--no-smoke"]) == 0
     assert [len(r["rows"]) for r in bench.runs(kept, "alone")] == [5]
@@ -250,8 +250,8 @@ def test_the_real_preflight_runs_over_the_spec_the_run_builds_and_the_argv_is_bu
     spec `served` builds -- a head named by hf: file, a draft length, a quantised cache --
     and `command()` builds the argv for real, twice: in the flags check on the reference's
     stand-in, and in the served fake on the head as `start()` would have fetched it."""
-    from ml_stack.serve import preflight
-    from ml_stack.serve.backend import LlamaServerBackend
+    from poolhouse.serve import preflight
+    from poolhouse.serve.backend import LlamaServerBackend
 
     checked, built = [], []
     real_flags = preflight._flags_check
@@ -286,9 +286,9 @@ def test_yesterdays_bug_put_back_fails_the_self_check_naming_the_reference(monke
     """A flags check that builds the argv on the raw spec, where `command()` refuses a head
     still named by hf: file. The self-check fails and says which reference, rather than
     saying ok over a preflight that never ran."""
-    from ml_stack.serve import preflight
-    from ml_stack.serve.backend import LlamaServerBackend
-    from ml_stack.serve.preflight import Check
+    from poolhouse.serve import preflight
+    from poolhouse.serve.backend import LlamaServerBackend
+    from poolhouse.serve.preflight import Check
 
     def raw(spec, binary, **_):
         LlamaServerBackend(binary=binary).command(spec)
@@ -302,8 +302,8 @@ def test_yesterdays_bug_put_back_fails_the_self_check_naming_the_reference(monke
 
 
 def test_a_check_that_refuses_fails_the_self_check_with_the_report(monkeypatch):
-    from ml_stack.serve import preflight
-    from ml_stack.serve.preflight import Check
+    from poolhouse.serve import preflight
+    from poolhouse.serve.preflight import Check
 
     monkeypatch.setattr(preflight, "_fit_check",
                         lambda *a, **k: Check("fit", False, "selfcheck test: does not fit"))
@@ -318,17 +318,17 @@ def test_the_shapes_that_died_in_the_preflight_pass_and_read_nothing(monkeypatch
     """The two command lines of 2026-09-02, and a model whose file is nowhere: the facts
     say the shards are present, the header is a dense model the build reads, every flag
     is accepted -- and nothing asks the disk, the Hub or a build's --help for any of it."""
-    import ml_stack.hub
-    import ml_stack.setup
-    from ml_stack.serve import backend, preflight
+    import poolhouse.hub
+    import poolhouse.setup
+    from poolhouse.serve import backend, preflight
 
     def never(*a, **k):
         raise AssertionError("the self-check reached a real reader")
 
-    monkeypatch.setattr(ml_stack.hub, "files", never)
+    monkeypatch.setattr(poolhouse.hub, "files", never)
     monkeypatch.setattr(preflight, "_local_index", never)
     monkeypatch.setattr(preflight, "read_gguf_header", never)
-    monkeypatch.setattr(ml_stack.setup, "_arches", never)
+    monkeypatch.setattr(poolhouse.setup, "_arches", never)
     monkeypatch.setattr(backend, "flags_of", never)
 
     said = selfcheck(["drafts", "tiny.gguf", "--draft", "hf:someone/tiny-GGUF/MTP/head.gguf",
@@ -346,7 +346,7 @@ def test_a_raw_serve_arg_passes_the_self_check_for_the_real_preflight_to_judge(t
     """`--serve-arg=-ub --serve-arg=2048`: the stand-in build cannot know a raw flag, so the
     self-check takes the person's word for it and the real preflight checks it against the
     real binary. Every knob sweep failed here before (2026-09-02)."""
-    from ml_stack.bench.selfcheck import selfcheck
+    from poolhouse.bench.selfcheck import selfcheck
 
     said = selfcheck(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke",
                       "--serve-arg=-ub", "--serve-arg=2048", "--serve-mlock",
@@ -356,13 +356,13 @@ def test_a_raw_serve_arg_passes_the_self_check_for_the_real_preflight_to_judge(t
 
 def test_a_fleet_sweep_passes_the_self_check_on_the_line_a_peer_would_run(monkeypatch, capsys,
                                                                          tmp_path):
-    import ml_stack.lock
-    from ml_stack.bench import ops
+    import poolhouse.lock
+    from poolhouse.bench import ops
 
     def taken(*a, **k):
         raise AssertionError("a fleet sweep took the measuring lock before dispatching")
 
-    monkeypatch.setattr(ml_stack.lock, "only_one", taken)
+    monkeypatch.setattr(poolhouse.lock, "only_one", taken)
     monkeypatch.setattr(ops, "fleet_planned", lambda *a, **k: ops.Fleeted())
     assert bench.main(["sweep", "--fleet", "--peers", "box", "--serve", "tiny.gguf", "--smoke",
                        "--kept", str(tmp_path / "runs.ladybug")]) == 0

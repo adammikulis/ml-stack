@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from ml_stack.fleet import shard_run, shard_tree
+from poolhouse.fleet import shard_run, shard_tree
 
 
 def packed(payload: bytes) -> tuple[bytes, str]:

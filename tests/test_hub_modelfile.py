@@ -9,16 +9,16 @@ import time
 
 import pytest
 
-from ml_stack.hub import header, in_gguf
-from ml_stack.hub.modelfile import (
+from poolhouse.hub import header, in_gguf
+from poolhouse.hub.modelfile import (
     Limits,
     NotAModelFile,
     safetensors_header,
     scan_gguf,
 )
-from ml_stack.serve.mlx_tree import resident_bytes
-from ml_stack.serve.preflight import read_gguf_header
-from ml_stack.serve.tensors import tensors_of
+from poolhouse.serve.mlx_tree import resident_bytes
+from poolhouse.serve.preflight import read_gguf_header
+from poolhouse.serve.tensors import tensors_of
 
 STRING, ARRAY = 8, 9
 U8, U32, F32 = 0, 4, 6
@@ -252,7 +252,7 @@ def test_the_resident_size_of_a_model_directory_uses_the_bounded_reader(tmp_path
 
 
 def test_the_gguf_package_is_not_handed_a_header_that_lies(tmp_path):
-    from ml_stack.gguf.vocab import read_metadata, set_metadata
+    from poolhouse.gguf.vocab import read_metadata, set_metadata
 
     path = gguf(tmp_path, s("k") + i(ARRAY) + i(U8) + q(2**50), kv=1)
     with pytest.raises(NotAModelFile, match="more than the file holds"):

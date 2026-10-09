@@ -1,7 +1,7 @@
 """No test reaches a paid API or a public endpoint unless a person switched it on.
 
 A ``live_api`` or ``live_net`` mark is the only way in, the mark is skipped without its
-``ML_STACK_*`` switch, a credential in the environment switches nothing on, and every other
+``POOLHOUSE_*`` switch, a credential in the environment switches nothing on, and every other
 test is refused a connection beyond this machine and its LAN.
 """
 
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.testing import live
+from poolhouse.testing import live
 
 TESTS = Path(__file__).resolve().parent
 MARKS = {"live_api", "live_net"}

@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import project_client, wsl_network
-from ml_stack.http import Sealed, ServerError
-from ml_stack.workspace import remote, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse.fleet import project_client, wsl_network
+from poolhouse.http import Sealed, ServerError
+from poolhouse.workspace import remote, tokens
+from poolhouse.workspace.identity import Denied
 
 
 @pytest.fixture

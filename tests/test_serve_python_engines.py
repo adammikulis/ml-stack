@@ -6,11 +6,11 @@ import sys
 
 import pytest
 
-from ml_stack.serve import ServerManager, ServerSpec
-from ml_stack.serve.backend import ServerFailed
-from ml_stack.serve.ports import free_port
-from ml_stack.serve.process import pid_exists
-from ml_stack.serve.python_engines import ENGINES, SGLangBackend, VllmBackend
+from poolhouse.serve import ServerManager, ServerSpec
+from poolhouse.serve.backend import ServerFailed
+from poolhouse.serve.ports import free_port
+from poolhouse.serve.process import pid_exists
+from poolhouse.serve.python_engines import ENGINES, SGLangBackend, VllmBackend
 
 
 def test_each_engine_builds_its_own_server_command():
@@ -38,7 +38,7 @@ def test_an_engine_server_is_leased_recorded_and_released(tmp_path, monkeypatch)
     engine.write_text(
         "import sys\n"
         "from http.server import BaseHTTPRequestHandler\n"
-        "from ml_stack.http import Server\n"
+        "from poolhouse.http import Server\n"
         "class H(BaseHTTPRequestHandler):\n"
         "    def do_GET(self):\n"
         "        self.send_response(200); self.end_headers(); self.wfile.write(b'{}')\n"

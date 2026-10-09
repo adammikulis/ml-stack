@@ -16,8 +16,8 @@ import land_finish
 import land_git as lg
 import land_run
 
-from ml_stack import lock as filelock
-from ml_stack.activity.gate import tree_hash
+from poolhouse import lock as filelock
+from poolhouse.activity.gate import tree_hash
 
 PUSH_TRIES = 3
 INTEGRATION = "land/"

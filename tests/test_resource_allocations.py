@@ -4,9 +4,9 @@ from dataclasses import replace
 import pytest
 from workspace_kit import Kit
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import device_agent, localagent, resource_allocations as resources, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import device_agent, localagent, resource_allocations as resources, tokens
+from poolhouse.workspace.identity import Denied
 
 
 def test_shared_managed_holder_allowed_but_changed_grant_denied(tmp_path, monkeypatch):

@@ -8,24 +8,24 @@ import re
 import pytest
 from taskboard_kit import board as _board_fixture
 
-from ml_stack import authority, chatpolicy
-from ml_stack.net import cli as net_cli
-from ml_stack.person import HumanRequired
-from ml_stack.sentinel import human
-from ml_stack.serve import wired, wired_apply
-from ml_stack.workspace import authority_cli, enforcement
-from ml_stack.workspace.identity import Denied
+from poolhouse import authority, chatpolicy
+from poolhouse.net import cli as net_cli
+from poolhouse.person import HumanRequired
+from poolhouse.sentinel import human
+from poolhouse.serve import wired, wired_apply
+from poolhouse.workspace import authority_cli, enforcement
+from poolhouse.workspace.identity import Denied
 
 board = _board_fixture
-LEAD = {"CLAUDECODE": "1", "ML_STACK_WORKSPACE_AGENT": "claude-code"}
+LEAD = {"CLAUDECODE": "1", "POOLHOUSE_WORKSPACE_AGENT": "claude-code"}
 
 
 @pytest.fixture(autouse=True)
 def registry(monkeypatch, tmp_path):
     monkeypatch.delenv(authority.FLOOR_ENV, raising=False)
-    for name in (*authority.DELEGATING, "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_AGENT"):
+    for name in (*authority.DELEGATING, "POOLHOUSE_NONINTERACTIVE", "POOLHOUSE_WORKSPACE_AGENT"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
 
 
 def uses():
@@ -92,10 +92,10 @@ def test_a_delegated_gate_passes_a_lead_agent_and_audits_each_use():
 
 
 def test_a_delegated_gate_refuses_helpers_and_unattended_processes():
-    for env in ({**LEAD, "ML_STACK_WORKSPACE_AGENT": "claude-code/reader"},):
+    for env in ({**LEAD, "POOLHOUSE_WORKSPACE_AGENT": "claude-code/reader"},):
         with pytest.raises(HumanRequired, match="not a helper"):
             authority.require("sentinel.policy", "mode", (False, False), env)
-    for env in ({}, {"ML_STACK_NONINTERACTIVE": "1"}):
+    for env in ({}, {"POOLHOUSE_NONINTERACTIVE": "1"}):
         with pytest.raises(HumanRequired):
             authority.require("sentinel.policy", "mode", (False, False), env)
     assert not uses()
@@ -163,7 +163,7 @@ def test_the_keystore_stays_a_person_s_whatever_the_registry_says(monkeypatch, c
 
 
 def test_the_cluster_passphrase_stays_a_person_s(monkeypatch, capsys):
-    from ml_stack.fleet import recovery
+    from poolhouse.fleet import recovery
     authority.set_state(["ALL"], authority.DELEGATED, by="lead")
     monkeypatch.setenv("CLAUDECODE", "1")
     args = argparse.Namespace(cmd="passphrase", group="", cluster_key=None)

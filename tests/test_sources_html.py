@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import ingest
-from ml_stack.sources import html, pdf, units
-from ml_stack.web import Refused
+from poolhouse import ingest
+from poolhouse.sources import html, pdf, units
+from poolhouse.web import Refused
 
 XML = """<?xml version="1.0" encoding="UTF-8"?>
 <statute>
@@ -90,7 +90,7 @@ def test_unit_where_carries_the_url():
 
 
 def test_reader_for_picks_the_reader_by_suffix(tmp_path, monkeypatch):
-    from ml_stack.sources import html as html_module, pdf as pdf_module
+    from poolhouse.sources import html as html_module, pdf as pdf_module
 
     seen = []
     monkeypatch.setattr(html_module, "read", lambda where, **kw: seen.append(("html", where)))
@@ -113,10 +113,10 @@ def test_reader_for_picks_the_reader_by_suffix(tmp_path, monkeypatch):
 
 
 def test_reader_for_fetches_a_url_and_dispatches_on_what_came_down(tmp_path, monkeypatch):
-    import ml_stack.http as http
-    import ml_stack.media.download as download
+    import poolhouse.http as http
+    import poolhouse.media.download as download
 
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(http, "check", lambda url: url)
 
     fetched = []
@@ -252,9 +252,9 @@ def test_a_source_is_re_read_with_the_marks_it_was_read_with(tmp_path):
     """`sources_for` re-reads a document; other marks would mint other unit ids."""
     from dataclasses import asdict
 
-    from ml_stack.ingest.judge import sources_for
-    from ml_stack.ingest.progress import Progress
-    from ml_stack.sources import units as source_units
+    from poolhouse.ingest.judge import sources_for
+    from poolhouse.ingest.progress import Progress
+    from poolhouse.sources import units as source_units
 
     statute = tmp_path / "act.xml"
     statute.write_text(STATUTE)
@@ -273,9 +273,9 @@ def test_a_source_is_re_read_with_the_marks_it_was_read_with(tmp_path):
 
 
 def test_a_source_recorded_without_marks_is_still_re_read(tmp_path):
-    from ml_stack.ingest.judge import sources_for
-    from ml_stack.ingest.progress import Progress
-    from ml_stack.sources import units as source_units
+    from poolhouse.ingest.judge import sources_for
+    from poolhouse.ingest.progress import Progress
+    from poolhouse.sources import units as source_units
 
     page = tmp_path / "plain.xml"
     page.write_text(XML)
@@ -319,7 +319,7 @@ class TestNamingADocument:
     def test_a_slug_and_a_title_given_are_what_the_document_is_read_under(self):
         import argparse
 
-        from ml_stack.ingest.run import _named
+        from poolhouse.ingest.run import _named
 
         document = self.document()
         _named(argparse.Namespace(slug="cfr-10-50", title="10 CFR Part 50"), document, 1)
@@ -328,7 +328,7 @@ class TestNamingADocument:
     def test_the_markup_still_wins_when_neither_is_given(self):
         import argparse
 
-        from ml_stack.ingest.run import _named
+        from poolhouse.ingest.run import _named
 
         document = self.document()
         _named(argparse.Namespace(slug="", title=""), document, 1)
@@ -337,7 +337,7 @@ class TestNamingADocument:
     def test_naming_one_document_in_a_run_over_several_is_refused(self, capsys):
         import argparse
 
-        from ml_stack.ingest.run import _named
+        from poolhouse.ingest.run import _named
 
         document = self.document()
         _named(argparse.Namespace(slug="a-slug", title=""), document, 3)
@@ -347,7 +347,7 @@ class TestNamingADocument:
 
 def test_the_page_declares_its_encoding():
     """Opened from disk there is no server to say; the page carries arrows and dashes."""
-    from ml_stack.graph.page import template
+    from poolhouse.graph.page import template
 
     shell = template()
     assert 'charset="utf-8"' in shell.lower()
@@ -359,10 +359,10 @@ def test_a_source_is_re_read_under_the_slug_it_was_read_under(tmp_path):
     title mints other ids and every quote behind a citation comes back empty."""
     from dataclasses import asdict
 
-    from ml_stack.ingest.judge import sources_for
-    from ml_stack.ingest.progress import Progress
-    from ml_stack.ingest.run import _named
-    from ml_stack.sources import units as source_units
+    from poolhouse.ingest.judge import sources_for
+    from poolhouse.ingest.progress import Progress
+    from poolhouse.ingest.run import _named
+    from poolhouse.sources import units as source_units
 
     statute = tmp_path / "act.xml"
     statute.write_text(STATUTE)

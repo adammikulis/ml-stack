@@ -1,4 +1,4 @@
-"""Every package and top-level module under src/ml_stack has a caller, a command, or a reason."""
+"""Every package and top-level module under src/poolhouse has a caller, a command, or a reason."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SRC = REPO / "src" / "ml_stack"
+SRC = REPO / "src" / "poolhouse"
 
 STANDALONE = {
-    "coding": "called by the workspace runner as ml_stack.coding.launch_coding_agent",
-    "datasheet": "loaded by name as python:ml_stack.datasheet:tools, never imported",
-    "device_setup": "run as python -m ml_stack.device_setup on a device that has no install yet, never imported",
-    "redteam": "run as python -m ml_stack.redteam, never imported",
-    "web": "loaded by name as python:ml_stack.web:tools, never imported",
+    "coding": "called by the workspace runner as poolhouse.coding.launch_coding_agent",
+    "datasheet": "loaded by name as python:poolhouse.datasheet:tools, never imported",
+    "device_setup": "run as python -m poolhouse.device_setup on a device that has no install yet, never imported",
+    "redteam": "run as python -m poolhouse.redteam, never imported",
+    "web": "loaded by name as python:poolhouse.web:tools, never imported",
 }
 
 
@@ -42,13 +42,13 @@ def _imported_by(path: Path) -> set[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError, UnicodeDecodeError):
         return set()
-    package = ["ml_stack", *path.relative_to(SRC).parts[:-1]]
+    package = ["poolhouse", *path.relative_to(SRC).parts[:-1]]
     out: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 parts = alias.name.split(".")
-                if parts[0] == "ml_stack" and len(parts) > 1:
+                if parts[0] == "poolhouse" and len(parts) > 1:
                     out.add(parts[1])
         elif isinstance(node, ast.ImportFrom):
             if node.level:
@@ -56,7 +56,7 @@ def _imported_by(path: Path) -> set[str]:
                 parts = base + (node.module.split(".") if node.module else [])
             else:
                 parts = (node.module or "").split(".")
-            if parts[:1] != ["ml_stack"]:
+            if parts[:1] != ["poolhouse"]:
                 continue
             if len(parts) > 1:
                 out.add(parts[1])
@@ -82,7 +82,7 @@ def _commands() -> set[str]:
     out = set()
     for target in data.get("project", {}).get("scripts", {}).values():
         parts = target.split(":")[0].split(".")
-        if parts[:1] == ["ml_stack"] and len(parts) > 1:
+        if parts[:1] == ["poolhouse"] and len(parts) > 1:
             out.add(parts[1])
     return out
 
@@ -96,7 +96,7 @@ def test_piece_is_wired_in(name: str) -> None:
     if name in CALLERS or name in COMMANDS or name in STANDALONE:
         return
     pytest.fail(
-        f"ml_stack.{name} is imported by nothing in src/ml_stack, backs no console script, "
+        f"poolhouse.{name} is imported by nothing in src/poolhouse, backs no console script, "
         f"and is not in STANDALONE. Wire it in, give it a command, or name it in STANDALONE "
         f"in tests/test_wiring.py with a one-line reason."
     )

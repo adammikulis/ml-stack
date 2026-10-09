@@ -1,6 +1,6 @@
 # Compaction
 
-`ml_stack.agent` keeps a conversation inside the model's context. It counts what the
+`poolhouse.agent` keeps a conversation inside the model's context. It counts what the
 conversation takes, and when it gets close to the limit it shrinks the oldest part, writes what
 it removed to a file, and carries on.
 
@@ -9,7 +9,7 @@ it removed to a file, and carries on.
 `context_usage(messages, tools, context_size, count=Counter(client))` returns the tokens used,
 the limit and the fraction. `Counter(client)` asks the server's `/tokenize`, so llama-server's
 own tokenizer does the counting; each distinct text is counted once. With no reachable server it
-falls back to `ml_stack.client.tokens` scaled by the characters-per-token ratio of whatever the
+falls back to `poolhouse.client.tokens` scaled by the characters-per-token ratio of whatever the
 server did count, and by a 15% margin when nothing was counted. Each message adds 4 tokens for
 its role markers, and the tool schemas count as one block. The limit is `Compaction.context_size`
 or the per-slot `n_ctx` in the server's `/props`.
@@ -59,13 +59,13 @@ Cancelling the task that drives `run` or `compact_now` leaves the message list a
 list is replaced only when a compaction has finished.
 
 `Compacting(client, Compaction(...), on_event=...)` wraps any client with a `chat` method and
-compacts the `messages` it is handed before each call. `ml-stack-chat` uses it
+compacts the `messages` it is handed before each call. `poolhouse-chat` uses it
 (`--no-compact` turns it off, `--context-size N` sets the window). The MCP tool `conversation_compact` fits a chat saved as JSON.
 
 ## The transcript
 
 Every removal and every cut result is appended to a JSONL file under
-`$ML_STACK_HOME/compaction/` (`Transcript`, one file per conversation). Each line has `n`, `ts`,
+`$POOLHOUSE_HOME/compaction/` (`Transcript`, one file per conversation). Each line has `n`, `ts`,
 `kind` (`summarised`, `superseded`, `truncated`, `elided`) and the `messages` or `text`.
 `Transcript.fetch("<file>#<n>")` returns a line, which is how an elided result is read in full.
 
@@ -76,5 +76,5 @@ add; compacting to 50% leaves half the window free, so the next compaction is ma
 rather than one. Every compaction rewrites the conversation after the system prompt, so
 llama-server reuses its cached prefix only up to the end of the system messages and tool
 schemas; the summary sits directly after them, and stays byte-identical until the next
-compaction. A KV dump taken with `ml-stack-serve slots save` before a compaction holds the old
+compaction. A KV dump taken with `poolhouse-serve slots save` before a compaction holds the old
 prefix, so save again afterwards.

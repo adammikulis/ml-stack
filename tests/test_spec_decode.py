@@ -10,25 +10,25 @@ from collections.abc import Sequence
 
 import pytest
 
-mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
+mx = pytest.importorskip("mlx.core", reason="poolhouse[spec]")
 pytest.importorskip("mlx_lm.models.qwen3_5",
-                    reason="qwen3_5 arrived in mlx-lm 0.31.3: pip install 'ml-stack[spec]'")
+                    reason="qwen3_5 arrived in mlx-lm 0.31.3: pip install 'poolhouse[spec]'")
 
 from mlx_lm.generate import generate_step  # noqa: E402
 from mlx_lm.models import qwen3_5  # noqa: E402
 from mlx_lm.models.gated_delta import compute_g, gated_delta_update  # noqa: E402
 
-from ml_stack.spec import deltanet  # noqa: E402
-from ml_stack.spec.decode import Asked, Session, decode  # noqa: E402
-from ml_stack.spec.drafters import Budget  # noqa: E402
-from ml_stack.spec.drafters.dflash import DFlashDrafter  # noqa: E402
-from ml_stack.spec.drafters.dflash_model import DFlashConfig, DFlashDraftModel  # noqa: E402
-from ml_stack.spec.drafters.mtp import Beam, MtpDrafter, MtpHead  # noqa: E402
-from ml_stack.spec.drafters.ngram import NgramDrafter  # noqa: E402
-from ml_stack.spec.layout import layout_for  # noqa: E402
-from ml_stack.spec.sample import Sampling, sample_rows  # noqa: E402
-from ml_stack.spec.tree import Tree  # noqa: E402
-from ml_stack.spec.verify import TreeVerifier  # noqa: E402
+from poolhouse.spec import deltanet  # noqa: E402
+from poolhouse.spec.decode import Asked, Session, decode  # noqa: E402
+from poolhouse.spec.drafters import Budget  # noqa: E402
+from poolhouse.spec.drafters.dflash import DFlashDrafter  # noqa: E402
+from poolhouse.spec.drafters.dflash_model import DFlashConfig, DFlashDraftModel  # noqa: E402
+from poolhouse.spec.drafters.mtp import Beam, MtpDrafter, MtpHead  # noqa: E402
+from poolhouse.spec.drafters.ngram import NgramDrafter  # noqa: E402
+from poolhouse.spec.layout import layout_for  # noqa: E402
+from poolhouse.spec.sample import Sampling, sample_rows  # noqa: E402
+from poolhouse.spec.tree import Tree  # noqa: E402
+from poolhouse.spec.verify import TreeVerifier  # noqa: E402
 
 PROMPT = [5, 7, 11, 13, 17, 19, 23, 29]
 

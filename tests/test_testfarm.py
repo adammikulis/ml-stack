@@ -24,10 +24,10 @@ import pytest
 import test_on
 from testfarm_tree import MARKERS, make_tree
 
-from ml_stack import features
-from ml_stack.fleet import shard_exec, shard_spec, shard_split, shard_tree
-from ml_stack.testfarm import consent, devices, ledger, report
-from ml_stack.testfarm.client import ShardError
+from poolhouse import features
+from poolhouse.fleet import shard_exec, shard_spec, shard_split, shard_tree
+from poolhouse.testfarm import consent, devices, ledger, report
+from poolhouse.testfarm.client import ShardError
 
 ROOT = Path(__file__).resolve().parents[1]
 ID = "ab" * 16
@@ -35,7 +35,7 @@ ID = "ab" * 16
 
 def run_executor(folder: Path, env: dict | None = None) -> tuple[int, dict]:
     """Start the executor on ``folder`` the way the node does; its exit status and ``result.json``."""
-    code = "import sys; sys.path.insert(0, sys.argv[1]); from ml_stack.fleet.shard_exec import run; raise SystemExit(run(sys.argv[2]))"
+    code = "import sys; sys.path.insert(0, sys.argv[1]); from poolhouse.fleet.shard_exec import run; raise SystemExit(run(sys.argv[2]))"
     base = {k: v for k, v in os.environ.items() if k not in MARKERS and k != "PYTHONPATH"}
     done = subprocess.run([sys.executable, "-E", "-c", code, str(ROOT / "src"), str(folder)], env={**base, **(env or {})},
                           capture_output=True, text=True, timeout=120, check=False)
@@ -98,7 +98,7 @@ def test_the_gate_runs_with_no_files_and_reports_its_own_words(tmp_path):
 
 
 def test_no_agent_marker_and_no_credential_reaches_the_runner(tmp_path):
-    leaked = dict.fromkeys(MARKERS, "1") | {"ML_STACK_SHARD_TOKEN": "secret", "OPENAI_API_KEY": "sk-x"}
+    leaked = dict.fromkeys(MARKERS, "1") | {"POOLHOUSE_SHARD_TOKEN": "secret", "OPENAI_API_KEY": "sk-x"}
     code, result = run_executor(job(tmp_path, files=["tests/test_a.py"]), env=leaked)
     assert code == 0 and result["failures"] == [], result["failures"]
 
@@ -250,12 +250,12 @@ def test_the_tiers_a_node_accepts_are_the_ones_the_runner_has():
 
 
 def test_nothing_is_sent_or_taken_until_the_experimental_feature_is_on(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path))
     args = argparse.Namespace(tier="all", on="somewhere", split=False, base="main", timeout=60.0)
     assert test_on.main(args, ["tests/test_a.py"], ROOT, lambda tier, file: [], True) == 4
     assert "experimental feature" in capsys.readouterr().err
     assert features.enabled(consent.FEATURE) is False and consent.run(["on"]) == 1
-    assert "ml-stack features enable remote-tests" in capsys.readouterr().out
+    assert "poolhouse features enable remote-tests" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("words", [[], ["allow"], ["deny"], ["on", "--from"], ["on", "--from", "--python"], ["off", "--from", "mac"], ["status", "mac"],

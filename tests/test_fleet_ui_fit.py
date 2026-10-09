@@ -2,7 +2,7 @@
 
 Nothing here reads a real measurement. The autouse fixture points both halves of the
 source of truth at ``tmp_path`` -- ``package_file`` is a function so it can be replaced,
-and the machine's own half moves with ``$MLSTACK_FIT_FILE`` -- and fills the shipped half
+and the machine's own half moves with ``$POOLHOUSE_FIT_FILE`` -- and fills the shipped half
 with invented models whose numbers are round enough to check by hand. ``hub.room`` is
 replaced too, so no test depends on the machine it runs on.
 
@@ -24,10 +24,10 @@ import threading
 
 import pytest
 
-from ml_stack.fleet.ui import asset_bytes, serve_page
-from ml_stack.http import ServerError, open_stream
-from ml_stack.serve import charts, fit as fit_mod
-from ml_stack.serve.fit import Fit
+from poolhouse.fleet.ui import asset_bytes, serve_page
+from poolhouse.http import ServerError, open_stream
+from poolhouse.serve import charts, fit as fit_mod
+from poolhouse.serve.fit import Fit
 
 GIB = 1024 ** 3
 ROOM = 96 * GIB
@@ -66,7 +66,7 @@ class Page:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def call(self, path: str, *, ui_header: bool = True) -> tuple[int, dict, str]:
-        headers = {"X-ML-Stack-UI": "1"} if ui_header else {}
+        headers = {"X-Poolhouse-UI": "1"} if ui_header else {}
         try:
             with open_stream(f"http://127.0.0.1:{self.port}{path}", headers=headers, timeout=10) as response:
                 raw, status, kind = response.read(), response.status, response.headers.get("Content-Type", "")
@@ -94,7 +94,7 @@ def page():
 # -- the page ----------------------------------------------------------------------------
 class TestThePage:
     def test_it_ships_with_the_package(self):
-        from ml_stack.fleet.page import COMPONENTS_DIR
+        from poolhouse.fleet.page import COMPONENTS_DIR
 
         assert (COMPONENTS_DIR / "fit-view.html").is_file(), "fit-view is missing"
 
@@ -110,7 +110,7 @@ class TestThePage:
         assert status == 200 and kind.startswith("text/html")
 
     def test_a_machine_running_no_daemon_gets_the_fit_view_alone(self, page):
-        """`ml-stack-serve fit --ui` puts up the page with no cluster behind it, so it is
+        """`poolhouse-serve fit --ui` puts up the page with no cluster behind it, so it is
         assembled without the screens that would ask one questions."""
         _, got, _ = page.call("/ui/fit")
         assert "<fit-view>" in got["raw"]
@@ -135,8 +135,8 @@ class TestThePage:
                                  "telemetry-view"])
     def test_the_script_parses(self, tmp_path, name):
         """A duplicate declaration anywhere in it stops the whole page loading."""
-        from ml_stack.fleet.page import COMPONENTS_DIR
-        from ml_stack.ui import load
+        from poolhouse.fleet.page import COMPONENTS_DIR
+        from poolhouse.ui import load
 
         node = shutil.which("node")
         if node is None:
@@ -154,13 +154,13 @@ class TestTheSplitBetweenTheFitComponents:
     NAMES = ("fit-model", "fit-view", "fit-charts", "rates-view", "telemetry-view")
 
     def read(self, name: str) -> str:
-        from ml_stack.fleet.page import COMPONENTS_DIR
+        from poolhouse.fleet.page import COMPONENTS_DIR
 
         return (COMPONENTS_DIR / f"{name}.html").read_text(encoding="utf-8")
 
     def test_every_piece_ships_with_the_package(self):
         for name in self.NAMES:
-            from ml_stack.fleet.page import COMPONENTS_DIR
+            from poolhouse.fleet.page import COMPONENTS_DIR
 
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
@@ -216,11 +216,11 @@ class TestTheSplitBetweenTheFitComponents:
             page.locator('#nav-guide').click()
             expect(page.locator('#nav-demo')).to_be_visible()
             expect(page.locator('.demo-slice')).to_have_count(10)
-            page.screenshot(path='/private/tmp/poolside-demo-guide.png', full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-demo-guide.png', full_page=True)
             page.locator('.demo-slice').filter(has_text='Fine-tune a model').click()
             assert page.url.endswith('#training')
             expect(page.locator('training-view > section.workspace')).to_be_visible()
-            page.screenshot(path='/private/tmp/poolside-training-shell.png', full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-training-shell.png', full_page=True)
             page.set_viewport_size({'width':390,'height':844})
             page.locator('#nav-guide').click()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
@@ -285,7 +285,7 @@ class TestTheSlotCountIsWorkedOutOnce:
     PEOPLE = (1, 2, 7, 64, 1000)
 
     def component(self) -> str:
-        from ml_stack.fleet.page import COMPONENTS_DIR
+        from poolhouse.fleet.page import COMPONENTS_DIR
 
         return (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
 
@@ -343,8 +343,8 @@ class TestTheCliFlag:
         called with the URL before `serve_forever`, so it fetches the page from a thread
         and then stops the server, which is what a Ctrl-C would have done.
         """
-        from ml_stack.fleet import ui as ui_mod
-        from ml_stack.serve import cli
+        from poolhouse.fleet import ui as ui_mod
+        from poolhouse.serve import cli
 
         made: dict = {}
         real = ui_mod.serve_page
@@ -359,9 +359,9 @@ class TestTheCliFlag:
             seen["url"] = str(where)
 
             def visit():
-                with open_stream(str(where), headers={"X-ML-Stack-UI": "1"}, timeout=10) as r:
+                with open_stream(str(where), headers={"X-Poolhouse-UI": "1"}, timeout=10) as r:
                     seen["status"], seen["page"] = r.status, r.read().decode()
-                with open_stream(str(where) + ".json", headers={"X-ML-Stack-UI": "1"}, timeout=10) as r:
+                with open_stream(str(where) + ".json", headers={"X-Poolhouse-UI": "1"}, timeout=10) as r:
                     seen["records"] = json.loads(r.read())["records"]
                 made["server"].shutdown()
 
@@ -369,7 +369,7 @@ class TestTheCliFlag:
             return "open"
 
         monkeypatch.setattr(ui_mod, "serve_page", watched)
-        monkeypatch.setattr("ml_stack.platform.open_path", opened)
+        monkeypatch.setattr("poolhouse.platform.open_path", opened)
 
         assert cli.main(["fit", "--ui"]) == 0
         assert seen["status"] == 200 and "What fits" in seen["page"]
@@ -381,7 +381,7 @@ class TestTheCliFlag:
     def test_the_flag_is_parsed_not_merely_handled(self):
         """A flag argparse has not been told about is a flag argparse refuses, however
         carefully `cmd_fit` reads for it."""
-        from ml_stack.serve import cli
+        from poolhouse.serve import cli
 
         parser = cli.COMMANDS.parser()
         assert parser.parse_args(["fit", "--ui"]).ui is True
@@ -399,21 +399,21 @@ class TestTheCliFlag:
 
 # -- the rates beside it ------------------------------------------------------------------
 class TestTheRatesRoute:
-    """`ml-stack-bench show --rates` as data, over a store built here.
+    """`poolhouse-bench show --rates` as data, over a store built here.
 
     Nothing measures anything: two invented runs are written into a store in ``tmp_path``
-    and `ml_stack.bench.home_dir()` is pointed at it, so no test can reach the runs this
+    and `poolhouse.bench.home_dir()` is pointed at it, so no test can reach the runs this
     machine has kept.
     """
 
     @pytest.fixture
     def store(self, tmp_path, monkeypatch):
-        from ml_stack.bench.keep import SHORT, save
-        from ml_stack.bench.score import Row
+        from poolhouse.bench.keep import SHORT, save
+        from poolhouse.bench.score import Row
 
         home = tmp_path / "bench"
         home.mkdir()
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(home))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(home))
         where = home / "runs.ladybug"
 
         def run(label: str, *, seconds: float, tokens: int, right: bool,
@@ -449,8 +449,8 @@ class TestTheRatesRoute:
 
     def test_the_rates_are_the_ones_the_command_prints(self, page, store):
         """Not recomputed here: `score.derived` is what both read."""
-        from ml_stack.bench.keep import _kept
-        from ml_stack.bench.score import derived
+        from poolhouse.bench.keep import _kept
+        from poolhouse.bench.score import derived
 
         _, got, _ = page.call("/ui/rates.json")
         by_label = {r["label"]: r for r in got["runs"] if not r["composed"]}
@@ -463,7 +463,7 @@ class TestTheRatesRoute:
 
     def test_the_frontier_is_marked_for_every_cost(self, page, store):
         """Worked out for all three, so switching the axis on the page fetches nothing."""
-        from ml_stack.bench.frontier import AXES
+        from poolhouse.bench.frontier import AXES
 
         _, got, _ = page.call("/ui/rates.json")
         assert set(got["axes"]) == set(AXES)
@@ -476,7 +476,7 @@ class TestTheRatesRoute:
     def test_the_page_draws_the_key_the_frontier_was_worked_out_on(self, page, store):
         """Per question for time and tokens, a total for memory: the same map the command
         uses, sent with the axes so the point and its frontier mark agree."""
-        from ml_stack.bench.score import COSTS
+        from poolhouse.bench.score import COSTS
 
         _, got, _ = page.call("/ui/rates.json")
         assert got["keys"] == dict(COSTS)
@@ -495,7 +495,7 @@ class TestTheRatesRoute:
 
     def test_a_machine_that_has_measured_nothing_says_so(self, page, tmp_path, monkeypatch):
 
-        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "empty"))
+        monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "empty"))
         status, got, _ = page.call("/ui/rates.json")
         assert status == 200 and got["runs"] == []
 
@@ -520,8 +520,8 @@ class Answering:
     def __init__(self) -> None:
         from http.server import BaseHTTPRequestHandler
 
-        from ml_stack.graph.serve import AskRoutes
-        from ml_stack.http import Server
+        from poolhouse.graph.serve import AskRoutes
+        from poolhouse.http import Server
 
         class Handler(AskRoutes, BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -557,7 +557,7 @@ def answering():
 
 class TestTheTelemetryView:
     def test_it_is_offered_beside_what_fits_and_what_it_cost(self):
-        from ml_stack.fleet.page import COMPONENTS_DIR
+        from poolhouse.fleet.page import COMPONENTS_DIR
 
         model = (COMPONENTS_DIR / "fit-model.html").read_text(encoding="utf-8")
         views = re.search(r"FM\.VIEWS = \[(.+?)\];", model, re.S)

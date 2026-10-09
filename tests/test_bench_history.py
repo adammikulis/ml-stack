@@ -1,8 +1,8 @@
-"""`ml-stack-bench history`: the day, read out of the logs directory and joined to the store.
+"""`poolhouse-bench history`: the day, read out of the logs directory and joined to the store.
 
 Everything here is invented and lives in ``tmp_path`` -- four fake logs, a fake
 `measuring.json` pointing at this test's own pid, and a store with two runs, one inside a
-log's window and one outside every window. Nothing reads ``~/.ml-stack``.
+log's window and one outside every window. Nothing reads ``~/.poolhouse``.
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-import ml_stack.bench as bench
-import ml_stack.bench.history as bh
+import poolhouse.bench as bench
+import poolhouse.bench.history as bh
 
 # A day in the invented company's life: four measurements, in the order they were started.
 DAY = "2026-09-01"
@@ -28,7 +28,7 @@ NOW = f"{DAY}T14:30:00"             # when the test looks
 
 
 def history_cmd(argv):
-    """``ml-stack-bench history ARGS``, parsed and dispatched as the command is."""
+    """``poolhouse-bench history ARGS``, parsed and dispatched as the command is."""
     return bench.main(["history", *argv])
 
 
@@ -48,7 +48,7 @@ def _log(logs: Path, sub: str, name: str, started: str, text: str, *, ended: str
 
 
 def _store(path: Path, at: list[tuple[str, str]]) -> None:
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
 
     with GraphStore(path) as writer:
         for n, (when, label) in enumerate(at):
@@ -61,7 +61,7 @@ def _store(path: Path, at: list[tuple[str, str]]) -> None:
 @pytest.fixture
 def day(tmp_path: Path) -> Path:
     """A bench home holding the four logs, `measuring.json` and the runs store."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     home = tmp_path / "home"
     logs = home / "logs"
     logs.mkdir(parents=True)
@@ -78,7 +78,7 @@ def day(tmp_path: Path) -> Path:
          ended=f"{DAY}T12:00:00")
     _log(logs, "run", "inkwell", KILLED,
          "   5.0s   1 calls  who runs the workshop\n"
-         "[killed] pid 4242 asked to stop by ml-stack-bench stop\n",
+         "[killed] pid 4242 asked to stop by poolhouse-bench stop\n",
          ended=f"{DAY}T12:10:00")
     _log(logs, "drafts", "lantern-head", CRASHED,
          "# argv: drafts --serve models/lantern.gguf --draft auto\n"
@@ -196,13 +196,13 @@ def test_json_dumps_the_entries(day: Path, monkeypatch, capsys):
 
 
 def test_the_default_home_is_the_benchs_and_is_faked_here(tmp_path: Path, monkeypatch, capsys):
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))             # never ~/.ml-stack
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))             # never ~/.poolhouse
     assert bench.main(["history"]) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("0 runs")
 
 
 def test_runs_as_a_module(day: Path):
-    done = subprocess.run([sys.executable, "-m", "ml_stack.bench", "history",
+    done = subprocess.run([sys.executable, "-m", "poolhouse.bench", "history",
                            "--home", str(day), "--json"],
                           capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
@@ -218,8 +218,8 @@ def test_an_estimate_line_is_read_in_any_of_the_shapes_it_is_printed_in(text, se
     assert bh.parse_duration(text) == seconds
 
 
-def test_ml_stack_bench_history_is_the_same_command(day: Path, monkeypatch, capsys):
-    """Registered on the bench's parser: `ml-stack-bench history` dispatches to `run`, and
+def test_poolhouse_bench_history_is_the_same_command(day: Path, monkeypatch, capsys):
+    """Registered on the bench's parser: `poolhouse-bench history` dispatches to `run`, and
     its flags are this module's own (`add_arguments`), so the two cannot drift."""
     monkeypatch.setattr(bh, "_now", lambda: _epoch(NOW))
     assert bench.main(["history", "--home", str(day), "--json", "--since", "24h"]) == 0

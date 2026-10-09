@@ -35,8 +35,8 @@ from person_support import (
     transcript,
 )
 
-from ml_stack.workspace import person_auth, person_store, person_transcript
-from ml_stack.workspace.person_auth import Identity, NotAuthorized
+from poolhouse.workspace import person_auth, person_store, person_transcript
+from poolhouse.workspace.person_auth import Identity, NotAuthorized
 
 PROPOSAL = assistant("The tests pass. I'll push main to origin now.")
 
@@ -140,7 +140,7 @@ def test_events_that_are_not_the_main_sessions_prompt_are_ignored(world, change)
     assert rows(state) == []
 
 
-@pytest.mark.parametrize("env", [{"ML_STACK_NONINTERACTIVE": "1"}, {"CLAUDE_CODE_SESSION_ATTENDED": "false"}])
+@pytest.mark.parametrize("env", [{"POOLHOUSE_NONINTERACTIVE": "1"}, {"CLAUDE_CODE_SESSION_ATTENDED": "false"}])
 def test_a_session_nobody_is_attending_records_nothing(world, env):
     _tmp, state, repo = world
     path = transcript(project_dir(state) / f"{SESSION}.jsonl", human("hello", "p-1"))
@@ -172,9 +172,9 @@ def test_a_transcript_the_calling_agent_wrote_elsewhere_records_nothing(world, t
     renamed = transcript(project_dir(state) / "not-the-session.jsonl", human("hello", "p-1"))
     for path in (link, renamed):
         assert run_hook(prompt_event("hello", "p-1", path, repo), state).returncode == 0
-    assert run_hook(prompt_event("hello", "p-1", inside, repo), state, ML_STACK_SESSION_ID="other").returncode == 0
+    assert run_hook(prompt_event("hello", "p-1", inside, repo), state, POOLHOUSE_SESSION_ID="other").returncode == 0
     assert rows(state) == []
-    assert run_hook(prompt_event("hello", "p-1", inside, repo), state, ML_STACK_SESSION_ID=SESSION).returncode == 0
+    assert run_hook(prompt_event("hello", "p-1", inside, repo), state, POOLHOUSE_SESSION_ID=SESSION).returncode == 0
     assert [r["type"] for r in rows(state)][:1] == ["statement"]
 
 
@@ -356,11 +356,11 @@ def test_the_session_comes_from_the_recorded_harness_process_and_not_from_the_en
     approve(tmp, state, repo)
     sha = tip(repo)
     line = f"refs/heads/main {sha} refs/heads/main {tip(repo, 'origin/main')}\n"
-    ok = person_consume(repo, state, "consume", "origin", stdin=line, ML_STACK_SESSION_ID="forged")
+    ok = person_consume(repo, state, "consume", "origin", stdin=line, POOLHOUSE_SESSION_ID="forged")
     assert ok.returncode == 0, ok.stderr
     forged_store = tmp_path_factory.mktemp("forged") / "state"
     assert person_consume(repo, forged_store, "consume", "origin", stdin=line,
-                          ML_STACK_SESSION_ID=SESSION).returncode == 1
+                          POOLHOUSE_SESSION_ID=SESSION).returncode == 1
 
 
 def test_revoking_and_consuming_take_the_same_lock(world):
@@ -381,13 +381,13 @@ def test_revoking_and_consuming_take_the_same_lock(world):
 
 
 def person_auth_revoke(log):
-    from ml_stack.workspace import person_record
+    from poolhouse.workspace import person_record
     return person_record.revoke_session(log, SESSION, "test")
 
 
 def test_a_use_never_follows_a_revocation_under_contention(world):
     tmp, state, repo = world
-    from ml_stack.workspace import person_record
+    from poolhouse.workspace import person_record
     approve(tmp, state, repo)
     log = log_of(state)
     statement = next(r for r in rows(state) if r["type"] == "statement")
@@ -421,8 +421,8 @@ def test_a_use_never_follows_a_revocation_under_contention(world):
 def test_the_hooks_view_shows_an_answer_as_quoted_model_text(world, monkeypatch):
     tmp, state, repo = world
     approve(tmp, state, repo)
-    monkeypatch.setenv("ML_STACK_HOME", str(state))
-    from ml_stack.workspace import person_view
+    monkeypatch.setenv("POOLHOUSE_HOME", str(state))
+    from poolhouse.workspace import person_view
     answer = next(r for r in person_view.listing() if r["record"] == "answer")
     assert "quoted_model_text" in answer["detail"] and "excerpt" not in answer["detail"]
-    assert os.environ["ML_STACK_HOME"] == str(state)
+    assert os.environ["POOLHOUSE_HOME"] == str(state)

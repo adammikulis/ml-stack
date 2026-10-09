@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import features, node_binary, node_health
-from ml_stack.fleet.settings import Settings
+from poolhouse import features, node_binary, node_health
+from poolhouse.fleet.settings import Settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -17,7 +17,7 @@ import testextras
 
 @pytest.fixture
 def machine(monkeypatch, tmp_path):
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "state"))
 
 
 @pytest.fixture
@@ -30,29 +30,29 @@ STATE = Path("/tmp/node-state")
 
 def test_windows_node_is_off_on_windows_until_enabled(machine, on_windows):
     assert features.windows_node() is False
-    assert node_binary.name() == "poolside-node"
+    assert node_binary.name() == "poolhouse-node"
     assert node_health.socket_path(STATE) == STATE / node_health.SOCKET
 
 
 def test_windows_node_enabled_on_windows_picks_the_exe_and_the_pipe(machine, on_windows):
     features.switch("windows-node", True)
     assert features.windows_node() is True
-    assert node_binary.name() == "poolside-node.exe"
-    assert str(node_health.socket_path(STATE)).startswith("\\\\.\\pipe\\poolside-node-")
+    assert node_binary.name() == "poolhouse-node.exe"
+    assert str(node_health.socket_path(STATE)).startswith("\\\\.\\pipe\\poolhouse-node-")
 
 
 def test_windows_node_enabled_elsewhere_changes_nothing(machine, monkeypatch):
     features.switch("windows-node", True)
     monkeypatch.setattr(features, "is_windows", lambda: False)
     assert features.windows_node() is False
-    assert node_binary.name() == "poolside-node"
+    assert node_binary.name() == "poolhouse-node"
     assert node_health.socket_path(STATE) == STATE / node_health.SOCKET
 
 
 def test_windows_node_disabled_again_goes_back(machine, on_windows):
     features.switch("windows-node", True)
     features.switch("windows-node", False)
-    assert node_binary.name() == "poolside-node"
+    assert node_binary.name() == "poolhouse-node"
 
 
 def test_the_test_runner_extras_are_absent_until_enabled(machine, tmp_path, monkeypatch):

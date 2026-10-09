@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from taskboard_kit import board
 
-from ml_stack.workspace import (
+from poolhouse.workspace import (
     localagent as la,
     localloop,
     localmodel,
@@ -18,7 +18,7 @@ from ml_stack.workspace import (
     task_launch,
     tokens,
 )
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace.identity import Denied
 
 __all__ = ['board']
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from test_hub_discover import symlink
 
-from ml_stack.hub import hf_cache
+from poolhouse.hub import hf_cache
 
 COMMIT = "a" * 40
 

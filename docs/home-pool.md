@@ -2,13 +2,13 @@
 
 Design and gap analysis, written against `0.2dev` at `c1007d3b`. Nothing here is built unless a line says so.
 
-Owner goal, verbatim: "I want to be able to run poolside on all my devices at home, and have any of them
+Owner goal, verbatim: "I want to be able to run poolhouse on all my devices at home, and have any of them
 used for test runners, local models, etc. all commanded from an app on my phone, or through claude
 code/codex/whatever harness, or the app."
 
 Tags on each claim: **[V]** read in code at the path given, **[D]** taken from a document and not
 re-checked in code. The code still says cluster and fleet where the plan says pool
-(`docs/poolside-refactor-plan.md`, [D]); this note uses the commands as they are today. Timing and
+(`docs/poolhouse-refactor-plan.md`, [D]); this note uses the commands as they are today. Timing and
 performance are not claimed anywhere.
 
 ## 0. The five findings that shape the order
@@ -24,8 +24,8 @@ performance are not claimed anywhere.
 3. Tailscale is already half-built as a route: read-only detection, a learned tailnet address after the
    certificate matched, and no install or config (`fleet/tailnet.py`, `fleet/onboard/routes.py` [V]). But the
    Android companion and its invite refuse tailnet IPv4, see section 2.5 [V].
-4. Fleet jobs cannot run tests. The daemon refuses every argv except `ml-stack-bench` and
-   `python -m ml_stack.fleet.calibration` (`fleet/commands.py:allowed` [V]). The test broker and the reuse
+4. Fleet jobs cannot run tests. The daemon refuses every argv except `poolhouse-bench` and
+   `python -m poolhouse.fleet.calibration` (`fleet/commands.py:allowed` [V]). The test broker and the reuse
    store are per device (section 2.1).
 5. The pool-wide board (journals, `mesh_sync`, membership, derived coordinator) is a design note with no code:
    `workspace/journal.py`, `mesh_sync.py` and `landing.py` do not exist [V]. What runs today is one coordinator
@@ -35,21 +35,21 @@ performance are not claimed anywhere.
 
 ### 1.1 Pairing and joining
 
-- A device starts its daemon with `ml-stack-traind`; it listens on loopback until it has joined a cluster or is
+- A device starts its daemon with `poolhouse-traind`; it listens on loopback until it has joined a cluster or is
   given `--lan` (`fleet/daemon.py:bind_address` [V]). Once joined it binds all interfaces over TLS with a
   self-signed certificate that peers pin; loopback is plain HTTP (`Daemon.listen`, `tls.py` [V]).
 - Development mode is the default: nearby devices discover one another by signed beacon and join the same
   cluster over pinned TLS without a passphrase (`docs/fleet.md` "Joining a cluster" [D]; beacon verification in
   `fleet/discovery.py` [V]).
 - Person-approved pairing for a device that must be explicitly admitted:
-  - on the existing device: `ml-stack-cluster listen --for 10m`; a dialog shows Decline, Accept as mine,
+  - on the existing device: `poolhouse-cluster listen --for 10m`; a dialog shows Decline, Accept as mine,
     Accept as someone else's, then a six digit code (`cli/reference.py` [V]);
-  - on the new device: `ml-stack-cluster pair --host H [--port 8772]`, type the code. A SPAKE2 exchange hands
+  - on the new device: `poolhouse-cluster pair --host H [--port 8772]`, type the code. A SPAKE2 exchange hands
     over the cluster key; three wrong tries or a machine in the middle fails (`docs/onboarding.md` [D]).
-  - `ml-stack-cluster accept ID --mine|--other` and `decline ID` answer from a terminal (`cli/reference.py` [V]).
-- Explicit Production admission: `ml-stack-cluster join --group NAME --mode prod --persist` (`docs/fleet.md` [D]).
-- Nearby and status: `ml-stack-cluster nearby`, `ml-stack-cluster status` (`cli/reference.py` [V]) and `ml-stack-peers ls`
-  ([D] `docs/fleet.md`). `ml-stack-cluster devices [--learn]` shows each paired device as lan, tailnet or
+  - `poolhouse-cluster accept ID --mine|--other` and `decline ID` answer from a terminal (`cli/reference.py` [V]).
+- Explicit Production admission: `poolhouse-cluster join --group NAME --mode prod --persist` (`docs/fleet.md` [D]).
+- Nearby and status: `poolhouse-cluster nearby`, `poolhouse-cluster status` (`cli/reference.py` [V]) and `poolhouse-peers ls`
+  ([D] `docs/fleet.md`). `poolhouse-cluster devices [--learn]` shows each paired device as lan, tailnet or
   unreachable (`fleet/onboard/devices_cli.py` [V]).
 - Pairing is pairwise today: N devices need N(N-1)/2 pairings, there is no membership certificate
   (`docs/mesh-board.md` section 1 [D]; `fleet/onboard/cli.py` pinned rows).
@@ -58,18 +58,18 @@ performance are not claimed anywhere.
 
 Not built. `docs/mesh-board.md` is the design (per-device append-only signed journals, hybrid logical clock,
 derived coordinator, membership as signed records) and says "nothing is implemented"; `journal.py`,
-`mesh_sync.py`, `mesh_fold.py`, `presence.py` and `membership.py` are absent from `src/ml_stack/workspace`
+`mesh_sync.py`, `mesh_fold.py`, `presence.py` and `membership.py` are absent from `src/poolhouse/workspace`
 [V]. What exists is the hash-chain `ChainLog` (`workspace/chain.py` [V]) and a per-origin bus merge
 (`workspace/board_graph_merge.py` [V]). Section 3 slice 6 is the first piece of the design.
 
 What stands in for it, one coordinator device:
 
-- On the coordinator (a person): `ml-stack-workspace coordinator host`, `ml-stack-cluster listen --for 10m`;
-  elsewhere `ml-stack-cluster pair ...` then `ml-stack-workspace join CODE --coordinator FLEET_NAME --name N
+- On the coordinator (a person): `poolhouse-workspace coordinator host`, `poolhouse-cluster listen --for 10m`;
+  elsewhere `poolhouse-cluster pair ...` then `poolhouse-workspace join CODE --coordinator FLEET_NAME --name N
   --model EXACT_MODEL --harness codex` (`docs/workspace.md` "Explicit shared coordinator" [D]; the `join` and
   `remote-agent` verbs registered in `workspace/cli.py` [V]).
 - A matching Git checkout on an enrolled Development device connects with no code: the first
-  `ml-stack-workspace` command registers the project and discovers its board (`docs/workspace.md` [D];
+  `poolhouse-workspace` command registers the project and discovers its board (`docs/workspace.md` [D];
   `workspace/automatic_connection.py` [V]).
 - Remote commands are bounded board operations only (`workspace/remote_protocol.py:METHODS` [V]); a lost
   response is retried with `--request-id ID` (`coordinator_calls.py` [V], one day retention [D]).
@@ -77,28 +77,28 @@ What stands in for it, one coordinator device:
 
 ### 1.3 Fleet jobs
 
-- `ml_stack.fleet.Peer.discover()`, `run(units, peers)` places work by label, backend, VRAM, RAM, CPUs and
+- `poolhouse.fleet.Peer.discover()`, `run(units, peers)` places work by label, backend, VRAM, RAM, CPUs and
   schedule window, retries on a different machine, sets a machine aside after three failures (`fleet/pool.py`
   `Requires`, `fleet/work.py` `QUARANTINE_AFTER = 3` [V]).
-- What a daemon will run: `ml-stack-bench` and `python -m ml_stack.fleet.calibration`, nothing else
+- What a daemon will run: `poolhouse-bench` and `python -m poolhouse.fleet.calibration`, nothing else
   (`fleet/commands.py` [V]). A bench job is refused on a differing commit, a held `measuring.lock` or too little
   room (`fleet/sweeps.py`, `docs/fleet.md` [D]).
-- `ml-stack-workspace remote-agent --device NAME --task ...` starts a Board-message worker running a
+- `poolhouse-workspace remote-agent --device NAME --task ...` starts a Board-message worker running a
   downloaded Qwen on another Development device, admitted through that device's broker (`docs/workspace.md`
   [D]; `workspace/remote_workers.py` [V]).
 - Uploads and downloads of files resume and are digest-verified (`docs/fleet.md` [D]).
 
 ### 1.4 Model serving leases
 
-- One manager and one broker per machine: `ml-stack-serve up MODEL [--for 'why'] [--context 256k] [--kv q8_0]`,
+- One manager and one broker per machine: `poolhouse-serve up MODEL [--for 'why'] [--context 256k] [--kv q8_0]`,
   `status`, `leases`, `queue`, `history`, `down MODEL`. A lease records a reason, requester, process and
   place; a server nobody tracked is reported, never killed (`docs/serving.md` [D]; broker over a loopback
   socket in `serve/broker_wire.py` [V]).
 - The broker is reachable only on `127.0.0.1` (`serve/broker_wire.py` `DEFAULT_HOST` [V]). Another device
   cannot take a lease on this one.
 - Which peer serves what is announced in the daemon's device report (`serving` list) and visible in
-  `ml-stack-peers ls` (`fleet/chat.py:targets` reads it [V]).
-- `ml-stack-cluster plan --users N --context C [--apply]` picks a model per peer and, with `--apply`,
+  `poolhouse-peers ls` (`fleet/chat.py:targets` reads it [V]).
+- `poolhouse-cluster plan --users N --context C [--apply]` picks a model per peer and, with `--apply`,
   calls `POST /serve` on each daemon (`docs/fleet.md` "Placing users" [D]).
 - A conversation reaches a model held by another peer through `<peer>/infer/v1/chat/completions`, which the
   peer's daemon forwards to its own loopback server (`fleet/chat.py:targets`, `fleet/api.py` `/infer` [V]).
@@ -128,10 +128,10 @@ What stands in for it, one coordinator device:
 
 ### 1.7 Harness surface
 
-- `ml-stack-workspace` is the CLI every harness uses; `ml-stack-mcp` exposes the same functions as MCP tools
+- `poolhouse-workspace` is the CLI every harness uses; `poolhouse-mcp` exposes the same functions as MCP tools
   over stdio, including the board tools `workspace_status`, `inbox`, `send`, `thread`, `announce`, `claim`,
   `release`, `heartbeat`, `tasks`, `task` and more (`mcp.py` line 492, `workspace/tools.py` [V]). Register with
-  `claude mcp add ml-stack -- ml-stack-mcp` (`mcp.py` docstring [V]).
+  `claude mcp add poolhouse -- poolhouse-mcp` (`mcp.py` docstring [V]).
 - Each harness registers as itself; person-only operations check a terminal and no agent marker
   (`person.py:require_person`, `AGENT_MARKERS` [V]). `docs/person-delegation.md` invariants 1 and 2: every
   agent acts as itself, none can pose as a person [D].
@@ -168,7 +168,7 @@ Rank is by how much of the goal a missing item blocks, first item first.
 
 1. **Routing is chat-only and by announcement.** `targets()` lists peer models and sends chat to the peer's
    `/infer` [V]. Missing: routing for coding harnesses, a "run this on whichever device holds model X or has room"
-   decision, and failure fallback. `ml-stack-cluster plan` computes placement but a person runs it [D].
+   decision, and failure fallback. `poolhouse-cluster plan` computes placement but a person runs it [D].
 2. **No lease broker reachable per device.** `broker_wire` is loopback [V]. A remote request to load a model
    today is `POST /serve` from `plan --apply` [D]; it should be a lease with reason and requester under the
    caller's own identity, taken through the target's broker, so the target's queue and history stay the one
@@ -181,9 +181,9 @@ Rank is by how much of the goal a missing item blocks, first item first.
 4. **Wake and unload.** No Wake-on-LAN, sleep detection or idle unload exists: no WoL or idle-unload code was
    found under `serve/` or `fleet/` (searched `idle_timeout`, `idle_unload`, `unload_after`, `keep_alive`, `wake_on_lan`, `magic packet` under `serve/` and `fleet/`) [V]. `workspace/wake.py`
    is board wake-ups over named pipes, not machine power. Needed: an "asleep" state in the report and a
-   person-granted wake action; unload is `ml-stack-serve down` and must go through the same lease check.
+   person-granted wake action; unload is `poolhouse-serve down` and must go through the same lease check.
 5. **Model files.** Paired devices already fetch model files from each other before the Hub
-   (`ml-stack-models pull`, `fleet fetch`, `docs/onboarding.md` [D]), so a device without the model can
+   (`poolhouse-models pull`, `fleet fetch`, `docs/onboarding.md` [D]), so a device without the model can
    obtain it without the internet. This works.
 
 ### 2.3 Commanding from a phone
@@ -246,7 +246,7 @@ not repository facts; the repository facts are tagged.
 **(a) Secure context.** A page loaded over plain `http://` from a LAN address is not a secure context in a
 phone browser. There, service workers, install to home screen as a PWA, the camera (`getUserMedia`, needed to
 scan a pairing QR in a page), WebAuthn and the async clipboard API are unavailable or degraded. What the UI
-actually uses today [V, `grep` over `src/ml_stack/fleet`]: `fetch`, `localStorage`, `sessionStorage` and
+actually uses today [V, `grep` over `src/poolhouse/fleet`]: `fetch`, `localStorage`, `sessionStorage` and
 `navigator.clipboard` (copy buttons in `chat-view.html`, `projects-view.html`, `cluster-actions.html`). It uses
 no service worker, manifest, camera, WebAuthn or `crypto.subtle`. So the UI itself loads over plain LAN HTTP,
 except the copy buttons; what breaks is everything a phone app would add. The daemon on the LAN is already
@@ -284,7 +284,7 @@ address is stored only after the certificate matched there.
   now only adds the per-device route display).
 
 **(c) Install and `tailscale serve` are person-only system settings.** We prepare and check; the person
-installs. The pattern is `ml_stack.fleet.autostart`: `prepare` stages unit files and a manifest and installs
+installs. The pattern is `poolhouse.fleet.autostart`: `prepare` stages unit files and a manifest and installs
 nothing; `install`, `rollback` are for a person at a terminal (`fleet/autostart_cli.py` imports `HumanRequired`
 and says "a person at a terminal only" [V]); `status` and `verify` compare installed with prepared and change
 nothing [V]. A Tailscale slice follows it: `prepare` writes the exact `tailscale serve` command and a
@@ -303,7 +303,7 @@ branch landed before the next starts. Dependencies name slice numbers.
 
 | # | Slice | Size | Needs | Builds on |
 |---|---|---|---|---|
-| 1 | `ml-stack-cluster devices` shows the route per device (tailnet IPv4 admission in the companion and invite checks is already fixed) | S | none | `fleet/onboard/lan.py:in_tailnet`, `fleet/invites.py`, `companion_routes.py`; `tests/test_onboard_tailnet.py` |
+| 1 | `poolhouse-cluster devices` shows the route per device (tailnet IPv4 admission in the companion and invite checks is already fixed) | S | none | `fleet/onboard/lan.py:in_tailnet`, `fleet/invites.py`, `companion_routes.py`; `tests/test_onboard_tailnet.py` |
 | 2 | Device capability block in `Daemon.report()` (test capacity, platform key, checkouts, awake/asleep) and a `Requires` filter on it | S-M | none | `fleet/pool.py`, `fleet/daemon.py:report`, `scripts/testslots.py status` |
 | 3 | Board-fed landing queue: `workspace/landing.py`, `scripts/land submit`, `land watch --once`, `land run --entries` | M | none (single device) | `docs/landing-queue.md`; `scripts/land_*.py`; `workspace/task_integration.py` |
 | 4 | Phone person credential: device-key enrollment from the owner page, named capabilities, expiry, revoke, read-only status and board | M-L | 1 | `fleet/invites.py` `devices` and `_grant`, `companion_routes.py`, `docs/person-delegation.md` |

@@ -1,7 +1,7 @@
 """Deny the pytest process tree every write under the real state root.
 
 The after-the-fact check in `tests/conftest.py` (`_real_home`) fails a run once the real
-`~/.ml-stack` has changed. This stops the write when it is made: the pytest tree runs under a
+`~/.poolhouse` has changed. This stops the write when it is made: the pytest tree runs under a
 kernel rule that refuses it, so the test that reached for the real root gets an `EPERM` at the
 line that did it.
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from ml_stack import home
+from poolhouse import home
 
 ENV = "DEV_TEST_WRITE_DENY"
 """Input: ``0`` turns the denial off for a run. Output: the supervisor sets ``1`` in a child only after
@@ -47,7 +47,7 @@ def say(text: str) -> None:
 
 def candidates() -> list[Path]:
     """Every real path a test must not write: the account's state and cache roots, the roots the
-    launching environment names (``ML_STACK_HOME``, ``ML_STACK_CACHE`` and each ``home.OVERRIDES``
+    launching environment names (``POOLHOUSE_HOME``, ``POOLHOUSE_CACHE`` and each ``home.OVERRIDES``
     variable that is set)."""
     state, cache = home.account_roots()
     named = [home.home(), home.cache(), *(home.expand(os.environ[v]) for v in home.OVERRIDES.values() if os.environ.get(v))]

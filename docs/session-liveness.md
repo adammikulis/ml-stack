@@ -19,7 +19,7 @@ Facts from code. "Blocks" means what a stale entry stops another agent doing.
   therefore *is* the old identity locally. It silently owns the dead session's claims (`claims.py:139`
   conflicts only when `other['owner'] != who.id`) and can renew them.
 - Only the shared-project path derives a per-session routing identity: `project_session.name()`
-  gives `agent-<32 hex of sha256(harness NUL session_id)>` from `ML_STACK_SESSION_ID`
+  gives `agent-<32 hex of sha256(harness NUL session_id)>` from `POOLHOUSE_SESSION_ID`
   (`project_session.py:36-39`), exported by SessionStart (`workspace_hook.py:63-90`). There a
   new terminal is a new identity and the old one is orphaned, which is the case the owner sees.
 - `ensure_presentation` assigns a stable ordinal to a top-level agent record once
@@ -115,7 +115,7 @@ Facts from code. "Blocks" means what a stale entry stops another agent doing.
   different machines. Nothing in code today implements the second.
 - `nudge` hook (`nudge.py`, `cli.py:487-510`) runs after tool calls; it reads (`ws.waiting_summary`)
   and writes nothing to the board, and is throttled by a *user-wide* stamp file
-  `ml-stack-nudge.<user>` at `POST_EVERY_S` = 20 s (`nudge.py:21`, `:128-131`), not per session.
+  `poolhouse-nudge.<user>` at `POST_EVERY_S` = 20 s (`nudge.py:21`, `:128-131`), not per session.
 
 ### Summary of what a stale entry blocks
 
@@ -160,7 +160,7 @@ as `owner_pid`/`owner_started`, `claims.py:180-181`), not the short hook process
 - SessionStart registers the record (`state: active`) after `main-session`.
 - `nudge --hook post|prompt|stop` also does `presence.touch` in the same process, after reading the
   inbox (`cli.py:_hook`). The write is rate limited per session to once per `interval_s`
-  (default 30 s, a file stamp keyed by `session_key`, replacing the user-wide `ml-stack-nudge` stamp so
+  (default 30 s, a file stamp keyed by `session_key`, replacing the user-wide `poolhouse-nudge` stamp so
   two sessions no longer suppress each other). At most 2 writes a minute per session. A
   `touch` carries `claims.renew` for that session's claims and `task heartbeat` for its lease, so
   an active agent needs no manual `heartbeat`.
@@ -182,7 +182,7 @@ Evaluated by the board host (the single clock):
 4. Only states *dead, verified* and *expired* permit action, and they are different: verified death
    releases at once, expiry waits the grace period (section 3).
 
-Remote devices cannot prove death. A device's own agent (`ml-stack-workspace` on that machine)
+Remote devices cannot prove death. A device's own agent (`poolhouse-workspace` on that machine)
 may post `presence verified-dead` for local records it can verify, as authenticated per-device
 evidence; the host trusts it only for records with that device id.
 
@@ -207,7 +207,7 @@ keep checkpoints and exact task/resource identity; never delete unique work.
 - The **coordinator** runs `recover` on every sweep (every presence touch it makes, and a
   60 s timer inside its `watch` loop, `task_scheduler.watch`).
 - **Self-service path** (no live coordinator): any live *main* session may run
-  `ml-stack-workspace recover --dry-run|--apply` for holdings that are already *dead, verified* (not
+  `poolhouse-workspace recover --dry-run|--apply` for holdings that are already *dead, verified* (not
   merely expired). It acts under its own token, takes the `recovery` claim (below), and is
   limited to releasing claims and requeuing leases. It cannot reassign worktrees or land work.
   A claim that merely expired is already released by the sweep with no actor.
@@ -381,7 +381,7 @@ exact model id in the registry through a maintained table, never from a display 
 
 ### 5.1 The table
 
-Data file `src/ml_stack/workspace/model_tiers.json` (package data, in the wheel), edited by the owner and
+Data file `src/poolhouse/workspace/model_tiers.json` (package data, in the wheel), edited by the owner and
 changed only through a normal commit; there is no runtime write path an agent can reach.
 
 ```json
@@ -455,10 +455,10 @@ no longer eligible (the table was edited). Mechanics:
 
 ## 6. Failure modes and tests
 
-Tests are real processes against a real temp workspace (`ml-stack-workspace` with `limits.root()`
+Tests are real processes against a real temp workspace (`poolhouse-workspace` with `limits.root()`
 pointed at a tmp dir, a real `Claims`, `GraphStore`, hook scripts as child processes, no mocking of
 the board). Children exported `PYTHON_KEYRING_BACKEND=onboard_support.FileKeyring` and
-`ML_STACK_NO_REAL_KEYSTORE=1` as the repository requires. Clocks: `Claims(clock=...)` and
+`POOLHOUSE_NO_REAL_KEYSTORE=1` as the repository requires. Clocks: `Claims(clock=...)` and
 `Registry(clock=...)` already accept injected clocks (`claims.py:99`, `identity.py:95`); tests
 advance them instead of sleeping, but the process kill is real.
 
@@ -501,19 +501,19 @@ Each slice is independently landable; files are expected, not final.
 
 ### Slice 1 (days): presence, verified-death sweep, `status`
 
-- `src/ml_stack/workspace/presence.py` (new): record, `touch`, `classify(record, now)`, pid+start
+- `src/poolhouse/workspace/presence.py` (new): record, `touch`, `classify(record, now)`, pid+start
   check via `serve.process.started_at`/`pid_exists`.
-- `src/ml_stack/workspace/cli.py`: `_hook` also touches; `status` shows presence and stale holders;
+- `src/poolhouse/workspace/cli.py`: `_hook` also touches; `status` shows presence and stale holders;
   new `presence` and `recover` subcommands (`--dry-run` default).
-- `src/ml_stack/workspace/nudge.py`: per-session stamp instead of the user-wide one (`:128-131`).
+- `src/poolhouse/workspace/nudge.py`: per-session stamp instead of the user-wide one (`:128-131`).
 - `scripts/hooks/claude-session-start`, `claude-subagent-start`, `claude-subagent-stop`: write presence;
   add `claude-session-end` (or the existing Stop path) for `ending`.
-- `src/ml_stack/workspace/claims.py`: `_sweep` also tests `owner_pid`/`owner_started` for `pid == 0`
+- `src/poolhouse/workspace/claims.py`: `_sweep` also tests `owner_pid`/`owner_started` for `pid == 0`
   (`:117-119`) and `holder_session`; `reserve` records `holder_session`.
-- `src/ml_stack/workspace/task_actions.py`: `recover_dead(board, ws, lease)` requeues with checkpoint,
+- `src/poolhouse/workspace/task_actions.py`: `recover_dead(board, ws, lease)` requeues with checkpoint,
   no failure increment; recording `previous_owner`.
-- `src/ml_stack/workspace/agent_display.py`: `coordinator_eligible` also requires live presence.
-- `src/ml_stack/workspace/harness_remote.py`: pass `holder_session`; use presence in `conflict`.
+- `src/poolhouse/workspace/agent_display.py`: `coordinator_eligible` also requires live presence.
+- `src/poolhouse/workspace/harness_remote.py`: pass `holder_session`; use presence in `conflict`.
 - Docs: `docs/workspace.md` section on session liveness; tests as in section 6 for claims, leases,
   presence, hooks.
 - Does not need a coordinator: a verified-dead sweep runs from any session's touch.

@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import do, mcp
-from ml_stack.serve import LlamaServerBackend, ServerManager, quant_guard
-from ml_stack.serve.broker import Ask, Broker
-from ml_stack.serve.broker_wire import _Server, spec_from
-from ml_stack.serve.cli import COMMANDS
-from ml_stack.serve.process import kill_process_tree
-from ml_stack.serve.quant_guard import BlockedQuant
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import do, mcp
+from poolhouse.serve import LlamaServerBackend, ServerManager, quant_guard
+from poolhouse.serve.broker import Ask, Broker
+from poolhouse.serve.broker_wire import _Server, spec_from
+from poolhouse.serve.cli import COMMANDS
+from poolhouse.serve.process import kill_process_tree
+from poolhouse.serve.quant_guard import BlockedQuant
+from poolhouse.testing.fakes import fake_llama_binary
 
 STRING, U32 = 8, 4
 

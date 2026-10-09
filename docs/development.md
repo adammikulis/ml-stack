@@ -1,4 +1,4 @@
-# Working on ml-stack
+# Working on Poolhouse
 
 ## `contracts/` is data, not code
 
@@ -9,7 +9,7 @@ code, so a native or scripting host can read it directly.
 There is exactly one copy on disk. The wheel pulls it in at build time,
 so there is no synced duplicate in the source tree to drift.
 
-Resolution order at runtime: `$ML_STACK_CONTRACTS` → the copy inside the installed wheel → a
+Resolution order at runtime: `$POOLHOUSE_CONTRACTS` → the copy inside the installed wheel → a
 `contracts/` found by walking up from the source file. The walk-up is last on purpose: if a
 wheel is installed *and* a repo happens to be an ancestor, the wheel's own data should win,
 because that is what its version was tested against.
@@ -23,11 +23,11 @@ available for existing shell setups. Installed hooks run the checks in the invok
 `no-real-names` refuses a commit whose staged files carry a person's name, `commit-msg`
 refuses one whose message does. A third hook there is for Claude Code rather than git:
 `scripts/hooks/claude-bash-guard` is a PreToolUse hook on Bash that refuses the shells
-which keep getting written instead of ml-stack commands -- a hand-written `pgrep` waiter,
+which keep getting written instead of Poolhouse commands -- a hand-written `pgrep` waiter,
 `nohup`, `llama-server` started directly, `find`-ing for GGUFs, `hf download`, curl probes
 at the model, killing llama by name, `SKIP_NAME_CHECK=1` -- and names the command to run
 instead. Wire it into a project's `.claude/settings.json` (the docstring shows the JSON);
-`MLSTACK_GUARD=off` disables it for a session. Both hooks are tested:
+`POOLHOUSE_GUARD=off` disables it for a session. Both hooks are tested:
 `tests/test_no_real_names.py` and `tests/test_bash_guard.py`.
 
 Set `git config --local pull.ff only` for editor sync: a divergent pull refuses before
@@ -39,7 +39,7 @@ Coding tasks own their branch and worktree through assignment, claim, review, in
 and cleanup ([task lifecycle](tasks.md)). A reviewed coding proposal is accepted; completion
 requires the landed commit and verified removal of its worktrees and merged branches.
 
-The worktree rule is in `src/ml_stack/worktreerules.py` and reaches every harness. Claude Code
+The worktree rule is in `src/poolhouse/worktreerules.py` and reaches every harness. Claude Code
 runs `claude-edit-guard` (Write, Edit, MultiEdit, NotebookEdit) and `claude-bash-guard` before
 a tool call; both refuse a write inside the primary checkout (the first entry of `git worktree
 list`), a git command that changes its tree (`add`, `commit`, `checkout`, `switch`, `reset`,
@@ -47,7 +47,7 @@ list`), a git command that changes its tree (`add`, `commit`, `checkout`, `switc
 `--ff-only <branch>`) and a `pip install -e` of a tree that is not the primary checkout.
 `claude-subagent-start` (SubagentStart) puts the rule and the development branch in each
 subagent's context, and `.claude/settings.json` sets `worktree.baseRef` to `head` so worktrees
-branch from the development branch. `ml_stack.harnesshook pre` applies the same refusal to Codex
+branch from the development branch. `poolhouse.harnesshook pre` applies the same refusal to Codex
 and local-model sessions the launchers start (add a `[[hooks.PreToolUse]]` entry running it to a
 Codex config the launchers did not write), and `scripts/hooks/primary-only` refuses a commit by an
 agent in the primary checkout or on the development branch. Tests: `tests/test_worktree_rules.py`.
@@ -59,7 +59,7 @@ What `no-real-names` takes for a name, and what stands a name-shaped pair down, 
 suffixes it implies, the RFC 2606 reserved domains, the `noreply` mailboxes, the uuid
 and name patterns, and the file suffixes never read -- each section with a `why` saying
 what it is for and when it was learned. A refusal names the rule (`patterns: nameish;
-nothing stood it down`), and `NAMES_WHY=1` (or `python -m ml_stack.redact.hook --why`)
+nothing stood it down`), and `NAMES_WHY=1` (or `python -m poolhouse.redact.hook --why`)
 prints, for every pair a rule cleared, which section and which word did it
 (`'North Carolina' cleared by place_first: north`), so the next exception is a word added
 to a known section rather than a code change. `NAMES_SHAPES=path.json` reads another
@@ -79,10 +79,10 @@ early. The app builds its own environment on 3.13 (`fleet.environment.PYTHON`, t
 ## WSL development environment
 
 Run `scripts/setup-wsl-dev` from the primary checkout in WSL. It fills the persistent
-`~/.venvs/ml-stack-dev` environment with the compatible `[wsl-dev]` dependency bundle using a
+`~/.venvs/poolhouse-dev` environment with the compatible `[wsl-dev]` dependency bundle using a
 regular wheel install, then configures Bash to use that environment and the checkout's live `src/`
 tree. It also adds existing Windows model stores and Hugging Face, Ollama, LM Studio, llama.cpp,
-and Jan caches to `ML_STACK_MODEL_PATHS`, so WSL reuses downloaded weights.
+and Jan caches to `POOLHOUSE_MODEL_PATHS`, so WSL reuses downloaded weights.
 
 `[wsl-dev]` includes the Linux-compatible runtime and test extras plus the pinned Ruff and Pyright
 versions used by the structural gates. The setup script also installs MetaDrive from the source
@@ -91,8 +91,8 @@ revision pinned in [the Gym guide](studio-gym.md). `[viz]` conflicts with `[gym-
 separate environments. The Apple-only `[mlx]` and opt-in `[pdf-agpl]` are also excluded.
 
 The setup is repeatable after dependency changes. Open a new shell or run `source ~/.bashrc`
-after the first setup. `ML_STACK_WSL_VENV` selects another persistent venv, and
-`ML_STACK_WINDOWS_USER` selects the matching Windows profile when its name differs from the WSL
+after the first setup. `POOLHOUSE_WSL_VENV` selects another persistent venv, and
+`POOLHOUSE_WINDOWS_USER` selects the matching Windows profile when its name differs from the WSL
 login.
 
 ## Testing
@@ -141,7 +141,7 @@ Rules that keep the suite fast and not flaky:
 * Servers a test starts shut down in milliseconds (conftest polls every 20 ms); do not add sleeps
   to wait for them.
 * The real-state-root guard (`tests/conftest.py`, `LIVE_PATHS`) fails a run when a file under
-  `~/.ml-stack` changed. Other agents and runs append to a few logs while yours is going, so only
+  `~/.poolhouse` changed. Other agents and runs append to a few logs while yours is going, so only
   `workspace/`, `harness/`, the activity log and the sentinel's event and anchor logs are tolerated.
   The keystore, every `.key` file, manifests, canaries, honey, requests and credentials stay guarded
   (`tests/test_live_paths.py`). The guard cannot tell which process wrote a tolerated log; a test
@@ -154,13 +154,13 @@ socket, because the failures these modules exist to prevent are transport-shaped
 that answers `/health` while still loading, one that ignores a `Range` header, one that
 returns 500 on a concurrent request. A mocked `urlopen` reproduces none of them.
 
-The fleet tests go further: they boot real `ml-stack-traind` subprocesses and speak real
+The fleet tests go further: they boot real `poolhouse-traind` subprocesses and speak real
 UDP on a real interface, on randomised ports so a run never answers -- or gets answered
 by -- a daemon you actually have running on your LAN. A forged beacon, a replayed reply,
 a multicast group a router quietly drops: a fake socket reproduces none of those either.
 
 What *is* faked -- the model's answers, a `serve()` that would load 87G, a preflight that
-would read it -- is faked once, in `ml_stack.testing.fakes`, with the real signature.
+would read it -- is faked once, in `poolhouse.testing.fakes`, with the real signature.
 `FakeClient` is built exactly as `Client` is built, `fake_serve` / `FakeServe` take what
 `serve()` takes, `FakePreflight` returns a real `Report`, and `ScriptedModel` replays tool
 calls through `Client.chat`'s signature. None takes a `**kwargs` the real one lacks: a fake

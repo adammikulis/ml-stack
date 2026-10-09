@@ -4,8 +4,8 @@ import hashlib
 
 import pytest
 
-from ml_stack.decide.fetch import Pin, locate
-from ml_stack.decide.types import BackendUnavailable, DecideError
+from poolhouse.decide.fetch import Pin, locate
+from poolhouse.decide.types import BackendUnavailable, DecideError
 from tests.web_site import Site
 
 REV = "a" * 40
@@ -26,7 +26,7 @@ def hub(monkeypatch, loopback_net):
 
 
 def test_a_file_is_not_fetched_unless_asked(hub):
-    with pytest.raises(BackendUnavailable, match="ml-stack decide fetch"):
+    with pytest.raises(BackendUnavailable, match="poolhouse decide fetch"):
         locate(pin())
     assert hub.hits == []
 
@@ -59,7 +59,7 @@ def test_the_injection_classifier_comes_through_the_pipeline_with_the_hubs_own_h
         monkeypatch, loopback_net, tmp_path):
     import json
 
-    from ml_stack.guard import classifier
+    from poolhouse.guard import classifier
 
     model, config = b"\x08\x07onnx-bytes" * 8, b'{"model_type": "deberta"}'
     tree = [{"type": "file", "path": "onnx/model.onnx", "size": len(model),

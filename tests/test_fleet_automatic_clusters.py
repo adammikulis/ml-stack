@@ -4,8 +4,8 @@ import hashlib
 
 import pytest
 
-from ml_stack.fleet import automatic_clusters as automatic, discovery
-from ml_stack.fleet.onboard import joining
+from poolhouse.fleet import automatic_clusters as automatic, discovery
+from poolhouse.fleet.onboard import joining
 
 KEY = b"a" * 43
 NONCE = "c" * 32
@@ -249,7 +249,7 @@ def test_membership_offer_identifies_the_cluster_key():
 
 
 def test_manual_dev_selection_survives_restart_and_project_settle(tmp_path, monkeypatch):
-    from ml_stack.workspace.automatic_connection import settle
+    from poolhouse.workspace.automatic_connection import settle
 
     path = tmp_path / "device.key"
     member = discovery.mint_cluster("chosen-dev", path, selection="manual")
@@ -303,7 +303,7 @@ def test_manual_join_marks_received_dev_membership(tmp_path, monkeypatch):
 
 
 def test_project_settle_respects_manual_choice_made_during_discovery(tmp_path, monkeypatch):
-    from ml_stack.workspace.automatic_connection import settle
+    from poolhouse.workspace.automatic_connection import settle
 
     original = discovery.Membership("development", KEY)
     chosen = discovery.Membership("chosen-dev", b"b" * 43, selection="manual")

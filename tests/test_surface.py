@@ -1,4 +1,4 @@
-"""``ml-stack-surface``: the walk, what it is safe to run, the normalising and the diff."""
+"""``poolhouse-surface``: the walk, what it is safe to run, the normalising and the diff."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.surface import ops
-from ml_stack.surface.cli import main
+from poolhouse.surface import ops
+from poolhouse.surface.cli import main
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "src"
@@ -34,7 +34,7 @@ def test_a_command_is_walked_with_every_subcommand_it_declares():
 def test_a_command_with_no_subcommands_is_a_single_node():
     found = ops.walk(SRC, ["claude"])
     assert [node.spoken for node in found] == ["claude"]
-    assert "usage: ml-stack-claude" in found[0].help
+    assert "usage: poolhouse-claude" in found[0].help
 
 
 @pytest.mark.slow
@@ -101,9 +101,9 @@ def test_a_default_in_the_help_is_left_as_it_is():
 
 
 def test_this_machine_is_settled_out_of_the_help():
-    text = f"  --home DIR  where the records are (default: {Path.home()}/.ml-stack/jobs)\n"
+    text = f"  --home DIR  where the records are (default: {Path.home()}/.poolhouse/jobs)\n"
     assert ops.settle(text, SRC, output=False) == (
-        "  --home DIR  where the records are (default: ~/.ml-stack/jobs)\n")
+        "  --home DIR  where the records are (default: ~/.poolhouse/jobs)\n")
 
 
 @pytest.mark.slow

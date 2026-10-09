@@ -148,7 +148,7 @@ def remembered(root: Path, name: str, compute, salt: str = "", fingerprint: str 
     already has it.
     """
     key = hashlib.sha256(f"{fingerprint or tree_fingerprint(root)}\0{salt}".encode()).hexdigest()
-    kept = Path(tempfile.gettempdir()) / "ml-stack-gates" / f"{name}-{key}.json"
+    kept = Path(tempfile.gettempdir()) / "poolhouse-gates" / f"{name}-{key}.json"
     try:
         return json.loads(kept.read_text(encoding="utf-8"))
     except (OSError, ValueError):

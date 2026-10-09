@@ -13,10 +13,18 @@ import time
 
 import pytest
 
-from ml_stack.world import World
-from ml_stack.world.names import company_name, person_name, product_name, slug
-from ml_stack.world.organisation import KINDS, SIZES, UNIT_KIND, load, make, role_catalogue, summary
-from ml_stack.world.questions import KINDS as KINDS_OF_QUESTION, questions
+from poolhouse.world import World
+from poolhouse.world.names import company_name, person_name, product_name, slug
+from poolhouse.world.organisation import (
+    KINDS,
+    SIZES,
+    UNIT_KIND,
+    load,
+    make,
+    role_catalogue,
+    summary,
+)
+from poolhouse.world.questions import KINDS as KINDS_OF_QUESTION, questions
 
 
 def _edges(world: World, rel: str) -> list[tuple[str, str]]:
@@ -196,9 +204,9 @@ def test_a_nonprofit_has_a_board_that_advises_the_director_and_volunteers_who_re
 # --- through the store and the bench, unchanged ------------------------------------------------
 
 def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.rebuild import replace
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.rebuild import replace
+    from poolhouse.graph.store import GraphStore
 
     world = make("company", "small", 2)
     written = replace(tmp_path / "world.ladybug", world.graph)
@@ -216,9 +224,9 @@ def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
-    from ml_stack.bench import SHORT, read_questions, sample
-    from ml_stack.graph.looking import list_kind, look_up, path_between, tools_for
-    from ml_stack.world.cli import main
+    from poolhouse.bench import SHORT, read_questions, sample
+    from poolhouse.graph.looking import list_kind, look_up, path_between, tools_for
+    from poolhouse.world.cli import main
 
     out = tmp_path / "world"
     assert main(["make", "--kind", kind, "--size", "small", "--seed", "0",
@@ -249,7 +257,7 @@ def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
 
 
 def test_shape_finds_no_expected_id_missing_from_the_graph(capsys):
-    from ml_stack.bench import shape
+    from poolhouse.bench import shape
 
     world = make("community", "small", 3)
     shape(questions(world, 40), world.graph)
@@ -427,7 +435,7 @@ def test_a_quote_question_is_answered_by_the_words_and_by_nothing_else():
 
 
 def test_kinds_draws_only_those_buckets_and_refuses_an_unknown_one(tmp_path, capsys):
-    from ml_stack.world.cli import main
+    from poolhouse.world.cli import main
 
     world = make("company", "small", 0)
     assert {q["kind"] for q in questions(world, 30, kinds=["trap", "quote"])} == {"trap", "quote"}
@@ -478,7 +486,7 @@ def test_organisations_and_products_are_named_from_stems_and_slugs_are_ids():
 # --- the command ------------------------------------------------------------------------------------
 
 def test_main_make_writes_the_three_files_and_says_what_it_made(tmp_path, capsys):
-    from ml_stack.world.cli import main
+    from poolhouse.world.cli import main
 
     out = tmp_path / "w"
     assert main(["make", "--kind", "nonprofit", "--size", "small", "--seed", "4",
@@ -500,7 +508,7 @@ def test_main_make_writes_the_three_files_and_says_what_it_made(tmp_path, capsys
 
 
 def test_main_make_writes_world_json_and_load_reads_kind_size_and_people_from_it(tmp_path):
-    from ml_stack.world.cli import main
+    from poolhouse.world.cli import main
 
     out = tmp_path / "w"
     assert main(["make", "--kind", "university", "--seed", "2", "--out", str(out)]) == 0
@@ -516,8 +524,8 @@ def test_main_make_writes_world_json_and_load_reads_kind_size_and_people_from_it
 
 def test_main_simulate_then_emit_writes_a_corpus_the_sources_read_back(tmp_path, capsys):
     """The whole path with no model: make, talk for a few days, export as Slack, read it."""
-    from ml_stack.sources import read
-    from ml_stack.world.cli import main, read_messages
+    from poolhouse.sources import read
+    from poolhouse.world.cli import main, read_messages
 
     world_dir, talk, export = tmp_path / "w", tmp_path / "talk", tmp_path / "export"
     assert main(["make", "--kind", "community", "--seed", "0", "--out", str(world_dir)]) == 0
@@ -545,7 +553,7 @@ def test_main_simulate_then_emit_writes_a_corpus_the_sources_read_back(tmp_path,
 
 
 def test_main_answers_help():
-    from ml_stack.world.cli import main
+    from poolhouse.world.cli import main
 
     with pytest.raises(SystemExit) as left:
         main(["--help"])
@@ -580,9 +588,9 @@ class TestTheWorldRecord:
     reader trusts, so which shape it is has to be readable off the file."""
 
     def test_what_make_writes_says_which_shape_it_is(self, tmp_path):
-        from ml_stack.files import version_of
-        from ml_stack.world import about
-        from ml_stack.world.cli import main
+        from poolhouse.files import version_of
+        from poolhouse.world import about
+        from poolhouse.world.cli import main
 
         out = tmp_path / "w"
         assert main(["make", "--kind", "university", "--seed", "2", "--out", str(out)]) == 0
@@ -591,9 +599,9 @@ class TestTheWorldRecord:
         assert about.read(out)["seed"] == 2
 
     def test_a_world_written_before_the_key_existed_is_still_read(self, tmp_path):
-        from ml_stack.files import UNVERSIONED, version_of
-        from ml_stack.world import about
-        from ml_stack.world.cli import main
+        from poolhouse.files import UNVERSIONED, version_of
+        from poolhouse.world import about
+        from poolhouse.world.cli import main
 
         out = tmp_path / "w"
         assert main(["make", "--kind", "university", "--seed", "2", "--out", str(out)]) == 0
@@ -606,8 +614,8 @@ class TestTheWorldRecord:
         assert back.kind == "university" and back.seed == 2
         assert back.people == make("university", "small", 2).people
 
-    def test_a_world_from_a_newer_ml_stack_says_so_rather_than_reading_as_empty(self, tmp_path):
-        from ml_stack.world import about
+    def test_a_world_from_a_newer_poolhouse_says_so_rather_than_reading_as_empty(self, tmp_path):
+        from poolhouse.world import about
 
         out = tmp_path / "w"
         out.mkdir()

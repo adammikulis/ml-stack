@@ -39,7 +39,7 @@ proposal. Words: the board, one kind of pool, join policy `open | secure`.
 | Detectors | `PeerWatch` (bad signature, replay, clock, lockout, oversize, rate, flapping, version or binary mismatch), `ToolMix`, `Abuse`, `RailWatch`, honeytokens, canaries, integrity pins | `rates.py`, `rails.py`, `honey.py`, `canary.py`, `integrity.py` [V] |
 | Policy | modes `observe`, `guarded` (default), `enforce`, `off`; `guarded` acts only on high-confidence signals | `policy.py` [V] |
 | HumanGrant | release, purge and mode changes need a grant minted at a terminal (or a dialog button), 120 s, one action on one subject, refused under any agent marker | `human.py` [V] |
-| Heartbeat and scan threads | `Scanner` is a daemon thread in the Broker daemon and the fleet daemon: every pin and decoy at start, then every `ML_STACK_SENTINEL_SCAN` s (300), deep hash every 12th round, canaries after each scan; a sealed `scanner.json` heartbeat says it is alive | `watch.py` [V] |
+| Heartbeat and scan threads | `Scanner` is a daemon thread in the Broker daemon and the fleet daemon: every pin and decoy at start, then every `POOLHOUSE_SENTINEL_SCAN` s (300), deep hash every 12th round, canaries after each scan; a sealed `scanner.json` heartbeat says it is alive | `watch.py` [V] |
 | Heads-up | one dialog, never a stack; single-flight lock; fixed sentences | `heads_up.py`, `explain.py` [V] |
 
 ### 1.2 What it protects
@@ -237,7 +237,7 @@ pool of the same project. [owner decision]
   repository that uses the node: the normalised `origin` remote (`github.com/owner/repo`, the same
   from every clone and spelling), else `local/<name of the main working tree>`. The owner can name
   a project instead (`--project NAME`). The key is a hash, so a remote URL is never put on the
-  network. For this repository the project is ml-stack itself.
+  network. For this repository the project is Poolhouse itself.
 - **Start.** A node with a project and a beacon takes the project for its pool of one, stays quiet
   for the settle window (4 s) and joins the first `open` pool of the same project it hears. If it
   hears none, it makes its pool `open` and beacons it. No key file and no code is involved.
@@ -298,7 +298,7 @@ would treat the device as `active`. That is unsafe: ship the Python reader's und
 Scored by evidence a script reads (a counter, a log line, a status field, a refused call), never by a
 model. Two layers.
 
-**5.1 PyRIT, extending `src/ml_stack/redteam`.** `pyrit_bridge.fire(...)` sends a prompt through
+**5.1 PyRIT, extending `src/poolhouse/redteam`.** `pyrit_bridge.fire(...)` sends a prompt through
 deterministic converters and scores objective evidence; targets wrap any `Responder`. [V
 `pyrit_bridge.py`, `targets.py`] The network attacks are not prompts, so PyRIT is used where text is
 the attack: (a) device names and labels (control characters, bidi, very long, a name that reads as an
@@ -356,7 +356,7 @@ Sizes: S under 150 lines of code plus tests, M 150 to 500, L over 500.
 | 8 | The brake: CLI verbs (HumanGrant), Fleet page buttons, next-request effect | M | verb then the very next request refused; an agent marker refuses; page button calls the same route | 2 |
 | 9 | Lone-adopter confirmation | S | a lone device does not adopt without confirmation; confirmation by id | 2 |
 | 10 | Trust-ledger link: device account evidence, promotion by evidence, standing-grant | M | clean syncs raise the ledger state; a fault drops it; the grant is scoped and revocable | 7, earned-trust slices |
-| 11 | Fuzz targets in `app/poolside-node/fuzz` | M | the five targets, run for a fixed iteration count in CI, long runs by hand | node network branch |
+| 11 | Fuzz targets in `app/poolhouse-node/fuzz` | M | the five targets, run for a fixed iteration count in CI, long runs by hand | node network branch |
 | 12 | Red-team scenarios (`redteam/scenarios/devices.py`) and the scenario table above as tests | L | each row of 5.2 | 2 to 8 |
 | 13 | Sentinel as a node-socket client and heartbeat check by the node | M | kill the sentinel: enrolment closes in three intervals; restart: it reopens | 5 |
 

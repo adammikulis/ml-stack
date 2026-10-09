@@ -69,19 +69,19 @@ work or ends in one line. The prompt and the rules are in docs/heartbeat.md.
 
 The `SessionStart` hook registers the lead, announces it and puts the inbox in its context. The
 lead's first action each session is to read that inbox and answer what is in it; when the hook
-output is absent, it runs `ml-stack-workspace inbox` before any other work.
-Between tasks it runs `ml-stack-workspace inbox` again. The lead is its own session name
+output is absent, it runs `poolhouse-workspace inbox` before any other work.
+Between tasks it runs `poolhouse-workspace inbox` again. The lead is its own session name
 (for example `claude-6e1a2f`), run with no `--agent`.
 
 ## Hooks and settings
 
 `.claude/settings.json` wires `scripts/hooks/claude-bash-guard` and `scripts/hooks/claude-edit-guard`
 before tools run, and `claude-session-start`, `claude-subagent-start` and `claude-subagent-stop`
-around sessions and subagents. `MLSTACK_GUARD=off` turns both guards off.
+around sessions and subagents. `POOLHOUSE_GUARD=off` turns both guards off.
 
-- The Bash guard refuses `git add -A`, `.` and `-u`, `git commit -a`, `llama-server` by hand, `ml-stack-serve up` flags that skip the lease,
+- The Bash guard refuses `git add -A`, `.` and `-u`, `git commit -a`, `llama-server` by hand, `poolhouse-serve up` flags that skip the lease,
   a push to `main` (a promotion is a pull request from a `promote/<date>` snapshot, merged only
-  under the owner's live `release-main` authorization; `ML_STACK_PUSH_MAIN=yes` opens nothing), and a force push,
+  under the owner's live `release-main` authorization; `POOLHOUSE_PUSH_MAIN=yes` opens nothing), and a force push,
   a remote ref deletion, `--all` or `--tags` pushes, past any `NAME=value` written in front of the command.
 - The edit guard refuses, at the moment it is written, a function whose body already exists
   elsewhere, a raw HTTP call, a docstring over twelve lines, a signature over eight parameters,
@@ -89,7 +89,7 @@ around sessions and subagents. `MLSTACK_GUARD=off` turns both guards off.
   reads the two limits from the checkers.
 - Claude Code sets `CLAUDECODE` for every command it runs. `--allow-increase` on the budgets and
   the `pre-push` hook's agent restrictions key on it; a terminal sets nothing.
-- `ML_STACK_WINDOW_POSITION` is set in `.claude/settings.json`.
+- `POOLHOUSE_WINDOW_POSITION` is set in `.claude/settings.json`.
 
 ## Commit attribution
 
@@ -107,7 +107,7 @@ pushes it. I never report a commit as "unpushed, the owner's to push" and never 
 
 A worker lands its own branch: fetch, rebase its own linear commits onto `origin/<dev>` (merge it when
 the branch holds merges or is shared), run the affected tests, then
-`ml-stack-workspace land-request BRANCH SHA --test ...`. The runner (`scripts/land up`) batches, gates,
+`poolhouse-workspace land-request BRANCH SHA --test ...`. The runner (`scripts/land up`) batches, gates,
 fast-forwards, pushes only the development branch and cleans up; a request that fails is ejected alone and
 the rest land. I step in only for cross-branch conflicts, security review and release, and my heartbeat
 runs `scripts/land up` when `digest --status` says the runner is `NOT RUNNING`. A worker never pushes, and
@@ -120,8 +120,8 @@ pages: that window is on their primary display and every click takes their scree
 own Chromium through playwright, or run headless and read screenshots (AGENTS.md, "Driving a
 browser").
 
-## ml-stack-claude
+## poolhouse-claude
 
-`ml-stack-claude` runs Claude Code against a local model under a broker lease. Drive it in a
+`poolhouse-claude` runs Claude Code against a local model under a broker lease. Drive it in a
 scratch directory, never in a checkout being edited (AGENTS.md, "Driving a model on this
 machine").

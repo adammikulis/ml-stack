@@ -15,14 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import hub
-from ml_stack.serve import cli, holding, lease_cli, lease_history, ops, provenance
-from ml_stack.serve.backend import LlamaServerBackend
-from ml_stack.serve.broker import Ask, Broker
-from ml_stack.serve.leases import lease_file
-from ml_stack.serve.manager import ServerManager
-from ml_stack.serve.process import kill_process_tree
-from ml_stack.testing.fakes import fake_llama_binary
+from poolhouse import hub
+from poolhouse.serve import cli, holding, lease_cli, lease_history, ops, provenance
+from poolhouse.serve.backend import LlamaServerBackend
+from poolhouse.serve.broker import Ask, Broker
+from poolhouse.serve.leases import lease_file
+from poolhouse.serve.manager import ServerManager
+from poolhouse.serve.process import kill_process_tree
+from poolhouse.testing.fakes import fake_llama_binary
 
 MIB = 1024 * 1024
 SLEEP = "import time; time.sleep(120)"
@@ -279,7 +279,7 @@ def test_the_workspace_label_names_the_requester(monkeypatch):
 def _unreasoned_lease_lines(text):
     tree = ast.parse(text)
     aliases = {alias.asname or alias.name for node in ast.walk(tree)
-               if isinstance(node, ast.ImportFrom) and node.module in ('ml_stack.serve', 'ml_stack.serve.manager')
+               if isinstance(node, ast.ImportFrom) and node.module in ('poolhouse.serve', 'poolhouse.serve.manager')
                for alias in node.names if alias.name == 'serve'}
     missing = []
     for node in ast.walk(tree):
@@ -288,21 +288,21 @@ def _unreasoned_lease_lines(text):
         func = node.func
         leases = (isinstance(func, ast.Attribute) and func.attr == 'lease'
                   and isinstance(func.value, ast.Name) and func.value.id in ('broker_wire', 'manager'))
-        serves = (isinstance(func, ast.Name) and func.id in aliases) or ast.unparse(func) == 'ml_stack.serve.serve'
+        serves = (isinstance(func, ast.Name) and func.id in aliases) or ast.unparse(func) == 'poolhouse.serve.serve'
         if (leases or serves) and 'reason' not in {keyword.arg for keyword in node.keywords}:
             missing.append(node.lineno)
     return missing
 
 
 def test_reason_inventory_follows_imported_alias_not_local_serve_entrypoint():
-    good = "from ml_stack.serve import serve as camera_server\ndef serve():\n    camera_server('model', reason='camera perception')\nserve()\n"
+    good = "from poolhouse.serve import serve as camera_server\ndef serve():\n    camera_server('model', reason='camera perception')\nserve()\n"
     assert _unreasoned_lease_lines(good) == []
     assert _unreasoned_lease_lines(good.replace(", reason='camera perception'", '')) == [3]
-    assert _unreasoned_lease_lines("from ml_stack.serve import serve as another_alias\nanother_alias('model')") == [2]
+    assert _unreasoned_lease_lines("from poolhouse.serve import serve as another_alias\nanother_alias('model')") == [2]
 
 
 def test_every_lease_the_source_takes_gives_a_reason():
-    root = Path(__file__).resolve().parents[1] / 'src' / 'ml_stack'
+    root = Path(__file__).resolve().parents[1] / 'src' / 'poolhouse'
     missing = []
     for path in sorted(root.rglob('*.py')):
         if path.name in ('manager.py', 'broker.py', 'broker_wire.py', 'fakes.py'):

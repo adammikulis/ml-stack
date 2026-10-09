@@ -10,9 +10,9 @@ from typing import ClassVar
 
 import pytest
 
-from ml_stack import httpguard
-from ml_stack.http import Server
-from ml_stack.httpguard import Limits, Refused, TooLarge, fetch
+from poolhouse import httpguard
+from poolhouse.http import Server
+from poolhouse.httpguard import Limits, Refused, TooLarge, fetch
 
 LOCAL = Limits(allow_hosts=frozenset({"127.0.0.1"}), timeout=2.0, deadline_s=6.0)
 

@@ -1,10 +1,10 @@
-"""``ml-stack-mcp``: the commands as tools, driven over stdio with a fake transport.
+"""``poolhouse-mcp``: the commands as tools, driven over stdio with a fake transport.
 
 The transport is two in-memory streams carrying newline-delimited JSON-RPC, which is what
 the built-in loop reads from a real stdin. What each tool calls is the function the command
 calls, so the fakes here stand in for the machine -- a recorded server, a subprocess that
 would measure for an hour -- and never for the tool. Nothing reaches the Hub, a GPU or
-``~/.ml-stack``: the bench's home is a temporary directory.
+``~/.poolhouse``: the bench's home is a temporary directory.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import mcp as server
-from ml_stack.workspace import tools as workspace_tools
+from poolhouse import mcp as server
+from poolhouse.workspace import tools as workspace_tools
 
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
             "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
@@ -46,7 +46,7 @@ def said(reply: dict):
 @pytest.fixture(autouse=True)
 def bench_at_home(tmp_path, monkeypatch):
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "bench"))
 
 
 class TestTheProtocol:
@@ -56,7 +56,7 @@ class TestTheProtocol:
                         rpc(2, "tools/list"), rpc(3, "ping"))
         assert [r["id"] for r in replies] == [1, 2, 3], "a notification gets no reply"
         assert replies[0]["result"]["capabilities"] == {"tools": {}}
-        assert replies[0]["result"]["serverInfo"]["name"] == "ml-stack"
+        assert replies[0]["result"]["serverInfo"]["name"] == "poolhouse"
         tools = {t["name"]: t for t in replies[1]["result"]["tools"]}
         assert set(tools) == EXPECTED
         for name, tool in tools.items():
@@ -110,7 +110,7 @@ class TestTheTools:
         assert "--threads" not in captured[1] and "--context" not in captured[1]
 
     def test_serve_status_calls_the_look_the_command_calls(self, monkeypatch):
-        from ml_stack.serve import ops
+        from poolhouse.serve import ops
 
         monkeypatch.setattr(ops, "recorded_servers", lambda state: {8083: {"model": "x"}})
         monkeypatch.setattr(ops, "look", lambda port, records: ops.Snapshot(
@@ -142,7 +142,7 @@ class TestTheTools:
         assert handle["pid"] == 4242 and handle["argv"] == argv
         assert Path(handle["log"]).is_file(), "the log exists before the call returns"
         assert Path(handle["log"]).parent == tmp_path / "bench" / "logs"
-        bench_line = next(c for c in spawned if "ml_stack.bench" in c)
+        bench_line = next(c for c in spawned if "poolhouse.bench" in c)
         assert bench_line[-len(argv):] == argv
         assert "--detach" not in bench_line
 
@@ -160,12 +160,12 @@ class TestTheTools:
         assert said(reply) == [], "an empty bench home holds no runs"
 
     def test_fleet_peers_in_no_cluster_is_empty_not_an_error(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ML_STACK_CLUSTER_KEY", str(tmp_path / "none.key"))
+        monkeypatch.setenv("POOLHOUSE_CLUSTER_KEY", str(tmp_path / "none.key"))
         (reply,) = drive(rpc(1, "tools/call", name="fleet_peers", arguments={"timeout_s": 0.2}))
         assert said(reply) == []
 
     def test_a_tool_that_raises_answers_with_the_error(self, monkeypatch):
-        from ml_stack import hub
+        from poolhouse import hub
 
         def down(*a, **k):
             raise RuntimeError("the Hub is somebody else's machine")
@@ -185,13 +185,13 @@ class TestTheTools:
                 pass
 
         monkeypatch.setattr(subprocess, "Popen", Child)
-        got = server.detached("ml_stack.hub", ["fetch", "hf:pellard/larch/larch.gguf"],
+        got = server.detached("poolhouse.hub", ["fetch", "hf:pellard/larch/larch.gguf"],
                               name="fetch-larch", home=tmp_path / "mcp")
         assert got["pid"] == 77
         header = Path(got["log"]).read_text().splitlines()
         assert header[0] == "argv: fetch hf:pellard/larch/larch.gguf"
         said = next(line for line in header if line.startswith("command:"))
-        assert "ml_stack.hub fetch" in said
+        assert "poolhouse.hub fetch" in said
 
 
 class TestTheCompactTool:
@@ -218,13 +218,13 @@ class TestTheCompactTool:
 
 class TestTheSpeechTools:
     """No speech engine is installed where the suite runs, so a fake stands on the registry
-    the tools resolve through -- the same one ``ml-stack-speech`` resolves through."""
+    the tools resolve through -- the same one ``poolhouse-speech`` resolves through."""
 
     @pytest.fixture(autouse=True)
     def registered(self, monkeypatch):
-        from ml_stack import speech as package
-        from ml_stack.media import wav
-        from ml_stack.speech import ProviderHealth, Registry, Segment, Speech, Transcript
+        from poolhouse import speech as package
+        from poolhouse.media import wav
+        from poolhouse.speech import ProviderHealth, Registry, Segment, Speech, Transcript
 
         class Ears:
             name = "fake"
@@ -283,8 +283,8 @@ class TestTheSpeechTools:
 
     def test_no_engine_is_an_error_result_rather_than_a_crash(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
-        from ml_stack import speech as package
-        from ml_stack.speech import Registry
+        from poolhouse import speech as package
+        from poolhouse.speech import Registry
 
         monkeypatch.setattr(package, "ASR", Registry(kind="asr"))
         clip = tmp_path / "clip.wav"

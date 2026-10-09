@@ -9,20 +9,20 @@ from ._perfile import finder
 from ._util import calls, exempt, parse
 
 NAME = "subprocess-spawns"
-OWNER = "ml_stack.platform"
+OWNER = "poolhouse.platform"
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 OWNS = (
-    "src/ml_stack/platform.py",
-    "src/ml_stack/jobs.py",
-    "src/ml_stack/serve/backend.py",
-    "src/ml_stack/serve/exit_guard.py",
-    "src/ml_stack/sandbox/run.py",
+    "src/poolhouse/platform.py",
+    "src/poolhouse/jobs.py",
+    "src/poolhouse/serve/backend.py",
+    "src/poolhouse/serve/exit_guard.py",
+    "src/poolhouse/sandbox/run.py",
 )
 
 
 def describe() -> str:
-    return "A detached process started here; ml_stack.platform launches and records one."
+    return "A detached process started here; poolhouse.platform launches and records one."
 
 
 def scan(path: Path, where: str) -> list[Finding]:

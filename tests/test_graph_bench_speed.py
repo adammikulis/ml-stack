@@ -1,4 +1,4 @@
-"""``ml-stack-bench speed``: prefill, decode and the first token by prompt size and streams.
+"""``poolhouse-bench speed``: prefill, decode and the first token by prompt size and streams.
 
 Every fixture here is invented. Nothing reads a real store, a real graph, or a real server.
 """
@@ -12,9 +12,9 @@ from typing import ClassVar
 
 import pytest
 
-from ml_stack import hub
-from ml_stack.bench import runs
-from ml_stack.bench.speed import (
+from poolhouse import hub
+from poolhouse.bench import runs
+from poolhouse.bench.speed import (
     KIND,
     calibrated,
     cell,
@@ -25,7 +25,7 @@ from ml_stack.bench.speed import (
     prompt_text,
     speed_table,
 )
-from ml_stack.http import ServerUnreachable
+from poolhouse.http import ServerUnreachable
 
 
 class _Reply:
@@ -209,10 +209,10 @@ def test_a_smoke_grid_is_one_cell_and_a_full_grid_is_every_pair():
 
 def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_path, monkeypatch,
                                                                         capsys):
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     ollama = _Ollama()
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint",
                         lambda url, client=None: {"base_url": url, "resident_bytes": 65 * 2**30,
@@ -223,7 +223,7 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
         seen.update(url=url, request=request, transport=transport)
         return ollama
 
-    monkeypatch.setattr("ml_stack.bench.speed.client_for", fake_client_for)
+    monkeypatch.setattr("poolhouse.bench.speed.client_for", fake_client_for)
     kept = tmp_path / "runs.ladybug"
     code = bench._main(["speed", "--on", "flash-ollama=ollama://127.0.0.1:11434/thornfell:125b-mlx",
                         "--prompts", "64,128", "--streams", "1,2", "--generate", "8",
@@ -244,13 +244,13 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
 
 
 def test_a_speed_run_that_is_not_a_smoke_smokes_one_cell_first(tmp_path, monkeypatch, capsys):
-    import ml_stack.bench as bench
+    import poolhouse.bench as bench
 
     client = _Llama()
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint", lambda url, client=None: {"base_url": url})
-    monkeypatch.setattr("ml_stack.bench.speed.client_for", lambda url, **kw: client)
+    monkeypatch.setattr("poolhouse.bench.speed.client_for", lambda url, **kw: client)
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["speed", "--on", "flash=http://127.0.0.1:1", "--prompts", "64,128",
                         "--streams", "1", "--generate", "8", "--kept", str(kept)]) == 0
@@ -260,8 +260,8 @@ def test_a_speed_run_that_is_not_a_smoke_smokes_one_cell_first(tmp_path, monkeyp
 
 
 def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monkeypatch):
-    import ml_stack.bench as bench
-    from ml_stack.bench.serve import SmokeFailed
+    import poolhouse.bench as bench
+    from poolhouse.bench.serve import SmokeFailed
 
     class Down:
         base_url = "http://127.0.0.1:1"
@@ -270,10 +270,10 @@ def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monk
         def chat(self, messages, **kw):
             raise ServerUnreachable("nothing there")
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint", lambda url, client=None: {"base_url": url})
-    monkeypatch.setattr("ml_stack.bench.speed.client_for", lambda url, **kw: Down())
+    monkeypatch.setattr("poolhouse.bench.speed.client_for", lambda url, **kw: Down())
     with pytest.raises(SmokeFailed, match="every request failed"):
         bench._main(["speed", "--on", "flash=http://127.0.0.1:1", "--prompts", "64",
                      "--streams", "1", "--generate", "8", "--kept", str(tmp_path / "r.ladybug")])
@@ -289,15 +289,15 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
 
     from test_graph_bench import _preflight_ok
 
-    import ml_stack.bench as bench
-    import ml_stack.client
-    import ml_stack.serve
-    from ml_stack.serve import ServerInfo
-    from ml_stack.serve.profile import record
+    import poolhouse.bench as bench
+    import poolhouse.client
+    import poolhouse.serve
+    from poolhouse.serve import ServerInfo
+    from poolhouse.serve.profile import record
 
     measured = record("tiny.gguf", slot_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for",
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for",
                         lambda m, **_: replace(measured, served=str(m)))
     seen = {"kwargs": [], "clients": []}
     _preflight_ok(monkeypatch)
@@ -315,12 +315,12 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
             self.request = request
             seen["clients"].append(self)
 
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint",
                         lambda url, client=None: {"base_url": url, "model": "tiny.gguf"})
-    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
-    monkeypatch.setattr(ml_stack.client, "Client", Built)
+    monkeypatch.setattr(poolhouse.serve, "serve", fake_serve)
+    monkeypatch.setattr(poolhouse.client, "Client", Built)
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["speed", "--serve", "tiny.gguf", "--no-draft", "--serve-label", "flash",
                         "--prompts", "64", "--streams", "1,2", "--generate", "8",
@@ -346,7 +346,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
 
 def test_show_speed_prints_the_speed_runs_and_the_answering_table_leaves_them_out(tmp_path,
                                                                                 capsys):
-    from ml_stack.bench import save, table
+    from poolhouse.bench import save, table
 
     kept = tmp_path / "runs.ladybug"
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 900.0, "decode_tps": 31.5,
@@ -370,7 +370,7 @@ def test_show_speed_prints_the_speed_runs_and_the_answering_table_leaves_them_ou
 
 
 def test_the_selfcheck_drives_speed_through_the_whole_path():
-    from ml_stack.bench.selfcheck import selfcheck
+    from poolhouse.bench.selfcheck import selfcheck
 
     said = selfcheck(["speed", "--serve", "tiny.gguf", "--serve-label", "tiny"])
     assert said.startswith("speed: ") and "tiny-speed" in said and "read back" in said

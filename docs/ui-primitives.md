@@ -9,10 +9,10 @@ fonts come from CSS custom properties, so a host themes them by overriding varia
 
 | What | Where |
 | --- | --- |
-| Folder on disk | `ml_stack.ui.assets_dir()` returns a `pathlib.Path` |
+| Folder on disk | `poolhouse.ui.assets_dir()` returns a `pathlib.Path` |
 | Served by the daemon | `/ui/ml-ui/<file>`, for example `/ui/ml-ui/ml-ui.css` and `/ui/ml-ui/ml-ui.js` |
 | Gallery of every state | `/ui/gallery` (the file is `gallery.html` in the same folder) |
-| Python side of the verdicts | `ml_stack.ui.verdict` (`verdict_of`, `THRESHOLDS`, `LABELS`) |
+| Python side of the verdicts | `poolhouse.ui.verdict` (`verdict_of`, `THRESHOLDS`, `LABELS`) |
 
 An embedding application copies or serves the folder and adds two tags:
 
@@ -95,7 +95,7 @@ meter.segments = est.breakdown.map(({ name, bytes }) => ({ label: name, value: b
 meter.verdict = est.verdict;           // "green" | "yellow" | "red"
 ```
 
-`ml_stack.serve.fit` words its outcomes as it likes; the mapping to the vocabulary above
+`poolhouse.serve.fit` words its outcomes as it likes; the mapping to the vocabulary above
 is `fits` to `green`, `tight` to `yellow`, `does not fit` to `red`, unknown to `none`.
 
 ### `<ml-chip>`
@@ -262,7 +262,7 @@ Keep the contrast pairs in the Tokens table when overriding: the `-ink` tokens m
 ## Verdicts
 
 `verdict.json` holds the definition: `yellow_at` 0.8 and `red_at` 0.95 of capacity, and the
-words. `ml_stack.ui.verdict.verdict_of(used, capacity)` and the script's `verdictOf` give
+words. `poolhouse.ui.verdict.verdict_of(used, capacity)` and the script's `verdictOf` give
 the same answer, and `tests/test_ui_primitives.py` fails if the two drift. Anything that
 decides a verdict by other means (a fit estimate with its own cutoffs) passes the result in
 the `verdict` attribute; the mapping from an estimator's words is `fits` to `green`, `tight`
@@ -290,5 +290,5 @@ to `yellow`, `does not fit` to `red`, unknown to `none`.
 | Graph page palette (`--ink`, `--surface`, `--k-*`) | `graph/web/shell.html`, its own tokens | unchanged; a second token set that does not use ml-ui yet |
 
 Components of the daemon page are light-DOM custom elements assembled by
-`ml_stack.ui.assemble` into one HTML string with inline scripts; `ml-ui` is the part
+`poolhouse.ui.assemble` into one HTML string with inline scripts; `ml-ui` is the part
 meant to be loaded by other pages, so it ships as separate files instead.

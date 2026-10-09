@@ -2,8 +2,8 @@
 
 import pytest
 
-from ml_stack.workspace import guide, project, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import guide, project, tokens
+from poolhouse.workspace.identity import Denied
 
 pytest_plugins = ("test_workspace_quickstart",)
 

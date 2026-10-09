@@ -14,7 +14,7 @@ from keyring.backend import KeyringBackend
 from keyring.compat import properties
 from keyring.errors import KeyringError, PasswordDeleteError
 
-from ml_stack import keystore
+from poolhouse import keystore
 
 
 class CountingRing(KeyringBackend):
@@ -53,16 +53,16 @@ class CountingRing(KeyringBackend):
 
 
 class CountingFileRing(KeyringBackend):
-    """Entries in the JSON file named by ``ML_STACK_TEST_KEYRING``; each call appends a line to
+    """Entries in the JSON file named by ``POOLHOUSE_TEST_KEYRING``; each call appends a line to
     ``<file>.calls``. Inert while the variable is unset."""
 
     @properties.classproperty
     def priority(cls) -> float:
-        return 5 if "ML_STACK_TEST_KEYRING" in os.environ else 0
+        return 5 if "POOLHOUSE_TEST_KEYRING" in os.environ else 0
 
     @staticmethod
     def _file() -> Path:
-        return Path(os.environ["ML_STACK_TEST_KEYRING"])
+        return Path(os.environ["POOLHOUSE_TEST_KEYRING"])
 
     def _note(self, name: str) -> None:
         with Path(f"{self._file()}.calls").open("a") as out:
@@ -76,7 +76,7 @@ class CountingFileRing(KeyringBackend):
 
     def get_password(self, service, username):
         self._note("get")
-        time.sleep(float(os.environ.get("ML_STACK_TEST_KEYRING_DELAY", "0")))
+        time.sleep(float(os.environ.get("POOLHOUSE_TEST_KEYRING_DELAY", "0")))
         return self._all().get(f"{service}/{username}")
 
     def set_password(self, service, username, password):

@@ -1,4 +1,4 @@
-"""`ml_stack.serve` and `ml_stack.client` as another application imports and calls them."""
+"""`poolhouse.serve` and `poolhouse.client` as another application imports and calls them."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-import ml_stack.client
-import ml_stack.serve
-from ml_stack.testing.fakes import fake_llama_binary
+import poolhouse.client
+import poolhouse.serve
+from poolhouse.testing.fakes import fake_llama_binary
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 DOC = Path(__file__).resolve().parents[1] / "docs" / "embedding.md"
@@ -28,16 +28,16 @@ core = {module for module, distributions in packages_distributions().items()
 def refuse(*args, **kwargs):
     raise RuntimeError("socket opened at import")
 socket.socket.connect = refuse
-import ml_stack.serve, ml_stack.client
+import poolhouse.serve, poolhouse.client
 outside = sorted({name.split('.')[0] for name in sys.modules
                   if not name.startswith('_')
                   and name.split('.')[0] not in sys.stdlib_module_names}
-                 - core - {'ml_stack'})
+                 - core - {'poolhouse'})
 print(outside)
 """
 
 
-@pytest.mark.parametrize("module", [ml_stack.serve, ml_stack.client],
+@pytest.mark.parametrize("module", [poolhouse.serve, poolhouse.client],
                          ids=["serve", "client"])
 def test_every_exported_name_resolves(module):
     assert [name for name in module.__all__ if not hasattr(module, name)] == []

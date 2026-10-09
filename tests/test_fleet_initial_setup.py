@@ -5,10 +5,10 @@ import pytest
 from launch_support import browser as browser_headers, sign_in
 from test_fleet_ui import Serving
 
-from ml_stack.fleet import automatic_clusters
-from ml_stack.fleet.daemon import DaemonOptions, DaemonRuntime
-from ml_stack.fleet.discovery import memberships, mint_cluster
-from ml_stack.fleet.settings import Settings
+from poolhouse.fleet import automatic_clusters
+from poolhouse.fleet.daemon import DaemonOptions, DaemonRuntime
+from poolhouse.fleet.discovery import memberships, mint_cluster
+from poolhouse.fleet.settings import Settings
 
 
 @pytest.fixture
@@ -48,8 +48,8 @@ def test_prod_name_stays_unpaired_and_keeps_full_wizard(device):
 
 @pytest.mark.parametrize("changes", [
     {"Origin": "http://foreign.invalid"}, {"Sec-Fetch-Site": "cross-site"},
-    {"Authorization": "Bearer agent"}, {"X-ML-Stack-Token": "agent"},
-    {"X-ML-Stack-Agent": "helper"}, {"Host": "[malformed"},
+    {"Authorization": "Bearer agent"}, {"X-Poolhouse-Token": "agent"},
+    {"X-Poolhouse-Agent": "helper"}, {"Host": "[malformed"},
 ])
 def test_initial_rejects_foreign_and_agent_requests(device, changes):
     headers = {**browser_headers(device), **changes}
@@ -141,7 +141,7 @@ def test_fresh_automatic_dev_can_choose_prod_explicitly(device):
 def test_initial_never_drops_manual_dev_membership(device):
     from dataclasses import replace
 
-    from ml_stack.fleet.discovery import adopt
+    from poolhouse.fleet.discovery import adopt
 
     member = mint_cluster("private", device.keyfile, mode="dev")
     adopt(replace(member, selection="manual"), device.keyfile)
@@ -152,8 +152,8 @@ def test_initial_never_drops_manual_dev_membership(device):
 @pytest.mark.redteam
 @pytest.mark.parametrize("changes", [
     {"Origin": "http://foreign.invalid"}, {"Sec-Fetch-Site": "cross-site"},
-    {"Authorization": "Bearer agent"}, {"X-ML-Stack-Token": "agent"},
-    {"X-ML-Stack-Agent": "helper"}, {"Host": "rebound.invalid"},
+    {"Authorization": "Bearer agent"}, {"X-Poolhouse-Token": "agent"},
+    {"X-Poolhouse-Agent": "helper"}, {"Host": "rebound.invalid"},
 ])
 def test_owner_admission_refuses_foreign_and_agent_requests_even_with_a_launch_session(device, changes):
     status, _, headers = device.call("/ui/setup/initial", method="POST", cookie=sign_in(device),
@@ -167,7 +167,7 @@ def test_owner_admission_refuses_foreign_and_agent_requests_even_with_a_launch_s
 
 @pytest.mark.redteam
 def test_owner_admission_refuses_lan_and_missing_ui_header(device):
-    from ml_stack.fleet.discovery import primary_ip
+    from poolhouse.fleet.discovery import primary_ip
 
     body = {"name": "quillhaven", "cluster_mode": "dev"}
     cookie = sign_in(device)
@@ -201,13 +201,13 @@ def test_initial_rejects_hostile_body_without_identity_or_membership_changes(dev
 
 @pytest.mark.redteam
 def test_setup_jobs_refuses_untrusted_readers_and_ignores_external_paths(device, tmp_path):
-    from ml_stack.fleet.setup_jobs import Jobs
+    from poolhouse.fleet.setup_jobs import Jobs
 
     device.ui.root = tmp_path / "traind"
     device.ui.setup_jobs = Jobs(device.ui.root)
     mint_cluster("private", device.keyfile, mode="dev")
     device.ui.setup_finished()
-    for expected, options in ((401, {}), (401, {"cookie": "ml-stack-session=forged"}),
+    for expected, options in ((401, {}), (401, {"cookie": "poolhouse-session=forged"}),
                               (403, {"ui_header": False}), (401, {"headers": {"Host": "rebound.invalid"}})):
         status, _, _ = device.call("/ui/setup/jobs", **options)
         assert status == expected

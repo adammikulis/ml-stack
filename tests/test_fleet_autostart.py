@@ -16,7 +16,7 @@ import pytest
 @pytest.fixture
 def mac(monkeypatch, tmp_path):
     """The module as it behaves on macOS, writing into tmp_path."""
-    from ml_stack.fleet import autostart
+    from poolhouse.fleet import autostart
 
     paths = {"login": tmp_path / "login.plist", "boot": tmp_path / "boot.plist"}
     monkeypatch.setattr(sys, "platform", "darwin")
@@ -30,12 +30,12 @@ def mac(monkeypatch, tmp_path):
 @pytest.fixture
 def windows(monkeypatch, tmp_path):
     """The module as it behaves on Windows, with a scheduled task already there."""
-    from ml_stack.fleet import autostart
+    from poolhouse.fleet import autostart
 
     ran: list[list[str]] = []
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(autostart, "_windows_startup", lambda: tmp_path / "start.cmd")
-    monkeypatch.setattr(autostart, "_executable", lambda: ["ml-stack-traind.exe"])
+    monkeypatch.setattr(autostart, "_executable", lambda: ["poolhouse-traind.exe"])
     monkeypatch.setattr(autostart, "_windows_task_exists", lambda: True)
     monkeypatch.setattr(
         subprocess, "run",
@@ -50,9 +50,9 @@ class TestWhatItWouldStart:
 
     def test_a_console_script_that_cannot_run_is_not_the_one_installed(
             self, monkeypatch, tmp_path):
-        from ml_stack.fleet import autostart
+        from poolhouse.fleet import autostart
 
-        broken = tmp_path / "ml-stack-traind"
+        broken = tmp_path / "poolhouse-traind"
         broken.write_text("#!/bin/sh\nexit 1\n")
         broken.chmod(0o755)
         monkeypatch.setattr(autostart.shutil, "which", lambda name: str(broken))
@@ -60,9 +60,9 @@ class TestWhatItWouldStart:
         assert autostart.plan("login")[:2] == [sys.executable, "-m"]
 
     def test_a_console_script_that_answers_is(self, monkeypatch, tmp_path):
-        from ml_stack.fleet import autostart
+        from poolhouse.fleet import autostart
 
-        works = tmp_path / "ml-stack-traind"
+        works = tmp_path / "poolhouse-traind"
         works.write_text("#!/bin/sh\nexit 0\n")
         works.chmod(0o755)
         monkeypatch.setattr(autostart.shutil, "which", lambda name: str(works))
@@ -78,7 +78,7 @@ class TestWhatItWouldStart:
 
         assert not done.installed
         assert not paths["login"].exists(), "installed a job that cannot run"
-        assert "no working ml-stack" in done.note
+        assert "no working poolhouse" in done.note
 
 
 class TestChangingTheAnswer:
@@ -100,7 +100,7 @@ class TestChangingTheAnswer:
         assert not paths["boot"].exists(), "two jobs would start two daemons"
 
     def test_what_could_not_be_removed_is_reported(self, monkeypatch, tmp_path):
-        from ml_stack.fleet import autostart
+        from poolhouse.fleet import autostart
 
         locked = tmp_path / "locked"
         locked.mkdir()
@@ -147,7 +147,7 @@ class TestWhatRunsAsRoot:
 
     def test_the_boot_job_is_written_by_the_privileged_command_not_copied_from_a_staged_file(
             self, monkeypatch, tmp_path):
-        from ml_stack.fleet import autostart
+        from poolhouse.fleet import autostart
 
         asked = []
         monkeypatch.setattr(sys, "platform", "darwin")
@@ -167,7 +167,7 @@ class TestWhatRunsAsRoot:
             self, monkeypatch, tmp_path):
         import shlex
 
-        from ml_stack.fleet import autostart
+        from poolhouse.fleet import autostart
 
         asked = []
         evil = tmp_path / "it's \"here\"; rm -rf ~"
@@ -182,7 +182,7 @@ class TestWhatRunsAsRoot:
         assert str(evil / "boot.plist") in words and "rm" not in words
 
     def test_the_text_of_an_applescript_string_cannot_end_it(self):
-        from ml_stack.platform import applescript_quote
+        from poolhouse.platform import applescript_quote
 
         assert applescript_quote('a"b\\c') == 'a\\"b\\\\c'
         assert '"' not in applescript_quote('" & (do shell script "id") & "').replace('\\"', "")

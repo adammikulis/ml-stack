@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from ml_stack.redteam.report import Attempt, Report, compare, markdown, summary
+from poolhouse.redteam.report import Attempt, Report, compare, markdown, summary
 
 
 def attempt(attack_id: str, succeeded: bool, **kwargs) -> Attempt:
@@ -68,7 +68,7 @@ def test_the_markdown_lists_each_success_by_name_and_where_the_run_came_from():
 
 # -- the regression gate and the per-attack table (issue 29) ----------------------------------
 
-from ml_stack.redteam.report import gate, scenario_table  # noqa: E402
+from poolhouse.redteam.report import gate, scenario_table  # noqa: E402
 
 
 def watched(attack_id: str, *, succeeded=False, detected=True, ttd: int | None = 0,

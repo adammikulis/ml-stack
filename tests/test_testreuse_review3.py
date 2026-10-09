@@ -20,11 +20,11 @@ import testreuse_store as storage
 from test_testreuse import FILE, Recorder, hows, project  # noqa: F401  (fixture)
 from test_testreuse_review import attempt, kinds
 
-from ml_stack.activity import reuse
-from ml_stack.workspace import testboard
+from poolhouse.activity import reuse
+from poolhouse.workspace import testboard
 
 pytestmark = pytest.mark.slow
-HELPER = "src/ml_stack/helper.py"
+HELPER = "src/poolhouse/helper.py"
 
 
 def last_entry(store):
@@ -143,7 +143,7 @@ def test_a_checkout_too_large_to_watch_stores_nothing_and_still_runs(project, tm
 def test_a_same_size_edit_with_the_old_modification_time_is_recorded_by_content(project, tmp_path):
     store = storage.Store(tmp_path / "store")
     (project / HELPER).write_text("VALUE = 1\n")
-    (project / FILE).write_text("from ml_stack.helper import VALUE\n\n\ndef test_a():\n    assert VALUE in (1, 2)\n")
+    (project / FILE).write_text("from poolhouse.helper import VALUE\n\n\ndef test_a():\n    assert VALUE in (1, 2)\n")
     attempt(project, store)
     stat = (project / HELPER).stat()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from git_template import copy_checkout
 
-from ml_stack.net import git
+from poolhouse.net import git
 
 
 def _build(root):

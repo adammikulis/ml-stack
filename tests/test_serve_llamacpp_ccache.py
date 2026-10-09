@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import home
-from ml_stack.sandbox import run
-from ml_stack.sandbox.seatbelt import Seatbelt
-from ml_stack.serve import llamacpp_ccache, llamacpp_compile
-from ml_stack.serve.build_paths import BuildFailed
-from ml_stack.serve.llamacpp_compile import Job, Toolchain
+from poolhouse import home
+from poolhouse.sandbox import run
+from poolhouse.sandbox.seatbelt import Seatbelt
+from poolhouse.serve import llamacpp_ccache, llamacpp_compile
+from poolhouse.serve.build_paths import BuildFailed
+from poolhouse.serve.llamacpp_compile import Job, Toolchain
 
 CMAKE = """cmake_minimum_required(VERSION 3.14)
 project(stub NONE)

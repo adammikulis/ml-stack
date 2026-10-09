@@ -1,0 +1,434 @@
+"""How a model is served, written down once, and one server per port to take a slot on.
+
+llama.cpp serves **one set of server settings per port**. Two parts of a program that lease
+the same model with different context, different slots, or a draft head on one and not the
+other are not two clients of one server: whichever leases second finds a mismatch, stops the
+first server and loads the weights again. On a large model that is a minute of nothing
+working, and it happens the moment a lease is spelled out in two places and one of them is
+edited.
+
+So a :class:`Serving` is every server setting in one object -- the model, its port, how many
+conversations it holds and how much context each gets, the KV cache's precision, the draft
+head and how far ahead it guesses, the vision projector, the thinking budget, and which
+llama.cpp build serves it -- and :meth:`Serving.lease` is the only place those become the
+keyword arguments :func:`poolhouse.serve.serve` takes. Everything that wants the model asks
+:func:`slot` for a slot on it: the server is started once per port and held for the process,
+and each caller gets a :class:`~poolhouse.client.Client` pinned to a slot of its own, so two
+conversations at once do not reprocess each other's context.
+
+A serving holds one slot unless it is asked for more, and that slot gets the whole context::
+
+    serving = Serving(model="hf:owner/repo/weights.gguf", port=8080,
+                      slot_context=131072, cache_type="q8_0", draft=head, draft_n_max=4)
+    client = slot(serving, index=request_number, n_predict=16384)
+
+    crowded = dataclasses.replace(serving, slots=4, slot_context=32768)   # four at once
+
+A serving is one third of what a model needs. :class:`Config` is all three -- the
+:class:`Serving` to serve it in, the :class:`Asking` to ask it with, and the
+:class:`Talking` the client is built from -- so a bench row, a page answer and a client on a
+slot for one model are the same lease and the same asking by construction rather than by
+three places agreeing::
+
+    config = profile_for(model).config(port=8080)
+    serve(config.serving.model, **config.lease())            # the server
+    converse(question, graph, client, asking=config.asking)  # the asking
+    client = slot(config, index=request_number)              # the client
+
+:func:`draft_for` and :func:`projector_for` answer 'auto' the way `poolhouse-serve up` does,
+because a lease built by hand has to resolve what the CLI resolves for itself.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+from poolhouse.asking import Asking
+from poolhouse.client.health import serving_params
+from poolhouse.client.settings import SAMPLERS, Request, Transport
+from poolhouse.log import say
+
+__all__ = ["Config", "Serving", "Talking", "draft_for", "drafted", "projector_for",
+           "release_all", "said_cache", "served", "servers", "serving_said", "slot",
+           "split_cache_type"]
+
+#: how the KV cache is stored unless a serving says otherwise
+DEFAULT_CACHE = "q8_0"
+
+
+def split_cache_type(asked: str) -> tuple[str, str]:
+    """``(K, V)`` from one cache type, or from ``K/V`` where the two differ."""
+    k, _, v = str(asked or "").strip().partition("/")
+    return k.strip(), (v.strip() or k.strip())
+
+
+def said_cache(type_k: str, type_v: str) -> str:
+    """One cache type from its two halves: ``q8_0``, or ``q8_0/q4_0`` where they differ."""
+    k, v = str(type_k or ""), str(type_v or "")
+    return k if k == v else "/".join(part for part in (k, v) if part)
+
+
+@dataclass(frozen=True)
+class Serving:
+    """One model, served one way. :meth:`lease` is what :func:`poolhouse.serve.serve` takes."""
+
+    model: str
+    port: int = 8080
+    # One conversation each, with its own KV cache. The server divides the context it was
+    # given between them, so what is asked for is slots x slot_context and a slot is what
+    # any one conversation actually gets.
+    slots: int = 1
+    slot_context: int = 4096
+    # How the KV cache is stored: q8_0 unless a serving says otherwise (measured 2026-09-02
+    # on Flash-Next: F1 unchanged, faster, half the cache); "f16" asks for the full one.
+    cache_type: str = DEFAULT_CACHE
+    # Whether every slot's cache is one pool the server masks per sequence, or a cache per
+    # slot. None leaves the build's own default; measure before choosing.
+    kv_unified: bool | None = None
+    # A small model or a head of the same family, guessing ahead for the large one to check
+    # in one pass. A path, or hf:owner/repo[/file.gguf]; "" for none. Which `--spec-type` it
+    # needs is read from what it is called, so a head is never served as the wrong method.
+    draft: str = ""
+    draft_n_max: int | None = None      # tokens guessed ahead; None leaves the default
+    draft_p_min: float | None = None    # the draft's confidence floor; None leaves the default
+    # One cache type sets both draft halves; K/V sets them separately.
+    draft_cache_type: str = "q8_0"
+    # Which method the head implements. "" reads it off the head's own name, which is right
+    # whenever the name says so; a profile that measured one says it outright, and a head
+    # that lives inside the weights -- `--spec-type draft-mtp` with no `-md` -- can only be
+    # asked for this way.
+    spec_type: str = ""
+    # False serves without multi-token prediction; None leaves it to `serve.mtp`, which
+    # serves a model's own MTP head whenever one is found, trusted and loadable.
+    mtp: bool | None = None
+    mmproj: str = ""                    # the vision projector, so the model can see
+    reasoning_budget: int | None = None  # tokens a turn may think for; 0 turns it off
+    mlock: bool = False                 # hold the weights in memory rather than let them page
+    flash_attn: bool | None = None      # None leaves the spec's own, which is on
+    # A named build from `poolhouse-serve build --name`, or "" for the managed master: an
+    # architecture or a head newer than any release loads only on the build that has it.
+    build: str = ""
+    # Anything else llama-server takes that no field here names -- `-ub 2048`. Measured
+    # flags, not remembered ones: they are here because a profile carries what a
+    # measurement found, and a run that found `-ub 2048` worth 4.7x has nowhere else to
+    # put it.
+    extra_args: tuple[str, ...] = ()
+    # What decided `slot_context` for a lone slot -- the model's trained context, the
+    # longest this machine's room holds, or what scored best -- said outright rather
+    # than left for a caller to work out from the number alone. "" when slots > 1.
+    note: str = ""
+
+    @property
+    def context(self) -> int:
+        """What the server is asked for: every slot's context, added up."""
+        return self.slot_context * self.slots
+
+    def lease(self) -> dict[str, Any]:
+        """The keyword arguments :func:`poolhouse.serve.serve` takes, model aside.
+
+        Only what was actually asked for appears, so a serving that says nothing about a
+        draft, a projector or thinking serves exactly as the build's own defaults do.
+        """
+        out: dict[str, Any] = {"port": self.port, "context": self.context,
+                               "parallel": self.slots}
+        if self.cache_type:
+            out["cache_type_k"] = out["cache_type_v"] = self.cache_type
+        if self.kv_unified is not None:
+            out["kv_unified"] = bool(self.kv_unified)
+        if self.draft:
+            from poolhouse.hub import spec_for
+
+            out["draft"] = self.draft
+            out["spec_type"] = self.spec_type or spec_for(self.draft)
+            if self.draft_n_max is not None:
+                out["spec_draft_max"] = self.draft_n_max
+        elif self.spec_type:
+            # a head inside the weights: the method, no -md, and how far it guesses
+            out["spec_type"] = self.spec_type
+            if self.draft_n_max is not None:
+                out["spec_draft_max"] = self.draft_n_max
+        if (self.draft or self.spec_type) and self.draft_p_min is not None:
+            out["spec_p_min"] = self.draft_p_min
+        if (self.draft or self.spec_type) and self.draft_cache_type:
+            out["spec_draft_type_k"], out["spec_draft_type_v"] = \
+                split_cache_type(self.draft_cache_type)
+        if self.mtp is False:
+            out["mtp"] = False
+        if self.mmproj:
+            out["mmproj"] = self.mmproj
+        if self.reasoning_budget is not None:
+            out["reasoning_budget"] = self.reasoning_budget
+        if self.mlock:
+            out["mlock"] = True
+        if self.flash_attn is not None:
+            out["flash_attn"] = bool(self.flash_attn)
+        if self.extra_args:
+            out["extra_args"] = tuple(self.extra_args)
+        return out
+
+    def manager(self) -> Any | None:
+        """The :class:`~poolhouse.serve.ServerManager` for a named build, else None.
+
+        None is not "no manager": it is the default one, which finds the binary the usual
+        way. A build is named only when the model needs it.
+        """
+        if not self.build:
+            return None
+        from poolhouse.serve import backend, manager
+
+        return manager.ServerManager(backend.LlamaServerBackend(build=self.build))
+
+
+@dataclass(frozen=True)
+class Talking:
+    """One model, talked to one way: what a :class:`~poolhouse.client.Client` is built from.
+
+    ``timeout`` is the cap on one call, which is the bench's per-question cap said once.
+    ``think`` is taken per call -- ``chat(..., think=)`` -- and so is in neither
+    :meth:`request` nor :meth:`transport`. ``spec_draft_max`` rides on each request.
+    """
+
+    n_predict: int | None = None
+    timeout: float | None = None
+    sampling: Mapping[str, Any] = field(default_factory=dict)
+    think: bool | None = None
+    spec_draft_max: int | None = None    # tokens guessed ahead
+
+    def request(self, *, slot: int | None = None) -> Request:
+        """The :class:`~poolhouse.client.Request` a client on ``slot`` sends."""
+        sampling = {k: v for k, v in dict(self.sampling).items() if v is not None}
+        depth = None if self.spec_draft_max is None else int(self.spec_draft_max)
+        return Request(n_predict=self.n_predict, spec_draft_max=depth, slot=slot,
+                       **sampling)
+
+    def transport(self) -> Transport:
+        """The :class:`~poolhouse.client.Transport` a client reaches its server with."""
+        return Transport(timeout=self.timeout)
+
+
+@dataclass(frozen=True)
+class Config:
+    """One model, whole: served one way, asked one way, talked to one way.
+
+    Three sections, because three different pieces of code read them, and one object,
+    because a bench row, a page answer and a client on a slot that build their own drift.
+    :meth:`lease` is the server's, :attr:`asking` the asking, :meth:`client` the client's,
+    and :meth:`over` is how a caller changes one knob without knowing which section owns
+    it.
+    """
+
+    serving: Serving
+    asking: Asking = field(default_factory=Asking)
+    talking: Talking = field(default_factory=Talking)
+
+    @property
+    def model(self) -> str:
+        """The model reference served."""
+        return self.serving.model
+
+    @property
+    def port(self) -> int:
+        return self.serving.port
+
+    def lease(self) -> dict[str, Any]:
+        """The keyword arguments :func:`poolhouse.serve.serve` takes, model aside."""
+        return self.serving.lease()
+
+    def client(self, base_url: str, *, index: int | None = None) -> Any:
+        """A :class:`~poolhouse.client.Client` on this config's server.
+
+        ``index`` pins it to a slot -- whose slot it is, taken modulo the slots -- and
+        None leaves the server to choose.
+        """
+        from poolhouse.client import Client
+
+        slot = None if index is None else index % max(1, self.serving.slots)
+        return Client(base_url, request=self.talking.request(slot=slot),
+                      transport=self.talking.transport())
+
+    def over(self, **fields: Any) -> Config:
+        """This config with ``fields`` laid over it, each routed to the section that owns it.
+
+        A sampler setting no field names -- ``temperature``, ``top_k`` -- goes into
+        ``talking.sampling``. A name no section knows is a `TypeError` here rather than a
+        keyword the client refuses at the far end of a load.
+
+        ``draft_n_max`` reaches both sections: the depth a server starts with and the depth
+        a request asks for are one measurement, and a config whose two disagree measures the
+        request's. Taking the head away takes the request's depth with it.
+        """
+        parts: dict[str, dict[str, Any]] = {"serving": {}, "asking": {}, "talking": {}}
+        sampling = dict(self.talking.sampling)
+        for name, value in fields.items():
+            if name in Serving.__dataclass_fields__:
+                parts["serving"][name] = value
+            elif name in Asking.__dataclass_fields__:
+                parts["asking"][name] = value
+            elif name in Talking.__dataclass_fields__:
+                parts["talking"][name] = value
+            elif name in SAMPLERS:
+                sampling[name] = value
+            else:
+                raise TypeError(f"no such config field: {name}")
+        if "draft_n_max" in fields:
+            parts["talking"]["spec_draft_max"] = fields["draft_n_max"]
+        elif fields.get("draft") == "" and fields.get("spec_type") == "":
+            parts["talking"]["spec_draft_max"] = None
+        if sampling != dict(self.talking.sampling):
+            parts["talking"]["sampling"] = sampling
+        return replace(self, **{name: replace(getattr(self, name), **taken)
+                                for name, taken in parts.items() if taken})
+
+
+# One held server per port, for the life of the process. There is more than one model in a
+# program that reads with a large one and answers with a small one, and a single slot here
+# handed whichever was asked for first to both of them.
+_LOCK = threading.Lock()
+_STACKS: dict[int, contextlib.ExitStack] = {}
+_URLS: dict[int, str] = {}
+
+
+def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
+         timeout: float | None = None) -> Any:
+    """A client on one slot of ``serving``'s server, started on first ask and held after.
+
+    ``serving`` is a :class:`Serving` or the whole :class:`Config`; given a config, the ceiling,
+    timeout and the sampling are its ``talking``'s and need not be said again.
+
+    ``index`` is whose slot it is -- a request number, a worker id -- taken modulo the
+    slots, so each conversation keeps its own KV cache and a busy port cycles through them
+    rather than fighting over one. Sampling is the client's default, which is greedy: a
+    task that calls tools with exact ids is one where sampling noise becomes a wrong
+    argument rather than a livelier sentence.
+    """
+    config = serving if isinstance(serving, Config) else Config(serving=serving)
+    over = {k: v for k, v in (("n_predict", n_predict), ("timeout", timeout)) if v is not None}
+    config = config.over(**over) if over else config
+    with _LOCK:
+        if config.port not in _URLS:
+            from poolhouse.serve import serve
+
+            stack = contextlib.ExitStack()
+            server = stack.enter_context(
+                serve(config.model, manager=config.serving.manager(), **config.lease(),
+                      reason=f"a shared client on {Path(config.model).name}"))
+            _STACKS[config.port], _URLS[config.port] = stack, server.base_url
+        where = _URLS[config.port]
+    return config.client(where, index=index)
+
+
+def servers() -> dict[int, str]:
+    """port -> base url, for every server :func:`slot` is holding."""
+    with _LOCK:
+        return dict(_URLS)
+
+
+def release_all() -> None:
+    """Let go of every held server. What that does is the manager's business: a server this
+    process started stops, one it adopted stays up for whoever else is using it."""
+    with _LOCK:
+        stacks = list(_STACKS.values())
+        _STACKS.clear()
+        _URLS.clear()
+    for stack in stacks:
+        stack.close()
+
+
+def drafted(config: Config, asked: str = "auto", *,
+            say: Callable[[str], None] = say) -> Config:
+    """``config`` serving with the draft head ``asked`` names, and one line saying which.
+
+    A config that already carries a head keeps it. 'auto' takes the smallest head on this
+    machine for the model, 'none' takes none, and anything else names one of the heads
+    found -- a name matching none of them raises `ValueError`.
+    """
+    from poolhouse.hub import drafting, head_choice
+
+    if config.serving.draft:
+        say(drafting(config.serving.draft, config.serving.spec_type, config.talking.spec_draft_max,
+                     config.serving.build))
+        return config
+    head = head_choice(config.model, asked)
+    say(head.serving() if head is not None else drafting())
+    return config.over(**head.over()) if head is not None else config
+
+
+def serving_said(base_url: str) -> str:
+    """``2 slots x 32k`` as the server on ``base_url`` reports it, or ``settings unknown``."""
+    params = serving_params(base_url, timeout=5.0)
+    if params is None or not params.total_slots or not params.n_ctx:
+        return "settings unknown"
+    slots = int(params.total_slots)
+    return f"{slots} slot{'s' if slots != 1 else ''} x {int(params.n_ctx) // 1024}k"
+
+
+@contextlib.contextmanager
+def served(config: Config, *, say: Callable[[str], None] | None = None, reason: str = "",
+           **over: Any) -> Iterator[str]:
+    """The base URL of a server holding ``config``'s model, for the duration of the block.
+
+    A compatible managed server on any port is leased and left running for its other
+    holders; otherwise the broker admits a new server. The lease ends with this block. ``over``
+    goes to :func:`poolhouse.serve.serve`.
+    """
+    from poolhouse.serve.manager import serve
+
+    with serve(config.model, manager=config.serving.manager(),
+               **{**config.lease(), **over},
+               reason=reason or f"{Path(config.model).name} for this run") as server:
+        if say and server.adopted:
+            say(f"using the compatible server already up on {server.port} ({serving_said(server.base_url)}); it is left running")
+        yield server.base_url
+
+
+
+def draft_for(model: str, asked: str, *, build: str = "",
+              log: Callable[[str], None] | None = None) -> str:
+    """The draft head to serve beside ``model``, resolving 'auto', or "" if there is none.
+
+    'auto' reads the repository's own listing rather than guessing a filename, and only an
+    ``hf:`` reference can be resolved that way -- a local path says nothing about where it
+    came from. ``build`` is the named build the head has to load on, since a head withheld
+    from mainline is not a head this server can use.
+
+    A head that cannot be found is served without, out loud: ``log`` is told why. Said in
+    silence once, and a model ran undrafted for an hour with nothing to show for it.
+    """
+    from poolhouse.serve.ops import drafted
+
+    try:
+        binary: str | Path | None = None
+        if build:
+            from poolhouse.serve.backend import LlamaServerBackend
+
+            binary = LlamaServerBackend(build=build).binary
+        return drafted(str(model), asked, binary=binary)
+    except Exception as exc:  # noqa: BLE001 - a draft that cannot be found is served without
+        if log:
+            log(f"no draft head: {exc}")
+        return ""
+
+
+def projector_for(model: str, asked: str, *,
+                  log: Callable[[str], None] | None = None) -> str:
+    """The vision projector to serve beside ``model``, resolving 'auto', or "" for none.
+
+    :func:`poolhouse.serve.serve` hands ``mmproj`` straight to the ``ServerSpec`` and
+    resolves nothing, so 'auto' is answered here the way the CLI answers it: beside the
+    weights, then the directory above, then every revision of the same repository, taking
+    the *most precise* projector found -- quantising one costs sight out of all proportion
+    to what it saves.
+    """
+    from poolhouse.serve.ops import alongside
+
+    try:
+        return alongside(str(model), asked, "mmproj-", best=True)
+    except Exception as exc:  # noqa: BLE001 - a projector not found is served without
+        if log:
+            log(f"no projector: {exc}")
+        return ""

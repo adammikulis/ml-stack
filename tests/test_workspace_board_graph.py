@@ -6,10 +6,10 @@ from copy import deepcopy
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import Denied
-from ml_stack.workspace.board_graph import MEMORY, BoardGraph
-from ml_stack.workspace.chain import ChainLog
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace import Denied
+from poolhouse.workspace.board_graph import MEMORY, BoardGraph
+from poolhouse.workspace.chain import ChainLog
 
 
 def test_legacy_board_messages_and_cursors_migrate_once(tmp_path):
@@ -141,7 +141,7 @@ def test_prefix_deletion_and_envelope_rewiring_are_detected(replicas):
     with GraphStore(left.base / "board.db", buffer_pool_size=MEMORY) as graph:
         event = next(node for node in graph.nodes("board-event") if node["id"] == row["id"])
         graph.upsert_node({**event, "thread_id": "rewired"})
-    from ml_stack.workspace.chain import ChainBroken
+    from poolhouse.workspace.chain import ChainBroken
 
     with pytest.raises(ChainBroken, match="envelope"):
         left.ws.bus.log.rows()
@@ -153,7 +153,7 @@ def test_exchange_rejects_cross_audience_replies_and_schema_poison(replicas):
     left.ws.send(left.owner, "#general", "note", "public")
     left.ws.send(left.owner, "#shared", "note", "private")
     payload = left.ws.board.export_graph(left.owner)
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
 
     event = payload["events"][-1]
     event["thread_id"] = payload["events"][0]["id"]
@@ -228,7 +228,7 @@ def test_missing_seal_or_modified_projection_refuses_reads(replicas, tamper):
             graph.query("MATCH (d:Doc {key:$key}) DELETE d", {"key": "event-evidence:bus"})
         else:
             graph.put_doc("projection:bus", {"seq": 999})
-    from ml_stack.workspace.chain import ChainBroken
+    from poolhouse.workspace.chain import ChainBroken
 
     with pytest.raises(ChainBroken, match="integrity"):
         left.ws.bus.log.rows()
@@ -242,7 +242,7 @@ def test_exchange_rejects_invalid_expiry(replicas, expiry):
     payload = left.ws.board.export_graph(left.owner)
     row = payload["events"][0]["row"]
     row["expires"] = expiry
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
 
     row["hash"] = _digest(row["prev"], row)
     with pytest.raises(ValueError):
@@ -268,8 +268,8 @@ def test_legacy_reply_rewiring_is_refused_without_changing_row_digest(replicas):
     left.ws.send(left.owner, "#shared", "note", "root")
     left.ws.send(left.owner, "#shared", "note", "second")
     payload = left.ws.board.export_graph(left.owner)
-    from ml_stack.workspace.board_graph import identifier
-    from ml_stack.workspace.chain import GENESIS, _digest
+    from poolhouse.workspace.board_graph import identifier
+    from poolhouse.workspace.chain import GENESIS, _digest
 
     previous = GENESIS
     for event in payload["events"]:
@@ -298,7 +298,7 @@ def test_exchange_refuses_invalid_render_fields(replicas, field):
         row.pop(field)
     else:
         row[field] = {}
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
 
     row["hash"] = _digest(row["prev"], row)
     with pytest.raises(ValueError):
@@ -317,7 +317,7 @@ def test_valid_rehashed_origin_fork_rolls_back_every_imported_node(replicas):
     event = fork["events"][-1]
     event["id"] = fork["workspace"] + ":event:" + "f" * 32
     event["row"].update(event_id=event["id"], body="fork")
-    from ml_stack.workspace.chain import _digest
+    from poolhouse.workspace.chain import _digest
 
     event["row"]["hash"] = _digest(event["row"]["prev"], event["row"])
     with pytest.raises(ValueError, match="fork"):
@@ -348,8 +348,8 @@ def test_exclusive_graph_writer_waits_until_shared_reader_releases(monkeypatch, 
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event, current_thread
 
-    from ml_stack import lock
-    from ml_stack.workspace.graphlog import GraphLog
+    from poolhouse import lock
+    from poolhouse.workspace.graphlog import GraphLog
     graph_store = BoardGraph(tmp_path)
     graph_store.state()
     blocked = Event()

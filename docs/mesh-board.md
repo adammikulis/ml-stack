@@ -262,7 +262,7 @@ preserved as evidence, not applied.
 
 ### Provisional status
 
-Every write returns a row id and a status the agent can read (`ml-stack-workspace outbox`, redefined as the
+Every write returns a row id and a status the agent can read (`poolhouse-workspace outbox`, redefined as the
 status list): `local` (journaled), `synced n/m` (m = active members reached recently), `settled`,
 `yielded`, `superseded`, `rejected(reason)`. The hook prints each transition as context. No output says
 "applied" for a row that is not settled. At N = 1 rows are `settled` at once.
@@ -274,7 +274,7 @@ status list): `local` (journaled), `synced n/m` (m = active members reached rece
 - The first device's signing key is the founder, with no special rights after founding.
 - `member-add {device, signing_key, tls_cert_fp, enrolled_by, person_approval}` is signed by the enroller
   and by the joiner. It is valid when the enroller is a member at that HLC and the pairing handshake
-  completed on both ends with the person present (`ml-stack-pool pair`, existing SPAKE2 flow in
+  completed on both ends with the person present (`poolhouse-pool pair`, existing SPAKE2 flow in
   `pyproject.toml:72`). Trust propagates through these records: a device need not pair with each of N-1
   others. The new device receives the membership fold from its one pairing partner and then authenticates
   every other member by its recorded certificate fingerprint and signing key.
@@ -349,7 +349,7 @@ refuses the terminal `HumanGrant` (`human.py:54-66`).
 
 Real temp devices, each a real process with its own state root, real pairing and real sockets; partitions by
 a loopback proxy that drops connections; death by `kill -9`; clocks moved through the `clock=` parameters
-or a per-process offset; `ML_STACK_NO_REAL_KEYSTORE=1`. Large pools are real journals and the real
+or a per-process offset; `POOLHOUSE_NO_REAL_KEYSTORE=1`. Large pools are real journals and the real
 merge and fold, one process per device group, over loopback sockets. No mock of merge or board.
 
 | Case | Expected |
@@ -420,13 +420,13 @@ The device group is a pool. Identifiers that say cluster for this concept, with 
 
 | Today | Becomes |
 |---|---|
-| `ml-stack-cluster` (`pyproject.toml:162`, `fleet/join.py:main`) | `ml-stack-pool` |
-| `cluster_key`, `--cluster-key`, `ML_STACK_CLUSTER_KEY`, `cluster.key` (`fleet/discovery.py:75-80`) | `pool_key`, `--pool-key`, the matching pool-key environment variable, `pool.key` |
+| `poolhouse-cluster` (`pyproject.toml:162`, `fleet/join.py:main`) | `poolhouse-pool` |
+| `cluster_key`, `--cluster-key`, `POOLHOUSE_CLUSTER_KEY`, `cluster.key` (`fleet/discovery.py:75-80`) | `pool_key`, `--pool-key`, the matching pool-key environment variable, `pool.key` |
 | `cluster_id` (project connections, `workspace/remote.py`, `project_connection.py`) | `pool_id` |
 | `cluster`, `--cluster` in the project record shown by `whoami` | `pool`, `--pool` |
 | `mint_cluster`, `cluster_group`, `Membership` group fields (`fleet/discovery.py`) | `mint_pool`, `pool_group` |
 | `fleet/cluster_modes.py`, `lan_clusters.py`, `automatic_clusters.py` | `pool_modes.py`, `lan_pools.py`, `automatic_pools.py` |
-| `ml-stack-cluster join|listen|pair|status|recovery|leave` | `ml-stack-pool ...` |
+| `poolhouse-cluster join|listen|pair|status|recovery|leave` | `poolhouse-pool ...` |
 | `clusters.json` (`discovery.clusters_path` `:176`) | `pools.json` |
 
 Every other file that says cluster for the device group (about 45 under `fleet/` and `workspace/`, plus

@@ -10,8 +10,8 @@ import time
 
 import pytest
 
-from ml_stack.serve import Measuring, ServerInfo, ServerManager, ServerSpec, free_port
-from ml_stack.testing.registry import record_server
+from poolhouse.serve import Measuring, ServerInfo, ServerManager, ServerSpec, free_port
+from poolhouse.testing.registry import record_server
 
 
 class _Backend:
@@ -46,7 +46,7 @@ def stranger():
 
 def _measuring(pid: int, argv: list[str] | None = None) -> None:
     """Write the measuring record and lock for ``pid``."""
-    from ml_stack.bench.underway import measuring_file, measuring_lock_file
+    from poolhouse.bench.underway import measuring_file, measuring_lock_file
 
     measuring_file().parent.mkdir(parents=True, exist_ok=True)
     measuring_lock_file().write_text(f"pid {pid}", encoding="utf-8")
@@ -69,10 +69,10 @@ def test_a_lease_is_refused_while_somebody_else_measures(tmp_path, stranger):
         manager.lease(_spec(), roam=False, timeout=1.0)
 
     said = str(why.value)
-    assert "the card is being measured by ml-stack-bench ask --model m.gguf" in said
+    assert "the card is being measured by poolhouse-bench ask --model m.gguf" in said
     assert f"(pid {stranger})" in said
     assert "started 2026-01-02T03:04:05" in said
-    assert "Wait for it to finish, stop it with 'ml-stack-bench stop', or pass --anyway" \
+    assert "Wait for it to finish, stop it with 'poolhouse-bench stop', or pass --anyway" \
         in said
     assert backend.started == [], "nothing was loaded onto the card"
 
@@ -101,9 +101,9 @@ def test_the_measurement_adopts_the_server_it_is_serving_with(tmp_path, stranger
     manager = ServerManager(backend=backend, state_file=tmp_path / "servers.json")
     spec = _spec()
     record_server(tmp_path / "servers.json", spec.port, model="m.gguf")
-    monkeypatch.setattr("ml_stack.serve.manager.is_healthy", lambda *a, **k: True)
-    monkeypatch.setattr("ml_stack.serve.manager.reported_models", lambda *a, **k: ["m.gguf"])
-    monkeypatch.setattr("ml_stack.serve.manager.serving_params", lambda *a, **k: None)
+    monkeypatch.setattr("poolhouse.serve.manager.is_healthy", lambda *a, **k: True)
+    monkeypatch.setattr("poolhouse.serve.manager.reported_models", lambda *a, **k: ["m.gguf"])
+    monkeypatch.setattr("poolhouse.serve.manager.serving_params", lambda *a, **k: None)
 
     info = manager.lease(spec, roam=False, timeout=1.0)
     assert info.adopted, "a server already up costs the measurement no memory"
@@ -120,14 +120,14 @@ def test_the_process_holding_the_lock_serves_its_own_model(tmp_path):
 
 
 def _broker(tmp_path, backend):
-    from ml_stack.serve.broker import Broker
+    from poolhouse.serve.broker import Broker
 
     manager = ServerManager(backend=backend, state_file=tmp_path / "servers.json")
     return Broker(manager, idle_s=3600.0, room=lambda: None, scan=lambda: [])
 
 
 def _ask(model: str, pid: int):
-    from ml_stack.serve.broker import Ask
+    from poolhouse.serve.broker import Ask
 
     return Ask(purpose="bench", models=(model,), pid=pid, label=f"pid {pid}",
                spec={"context": 512})
@@ -145,7 +145,7 @@ def test_a_broker_does_not_refuse_the_measurement_that_asked(tmp_path, stranger)
 
 
 def test_a_broker_does_not_refuse_a_child_of_the_measurement():
-    from ml_stack.serve.manager import ASKING, measurement_on_the_card
+    from poolhouse.serve.manager import ASKING, measurement_on_the_card
 
     child = _sleeper()
     try:
@@ -161,7 +161,7 @@ def test_a_broker_does_not_refuse_a_child_of_the_measurement():
 
 
 def test_a_broker_still_refuses_for_another_live_measurement(tmp_path, stranger):
-    from ml_stack.serve.broker import BrokerError
+    from poolhouse.serve.broker import BrokerError
 
     other = _sleeper()
     try:

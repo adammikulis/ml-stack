@@ -20,11 +20,11 @@ import pytest
 from conftest import write_gguf
 from test_train_tools import PROMPTS, TOOLS, make_tiny_base
 
-from ml_stack.train import lora as lora_mod
-from ml_stack.train.lora import CEILING_MIN, Lora, OverCeiling, fingerprint
-from ml_stack.train.recipes import validate
-from ml_stack.train.run import main, plan_for, run
-from ml_stack.train.tools import synthesise, write_dataset
+from poolhouse.train import lora as lora_mod
+from poolhouse.train.lora import CEILING_MIN, Lora, OverCeiling, fingerprint
+from poolhouse.train.recipes import validate
+from poolhouse.train.run import main, plan_for, run
+from poolhouse.train.tools import synthesise, write_dataset
 
 # One invented base, named the way the recipe's e4b size names it, for the plans that must
 # never load anything.
@@ -40,8 +40,8 @@ GEMMA_META = {
 
 @pytest.fixture(autouse=True)
 def on_the_cpu(monkeypatch):
-    monkeypatch.setenv("ML_STACK_DEVICE", "cpu")
-    monkeypatch.delenv("MLSTACK_TRAIN_CEILING", raising=False)
+    monkeypatch.setenv("POOLHOUSE_DEVICE", "cpu")
+    monkeypatch.delenv("POOLHOUSE_TRAIN_CEILING", raising=False)
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ class TestWithoutPeft:
                                                                    monkeypatch):
         """Without peft there is no LoRA path, and the refusal is the first thing that
         happens rather than an AttributeError inside a builder."""
-        from ml_stack.train.recipes import build
+        from poolhouse.train.recipes import build
 
         data, _ = dataset
         monkeypatch.setitem(sys.modules, "peft", None)
@@ -137,12 +137,12 @@ class TestThePlan:
 
     @pytest.fixture(autouse=True)
     def on_mps(self, monkeypatch):
-        from ml_stack.train.recipes import tool_calls
+        from poolhouse.train.recipes import tool_calls
 
         monkeypatch.setattr(tool_calls, "device_for", lambda: "mps")
 
     def test_configured_base_overrides_manifest_without_size_estimates(self, tmp_path):
-        from ml_stack.train.run import _base_of
+        from poolhouse.train.run import _base_of
 
         config = validate("tool-calls", {"size": "e4b", "base": "invented/custom-causal"})
         base, entry = _base_of("tool-calls", config, e4b_data(tmp_path))
@@ -150,7 +150,7 @@ class TestThePlan:
         assert entry == {}
 
     def test_empty_base_uses_manifest_then_size(self, tmp_path):
-        from ml_stack.train.run import _base_of
+        from poolhouse.train.run import _base_of
 
         config = validate("tool-calls", {"size": "e4b", "base": ""})
         assert _base_of("tool-calls", config, e4b_data(tmp_path))[0] == E4B
@@ -213,7 +213,7 @@ class TestTheAdapter:
     def test_a_checkpoint_holds_the_adapter_and_not_the_frozen_base(self, dataset, tmp_path):
         """E4B's base is 16G and identical at every step; writing it every checkpoint
         would spend the disk on a copy of something already on this machine."""
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
         from safetensors.torch import load_file
 
         data, base = dataset
@@ -232,7 +232,7 @@ class TestTheAdapter:
             got["lora"]["trainable_parameters"]
 
     def test_it_resumes_from_its_own_adapter(self, dataset, tmp_path):
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
         data, _base = dataset
         out = tmp_path / "run"
         config = {"lora": True, "steps": 20, "context": 256, "batch_size": 2,
@@ -244,8 +244,8 @@ class TestTheAdapter:
     def test_a_checkpoint_of_another_rank_does_not_fit(self, dataset, tmp_path):
         """A LoRA checkpoint only fits the rank and modules it was trained with, and a
         partial restore of an adapter is a silently different model."""
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
-        from ml_stack.train.checkpoint import CheckpointError
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
+        from poolhouse.train.checkpoint import CheckpointError
 
         data, _ = dataset
         out = tmp_path / "run"
@@ -256,8 +256,8 @@ class TestTheAdapter:
                                "batch_size": 2, "learning_rate": 0.001}, data, out)
 
     def test_a_target_this_architecture_does_not_have_says_so(self, dataset, tmp_path):
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
-        from ml_stack.train.recipes import build
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
+        from poolhouse.train.recipes import build
 
         data, _ = dataset
         with pytest.raises(ValueError, match="nonesuch_proj"):
@@ -266,8 +266,8 @@ class TestTheAdapter:
 
     def test_the_full_fine_tune_export_refuses_a_lora_run_and_names_the_merge(self, dataset,
                                                                              tmp_path):
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
-        from ml_stack.train.recipes.tool_calls import save_pretrained
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
+        from poolhouse.train.recipes.tool_calls import save_pretrained
 
         data, base = dataset
         out = tmp_path / "run"
@@ -332,7 +332,7 @@ class TestEndToEnd:
             self, dataset, llama_cpp, tmp_path, capsys):
         """One command, the whole path: an adapter, the base with it folded in, a GGUF the
         serve path can read, and a manifest that identifies the data by hash."""
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
         data, base = dataset
         out = tmp_path / "out"
 
@@ -361,8 +361,8 @@ class TestEndToEnd:
         assert manifest["steps"] == 20 and manifest["base"] == str(base)
         # A later run is compared against this record; a reader has to be able to tell
         # which shape it is reading.
-        from ml_stack.files import version_of
-        from ml_stack.train.run import MANIFEST_VERSION
+        from poolhouse.files import version_of
+        from poolhouse.train.run import MANIFEST_VERSION
 
         assert version_of(manifest) == MANIFEST_VERSION
 
@@ -379,7 +379,7 @@ class TestEndToEnd:
         assert {f["file"] for f in after["files"]} == {"train.jsonl", "holdout.jsonl"}
 
     def test_the_exported_file_passes_the_serve_paths_own_preflight(self, tmp_path):
-        """The smoke: the file that was just written is one `ml-stack-serve up` would
+        """The smoke: the file that was just written is one `poolhouse-serve up` would
         agree to load -- asked with the preflight's own seams, so no server starts and no
         tensor is read."""
         gguf = write_gguf(tmp_path / "caller-tools-Q8_0.gguf", GEMMA_META)
@@ -404,7 +404,7 @@ class TestEndToEnd:
         assert "invented-arch" in lora_mod.summarise(report)
 
     def test_a_dry_run_measures_a_step_and_writes_nothing(self, dataset, tmp_path, capsys):
-        pytest.importorskip("peft", reason="ml-stack[train-lora]")
+        pytest.importorskip("peft", reason="poolhouse[train-lora]")
         data, _ = dataset
         out = tmp_path / "dry"
         code = main(["--recipe", "tool-calls", "--data", str(data), "--out", str(out),

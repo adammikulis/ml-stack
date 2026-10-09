@@ -14,8 +14,8 @@ import time
 import numpy as np
 import pytest
 
-from ml_stack.testing import needs_mlx
-from ml_stack.train import (
+from poolhouse.testing import needs_mlx
+from poolhouse.train import (
     CheckpointError,
     CheckpointState,
     LeakageError,
@@ -587,35 +587,35 @@ class TestFertility:
     def test_bytes_are_utf8_not_characters(self):
         """Counting characters flatters every language whose accented letters
         cost two bytes -- which is every language this is used to compare."""
-        from ml_stack.train import measure
+        from poolhouse.train import measure
         rows = measure(lambda t: [0], {"fr": ["éé"]}, vocab=8)
         assert rows[0].n_bytes == 4
 
     def test_a_coarser_tokenizer_reads_as_higher_bytes_per_token(self):
-        from ml_stack.train import measure
+        from poolhouse.train import measure
         fine = measure(self._enc(2), {"en": ["abcdefghij"]}, vocab=8)[0]
         coarse = measure(self._enc(5), {"en": ["abcdefghij"]}, vocab=8)[0]
         assert coarse.bytes_per_token > fine.bytes_per_token
 
     def test_empty_input_does_not_divide_by_zero(self):
-        from ml_stack.train import measure
+        from poolhouse.train import measure
         r = measure(lambda t: [], {"en": [""]}, vocab=8)[0]
         assert r.bytes_per_token == 0.0 and r.tokens_per_word == 0.0
 
     def test_tied_embeddings_cost_half_of_untied(self):
-        from ml_stack.train import embedding_params
+        from poolhouse.train import embedding_params
         assert embedding_params(8192, 512, tied=True) == 8192 * 512
         assert embedding_params(8192, 512, tied=False) == 2 * 8192 * 512
 
     def test_the_embedding_share_grows_with_vocabulary(self):
         """The whole trade-off. If this inverts, the report argues backwards."""
-        from ml_stack.train import embedding_params
+        from poolhouse.train import embedding_params
         small = embedding_params(8192, 512)
         large = embedding_params(32768, 512)
         assert large == 4 * small
 
     def test_the_relative_column_is_against_the_baseline_language(self):
-        from ml_stack.train import Fertility, report_markdown
+        from poolhouse.train import Fertility, report_markdown
         rows = [Fertility("en", 8192, 100, 20, 20),      # 1.00 tokens/word
                 Fertility("de", 8192, 100, 20, 30)]      # 1.50 tokens/word
         md = report_markdown(rows, d_model=512, non_embedding_params=31_000_000)
@@ -623,20 +623,20 @@ class TestFertility:
         assert "against **en**" in md
 
     def test_the_baseline_can_be_chosen(self):
-        from ml_stack.train import Fertility, report_markdown
+        from poolhouse.train import Fertility, report_markdown
         rows = [Fertility("en", 8192, 100, 20, 20), Fertility("de", 8192, 100, 20, 30)]
         md = report_markdown(rows, d_model=512, non_embedding_params=1,
                              baseline_lang="de")
         assert "against **de**" in md
 
     def test_it_names_the_worst_served_language(self):
-        from ml_stack.train import Fertility, report_markdown
+        from poolhouse.train import Fertility, report_markdown
         rows = [Fertility("en", 8192, 100, 20, 20), Fertility("de", 8192, 100, 20, 30)]
         md = report_markdown(rows, d_model=512, non_embedding_params=1)
         assert "Worst served: **de**" in md and "Best served: **en**" in md
 
     def test_no_measurements_does_not_produce_a_confident_empty_table(self):
-        from ml_stack.train import report_markdown
+        from poolhouse.train import report_markdown
         assert "no measurements" in report_markdown([], d_model=512,
                                                     non_embedding_params=1)
 
@@ -648,7 +648,7 @@ class TestTorchStepTiedWeights:
 
     @staticmethod
     def tied_module():
-        torch = pytest.importorskip("torch", reason="ml-stack[torch]")
+        torch = pytest.importorskip("torch", reason="poolhouse[torch]")
         nn = torch.nn
 
         class Tied(nn.Module):
@@ -669,7 +669,7 @@ class TestTorchStepTiedWeights:
     def step_for(model):
         import torch
 
-        from ml_stack.train.step import TorchStep
+        from poolhouse.train.step import TorchStep
 
         def loss(m, batch):
             return m(batch).float().pow(2).mean()
@@ -677,8 +677,8 @@ class TestTorchStepTiedWeights:
         return TorchStep(model, torch.optim.SGD(model.parameters(), lr=0.1), loss)
 
     def test_a_tied_weight_is_named_once_and_safetensors_writes_it(self, tmp_path):
-        pytest.importorskip("torch", reason="ml-stack[torch]")
-        pytest.importorskip("safetensors", reason="ml-stack[train]")
+        pytest.importorskip("torch", reason="poolhouse[torch]")
+        pytest.importorskip("safetensors", reason="poolhouse[train]")
         from safetensors.torch import load_file, save_file
 
         step = self.step_for(self.tied_module())
@@ -690,8 +690,8 @@ class TestTorchStepTiedWeights:
         assert set(load_file(str(tmp_path / "model.safetensors"))) == set(tensors)
 
     def test_a_resume_reties_the_name_the_checkpoint_left_out(self, tmp_path):
-        torch = pytest.importorskip("torch", reason="ml-stack[torch]")
-        pytest.importorskip("safetensors", reason="ml-stack[train]")
+        torch = pytest.importorskip("torch", reason="poolhouse[torch]")
+        pytest.importorskip("safetensors", reason="poolhouse[train]")
         from safetensors.torch import load_file, save_file
 
         trained = self.tied_module()
@@ -719,7 +719,7 @@ class TestTorchStepTiedWeights:
             step.restore(tensors, None)
 
     def test_a_checkpoint_with_a_tensor_the_model_lacks_is_refused(self):
-        torch = pytest.importorskip("torch", reason="ml-stack[torch]")
+        torch = pytest.importorskip("torch", reason="poolhouse[torch]")
 
         step = self.step_for(self.tied_module())
         tensors = {**step.parameters(), "extra": torch.zeros(1)}
@@ -734,7 +734,7 @@ class TestMLXStepRestore:
         import mlx.nn as nn
         import mlx.optimizers as optim
 
-        from ml_stack.train.step import MLXStep
+        from poolhouse.train.step import MLXStep
 
         model = nn.Linear(3, 2)
         mx.eval(model.parameters())

@@ -7,9 +7,9 @@ import json
 import pytest
 from conftest import json_reply
 
-from ml_stack.client import Client
-from ml_stack.contracts import ContractError, grammar_for
-from ml_stack.entities import (
+from poolhouse.client import Client
+from poolhouse.contracts import ContractError, grammar_for
+from poolhouse.entities import (
     EDITS_SCHEMA,
     OPERATIONS,
     Edit,

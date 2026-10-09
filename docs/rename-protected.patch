@@ -1,0 +1,465 @@
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -103,6 +103,6 @@
+     ]
+   },
+   "env": {
+-    "ML_STACK_WINDOW_POSITION": "3460,20"
++    "POOLHOUSE_WINDOW_POSITION": "3460,20"
+   }
+ }
+--- a/scripts/hooks/claude-bash-guard
++++ b/scripts/hooks/claude-bash-guard
+@@ -1,9 +1,9 @@
+ #!/usr/bin/env python3
+-"""A PreToolUse hook on Bash that refuses shell commands that should be ml-stack commands.
++"""A PreToolUse hook on Bash that refuses shell commands that should be poolhouse commands.
+ 
+ Claude Code runs this before every Bash call. Exit 2 blocks the command and hands the
+ message back.
+-Set MLSTACK_GUARD=off to disable the soft rules for a session; the hard rules (pushes of main, tags,
++Set POOLHOUSE_GUARD=off to disable the soft rules for a session; the hard rules (pushes of main, tags,
+ force and deletions, minting identities, the person record) stay in force.
+ 
+ Wire it in as a PreToolUse hook on Bash in a project's `.claude/settings.json`:
+@@ -36,10 +36,10 @@
+ PUSH_MAIN = PUSHER + GIT_PUSH + r"[^;&|\n]*\bmain\b"
+ PUSH_FLAGS = (PUSHER + GIT_PUSH + r"[^;&|\n]*(--all\b|--mirror\b|--tags\b|--delete\b"
+               r"|--force|\s-f\b|\s-d\b)")
+-MINT = RUN + r"(\S*/)?ml-stack-workspace\s+(-\S+\s+)*(mint|delegate)\b"
+-PERSON_STORE = (r"\.ml-stack/person\b|person/statements\.log|\bCLAUDE_CONFIG_DIR=|"
+-                r"(import|from)\s+ml_stack\.workspace(\.|\s+import\s+[^;\n]*\b)person_\w+|"
+-                r"-m\s+ml_stack\.workspace\.person_|"
++MINT = RUN + r"(\S*/)?poolhouse-workspace\s+(-\S+\s+)*(mint|delegate)\b"
++PERSON_STORE = (r"\.poolhouse/person\b|person/statements\.log|\bCLAUDE_CONFIG_DIR=|"
++                r"(import|from)\s+poolhouse\.workspace(\.|\s+import\s+[^;\n]*\b)person_\w+|"
++                r"-m\s+poolhouse\.workspace\.person_|"
+                 + RUN + r"(\S*python\S*\s+|(ba)?sh\s+)?(\S*/)?(claude-user-prompt|person-consume(?!\s+propose\b))")
+ HERE = Path(__file__).resolve().parent
+ 
+@@ -54,40 +54,40 @@
+     (r"until\s*!\s*pgrep|while\s+pgrep|until\s+pgrep",
+      "Do not hand-write a waiter. `pgrep -f` matches the waiting shell's own command line, "
+      "so the loop never exits -- two of them spun for an afternoon and the work queued "
+-     "behind them never ran. `ml-stack-bench run|sweep|drafts` now takes a lock and waits "
+-     "for whoever is measuring (`ml_stack.lock.only_one`); just start it."),
++     "behind them never ran. `poolhouse-bench run|sweep|drafts` now takes a lock and waits "
++     "for whoever is measuring (`poolhouse.lock.only_one`); just start it."),
+     (RUN + r"nohup\b",
+      "Do not `nohup ... &`. Use the Bash tool's run_in_background, which reports the exit "
+-     "code and keeps the output, or `ml-stack-bench sweep --serve`, which puts one model up "
++     "code and keeps the output, or `poolhouse-bench sweep --serve`, which puts one model up "
+      "at a time on purpose. Backgrounded jobs have died silently here before."),
+     (RUN + r"(sudo\s+|env\s+|time\s+|nice\s+|nohup\s+)*(\S*/)?llama-server(\s|$)",
+-     "Do not start llama-server by hand. `ml-stack-serve up MODEL --context 256k` asks the "
++     "Do not start llama-server by hand. `poolhouse-serve up MODEL --context 256k` asks the "
+      "broker for a lease: it checks the memory, queues behind other leases, picks the port "
+      "(a port another process holds is never fought over), applies the measured profile and "
+-     "keeps the server up until `ml-stack-serve down MODEL`. A server started by hand "
++     "keeps the server up until `poolhouse-serve down MODEL`. A server started by hand "
+      "skips all of that and the next lease refuses."),
+-    (r"\bML_STACK_BROKER_LOCAL=",
+-     "ML_STACK_BROKER_LOCAL runs a private broker inside the process, with no queue and no "
++    (r"\bPOOLHOUSE_BROKER_LOCAL=",
++     "POOLHOUSE_BROKER_LOCAL runs a private broker inside the process, with no queue and no "
+      "view of the machine's other servers; it is for the tests. Ask the machine's broker: "
+-     "`ml-stack-serve up MODEL`."),
+-    (RUN + r"ml-stack-serve\s+up\b[^;&|\n]*\s(--direct|--no-broker|--no-lease|--anyway|"
++     "`poolhouse-serve up MODEL`."),
++    (RUN + r"poolhouse-serve\s+up\b[^;&|\n]*\s(--direct|--no-broker|--no-lease|--anyway|"
+      r"--unmanaged|--no-queue)\b",
+-     "`ml-stack-serve up` is a lease and no flag skips the broker. Drop the flag: "
+-     "`ml-stack-serve up MODEL --context N` (add --no-wait to return while it is queued)."),
++     "`poolhouse-serve up` is a lease and no flag skips the broker. Drop the flag: "
++     "`poolhouse-serve up MODEL --context N` (add --no-wait to return while it is queued)."),
+     (r"\bfind\b[^|;]*\.gguf|\bls\b[^|;]*\*\.gguf",
+-     "Do not hunt for GGUFs with find/ls. `ml-stack-models find <words>` searches the Hub "
+-     "and `ml-stack-models files <repo>` lists what is already on this machine -- a Hub "
++     "Do not hunt for GGUFs with find/ls. `poolhouse-models find <words>` searches the Hub "
++     "and `poolhouse-models files <repo>` lists what is already on this machine -- a Hub "
+      "cache is symlinks into blobs/, so `ls -l` reports 79 bytes for a 46G shard and reading "
+      "that as 'not downloaded' nearly re-fetched 87G."),
+     (r"\bhuggingface-cli\s+download\b|\bhf\s+download\b",
+-     "Do not download by hand. `ml-stack-serve up hf:owner/repo/file` fetches on first use, "
+-     "into the same cache, and `ml-stack-models files <repo>` says what is already here."),
++     "Do not download by hand. `poolhouse-serve up hf:owner/repo/file` fetches on first use, "
++     "into the same cache, and `poolhouse-models files <repo>` says what is already here."),
+     (r"\bcurl\b[^|;]*(127\.0\.0\.1|localhost)[^|;]*(/v1/|/props|/slots|/completion)",
+-     "Do not probe the model with curl. `ml_stack.client.Client` carries the sampling and "
+-     "the budgets, and `ml-stack-bench` records what it measured. Ad-hoc curl probes have "
++     "Do not probe the model with curl. `poolhouse.client.Client` carries the sampling and "
++     "the budgets, and `poolhouse-bench` records what it measured. Ad-hoc curl probes have "
+      "produced numbers that went nowhere and an 80-token budget that returned empty text."),
+     (r"\bpkill\b[^|;]*llama|\bkillall\b[^|;]*llama",
+-     "Do not pkill llama-server. `ml-stack-serve down --port N` releases the lease too; "
++     "Do not pkill llama-server. `poolhouse-serve down --port N` releases the lease too; "
+      "killing the process leaves the lease behind and the next `up` refuses."),
+     (PUSH_FLAGS,
+      "An agent pushes one branch by name: `git push origin <branch>`. Every branch at "
+@@ -102,10 +102,10 @@
+      "word, and push main only after the person selects the approval."),
+     (MINT,
+      "An agent does not create identities. A person at a terminal mints a token; a joined agent "
+-     "starts a new agent with `ml-stack-workspace invite`."),
++     "starts a new agent with `poolhouse-workspace invite`."),
+     (PERSON_STORE,
+      "The person record is written only by the harness hooks when the person types. An agent "
+-     "does not read its key, open its log or import its writers; `ml-stack-workspace "
++     "does not read its key, open its log or import its writers; `poolhouse-workspace "
+      "attestations` shows what the hooks recorded."),
+     (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
+      "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
+@@ -147,12 +147,12 @@
+ 
+ 
+ HARD = (PUSH_FLAGS, PUSH_MAIN, MINT, PERSON_STORE)
+-"""Patterns that stay in force when MLSTACK_GUARD=off is set: this guard only ever runs on an agent's call."""
++"""Patterns that stay in force when POOLHOUSE_GUARD=off is set: this guard only ever runs on an agent's call."""
+ 
+ MESSAGE = re.compile(r"(-m|--message)(\s+|=)('[^']*'|\"[^\"]*\")")
+ 
+ 
+-WORKSPACE = RUN + r"(\S*/)?ml-stack-workspace\b"
++WORKSPACE = RUN + r"(\S*/)?poolhouse-workspace\b"
+ 
+ 
+ def subagent_without_its_name(event: dict, command: str) -> str:
+@@ -189,14 +189,14 @@
+     rules = None if switched else rules_loader.load()
+     why = rules.bash_refusal(command, event.get("cwd") or "") if rules else ""
+     if why:
+-        print(f"blocked: {why}\n\n(ml-stack scripts/hooks/claude-bash-guard. Set "
+-              f"MLSTACK_GUARD=off for a person's own session.)", file=sys.stderr)
++        print(f"blocked: {why}\n\n(poolhouse scripts/hooks/claude-bash-guard. Set "
++              f"POOLHOUSE_GUARD=off for a person's own session.)", file=sys.stderr)
+         return 2
+     named = "" if switched else subagent_without_its_name(event, command)
+     if named:
+         print(f"blocked: you are the subagent {named}. Run workspace commands as yourself with "
+               f"`--agent {named}`; without it the command acts as the session that started you.\n\n"
+-              f"(ml-stack scripts/hooks/claude-bash-guard. Set MLSTACK_GUARD=off for a person's own session.)",
++              f"(poolhouse scripts/hooks/claude-bash-guard. Set POOLHOUSE_GUARD=off for a person's own session.)",
+               file=sys.stderr)
+         return 2
+     command = MESSAGE.sub(r"\1 ''", without_search_patterns(command))
+@@ -208,8 +208,8 @@
+                 continue
+             tail = ("No switch opens this rule." if pattern in HARD else
+                     "If this is genuinely the right command, say so and a person can run it, "
+-                    "or set MLSTACK_GUARD=off.")
+-            print(f"blocked: {instead}\n\n(ml-stack scripts/hooks/claude-bash-guard. {tail})",
++                    "or set POOLHOUSE_GUARD=off.")
++            print(f"blocked: {instead}\n\n(poolhouse scripts/hooks/claude-bash-guard. {tail})",
+                   file=sys.stderr)
+             return 2
+     return 0
+--- a/scripts/hooks/claude-edit-guard
++++ b/scripts/hooks/claude-edit-guard
+@@ -1,11 +1,11 @@
+ #!/usr/bin/env python3
+-"""Refuse an edit under src/ml_stack that writes a routine the tree already has, or
++"""Refuse an edit under src/poolhouse that writes a routine the tree already has, or
+ leaves a file over its line limit.
+ 
+ Claude Code runs this before every Write, Edit, MultiEdit and NotebookEdit. A target inside
+-the primary checkout is refused first (src/ml_stack/worktreerules.py). An exit code of 2 blocks
++the primary checkout is refused first (src/poolhouse/worktreerules.py). An exit code of 2 blocks
+ the edit and hands the message back; a rule that is a suggestion rather than a certainty
+-prints on stdout and lets the edit through. MLSTACK_GUARD=off disables it for a session.
++prints on stdout and lets the edit through. POOLHOUSE_GUARD=off disables it for a session.
+ 
+ Wire it in as a PreToolUse hook on Write|Edit|MultiEdit in a project's
+ `.claude/settings.json`:
+@@ -37,23 +37,23 @@
+ 
+ # (what it calls, the pattern, the module that owns it, what to use instead)
+ OWNED = [
+-    ("urllib.request.urlopen", r"urllib\.request\.urlopen", "src/ml_stack/client/http.py",
+-     "use `ml_stack.http.request_json` -- it carries the timeout, the JSON decode "
++    ("urllib.request.urlopen", r"urllib\.request\.urlopen", "src/poolhouse/client/http.py",
++     "use `poolhouse.http.request_json` -- it carries the timeout, the JSON decode "
+      "and the error type this tree already agrees on."),
+-    ("psutil.process_iter", r"psutil\.process_iter", "src/ml_stack/serve/process.py",
+-     "use the helpers in `ml_stack.serve.process`; a fresh process scan is the seventh "
++    ("psutil.process_iter", r"psutil\.process_iter", "src/poolhouse/serve/process.py",
++     "use the helpers in `poolhouse.serve.process`; a fresh process scan is the seventh "
+      "copy of one loop."),
+ ]
+ 
+ 
+ def cache_path(root: Path) -> Path:
+     """Where this tree's function index is kept."""
+-    home = Path(os.environ.get("MLSTACK_GUARD_CACHE") or "~/.ml-stack/guard").expanduser()
++    home = Path(os.environ.get("POOLHOUSE_GUARD_CACHE") or "~/.poolhouse/guard").expanduser()
+     return home / (hashlib.sha256(str(root).encode()).hexdigest()[:16] + ".json")
+ 
+ 
+ def tree_key(root: Path, dup) -> str:
+-    """A fingerprint of src/ml_stack: the commit it sits on and what has been edited since."""
++    """A fingerprint of src/poolhouse: the commit it sits on and what has been edited since."""
+     try:
+         head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+@@ -161,16 +161,16 @@
+ 
+ def refuse(message: str, hard: bool = False) -> int:
+     tail = ("no switch opens this rule" if hard else
+-            "If this is genuinely the right code, say so and a person can write it, or set MLSTACK_GUARD=off")
+-    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. {tail}.)", file=sys.stderr)
++            "If this is genuinely the right code, say so and a person can write it, or set POOLHOUSE_GUARD=off")
++    print(f"blocked: {message}\n\n(poolhouse scripts/hooks/claude-edit-guard. {tail}.)", file=sys.stderr)
+     return BLOCKED
+ 
+ 
+ def library_root(path: Path) -> Path | None:
+-    """The checkout a src/ml_stack file sits in."""
++    """The checkout a src/poolhouse file sits in."""
+     parts = path.parts
+     for i in range(len(parts) - 1):
+-        if parts[i] == "src" and parts[i + 1] == "ml_stack":
++        if parts[i] == "src" and parts[i + 1] == "poolhouse":
+             return Path(*parts[:i]) if i else Path("/")
+     return None
+ 
+@@ -204,7 +204,7 @@
+ def load_duplicates():
+     """The duplicate detector from scripts/gates, loaded without importing the package."""
+     where = Path(__file__).resolve().parent.parent / "gates" / "duplicates.py"
+-    spec = importlib.util.spec_from_file_location("_ml_stack_duplicates", where)
++    spec = importlib.util.spec_from_file_location("_poolhouse_duplicates", where)
+     module = importlib.util.module_from_spec(spec)
+     sys.modules[spec.name] = module
+     spec.loader.exec_module(module)
+@@ -241,14 +241,14 @@
+             return refuse(f"`{called}` belongs to {owner}: {instead}")
+ 
+     if re.search(r"\bos\.(replace|rename)\s*\(", fresh) and re.search(r"json|\.json", fresh) \
+-            and here not in ("src/ml_stack/files.py", "src/ml_stack/jsonl/__init__.py"):
+-        return refuse("a JSON file is written through `ml_stack.files.write_json`, which "
++            and here not in ("src/poolhouse/files.py", "src/poolhouse/jsonl/__init__.py"):
++        return refuse("a JSON file is written through `poolhouse.files.write_json`, which "
+                       "already does the temp file and the atomic os.replace.")
+ 
+     if re.search(r"(Path\.home\(\)|expanduser\(\))", fresh) \
+-            and here != "src/ml_stack/home.py":
+-        return refuse("a home directory is resolved in `ml_stack.home`: `state(...)` for "
+-                      "`~/.ml-stack`, `cache(...)` for `~/.cache/ml_stack`, `user_home()` "
++            and here != "src/poolhouse/home.py":
++        return refuse("a home directory is resolved in `poolhouse.home`: `state(...)` for "
++                      "`~/.poolhouse`, `cache(...)` for `~/.cache/poolhouse`, `user_home()` "
+                       "for the account's own, `expand(...)` for a path somebody named.")
+ 
+     try:
+@@ -287,14 +287,14 @@
+ 
+     if "ArgumentParser(" in fresh and "ArgumentParser(" not in current and current:
+         advisory.append(f"{here} is gaining an ArgumentParser it did not have. A command "
+-                        f"belongs in its package's cli module, reached from ml_stack.cli.")
++                        f"belongs in its package's cli module, reached from poolhouse.cli.")
+ 
+     for note in advisory:
+         print(f"note: {note}")
+     return ALLOWED
+ 
+ 
+-PERSON_STORE = re.compile(r"(^|/)\.ml-stack/person(/|$)")
++PERSON_STORE = re.compile(r"(^|/)\.poolhouse/person(/|$)")
+ """The person record: statements, authorizations and the key that seals them."""
+ 
+ 
+@@ -304,12 +304,12 @@
+     if not path:
+         return False
+     real = Path(path).resolve()
+-    root = (Path(os.environ.get("ML_STACK_HOME") or "~/.ml-stack") / "person").expanduser().resolve()
++    root = (Path(os.environ.get("POOLHOUSE_HOME") or "~/.poolhouse") / "person").expanduser().resolve()
+     return real == root or root in real.parents or any(PERSON_STORE.search(p) for p in (path, str(real)))
+ 
+ 
+ PROTECTED = re.compile(
+-    r"(^|/)(src/ml_stack/workspace/person_\w+\.py|scripts/hooks/(claude-user-prompt|person-consume|claude-bash-guard"
++    r"(^|/)(src/poolhouse/workspace/person_\w+\.py|scripts/hooks/(claude-user-prompt|person-consume|claude-bash-guard"
+     r"|claude-edit-guard|pre-push|rules_loader\.py)|\.claude/settings(\.local)?\.json)$")
+ """The code and settings that make the person record: only a person at a terminal changes them."""
+ 
+--- a/scripts/hooks/person-consume
++++ b/scripts/hooks/person-consume
+@@ -14,7 +14,7 @@
+ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+-from ml_stack.workspace import person_release
++from poolhouse.workspace import person_release
+ 
+ 
+ def main(argv: list[str]) -> int:
+--- a/scripts/hooks/rules_loader.py
++++ b/scripts/hooks/rules_loader.py
+@@ -1,4 +1,4 @@
+-"""Loads src/ml_stack/worktreerules.py by file, for the hook scripts that sit beside this one."""
++"""Loads src/poolhouse/worktreerules.py by file, for the hook scripts that sit beside this one."""
+ 
+ from __future__ import annotations
+ 
+@@ -11,17 +11,17 @@
+ 
+ 
+ def guard_off() -> bool:
+-    """Whether MLSTACK_GUARD=off turns the soft rules off; the hooks run only for an agent's calls, so the hard
++    """Whether POOLHOUSE_GUARD=off turns the soft rules off; the hooks run only for an agent's calls, so the hard
+     rules stay in force."""
+-    return os.environ.get("MLSTACK_GUARD") == "off"
++    return os.environ.get("POOLHOUSE_GUARD") == "off"
+ 
+ 
+ def load():
+     """The worktreerules module of the checkout these hooks sit in, None when it lacks one."""
+-    where = HERE.parent.parent / "src" / "ml_stack" / "worktreerules.py"
++    where = HERE.parent.parent / "src" / "poolhouse" / "worktreerules.py"
+     if not where.exists():
+         return None
+-    spec = importlib.util.spec_from_file_location("_ml_stack_worktreerules", where)
++    spec = importlib.util.spec_from_file_location("_poolhouse_worktreerules", where)
+     module = importlib.util.module_from_spec(spec)
+     sys.modules[spec.name] = module
+     spec.loader.exec_module(module)
+--- a/src/poolhouse/workspace/person_auth.py
++++ b/src/poolhouse/workspace/person_auth.py
+@@ -5,8 +5,8 @@
+ import time
+ from dataclasses import dataclass
+ 
+-from ml_stack.sentinel.events import EventLog
+-from ml_stack.workspace import person_ancestry, person_record, person_store
++from poolhouse.sentinel.events import EventLog
++from poolhouse.workspace import person_ancestry, person_record, person_store
+ 
+ __all__ = ["Identity", "NotAuthorized", "consume", "live", "session_of_ancestry"]
+ 
+--- a/src/poolhouse/workspace/person_hook.py
++++ b/src/poolhouse/workspace/person_hook.py
+@@ -6,8 +6,8 @@
+ from pathlib import Path
+ from typing import Any
+ 
+-from ml_stack.sentinel.events import EventLog
+-from ml_stack.workspace import (
++from poolhouse.sentinel.events import EventLog
++from poolhouse.workspace import (
+     person_ancestry,
+     person_intent,
+     person_record,
+@@ -30,7 +30,7 @@
+ def attended(environ: dict[str, str] | None = None) -> bool:
+     """Whether a person is at the session: false for non-interactive runs."""
+     env = os.environ if environ is None else environ
+-    return not env.get("ML_STACK_NONINTERACTIVE") and env.get("CLAUDE_CODE_SESSION_ATTENDED", "true").lower() not in (
++    return not env.get("POOLHOUSE_NONINTERACTIVE") and env.get("CLAUDE_CODE_SESSION_ATTENDED", "true").lower() not in (
+         "0", "false", "no")
+ 
+ 
+@@ -60,7 +60,7 @@
+     if not (isinstance(prompt, str) and isinstance(path, str) and isinstance(prompt_id, str) and prompt_id):
+         return None
+     session = event["session_id"]
+-    if person_transcript.path_problem(path, session, os.environ.get("ML_STACK_SESSION_ID", "")):
++    if person_transcript.path_problem(path, session, os.environ.get("POOLHOUSE_SESSION_ID", "")):
+         return None
+     turn = person_transcript.wait_for_turn(path, prompt_id, session, prompt)
+     if not turn.human:
+--- a/src/poolhouse/workspace/person_record.py
++++ b/src/poolhouse/workspace/person_record.py
+@@ -8,10 +8,10 @@
+ from dataclasses import dataclass
+ from typing import Any
+ 
+-from ml_stack.sentinel.events import EventLog
+-from ml_stack.sentinel.redaction import redact
+-from ml_stack.workspace import person_store
+-from ml_stack.workspace.person_store import ATTESTATION, VERSION
++from poolhouse.sentinel.events import EventLog
++from poolhouse.sentinel.redaction import redact
++from poolhouse.workspace import person_store
++from poolhouse.workspace.person_store import ATTESTATION, VERSION
+ 
+ __all__ = ["EXCERPT_CHARS", "SOURCE", "Grant", "Heard", "expire_session", "mark_used", "prompt_hash", "record_answer",
+            "record_authorization", "record_binding", "record_statement", "revoke_session"]
+--- a/src/poolhouse/workspace/person_release.py
++++ b/src/poolhouse/workspace/person_release.py
+@@ -5,8 +5,8 @@
+ import re
+ from dataclasses import dataclass
+ 
+-from ml_stack.sentinel.events import EventLog
+-from ml_stack.workspace import person_ancestry, person_auth, person_store, person_targets
++from poolhouse.sentinel.events import EventLog
++from poolhouse.workspace import person_ancestry, person_auth, person_store, person_targets
+ 
+ __all__ = ["KIND", "Facts", "approved", "check_push", "echo_for", "facts", "options", "question", "run", "target"]
+ 
+--- a/src/poolhouse/workspace/person_session.py
++++ b/src/poolhouse/workspace/person_session.py
+@@ -1,10 +1,10 @@
+ """Request-bound person authority for browser workspaces."""
+ 
+-from ml_stack.fleet.session import parse_cookie
+-from ml_stack.workspace import boardroute
+-from ml_stack.workspace.chain import held
+-from ml_stack.workspace.identity import HUMAN, Denied, Identity
+-from ml_stack.workspace.service import Workspace
++from poolhouse.fleet.session import parse_cookie
++from poolhouse.workspace import boardroute
++from poolhouse.workspace.chain import held
++from poolhouse.workspace.identity import HUMAN, Denied, Identity
++from poolhouse.workspace.service import Workspace
+ 
+ 
+ class SetupRequired(Denied):
+@@ -33,8 +33,8 @@
+             raise Denied('a live local person session is required')
+         if not self._session.credentialed:
+             ui.record('person.refused', reason='uncredentialed-session', source=request.client_ip)
+-            raise Denied('this session was not opened with a credential; open ml-stack from its own '
+-                         'window, or run: ml-stack peers open')
++            raise Denied('this session was not opened with a credential; open poolhouse from its own '
++                         'window, or run: poolhouse peers open')
+         headers = {key.lower(): value for key, value in request.handler.headers.items()}
+         if boardroute._checked(request.method, headers,
+                                request.handler.server.server_address[1], writes=True):
+--- a/src/poolhouse/workspace/person_store.py
++++ b/src/poolhouse/workspace/person_store.py
+@@ -9,9 +9,9 @@
+ from pathlib import Path
+ from typing import Any
+ 
+-from ml_stack import home
+-from ml_stack.lock import Busy, only_one
+-from ml_stack.sentinel.events import EventLog
++from poolhouse import home
++from poolhouse.lock import Busy, only_one
++from poolhouse.sentinel.events import EventLog
+ 
+ __all__ = ["ATTESTATION", "DEFAULT_MINUTES", "MAX_MINUTES", "VERSION", "Authorization", "Unreadable",
+            "authorizations", "bound_sessions", "consume_lock", "directory", "open_log", "records"]
+--- a/src/poolhouse/workspace/person_transcript.py
++++ b/src/poolhouse/workspace/person_transcript.py
+@@ -11,7 +11,7 @@
+ from pathlib import Path
+ from typing import Any
+ 
+-from ml_stack import home
++from poolhouse import home
+ 
+ __all__ = ["PINNED_VERSIONS", "Turn", "claude_projects", "path_problem", "wait_for_turn"]
+ 
+--- a/src/poolhouse/workspace/person_view.py
++++ b/src/poolhouse/workspace/person_view.py
+@@ -4,7 +4,7 @@
+ 
+ from typing import Any
+ 
+-from ml_stack.workspace import person_store
++from poolhouse.workspace import person_store
+ 
+ __all__ = ["listing"]
+ 

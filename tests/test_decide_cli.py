@@ -1,4 +1,4 @@
-"""``ml-stack-decide`` against a fake chat server."""
+"""``poolhouse-decide`` against a fake chat server."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import json
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack.decide.cases import read_cases
-from ml_stack.decide_cli import main
+from poolhouse.decide.cases import read_cases
+from poolhouse.decide_cli import main
 
 
 def leaning(user: str) -> dict[str, float]:

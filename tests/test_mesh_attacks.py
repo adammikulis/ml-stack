@@ -3,10 +3,10 @@
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.fleet.onboard.manifest import Signer
-from ml_stack.workspace import mesh_fold
-from ml_stack.workspace.journal import Journals
-from ml_stack.workspace.mesh import Mesh
+from poolhouse.fleet.onboard.manifest import Signer
+from poolhouse.workspace import mesh_fold
+from poolhouse.workspace.journal import Journals
+from poolhouse.workspace.mesh import Mesh
 
 GENERAL = {'type': 'status', 'from': 'mallory', 'role': 'agent', 'to': '#general', 'subject': '', 'body': 'hi'}
 NOTE = {'nkind': 'fact', 'title': 't', 'body': 'b', 'author': 'mallory', 'role': 'agent'}

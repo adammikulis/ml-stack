@@ -17,8 +17,8 @@ import sys
 import time
 from pathlib import Path
 
-from ml_stack.lock import Busy, only_one, pid_alive
-from ml_stack.workspace import landing
+from poolhouse.lock import Busy, only_one, pid_alive
+from poolhouse.workspace import landing
 
 HERE = Path(__file__).resolve().parent
 MIN_DELAY_S = 1.0

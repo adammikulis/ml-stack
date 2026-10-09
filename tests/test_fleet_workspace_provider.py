@@ -5,7 +5,7 @@ import zipfile
 
 import wheel_cache
 
-from ml_stack.fleet import daemon
+from poolhouse.fleet import daemon
 
 
 def test_injected_workspace_factory_bypasses_installed_provider(monkeypatch):
@@ -25,9 +25,9 @@ def test_direct_daemon_loads_workspace_provider_from_built_wheel(tmp_path, monke
         archive.extractall(installed)
     distributions = list(importlib.metadata.distributions(path=[str(installed)]))
     providers = [entry for distribution in distributions for entry in distribution.entry_points
-                 if entry.group == "ml_stack.workspace_hosts" and entry.name == "default"]
+                 if entry.group == "poolhouse.workspace_hosts" and entry.name == "default"]
     assert len(providers) == 1
-    assert providers[0].value == "ml_stack.workspace.remote_host:WorkspaceHost"
+    assert providers[0].value == "poolhouse.workspace.remote_host:WorkspaceHost"
     monkeypatch.setattr(daemon, "entry_points", lambda **_kwargs: providers)
     projects = object()
     hosted = daemon.workspace_host(projects)

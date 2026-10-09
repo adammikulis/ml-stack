@@ -6,9 +6,9 @@ import pytest
 from launch_support import signed
 from test_fleet_ui import Serving
 
-from ml_stack.activity import writer
-from ml_stack.activity.log import ActivityLog
-from ml_stack.fleet import routes
+from poolhouse.activity import writer
+from poolhouse.activity.log import ActivityLog
+from poolhouse.fleet import routes
 from tests.activity_support import person, ring
 
 __all__ = ['person', 'ring']
@@ -33,8 +33,8 @@ def history(tmp_path, person, monkeypatch):
 
 @pytest.mark.redteam
 def test_installed_history_extension_reads_redacted_actions(history):
-    assert any(entry.value == 'ml_stack.activity.fleet_routes:route'
-               for entry in entry_points(group='ml_stack.ui_routes'))
+    assert any(entry.value == 'poolhouse.activity.fleet_routes:route'
+               for entry in entry_points(group='poolhouse.ui_routes'))
     code, data, _ = history.call('/ui/history/events')
     assert code == 200
     scout = next(event for event in data['events'] if event['actor'] == 'agent:scout')
@@ -79,5 +79,5 @@ def test_history_groups_agents_expands_actions_and_filters_on_mobile(history, pl
         viewer.locator('#history-search').fill('')
         page.set_viewport_size({'width': 390, 'height': 844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-        page.screenshot(path='/private/tmp/ml-stack-agent-history-mobile.png', full_page=True)
+        page.screenshot(path='/private/tmp/poolhouse-agent-history-mobile.png', full_page=True)
         assert not errors

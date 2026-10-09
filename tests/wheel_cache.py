@@ -14,7 +14,7 @@ from pathlib import Path
 from artifact_cache import cached, expand
 
 ROOT = Path(__file__).resolve().parents[1]
-TREES = ("src/ml_stack", "contracts", "patches")
+TREES = ("src/poolhouse", "contracts", "patches")
 FILES = ("pyproject.toml", "README.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
 
 

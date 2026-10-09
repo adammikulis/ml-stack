@@ -10,8 +10,8 @@ on:
     paths:
       - "app/**"
       - "packaging/**"
-      - "src/ml_stack/fleet/**"
-      - "src/ml_stack/ui/**"
+      - "src/poolhouse/fleet/**"
+      - "src/poolhouse/ui/**"
       - ".github/workflows/release*.yml"
   # release-please.yml dispatches this on the release branch, whose pull request starts no run.
   workflow_dispatch:

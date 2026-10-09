@@ -1,4 +1,4 @@
-"""Options, decisions, calibration and rules: the parts of ml_stack.decide that need no model."""
+"""Options, decisions, calibration and rules: the parts of poolhouse.decide that need no model."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import math
 
 import pytest
 
-from ml_stack.decide import Calibration, Layered, Rule, RulesDecider
-from ml_stack.decide.calibrate import fit, fit_isotonic, fit_temperature, nll, rescale
-from ml_stack.decide.types import DecideError, Option, decision_from, options_of
+from poolhouse.decide import Calibration, Layered, Rule, RulesDecider
+from poolhouse.decide.calibrate import fit, fit_isotonic, fit_temperature, nll, rescale
+from poolhouse.decide.types import DecideError, Option, decision_from, options_of
 
 
 def test_options_keep_their_order_and_take_descriptions_from_a_mapping():

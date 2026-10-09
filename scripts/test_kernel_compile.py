@@ -9,10 +9,10 @@ import subprocess
 import time
 from dataclasses import replace
 
-from ml_stack.platform import start_process, terminate_process_group
-from ml_stack.sandbox.path_language import expressions, paths_checked
-from ml_stack.sandbox.policy import Net
-from ml_stack.sandbox.seatbelt import Seatbelt, profile, quote
+from poolhouse.platform import start_process, terminate_process_group
+from poolhouse.sandbox.path_language import expressions, paths_checked
+from poolhouse.sandbox.policy import Net
+from poolhouse.sandbox.seatbelt import Seatbelt, profile, quote
 
 NODE = "tests/test_test_kernel_isolation.py::test_native_read_components_compile_independently"
 LITERAL_NODE = "tests/test_test_kernel_isolation.py::test_explicit_literal_holder_inventory_runs_only_normal"

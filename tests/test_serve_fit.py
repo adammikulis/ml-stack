@@ -1,9 +1,9 @@
 """How many people fit on one machine, from what llama.cpp said it allocated.
 
 Everything here is a fake load log and a fake GGUF header written into ``tmp_path``. No
-model is served, no GPU is touched, nothing under ``~/.ml-stack`` or ``~/.cache`` is read
+model is served, no GPU is touched, nothing under ``~/.poolhouse`` or ``~/.cache`` is read
 or written -- the file the records live in is pointed at ``tmp_path`` by
-``$MLSTACK_FIT_FILE`` and by replacing ``package_file``, in an autouse fixture, so a test
+``$POOLHOUSE_FIT_FILE`` and by replacing ``package_file``, in an autouse fixture, so a test
 that forgets cannot reach the real one.
 
 The log fixtures reproduce the *shape* of llama.cpp's own lines (llama-kv-cache.cpp's
@@ -21,9 +21,9 @@ from pathlib import Path
 import pytest
 from conftest import write_gguf
 
-from ml_stack.serve import charts, fit as fit_mod, loadlog, measuring, tensors as tensors_mod
-from ml_stack.serve.fit import Fit, parse_room, records, render
-from ml_stack.serve.loadlog import Measured, parse_load_log
+from poolhouse.serve import charts, fit as fit_mod, loadlog, measuring, tensors as tensors_mod
+from poolhouse.serve.fit import Fit, parse_room, records, render
+from poolhouse.serve.loadlog import Measured, parse_load_log
 
 MIB = 1024 * 1024
 GIB = 1024 ** 3
@@ -370,7 +370,7 @@ class TestTheSourceOfTruth:
         assert [(r.per_token, r.measured_at) for r in records()] == [(2, "2026-09-02")]
 
     def test_the_shipped_file_is_a_list_this_can_read(self):
-        """The real one, not a fixture: `src/ml_stack/data/fit.json` has to parse or the
+        """The real one, not a fixture: `src/poolhouse/data/fit.json` has to parse or the
         command that reads it is broken for everybody."""
         real = Path(fit_mod.__file__).resolve().parent.parent / "data" / "fit.json"
         assert isinstance(json.loads(real.read_text(encoding="utf-8")), list)
@@ -381,7 +381,7 @@ class TestMeasuring:
         """`-lv 4` is not decoration: at the server's default of 3 the library's own INFO
         lines are filtered out and there is nothing to read. Mutation: drop the flag, and
         every measurement comes back empty."""
-        from ml_stack.serve.backend import ServerSpec
+        from poolhouse.serve.backend import ServerSpec
 
         seen: list[ServerSpec] = []
 
@@ -395,7 +395,7 @@ class TestMeasuring:
         assert got.per_token == 32768
 
     def test_a_spec_that_already_asked_for_a_verbosity_is_left_alone(self):
-        from ml_stack.serve.backend import ServerSpec
+        from poolhouse.serve.backend import ServerSpec
 
         seen: list[ServerSpec] = []
 
@@ -462,7 +462,7 @@ class TestReadingARoom:
 
 class TestTheCommand:
     def run(self, argv: list[str]) -> int:
-        from ml_stack.serve.cli import main
+        from poolhouse.serve.cli import main
 
         return main(["fit", *argv])
 
@@ -476,7 +476,7 @@ class TestTheCommand:
         """
         model = tmp_path / "thornfield-8B-Q4_K_M.gguf"
         model.write_bytes(b"\0" * (4 * MIB))
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 24 * GIB)
         monkeypatch.setattr(measuring, "_load_log", lambda spec, **_: DENSE_LOG)
 
         assert self.run([str(model), "--measure", "--context", "32768"]) == 0
@@ -497,7 +497,7 @@ class TestTheCommand:
         """
         model = tmp_path / "quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf"
         model.write_bytes(b"\0" * MIB)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 24 * GIB)
         seen: list[int] = []
 
         def fake(spec, **_):
@@ -518,20 +518,20 @@ class TestTheCommand:
         _fit_files_in_tmp.write_text(json.dumps([
             Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, compute=GIB,
                 per_token=32768, room=96 * GIB).as_dict()]), encoding="utf-8")
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 96 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 96 * GIB)
 
         assert self.run(["--room", "24G", "--per-user", "32768"]) == 0
         assert "18" in capsys.readouterr().out
 
     def test_a_room_that_cannot_be_read_is_refused_before_anything_is_printed(
             self, monkeypatch, capsys):
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 96 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 96 * GIB)
         assert self.run(["--room", "lots"]) == 2
         assert "lots" in capsys.readouterr().err
 
     def test_asking_about_a_model_nobody_measured_says_so_and_exits_nonzero(
             self, monkeypatch, capsys):
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 96 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 96 * GIB)
         assert self.run(["nevermeasured-3B.gguf"]) == 1
         assert "--measure" in capsys.readouterr().err
 
@@ -540,7 +540,7 @@ class TestTheCommand:
         _fit_files_in_tmp.write_text(json.dumps([
             Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, compute=GIB,
                 per_token=32768, room=96 * GIB).as_dict()]), encoding="utf-8")
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 96 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 96 * GIB)
         where = tmp_path / "fit.md"
 
         assert self.run(["--room", "24G", "--write", str(where)]) == 0
@@ -555,13 +555,13 @@ class TestTheCommand:
         _fit_files_in_tmp.write_text(json.dumps([
             Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, compute=GIB,
                 per_token=32768, room=24 * GIB).as_dict()]), encoding="utf-8")
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 24 * GIB)
 
         assert self.run(["--parallel", "4"]) == 0
         assert "4 users fit at 147,456 tokens each" in capsys.readouterr().out
 
     def test_measure_without_a_model_is_refused(self, monkeypatch, capsys):
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 96 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 96 * GIB)
         assert self.run(["--measure"]) == 2
         assert "needs a model" in capsys.readouterr().err
 
@@ -595,7 +595,7 @@ class TestDrawingIt:
     @pytest.mark.parametrize("suffix", [".png", ".svg"])
     def test_the_file_is_written_in_the_format_its_name_asks_for(self, tmp_path, suffix):
         """Mutation: hard-code png, and `--plot fit.svg` writes a png with an svg name."""
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         where = tmp_path / f"fit{suffix}"
         assert charts.plot(self.rows(), where) == str(where)
         assert where.stat().st_size > 0
@@ -605,12 +605,12 @@ class TestDrawingIt:
     def test_a_format_nobody_can_draw_is_refused_by_name(self, tmp_path):
         """Before the figure is built, not inside savefig, so the message names the flag's
         own value rather than a matplotlib backend."""
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         with pytest.raises(ValueError, match="csv"):
             charts.plot(self.rows(), tmp_path / "fit.csv")
 
     def test_nothing_measured_is_refused_rather_than_drawn_empty(self, tmp_path):
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         with pytest.raises(ValueError, match="no model has been measured"):
             charts.plot([], tmp_path / "fit.png")
 
@@ -619,7 +619,7 @@ class TestDrawingIt:
         was served, so the label carries both. Mutation: label by model alone, and two
         measurements of one model become two indistinguishable lines.
         """
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         charts.plot(self.rows(), tmp_path / "fit.png")
@@ -631,7 +631,7 @@ class TestDrawingIt:
                                                               monkeypatch):
         """Read off the figure itself rather than off the file: a record silently dropped
         from a panel is invisible in a png and obvious here."""
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -658,7 +658,7 @@ class TestDrawingIt:
         is read as what it is. Mutation: skip the record, and the reader cannot tell a model
         that was never measured from one this machine cannot hold.
         """
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -681,7 +681,7 @@ class TestDrawingIt:
         """110G solid, 24G dashed: the same models, two machines, one picture. Mutation:
         draw only the first room, and --room's repeatability means nothing.
         """
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -703,7 +703,7 @@ class TestDrawingIt:
     def test_the_title_names_the_machine_the_room_and_the_build(self, tmp_path,
                                                                 monkeypatch):
         """A chart with no machine on it is a chart nobody can check a year later."""
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -721,7 +721,7 @@ class TestDrawingIt:
         """`--at` is the whole reason the second panel is comparable: at 4k the small model
         holds more, at 128k the one with the cheap cache does. Mutation: hard-code 32768.
         """
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         seen: list = []
@@ -806,7 +806,7 @@ class TestTheCardsBehindIt:
         lines are what turn it into "and what would I need". Mutation: drop them, and a
         reader with a 24 GB card has to do the arithmetic themselves.
         """
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         _figure, (_left, right) = self.panels(tmp_path, monkeypatch, rooms=[24 * GIB])
@@ -821,7 +821,7 @@ class TestTheCardsBehindIt:
                                                                     monkeypatch):
         """Mutation: fit the axis to the lines alone, and the room line -- the thing the
         reader is looking for -- falls off the top."""
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         _figure, (_left, right) = self.panels(tmp_path, monkeypatch, rooms=[96 * GIB])
@@ -833,7 +833,7 @@ class TestTheCardsBehindIt:
                                                                   monkeypatch):
         """"6.0G + 1.00G/user at 32k" -- the whole model in one line, which is what makes
         two models comparable at a glance. Mutation: label by model name alone."""
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         import matplotlib.pyplot as plt
 
         _figure, (left, right) = self.panels(tmp_path, monkeypatch, at=32768)
@@ -846,7 +846,7 @@ class TestTheCardsBehindIt:
 
 class TestTheCommandDraws:
     def run(self, argv: list[str]) -> int:
-        from ml_stack.serve.cli import main
+        from poolhouse.serve.cli import main
 
         return main(["fit", *argv])
 
@@ -860,9 +860,9 @@ class TestTheCommandDraws:
 
     def test_plot_writes_the_picture_and_says_where(self, tmp_path, monkeypatch, capsys,
                                                     _fit_files_in_tmp):
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         where = tmp_path / "fit.png"
 
         assert self.run(["--plot", str(where)]) == 0
@@ -871,11 +871,11 @@ class TestTheCommandDraws:
 
     def test_open_shows_the_picture_with_the_desktops_opener(self, tmp_path, monkeypatch,
                                                             capsys, _fit_files_in_tmp):
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         opened = []
-        monkeypatch.setattr("ml_stack.platform.open_path", lambda p: opened.append(str(p)) or "open")
+        monkeypatch.setattr("poolhouse.platform.open_path", lambda p: opened.append(str(p)) or "open")
         where = tmp_path / "fit.png"
         assert self.run(["--plot", str(where), "--open"]) == 0
         assert opened == [str(where)]
@@ -886,7 +886,7 @@ class TestTheCommandDraws:
         """`--room` is repeatable and both reach `plot`; the listing still answers for the
         first. Mutation: keep --room a single value, and the second is silently dropped."""
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         seen: list = []
         monkeypatch.setattr(charts, "plot",
                             lambda rows, where, **kw: seen.append(kw) or str(where))
@@ -900,7 +900,7 @@ class TestTheCommandDraws:
     def test_a_bad_room_is_refused_before_anything_is_drawn(self, tmp_path, monkeypatch,
                                                             capsys, _fit_files_in_tmp):
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         where = tmp_path / "fit.png"
         assert self.run(["--room", "24G", "--room", "heaps", "--plot", str(where)]) == 2
         assert not where.exists()
@@ -909,7 +909,7 @@ class TestTheCommandDraws:
     def test_at_reaches_the_second_panel(self, tmp_path, monkeypatch, capsys,
                                          _fit_files_in_tmp):
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         seen: list = []
         monkeypatch.setattr(charts, "plot",
                             lambda rows, where, **kw: seen.append(kw) or str(where))
@@ -924,9 +924,9 @@ class TestTheCommandDraws:
         moving both to a docs directory keeps the link. Mutation: write an absolute path,
         and the image is broken everywhere but this machine.
         """
-        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
+        pytest.importorskip("matplotlib", reason="poolhouse[plot] draws this")
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         page, picture = tmp_path / "fit.md", tmp_path / "fit.png"
 
         assert self.run(["--plot", str(picture), "--write", str(page)]) == 0
@@ -938,7 +938,7 @@ class TestTheCommandDraws:
     def test_a_page_written_without_a_chart_embeds_nothing(self, tmp_path, monkeypatch,
                                                            capsys, _fit_files_in_tmp):
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
         page = tmp_path / "fit.md"
         assert self.run(["--write", str(page)]) == 0
         assert "![" not in page.read_text(encoding="utf-8")
@@ -949,15 +949,15 @@ class TestTheCommandDraws:
         """Optional the way every other heavy dependency here is optional. Mutation: let
         the ImportError out, and a person gets a traceback instead of an install line."""
         self.some_records(_fit_files_in_tmp)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 110 * GIB)
 
         def missing():
             raise RuntimeError(
-                "drawing the fit chart needs matplotlib: pip install 'ml-stack[plot]'")
+                "drawing the fit chart needs matplotlib: pip install 'poolhouse[plot]'")
 
         monkeypatch.setattr(charts, "_pyplot", missing)
         assert self.run(["--plot", str(tmp_path / "fit.png")]) == 2
-        assert "pip install 'ml-stack[plot]'" in capsys.readouterr().err
+        assert "pip install 'poolhouse[plot]'" in capsys.readouterr().err
 
 
 # -- the estimate, for when nothing has been measured -------------------------------------
@@ -968,7 +968,7 @@ class TestTheEstimateWithoutAMeasurement:
     counted as full attention, each off by a different multiple."""
 
     def estimate(self, meta: dict, context: int) -> int:
-        from ml_stack.serve.preflight import _kv_estimate_bytes
+        from poolhouse.serve.preflight import _kv_estimate_bytes
 
         return _kv_estimate_bytes(meta, context, "", "")
 
@@ -1029,7 +1029,7 @@ class TestTheEstimateWithoutAMeasurement:
 
         Mutation: treat a missing pattern as no sliding at all.
         """
-        from ml_stack.serve.preflight import read_gguf_header
+        from poolhouse.serve.preflight import read_gguf_header
 
         path = write_gguf(tmp_path / "amberlin-20B-Q4_K_M.gguf", {
             "general.architecture": "gpt-oss", "gpt-oss.block_count": 4,
@@ -1410,7 +1410,7 @@ class TestWhatTheFileIsMadeOf:
 
 class TestTheTensorsFlag:
     def run(self, argv: list[str]) -> int:
-        from ml_stack.serve.cli import main
+        from poolhouse.serve.cli import main
 
         return main(["fit", *argv])
 
@@ -1442,7 +1442,7 @@ class TestTheTensorsFlag:
 
 class TestMeasuringRecordsWhereItWent:
     def run(self, argv: list[str]) -> int:
-        from ml_stack.serve.cli import main
+        from poolhouse.serve.cli import main
 
         return main(["fit", *argv])
 
@@ -1457,7 +1457,7 @@ class TestMeasuringRecordsWhereItWent:
         model = with_tensors(tmp_path / "thornfield-8B-Q4_K_M.gguf",
                              {"general.architecture": "llama"},
                              TestWhatTheFileIsMadeOf.TENSORS)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 24 * GIB)
         monkeypatch.setattr(measuring, "_load_log", lambda spec, **_: WEIGHTS_LOG)
 
         assert self.run([str(model), "--measure", "--context", "32768"]) == 0
@@ -1479,7 +1479,7 @@ class TestMeasuringRecordsWhereItWent:
         model = with_tensors(tmp_path / "thornfield-8B-Q4_K_M.gguf",
                              {"general.architecture": "llama"},
                              TestWhatTheFileIsMadeOf.TENSORS)
-        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr("poolhouse.hub.room", lambda: 24 * GIB)
         monkeypatch.setattr(measuring, "_load_log", lambda spec, **_: WEIGHTS_LOG)
 
         held = 32768 * (1024 * MIB // 32768)

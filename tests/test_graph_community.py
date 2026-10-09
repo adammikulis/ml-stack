@@ -13,9 +13,9 @@ from collections import Counter
 
 import pytest
 
-from ml_stack.bench.questions import mix, sample
-from ml_stack.graph.community import _MORE_SAID, QUESTIONS, graph
-from ml_stack.graph.store import GraphStore
+from poolhouse.bench.questions import mix, sample
+from poolhouse.graph.community import _MORE_SAID, QUESTIONS, graph
+from poolhouse.graph.store import GraphStore
 
 
 @pytest.fixture(scope="module")
@@ -159,7 +159,7 @@ def test_the_full_set_is_a_hundred_scored_questions_and_no_one_kind_of_them(g):
 
 # What the set is meant to look like, to within a question or two either way. Written down
 # because the mix is what a hundred questions can quietly lose: forty additions each of which
-# looked like a fair one, and the set is about people again. `ml-stack-bench prepare --mix`
+# looked like a fair one, and the set is about people again. `poolhouse-bench prepare --mix`
 # prints the same counts.
 _MIX = {"person": 51, "org": 15, "place": 13, "topic": 12, "nobody": 10, "event": 5,
         "opportunity": 4}

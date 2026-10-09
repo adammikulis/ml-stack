@@ -1,6 +1,6 @@
 """Question metadata and conversation history survive benchmark measurement."""
 
-from ml_stack.bench import concurrent, measure
+from poolhouse.bench import concurrent, measure
 
 
 def test_measure_preserves_expected_answers_and_model_label():

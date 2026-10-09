@@ -104,7 +104,7 @@ honest gap is uncommitted edits, which exist only on disk: the sweep records `di
   copied or re-addressed; they are re-owned. [analysis]
 - `reroute`: future mail to the departed name is delivered to the successor's inbox stream. The sender sees the unchanged address and a one-line `rerouted to <successor>
   (successor of <departed>)`. The rows still say `to: <departed>`, so history stays truthful.
-- A departed name's rows are readable by the coordinator and the person even before any takeover: `ml-stack-workspace inbox --of <departed-name>` (read only, no ack, requires
+- A departed name's rows are readable by the coordinator and the person even before any takeover: `poolhouse-workspace inbox --of <departed-name>` (read only, no ack, requires
   the lead or human role). [analysis; compare `Service.waiting` which reads for the token's own id only, `service.py:520`]
 - Held or flagged rows (the screen/quarantine path) stay held; takeover does not release them. Content is untrusted data to the successor exactly as to the original. [D
   `AGENTS.md`; V `service._hold`]
@@ -129,7 +129,7 @@ drive slice 1: the lease `deadline` passing with no heartbeat for `orphan_after_
 Reuse the existing nudge path. [V `nudge.py` `Waiting.line`, `nudge --hook post|prompt|stop`]
 
 - `Waiting` gains `orphans: list[Offer]`. `Waiting.line()` appends, once per offer per session, for an eligible reader: `orphaned work: claude-8f3a1c (task T-42 "...", 3
-  unread, worktree dirty). Run: ml-stack-workspace takeover claude-8f3a1c --dry-run`. The text is board-written, short and carries no free text from the departed agent beyond
+  unread, worktree dirty). Run: poolhouse-workspace takeover claude-8f3a1c --dry-run`. The text is board-written, short and carries no free text from the departed agent beyond
   the bounded `brief` (marked data). [analysis]
 - Who is offered, in order: (1) the **coordinator** always, since it plans the work; (2) an agent that **just started** (SessionStart / SubagentStart context, as the rules
   reminder already is) when the orphan's project and device match; (3) an agent that **goes idle** (the `stop` nudge event, i.e. it wrote a final message with no pending work)
@@ -137,7 +137,7 @@ Reuse the existing nudge path. [V `nudge.py` `Waiting.line`, `nudge --hook post|
 
 ## 5. `takeover`: one command, decided by the board
 
-Name: `ml-stack-workspace takeover <departed-name>` (aliases are not added). `--dry-run` prints the brief and checks only. Plain English: "I am taking over the work of that
+Name: `poolhouse-workspace takeover <departed-name>` (aliases are not added). `--dry-run` prints the brief and checks only. Plain English: "I am taking over the work of that
 departed agent."
 
 ### 5.1 Atomic effect (a compare-and-set on the dossier)
@@ -157,7 +157,7 @@ Then, in the same transaction:
 | Test jobs | Re-owned to the successor by an `adopted-by` field; a stalled whole-tier job is cancelled per liveness design | `testjobs.py` spec |
 | Owed replies / reviews | Listed in the brief; a review owed is re-assigned only if `me` is independent of the author (`_reviewer`) | `task_actions.review` |
 
-Visible lineage: the successor's registry record and dossier carry `successor_of: <name>`; `ml-stack-workspace agents` and `whoami` show `claude-91b2d0 (successor of
+Visible lineage: the successor's registry record and dossier carry `successor_of: <name>`; `poolhouse-workspace agents` and `whoami` show `claude-91b2d0 (successor of
 claude-8f3a1c)`; the task shows `worked-by` edges for both identities with the order. One announcement is posted by the board (not the agent): `takeover: claude-91b2d0 resumes
 task T-42 from claude-8f3a1c (departed, 41 min)`.
 
@@ -262,9 +262,9 @@ Rules, all expressed as journal rows folded deterministically: [analysis]
 | Loop: A takes B's, A dies, C takes A's | Allowed; lineage is a chain, `successor_of` printed as `C <- A <- B`; a task taken over more than `max_takeovers` (default 3) is blocked for the coordinator's decision, so a task that kills its workers stops. [analysis] |
 
 Observability: every step is an audit row (`dossier.orphaned`, `takeover.offered`, `takeover.accepted`, `takeover.yielded`, `takeover.reverted`, `inbox.read-of`) and one board
-announcement per accepted takeover. `ml-stack-workspace orphans` lists orphans with age, offered-to, who took them. [analysis; V `service.audit` is the existing audit path]
+announcement per accepted takeover. `poolhouse-workspace orphans` lists orphans with age, offered-to, who took them. [analysis; V `service.audit` is the existing audit path]
 
-Revocation by the person: `ml-stack-workspace takeover-revert <departed-name>` (human role only; a person statement through the `UserPromptSubmit` path as in
+Revocation by the person: `poolhouse-workspace takeover-revert <departed-name>` (human role only; a person statement through the `UserPromptSubmit` path as in
 `docs/person-delegation.md`). It marks the takeover `reverted`, returns the lease to `queued` with the checkpoint (not back to the departed), moves `inbox-owner` back, and
 tells the successor to stop; the worktree and commits stay. Trust levels (`docs/earned-trust.md` section 3): at L0 (suspended) an identity cannot take over at all; L1 may
 `--dry-run` and read; L2 may take over its own project's orphans with the coordinator's offer; L3 may self-accept per the default policy; reassigning a live agent's work is

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.httpguard import Refused
-from ml_stack.net import packages, policy
+from poolhouse.httpguard import Refused
+from poolhouse.net import packages, policy
 
 pytestmark = pytest.mark.redteam
 
@@ -41,11 +41,11 @@ def test_unapproved_or_unsupported_vcs_never_runs_install(monkeypatch, tmp_path,
 def test_trusted_index_find_links_extras_and_git_environment_are_preserved(monkeypatch, tmp_path):
     calls = capture(monkeypatch, tmp_path, "global.index-url='https://packages.example/simple'\nglobal.find-links='/bundle'\n")
     wheel = tmp_path / "runtime.whl"
-    packages.run("python", ["install", "ml-stack[train] @ " + wheel.as_uri(), "tensor @ git+https://packages.example/repo"],
+    packages.run("python", ["install", "poolhouse[train] @ " + wheel.as_uri(), "tensor @ git+https://packages.example/repo"],
                  timeout=7, env={"GIT_SSH_COMMAND": "unsafe", "SDKROOT": "/sdk"})
     argv, options = calls[-1]
     assert argv == ["python", "-m", "pip", "install", "--index-url", "https://packages.example/simple",
-                    "--find-links", "/bundle", "ml-stack[train] @ " + wheel.as_uri(), "tensor @ git+https://packages.example/repo"]
+                    "--find-links", "/bundle", "poolhouse[train] @ " + wheel.as_uri(), "tensor @ git+https://packages.example/repo"]
     assert options["timeout"] == 7
     env = options["env"]
     assert env["SDKROOT"] == "/sdk" and env["GIT_ALLOW_PROTOCOL"] == "https"
@@ -61,7 +61,7 @@ def test_offline_installs_ignore_network_indexes_and_preserve_local_wheels(monke
     if offline == "environment":
         config += ":env:.no-index='1'\n"
     calls = capture(monkeypatch, tmp_path, config)
-    args = ["install", "--find-links", str(tmp_path), "ml-stack[train] @ " + (tmp_path / "runtime.whl").as_uri()]
+    args = ["install", "--find-links", str(tmp_path), "poolhouse[train] @ " + (tmp_path / "runtime.whl").as_uri()]
     if offline == "argument":
         args.insert(1, "--no-index")
     packages.run(Path("python"), args, timeout=5, env={"PIP_INDEX_URL": "https://evil.example/simple"})
@@ -82,8 +82,8 @@ def test_unchecked_source_configuration_is_refused(monkeypatch, tmp_path, option
 def test_standard_package_provider_is_scoped_and_keeps_distrust_refusals(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
-    from ml_stack.net.policy import Distrusted
-    from ml_stack.sentinel import observers
+    from poolhouse.net.policy import Distrusted
+    from poolhouse.sentinel import observers
 
     calls = capture(monkeypatch, tmp_path)
     packages.run("python", ["install", "tensor"], timeout=5, env={})

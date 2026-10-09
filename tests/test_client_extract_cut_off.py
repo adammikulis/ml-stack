@@ -2,9 +2,9 @@
 
 import pytest
 
-from ml_stack.client import Client
-from ml_stack.client.chat import Reply, ServerError
-from ml_stack.extraction import Checking
+from poolhouse.client import Client
+from poolhouse.client.chat import Reply, ServerError
+from poolhouse.extraction import Checking
 
 
 def test_a_length_stop_names_the_knob(monkeypatch):

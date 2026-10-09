@@ -9,21 +9,21 @@ from types import SimpleNamespace
 import pytest
 from test_project_source import repository  # noqa: F401
 
-from ml_stack import home, http, private_path
-from ml_stack.fleet import discovery, tls
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.daemon import ALL_INTERFACES
-from ml_stack.fleet.discovery import Advertiser, Beacon, derive_token
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.pool_roster import Pool
-from ml_stack.fleet.projects import ProjectRegistry
-from ml_stack.fleet.remote import Peer
-from ml_stack.http import Server, ServerError, request_json
-from ml_stack.workspace import cli, project_connection, remote as remote_module, render, tokens
-from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied
-from ml_stack.workspace.remote import RemoteWorkspace
-from ml_stack.workspace.remote_host import WorkspaceHost
+from poolhouse import home, http, private_path
+from poolhouse.fleet import discovery, tls
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.daemon import ALL_INTERFACES
+from poolhouse.fleet.discovery import Advertiser, Beacon, derive_token
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.pool_roster import Pool
+from poolhouse.fleet.projects import ProjectRegistry
+from poolhouse.fleet.remote import Peer
+from poolhouse.http import Server, ServerError, request_json
+from poolhouse.workspace import cli, project_connection, remote as remote_module, render, tokens
+from poolhouse.workspace.identity import AGENT, HUMAN, LEAD, Denied
+from poolhouse.workspace.remote import RemoteWorkspace
+from poolhouse.workspace.remote_host import WorkspaceHost
 
 PROJECT = "a" * 32
 OTHER = "b" * 32
@@ -46,7 +46,7 @@ def test_project_authority_routes_before_global_coordinator_discovery(monkeypatc
 
 @pytest.mark.parametrize("unavailable", [False, True])
 def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_path, monkeypatch, unavailable):
-    from ml_stack.workspace.identity import Denied
+    from poolhouse.workspace.identity import Denied
     requested = tmp_path / "other-project"
     current = {"project_id": "current-board"}
     target = {"project_id": "requested-board"}
@@ -75,9 +75,9 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
 
 @pytest.mark.parametrize("owned", [False, True])
 def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, monkeypatch, owned):
-    from ml_stack.workspace import guide, tokens
-    from ml_stack.workspace.identity import Denied
-    from ml_stack.workspace.service import Workspace
+    from poolhouse.workspace import guide, tokens
+    from poolhouse.workspace.identity import Denied
+    from poolhouse.workspace.service import Workspace
     ws = Workspace(tmp_path / "private-workspace")
     found = {"key": "project", "name": "project"}
     guide.agent_connect(ws, "worker", found)
@@ -97,8 +97,8 @@ def test_foreign_credential_recovery_requires_owned_local_identity(tmp_path, mon
 
 
 def test_own_agent_connect_selects_no_coordinator(tmp_path):
-    from ml_stack.workspace import coordinator_config, guide
-    from ml_stack.workspace.service import Workspace
+    from poolhouse.workspace import coordinator_config, guide
+    from poolhouse.workspace.service import Workspace
     ws = Workspace(tmp_path / "private-workspace")
     found = {"key": "project", "name": "project"}
     assert guide.agent_connect(ws, "worker", found)["id"] == "worker"
@@ -146,7 +146,7 @@ def test_coordinator_runner_keeps_selected_authority(monkeypatch):
 
 
 def test_unavailable_selected_project_cannot_fall_back_to_global_authority(monkeypatch):
-    from ml_stack.workspace.identity import Denied
+    from poolhouse.workspace.identity import Denied
     def selected(*args):
         raise Denied("selected project unavailable")
     monkeypatch.setattr(project_connection, "selected", selected)
@@ -186,7 +186,7 @@ def test_client_recovers_expiry_and_preserves_outage_failure(tmp_path, monkeypat
     requests = []
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     def call(operation, token):
-        from ml_stack.workspace.identity import Denied
+        from poolhouse.workspace.identity import Denied
         raise Denied("unavailable") from ServerError("unavailable", status=status)
     monkeypatch.setattr(remote, "call", call)
     monkeypatch.setattr(remote, "_request", lambda action, payload:
@@ -195,7 +195,7 @@ def test_client_recovers_expiry_and_preserves_outage_failure(tmp_path, monkeypat
         assert remote.token(agent="worker") == "mlws1.worker.recovered"
         assert requests == ["ensure"]
     else:
-        from ml_stack.workspace.identity import Denied
+        from poolhouse.workspace.identity import Denied
         with pytest.raises(Denied, match="unavailable"):
             remote.token(agent="worker")
         assert requests == []
@@ -213,7 +213,7 @@ def test_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypatch, unsaf
     monkeypatch.setattr(tokens, "problem", judge)
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     monkeypatch.setattr(remote, "_request", lambda *a: pytest.fail("unsafe storage recovery"))
-    from ml_stack.workspace.identity import Denied
+    from poolhouse.workspace.identity import Denied
     with pytest.raises(Denied, match="project session storage"):
         remote.token(agent="worker")
 
@@ -239,7 +239,7 @@ def test_transport_is_per_identity_including_delegated_and_explicit_tokens(tmp_p
 
 @pytest.mark.parametrize("paired, saved", [(False, True), (True, True), (False, False), (True, False)])
 def test_delegated_credentials_never_recover_as_paired_top_identity(tmp_path, monkeypatch, paired, saved):
-    from ml_stack.workspace.identity import Denied
+    from poolhouse.workspace.identity import Denied
     remote = RemoteWorkspace.__new__(RemoteWorkspace)
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     tokens.prepare(remote.base)
@@ -280,7 +280,7 @@ def test_recovery_serializes_read_ensure_and_store(tmp_path, monkeypatch):
             assert release.wait(5)
         return {"id": "worker", "token": secret}
     def call(operation, token):
-        from ml_stack.workspace.identity import Denied
+        from poolhouse.workspace.identity import Denied
         if token != f"mlws1.worker.secret{len(count)}":
             raise Denied("stale credential") from ServerError("expired", status=403)
         return {"id": "worker"}
@@ -325,11 +325,11 @@ def host(tmp_path):
         def get(self, project_id):
             if project_id not in {PROJECT, OTHER}:
                 raise ValueError("unknown project")
-            return SimpleNamespace(name="ml-stack", board_host="https://board.invalid:8770")
+            return SimpleNamespace(name="poolhouse", board_host="https://board.invalid:8770")
         def hosts(self, board_host):
             return board_host == "https://board.invalid:8770"
         def list(self):
-            return [{"id": ident, "name": "ml-stack", "board_host": "https://board.invalid:8770"}
+            return [{"id": ident, "name": "poolhouse", "board_host": "https://board.invalid:8770"}
                     for ident in (PROJECT, OTHER)]
         def workspace_base(self, project_id):
             self.get(project_id)
@@ -437,9 +437,9 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
     files = tmp_path / "files"
     files.mkdir()
     runner = JobRunner(tmp_path / "jobs", files)
-    from ml_stack import macauth
-    from ml_stack.fleet.onboard.requests import Device
-    from ml_stack.workspace import coordinator_client
+    from poolhouse import macauth
+    from poolhouse.fleet.onboard.requests import Device
+    from poolhouse.workspace import coordinator_client
     secret = base64.urlsafe_b64encode(b"d" * 32).decode()
     device = Device("d" * 64, "peer", "peer-host", "127.0.0.1", 1, mine=True, secret=secret)
     daemon = Daemon(runner, files, fleet_token, devices=lambda: [device])
@@ -448,7 +448,7 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
     server = Server(("127.0.0.1", 0), make_handler(daemon))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
-    monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
+    monkeypatch.setattr("poolhouse.workspace.remote.load_cluster_key", lambda path: key)
     monkeypatch.setattr(coordinator_client, "_device_peer", lambda config: SimpleNamespace(
         token=macauth.derive(base64.urlsafe_b64decode(secret))))
     try:
@@ -485,16 +485,16 @@ def test_client_refuses_unsealed_response(monkeypatch):
             return self
         def __exit__(self, *args):
             return None
-    monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: bytes(range(32)))
-    monkeypatch.setattr("ml_stack.workspace.remote.open_stream", lambda *a, **k: PlainResponse())
+    monkeypatch.setattr("poolhouse.workspace.remote.load_cluster_key", lambda path: bytes(range(32)))
+    monkeypatch.setattr("poolhouse.workspace.remote.open_stream", lambda *a, **k: PlainResponse())
     remote = RemoteWorkspace("http://127.0.0.1:8770", PROJECT)
     with pytest.raises(PermissionError, match="not authenticated and sealed"):
         remote.call("agents", "agent-capability")
 
 
 def test_remote_client_never_reuses_global_or_human_token_files(monkeypatch, tmp_path):
-    monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: bytes(range(32)))
-    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", "global-human-token")
+    monkeypatch.setattr("poolhouse.workspace.remote.load_cluster_key", lambda path: bytes(range(32)))
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_TOKEN", "global-human-token")
     monkeypatch.delenv(tokens.AGENT_ENV, raising=False)
     remote = RemoteWorkspace("http://127.0.0.1:8770", PROJECT)
     with pytest.raises(PermissionError, match="select the local agent identity"):
@@ -526,7 +526,7 @@ def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tm
                                   machine=home.machine_id()),
                             key, port=udp, interval_s=30).start()
     discover = Peer.discover
-    monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
+    monkeypatch.setattr("poolhouse.workspace.remote.load_cluster_key", lambda path: key)
     monkeypatch.setattr(Peer, "discover", lambda **kw: discover(key=kw["key"], port=udp, timeout_s=1))
     http._PINNED.clear()
     try:
@@ -546,7 +546,7 @@ def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tm
 def test_adopted_history_has_no_identity_or_role_grants(host):
     agent = joined(host)
     before = host.workspace(PROJECT).registry.ids()
-    result = host.adopt(PROJECT, {"board": "#ml-stack", "tokens": ["private-secret"],
+    result = host.adopt(PROJECT, {"board": "#poolhouse", "tokens": ["private-secret"],
                       "messages": [{"seq": 1, "from": "old-owner", "from_role": "human",
                                     "text": "old project message", "can": ["mint"]}]})
     assert result["messages"] == 1
@@ -562,16 +562,16 @@ def test_adopted_history_has_no_identity_or_role_grants(host):
 
 def test_history_from_other_boards_and_conflicting_imports_are_refused(host):
     with pytest.raises(ValueError, match="only the selected"):
-        host.adopt(PROJECT, {"board": "#ml-stack", "messages": [{"board": "#other", "text": "x"}]})
-    history = {"board": "#ml-stack", "messages": [{"text": "selected"}]}
+        host.adopt(PROJECT, {"board": "#poolhouse", "messages": [{"board": "#other", "text": "x"}]})
+    history = {"board": "#poolhouse", "messages": [{"text": "selected"}]}
     assert host.adopt(PROJECT, history) == host.adopt(PROJECT, history)
     with pytest.raises(ValueError, match="different adopted history"):
-        host.adopt(PROJECT, {"board": "#ml-stack", "messages": [{"text": "different"}]})
+        host.adopt(PROJECT, {"board": "#poolhouse", "messages": [{"text": "different"}]})
 
 
 def test_source_publication_does_not_initialize_board_and_explicit_invite_selects_authority(repository, tmp_path):  # noqa: F811
     registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), host="https://192.168.2.59:8770")
-    project = registry.share(registry.candidates()[0]["id"], "ml-stack")
+    project = registry.share(registry.candidates()[0]["id"], "poolhouse")
     host = WorkspaceHost(registry)
     status = host.status(project.id)
     assert status["state"] == "unconfigured"
@@ -584,7 +584,7 @@ def test_source_publication_does_not_initialize_board_and_explicit_invite_select
 
 def test_foreign_authority_cannot_be_replaced_by_local_invite(repository, tmp_path):  # noqa: F811
     registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), host="https://192.168.2.59:8770")
-    project = registry.share(registry.candidates()[0]["id"], "ml-stack")
+    project = registry.share(registry.candidates()[0]["id"], "poolhouse")
     project.board_host = "https://192.168.2.27:8770"
     host = WorkspaceHost(registry)
     assert host.status(project.id)["state"] == "connection_required"

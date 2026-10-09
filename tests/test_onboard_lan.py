@@ -4,9 +4,9 @@ import ssl
 
 import pytest
 
-from ml_stack.fleet.onboard import transfer
-from ml_stack.fleet.onboard.lan import NotLocal, require_local
-from ml_stack.fleet.onboard.pairing import PairError, PairingClient
+from poolhouse.fleet.onboard import transfer
+from poolhouse.fleet.onboard.lan import NotLocal, require_local
+from poolhouse.fleet.onboard.pairing import PairError, PairingClient
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "192.168.1.20", "10.1.2.3", "172.16.0.9",

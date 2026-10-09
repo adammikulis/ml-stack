@@ -1,4 +1,4 @@
-"""Pyright's errors over src/ml_stack, under the checks configured in pyproject.toml."""
+"""Pyright's errors over src/poolhouse, under the checks configured in pyproject.toml."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def describe() -> str:
 def run(root: Path, files: list[str] | None = None) -> list[Finding]:
     """Pyright's errors for these files under root, or for the whole project when none are named."""
     cmd = command()
-    if cmd is None or not (root / "src" / "ml_stack").is_dir():
+    if cmd is None or not (root / "src" / "poolhouse").is_dir():
         return []
     done = subprocess.run([*cmd, "--outputjson", *(files or [])], cwd=root,
                           capture_output=True, text=True, check=False)
@@ -55,6 +55,6 @@ def find_full(root: Path) -> list[Finding]:
 
 
 def find(root: Path) -> list[Finding]:
-    if command() is None or not (root / "src" / "ml_stack").is_dir():
+    if command() is None or not (root / "src" / "poolhouse").is_dir():
         return []
     return _pyright_incremental.findings(root, lambda files: run(root, files))

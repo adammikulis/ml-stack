@@ -1,6 +1,6 @@
 """The PDF reader is permissively licensed by default, bounded, and fails closed.
 
-Every PDF here is written by the test from plain bytes (`ml_stack.redteam.minipdf`), so none of
+Every PDF here is written by the test from plain bytes (`poolhouse.redteam.minipdf`), so none of
 these tests needs MuPDF (AGPL-3.0). Hostile inputs are built the same way: a stream that inflates
 to hundreds of megabytes, a page tree that claims a billion pages or contains itself, a file cut
 in half, an object nested a hundred thousand deep, an encryption dictionary nobody can open.
@@ -21,11 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.net import pdfread
-from ml_stack.net.pdfread import Limits, PdfRefused
-from ml_stack.net.pdftext import visible_text
-from ml_stack.redteam.minipdf import Doc
-from ml_stack.sources import datasheet, pdf
+from poolhouse.net import pdfread
+from poolhouse.net.pdfread import Limits, PdfRefused
+from poolhouse.net.pdftext import visible_text
+from poolhouse.redteam.minipdf import Doc
+from poolhouse.sources import datasheet, pdf
 
 ROOT = Path(__file__).resolve().parents[1]
 BODY, SECTION, CHAPTER, TITLE, FOOT = 9.0, 13.0, 15.0, 22.0, 7.5
@@ -33,7 +33,7 @@ BODY, SECTION, CHAPTER, TITLE, FOOT = 9.0, 13.0, 15.0, 22.0, 7.5
 
 @pytest.fixture(autouse=True)
 def default_engine(monkeypatch):
-    monkeypatch.delenv("ML_STACK_PDF_ENGINE", raising=False)
+    monkeypatch.delenv("POOLHOUSE_PDF_ENGINE", raising=False)
 
 
 def a_textbook(path, *, outline=True) -> str:
@@ -74,17 +74,17 @@ def a_textbook(path, *, outline=True) -> str:
 
 def test_the_default_engine_is_the_permissive_one_and_a_bad_name_is_refused(monkeypatch):
     assert pdfread.engine() == "pdfminer"
-    monkeypatch.setenv("ML_STACK_PDF_ENGINE", "pymupdf")
+    monkeypatch.setenv("POOLHOUSE_PDF_ENGINE", "pymupdf")
     assert pdfread.engine() == "pymupdf"
-    monkeypatch.setenv("ML_STACK_PDF_ENGINE", "poppler")
+    monkeypatch.setenv("POOLHOUSE_PDF_ENGINE", "poppler")
     with pytest.raises(ValueError, match="one of pdfminer, pymupdf"):
         pdfread.engine()
 
 
 def test_mupdf_is_never_imported_by_a_default_read(tmp_path):
-    """Run in a fresh interpreter, so a copy installed beside ml-stack proves nothing by being there."""
+    """Run in a fresh interpreter, so a copy installed beside poolhouse proves nothing by being there."""
     where = a_textbook(tmp_path / "lattice.pdf")
-    code = ("import sys\nfrom ml_stack.sources import pdf\nfrom ml_stack.net.pdftext import visible_text\n"
+    code = ("import sys\nfrom poolhouse.sources import pdf\nfrom poolhouse.net.pdftext import visible_text\n"
             f"d = pdf.read({where!r})\nvisible_text({where!r})\n"
             "assert len(d.sections) == 2, d.sections\n"
             "assert 'pymupdf' not in sys.modules and 'fitz' not in sys.modules, 'MuPDF was imported'\n"
@@ -100,10 +100,10 @@ def test_the_mupdf_only_features_refuse_by_default_even_when_mupdf_is_installed(
 
 
 def test_the_mupdf_engine_reads_the_same_book_when_asked_for_by_name(tmp_path, monkeypatch):
-    pytest.importorskip("pymupdf", reason="MuPDF is AGPL and opt-in: pip install 'ml-stack[pdf-agpl]'")
+    pytest.importorskip("pymupdf", reason="MuPDF is AGPL and opt-in: pip install 'poolhouse[pdf-agpl]'")
     where = a_textbook(tmp_path / "lattice.pdf")
     default = pdf.read(where)
-    monkeypatch.setenv("ML_STACK_PDF_ENGINE", "pymupdf")
+    monkeypatch.setenv("POOLHOUSE_PDF_ENGINE", "pymupdf")
     chosen = pdf.read(where)
     assert [(s.number, s.title) for s in chosen.sections] == [(s.number, s.title) for s in default.sections]
 
@@ -306,7 +306,7 @@ def test_work_that_takes_too_long_is_killed(tmp_path):
     assert time.monotonic() - started < 30
 
 
-# -- the licence of what `pip install ml-stack[all]` and `[redteam]` bring ------------------------
+# -- the licence of what `pip install poolhouse[all]` and `[redteam]` bring ------------------------
 
 AGPL = re.compile(r"\b(AGPL|Affero|GPL-?[23]|GNU General Public)", re.IGNORECASE)
 LGPL = re.compile(r"\bLGPL|Lesser", re.IGNORECASE)
@@ -318,7 +318,7 @@ Empty: nothing in these extras is AGPL or GPL."""
 def closure(extra: str, table: dict[str, list[str]]) -> set[str]:
     names: set[str] = set()
     for requirement in table[extra]:
-        found = re.match(r"ml-stack\[([^\]]+)\]", requirement)
+        found = re.match(r"poolhouse\[([^\]]+)\]", requirement)
         if found:
             for inner in found.group(1).split(","):
                 names |= closure(inner.strip(), table)
@@ -344,7 +344,7 @@ def test_pdfium_and_the_licences_of_the_binary_it_ships_are_permissive():
     try:
         dist = metadata.distribution("pypdfium2")
     except metadata.PackageNotFoundError:
-        pytest.skip("pip install 'ml-stack[pdf-render]'")
+        pytest.skip("pip install 'poolhouse[pdf-render]'")
     claim = dist.metadata.get("License-Expression") or dist.metadata.get("License") or ""
     assert "BSD-3-Clause" in claim and "Apache-2.0" in claim and not AGPL.search(claim), claim
     files = {str(f): f for f in dist.files or ()}

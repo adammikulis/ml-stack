@@ -47,14 +47,14 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
         {
             "HOME": str(home),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "ML_STACK_WSL_VENV": str(venv),
+            "POOLHOUSE_WSL_VENV": str(venv),
             "BASHRC": str(home / ".bashrc"),
             "UV": str(uv),
             "UV_LOG": str(uv_log),
             "PYTHON_FOR_TEST": sys.executable,
             "FAKE_FFMPEG": str(ffmpeg),
             "PYTHONPATH": str(fake_packages),
-            "ML_STACK_WINDOWS_USER": "no-such-user",
+            "POOLHOUSE_WINDOWS_USER": "no-such-user",
         }
     )
     subprocess.run(
@@ -71,7 +71,7 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
     nvcc.write_text("#!/bin/sh\necho 'Cuda compilation tools, release 13.0, V13.0.88'\n")
     nvcc.chmod(0o755)
 
-    config = home / ".config/ml-stack/wsl-dev.sh"
+    config = home / ".config/poolhouse/wsl-dev.sh"
     sourced = subprocess.run(
         [
             "bash",

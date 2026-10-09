@@ -1,4 +1,4 @@
-"""Putting ml-stack on a machine: what starts it at boot, and what it does about the
+"""Putting poolhouse on a machine: what starts it at boot, and what it does about the
 models already on the disk.
 
 None of this needs root -- `system_service` only *generates* what root would write, so
@@ -12,8 +12,8 @@ from __future__ import annotations
 import plistlib
 from pathlib import Path
 
-from ml_stack.fleet import autostart
-from ml_stack.fleet.autostart import (
+from poolhouse.fleet import autostart
+from poolhouse.fleet.autostart import (
     ADOPTED,
     IN_PLACE,
     LEFT_ALONE,
@@ -42,7 +42,7 @@ class TestStartingAtBoot:
     def test_macos_gets_a_launchdaemon_that_runs_as_the_person_who_installed_it(self):
         """UserName is the whole trick: the service's home is theirs, so the models in
         ~/.cache/huggingface are the models it serves, and nothing is downloaded twice."""
-        made = system_service(USER, "/Users/wrenfield", argv=["/opt/ml-stack/bin/traind"],
+        made = system_service(USER, "/Users/wrenfield", argv=["/opt/poolhouse/bin/traind"],
                               platform="darwin")
         plist = plistlib.loads(made.body.encode())
 
@@ -54,7 +54,7 @@ class TestStartingAtBoot:
         assert made.path == f"/Library/LaunchDaemons/{SYSTEM_LABEL}.plist"
 
     def test_linux_gets_a_system_unit_with_that_user_and_the_same_cache(self):
-        made = system_service(USER, "/home/wrenfield", argv=["/opt/ml-stack/bin/traind"],
+        made = system_service(USER, "/home/wrenfield", argv=["/opt/poolhouse/bin/traind"],
                               platform="linux")
 
         assert f"User={USER}" in made.body

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.workspace import guard_patch
+from poolhouse.workspace import guard_patch
 
 PATH = "scripts/hooks/pre-push"
 OLD = "#!/bin/sh\nexit 0\n"
@@ -12,7 +12,7 @@ NEW = "#!/bin/sh\necho checked\nexit 0\n"
 
 
 @pytest.mark.parametrize("text", [
-    "--- a/src/ml_stack/other.py\n+++ b/src/ml_stack/other.py\n@@ -1 +1 @@\n-a\n+b\n",
+    "--- a/src/poolhouse/other.py\n+++ b/src/poolhouse/other.py\n@@ -1 +1 @@\n-a\n+b\n",
     f"--- a/{PATH}\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n",
     f"rename from {PATH}\nrename to scripts/hooks/pre-push2\n",
     f"old mode 100644\nnew mode 100755\n--- a/{PATH}\n+++ b/{PATH}\n@@ -1 +1 @@\n-a\n+b\n",

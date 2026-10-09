@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 
-from ml_stack.serve import ports
+from poolhouse.serve import ports
 
 
 def _sleeper():

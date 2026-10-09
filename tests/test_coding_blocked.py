@@ -1,12 +1,12 @@
 """Native approval denial terminates a turn without retrying or weakening policy."""
 import pytest
 
-from ml_stack.workspace import coding_events, coding_turns
+from poolhouse.workspace import coding_events, coding_turns
 
 
 def test_native_denial_stops_before_another_tool_call():
     row = {"type": "user", "message": {"content": [{"type": "tool_result", "is_error": True,
-        "content": "PreToolUse:Bash hook error: ml-stack: the person did not allow this call (KeystoreUnavailable)"}]}}
+        "content": "PreToolUse:Bash hook error: poolhouse: the person did not allow this call (KeystoreUnavailable)"}]}}
     turn = coding_turns.Turn("test")
     with pytest.raises(RuntimeError, match="blocked by approval policy"):
         coding_turns.Manager(None)._event(turn, row, "claude")

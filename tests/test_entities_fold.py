@@ -1,6 +1,6 @@
 """A coined vocabulary folds to one word, and only where the guess is safe."""
 
-from ml_stack.entities.fold import ESTABLISHED, dead_keys, fold_edges, fold_names
+from poolhouse.entities.fold import ESTABLISHED, dead_keys, fold_edges, fold_names
 
 
 def edge(source, rel, target, weight, said):

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.board import session as board_session
-from ml_stack.net import git
+from poolhouse.board import session as board_session
+from poolhouse.net import git
 
 pytest_plugins = ["node_kit"]
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,13 +25,13 @@ HOOKS = ROOT / 'scripts/hooks'
 def commands(tmp_path, monkeypatch, workspace_node):
     directory = tmp_path / 'bin'
     directory.mkdir()
-    executable = directory / 'ml-stack-workspace'
+    executable = directory / 'poolhouse-workspace'
     executable.write_text(f'''#!{sys.executable}
 import json, os, sys
 from pathlib import Path
 path = Path(os.environ['HOOK_CALLS'])
 calls = json.loads(path.read_text()) if path.exists() else []
-calls.append(dict(argv=sys.argv[1:], session=os.environ.get('ML_STACK_SESSION_ID'), agent=os.environ.get('ML_STACK_WORKSPACE_AGENT'), harness=os.environ.get('ML_STACK_SESSION_HARNESS')))
+calls.append(dict(argv=sys.argv[1:], session=os.environ.get('POOLHOUSE_SESSION_ID'), agent=os.environ.get('POOLHOUSE_WORKSPACE_AGENT'), harness=os.environ.get('POOLHOUSE_SESSION_HARNESS')))
 path.write_text(json.dumps(calls))
 if os.environ.get('HOOK_FAILURE'):
     print(os.environ['HOOK_FAILURE'], file=sys.stderr)
@@ -106,10 +106,10 @@ def test_unavailable_workspace_is_nonblocking_with_redacted_reason(commands, mon
 @pytest.mark.parametrize('name', ['claude-session-start', 'claude-subagent-start'])
 def test_missing_workspace_executable_is_nonblocking_and_explained(commands, name, tmp_path):
     directory, _ = commands
-    (directory / 'ml-stack-workspace').unlink()
+    (directory / 'poolhouse-workspace').unlink()
     done = invoke(name, {'model': 'claude-sonnet-4-6', 'cwd': str(tmp_path), 'session_id': 'native-missing-cli',
                          'agent_id': 'abc123'})
-    assert done.returncode == 0 and 'ml-stack-workspace' in done.stderr and 'No such file' in done.stderr
+    assert done.returncode == 0 and 'poolhouse-workspace' in done.stderr and 'No such file' in done.stderr
 
 
 def test_subagent_event_includes_brief_and_actual_primary_branch_rules(commands, tmp_path, workspace_node):
@@ -139,9 +139,9 @@ def test_timeout_warning_is_nonblocking_and_redacts_the_command(monkeypatch, cap
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(['ml-stack-workspace', 'mlws1.actor.syntheticSecret123'], 30)
+        raise subprocess.TimeoutExpired(['poolhouse-workspace', 'mlws1.actor.syntheticSecret123'], 30)
     monkeypatch.setattr(module.subprocess, 'run', timeout)
-    assert module.run(['ml-stack-workspace', 'whoami'], stage) is None
+    assert module.run(['poolhouse-workspace', 'whoami'], stage) is None
     warning = capsys.readouterr().err
     assert stage in warning and 'timed out' in warning and 'syntheticSecret123' not in warning
 
@@ -162,21 +162,21 @@ def test_repository_claude_settings_wire_the_maintained_event_hooks():
 
 
 def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(tmp_path, monkeypatch, workspace_node):
-    # The hooks must run this tree's workspace CLI, not whatever ml-stack-workspace an install put on PATH.
+    # The hooks must run this tree's workspace CLI, not whatever poolhouse-workspace an install put on PATH.
     shim_directory = tmp_path / 'shim'
     shim_directory.mkdir()
-    shim = shim_directory / 'ml-stack-workspace'
+    shim = shim_directory / 'poolhouse-workspace'
     shim.write_text(f'#!{sys.executable}\n'
                     'import sys\n'
-                    "sys.argv[0] = 'ml-stack-workspace'\n"
-                    'from ml_stack.workspace.cli import main\n'
+                    "sys.argv[0] = 'poolhouse-workspace'\n"
+                    'from poolhouse.workspace.cli import main\n'
                     'sys.exit(main())\n')
     shim.chmod(0o700)
     git_directory = str(Path(shutil.which('git')).parent)
     monkeypatch.setenv('PATH', os.pathsep.join([str(shim_directory), str(Path(sys.executable).parent), git_directory]))
     monkeypatch.delenv('CODEX_THREAD_ID', raising=False)
     monkeypatch.delenv('CODEX_SESSION_ID', raising=False)
-    monkeypatch.delenv('ML_STACK_AGENT', raising=False)
+    monkeypatch.delenv('POOLHOUSE_AGENT', raising=False)
     monkeypatch.setenv('PYTHONPATH', str(ROOT / 'src'))
     repository = tmp_path / 'project'
     git.run(['init', '-b', 'development', str(repository)])
@@ -219,10 +219,10 @@ def test_session_exports_preserve_native_context_without_global_configuration(co
     assert done.returncode == 0 and 'model unavailable' in done.stderr
     text = target.read_text()
     assert 'EXISTING_NATIVE_CONTEXT=preserved' in text
-    assert 'export ML_STACK_SESSION_ID=native-main-1' in text
-    assert 'export ML_STACK_SESSION_HARNESS=claude-code' in text
+    assert 'export POOLHOUSE_SESSION_ID=native-main-1' in text
+    assert 'export POOLHOUSE_SESSION_HARNESS=claude-code' in text
     assert [item['argv'][0] for item in json.loads(commands[1].read_text())] == ['whoami', 'announce', 'inbox']
-    shell = subprocess.run(['/bin/sh', '-c', '. "$1"; ml-stack-workspace whoami',
+    shell = subprocess.run(['/bin/sh', '-c', '. "$1"; poolhouse-workspace whoami',
                             'hook-test', str(target)], capture_output=True, text=True, check=False)
     assert shell.returncode == 0
     recorded = json.loads(commands[1].read_text())[-1]

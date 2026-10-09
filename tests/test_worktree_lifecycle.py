@@ -3,7 +3,7 @@
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import Denied, integration_git as repo, worktree_lifecycle as lifecycle
+from poolhouse.workspace import Denied, integration_git as repo, worktree_lifecycle as lifecycle
 
 
 @pytest.fixture
@@ -116,9 +116,9 @@ def test_cached_done_rechecks_reappeared_branch(setup):
 
 
 def test_native_mutation_records_its_unmanaged_checkout(setup):
-    from ml_stack import harness_claims
-    from ml_stack.workspace import tokens
-    from ml_stack.workspace.project import describe
+    from poolhouse import harness_claims
+    from poolhouse.workspace import tokens
+    from poolhouse.workspace.project import describe
     kit = setup
     tokens.store(kit.base, 'worker', kit.sender)
     repo.git(kit.primary, 'remote', 'add', 'origin', 'https://example.test/fixture.git')
@@ -157,8 +157,8 @@ def test_label_cannot_hide_unlabeled_native_scope(setup):
 
 @pytest.mark.redteam
 def test_harness_stop_uses_authenticated_owner_and_refuses_lingering_scope(setup):
-    from ml_stack import harnesshook
-    from ml_stack.workspace import tokens
+    from poolhouse import harnesshook
+    from poolhouse.workspace import tokens
     kit = setup
     tokens.store(kit.base, 'worker', kit.sender)
     claim(kit)
@@ -172,7 +172,7 @@ def test_harness_stop_uses_authenticated_owner_and_refuses_lingering_scope(setup
 def test_claude_settings_wire_stop_and_subagent_stop():
     import json
 
-    from ml_stack import claude
+    from poolhouse import claude
     hooks = json.loads(claude.settings('PRE', 'POST', 300, 'STOP'))['hooks']
     assert hooks['Stop'][0]['hooks'][0]['command'] == 'STOP'
     assert hooks['SubagentStop'][0]['hooks'][0]['command'] == 'STOP'
@@ -182,7 +182,7 @@ def test_claude_settings_wire_stop_and_subagent_stop():
 def test_launcher_refuses_success_without_done_announcement(setup, monkeypatch):
     import argparse
 
-    from ml_stack import harnessid, harnessing
+    from poolhouse import harnessid, harnessing
     kit = setup
     claim(kit)
     seat = harnessid.Seat('worker', base=kit.base)
@@ -242,9 +242,9 @@ def test_reserved_path_materialized_as_primary_repository_remains_pending(setup)
 
 @pytest.mark.redteam
 def test_native_mutation_records_target_checkout_instead_of_working_directory(setup):
-    from ml_stack import harness_claims
-    from ml_stack.workspace import tokens
-    from ml_stack.workspace.project import describe
+    from poolhouse import harness_claims
+    from poolhouse.workspace import tokens
+    from poolhouse.workspace.project import describe
     kit = setup
     target = kit.checkout.parent / 'other-checkout'
     repo.git(kit.primary, 'worktree', 'add', '-b', 'worker/other', str(target))
@@ -261,7 +261,7 @@ def test_native_mutation_records_target_checkout_instead_of_working_directory(se
 def test_launcher_exception_reports_pending_scope_and_preserves_failure(setup):
     import argparse
 
-    from ml_stack import harnessid, harnessing
+    from poolhouse import harnessid, harnessing
     kit = setup
     claim(kit)
     seat = harnessid.Seat('worker', base=kit.base)
@@ -293,7 +293,7 @@ def test_nested_reservation_retains_checkout_provenance(setup):
 def test_launcher_exception_survives_failed_exit_inspection(setup, monkeypatch):
     import argparse
 
-    from ml_stack import harnessid, harnessing
+    from poolhouse import harnessid, harnessing
     kit = setup
     seat = harnessid.Seat('worker', base=kit.base)
     args = argparse.Namespace(project=str(kit.checkout), parent='', name='worker',
@@ -324,9 +324,9 @@ def test_claim_before_final_commit_cannot_complete_after_lost_checkout_and_branc
 
 @pytest.mark.redteam
 def test_pretool_invalidates_old_cleanup_proof_when_tool_removes_its_final_commit(setup, monkeypatch):
-    from ml_stack import harness_claims, harnesshook
-    from ml_stack.workspace import tokens
-    from ml_stack.workspace.project import describe
+    from poolhouse import harness_claims, harnesshook
+    from poolhouse.workspace import tokens
+    from poolhouse.workspace.project import describe
 
     kit = setup
     claim(kit)
@@ -349,8 +349,8 @@ def test_pretool_invalidates_old_cleanup_proof_when_tool_removes_its_final_commi
 
 
 def test_posttool_captures_final_commit_and_cleanup_proves_it_landed(setup, monkeypatch):
-    from ml_stack import harnesshook
-    from ml_stack.workspace import notification_reader, tokens
+    from poolhouse import harnesshook
+    from poolhouse.workspace import notification_reader, tokens
 
     kit = setup
     claim(kit)
@@ -387,7 +387,7 @@ def test_cleanup_never_takes_a_foreign_live_claim(setup):
 def test_authenticated_worktree_cleanup_cli_records_the_exact_landed_commit(setup):
     from types import SimpleNamespace
 
-    from ml_stack.workspace import cli
+    from poolhouse.workspace import cli
 
     kit = setup
     claim(kit)

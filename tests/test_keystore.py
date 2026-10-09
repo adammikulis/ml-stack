@@ -16,13 +16,13 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from keyring.errors import KeyringError
 
-from ml_stack import home, keystore, memory, sentinel
-from ml_stack.fleet.onboard import manifest as mf
-from ml_stack.fleet.onboard.signing import SigningKeys
-from ml_stack.keystore import Keystore, Wires
-from ml_stack.memory import vault
-from ml_stack.sentinel import human
-from ml_stack.sentinel.events import Bus, Event, Severity
+from poolhouse import home, keystore, memory, sentinel
+from poolhouse.fleet.onboard import manifest as mf
+from poolhouse.fleet.onboard.signing import SigningKeys
+from poolhouse.keystore import Keystore, Wires
+from poolhouse.memory import vault
+from poolhouse.sentinel import human
+from poolhouse.sentinel.events import Bus, Event, Severity
 from tests import keystore_support
 from tests.onboard_support import Clock
 
@@ -72,7 +72,7 @@ def test_nothing_touches_the_keystore_until_a_key_is_needed(tmp_path, counting):
     store = memory.Store(tmp_path / "m" / "graph.enc")
     assert store.facts() == [] and store.status == "fresh"
     SigningKeys(tmp_path / "fleet").entry(Path(__file__))
-    from ml_stack import credentials
+    from poolhouse import credentials
     credentials.describe(), credentials.status("NOPE_KEY")
     assert counting.calls == []
 
@@ -99,9 +99,9 @@ def test_every_purpose_shares_one_item(tmp_path, counting):
     ks.subkey("reputation", "u")
     ks.wrap("fleet-signing", "d", b"x")
     ks.subkey("credentials", "HF")
-    assert list(counting.held) == [("ml-stack", ks.account)]
+    assert list(counting.held) == [("poolhouse", ks.account)]
     assert ks.account == "master/" + keystore.os_user()
-    assert counting.held[("ml-stack", ks.account)].startswith("v1:") and len(master_of(counting)) == 32
+    assert counting.held[("poolhouse", ks.account)].startswith("v1:") and len(master_of(counting)) == 32
     assert counting.calls == ["get", "set"]
 
 
@@ -172,7 +172,7 @@ if type(keyring.get_keyring()).__name__ != "CountingFileRing":
     sys.exit(3)
 while not Path(os.environ["GO"]).exists():
     time.sleep(0.005)
-from ml_stack import keystore
+from poolhouse import keystore
 ks = keystore.Keystore(wires=keystore.Wires(interactive=lambda: True, say=lambda _m: None))
 print(ks.subkey("test", "owner").hex())
 """
@@ -182,10 +182,10 @@ CHILD_NOWAIT = CHILD.replace('while not Path(os.environ["GO"]).exists():\n    ti
 
 
 def child_env(tmp_path: Path) -> dict[str, str]:
-    return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(tmp_path / "home"),
+    return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "POOLHOUSE_HOME": str(tmp_path / "home"),
             "PYTHON_KEYRING_BACKEND": "tests.keystore_support.CountingFileRing",
-            "ML_STACK_TEST_KEYRING": str(tmp_path / "ring.json"), "GO": str(tmp_path / "go"),
-            "ML_STACK_NOTIFY": "off", "ML_STACK_TEST_KEYRING_DELAY": "0.3"}
+            "POOLHOUSE_TEST_KEYRING": str(tmp_path / "ring.json"), "GO": str(tmp_path / "go"),
+            "POOLHOUSE_NOTIFY": "off", "POOLHOUSE_TEST_KEYRING_DELAY": "0.3"}
 
 
 def test_six_processes_starting_together_create_one_master(tmp_path):
@@ -198,7 +198,7 @@ def test_six_processes_starting_together_create_one_master(tmp_path):
     assert len({out.strip() for (out, _), _ in results}) == 1
     calls = Path(f"{tmp_path / 'ring.json'}.calls").read_text().split()
     assert calls.count("set") == 1 and calls.count("get") <= 6 and "delete" not in calls
-    assert list(json.loads((tmp_path / "ring.json").read_text())) == [f"ml-stack/master/{keystore.os_user()}"]
+    assert list(json.loads((tmp_path / "ring.json").read_text())) == [f"poolhouse/master/{keystore.os_user()}"]
 
 
 def test_processes_behind_a_refusal_do_not_ask_again(tmp_path):
@@ -216,7 +216,7 @@ def test_processes_behind_a_refusal_do_not_ask_again(tmp_path):
 
 
 def test_forty_processes_starting_together_never_see_busy_and_stay_under_the_read_ceiling(tmp_path):
-    env = {**child_env(tmp_path), "ML_STACK_TEST_KEYRING_DELAY": "0"}
+    env = {**child_env(tmp_path), "POOLHOUSE_TEST_KEYRING_DELAY": "0"}
     seed = subprocess.run([sys.executable, "-c", CHILD_NOWAIT], env=env, capture_output=True, text=True, timeout=120)
     assert seed.returncode == 0, seed.stderr
     kids = [subprocess.Popen([sys.executable, "-c", CHILD], env=env, stdout=subprocess.PIPE,
@@ -238,7 +238,7 @@ def test_a_refusal_is_remembered_and_never_retried_in_a_loop(tmp_path, counting,
     clock, bus = Clock(), Bus()
     counting.refuse = error
     first = make(tmp_path, clock, bus=bus)
-    with pytest.raises(keystore.KeystoreDenied, match="ml-stack-security unlock"):
+    with pytest.raises(keystore.KeystoreDenied, match="poolhouse-security unlock"):
         first.subkey("memory", "a")
     assert counting.calls == ["get"]
     second = make(tmp_path, clock)
@@ -375,7 +375,7 @@ def test_one_instance_locking_and_reading_in_a_loop_is_capped_too(tmp_path, coun
 
 def test_a_background_process_never_prompts_or_creates(tmp_path, counting):
     ks = make(tmp_path, person=False)
-    with pytest.raises(keystore.KeystoreLocked, match="ml-stack-security unlock"):
+    with pytest.raises(keystore.KeystoreLocked, match="poolhouse-security unlock"):
         ks.subkey("memory", "a")
     assert counting.calls == [] and counting.held == {}
 
@@ -401,7 +401,7 @@ def test_what_counts_as_interactive(monkeypatch):
         def isatty(self) -> bool:
             return self.tty
 
-    for marker in ("CLAUDECODE", "ML_STACK_AGENT", keystore.ENV_NONINTERACTIVE):
+    for marker in ("CLAUDECODE", "POOLHOUSE_AGENT", keystore.ENV_NONINTERACTIVE):
         monkeypatch.delenv(marker, raising=False)
     monkeypatch.setattr(sys, "stdin", Tty(True))
     assert REAL_INTERACTIVE() is True
@@ -452,7 +452,7 @@ def at_a_terminal(monkeypatch):
 
 
 def test_unlock_is_for_a_person_at_a_terminal(counting, monkeypatch, capsys):
-    from ml_stack.net import cli
+    from poolhouse.net import cli
 
     for marker in human.AGENT_MARKERS:
         monkeypatch.setenv(marker, "1")
@@ -463,7 +463,7 @@ def test_unlock_is_for_a_person_at_a_terminal(counting, monkeypatch, capsys):
 
 
 def test_unlock_makes_the_key_once_and_lets_background_processes_read_it(counting, at_a_terminal, capsys):
-    from ml_stack.net import cli
+    from poolhouse.net import cli
 
     assert cli.command(["unlock", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["created"] is True
@@ -475,7 +475,7 @@ def test_unlock_makes_the_key_once_and_lets_background_processes_read_it(countin
 
 
 def test_the_status_command_makes_no_backend_call(counting, capsys):
-    from ml_stack.net import cli
+    from poolhouse.net import cli
 
     assert cli.command(["keystore", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["provisioned"] is False
@@ -483,7 +483,7 @@ def test_the_status_command_makes_no_backend_call(counting, capsys):
 
 
 def test_reset_deletes_the_key_after_the_person_types_the_account(counting, at_a_terminal, monkeypatch):
-    from ml_stack.net import cli
+    from poolhouse.net import cli
 
     ks = keystore.default()
     ks.subkey("memory", "a")
@@ -578,9 +578,9 @@ def test_the_fleet_signing_key_moves_into_a_wrapped_file_and_the_old_item_goes(t
     keys = SigningKeys(tmp_path / "fleet", say=lambda _m: None)
     keys._write({"store": "keyring", "key_id": signer.key_id, "public": base64.b64encode(signer.public).decode(),
                  "created": 1.0, "rotations": [], "revoked": [], "confirm": False})
-    counting.set_password("ml-stack", keys.account, base64.b64encode(signer.private_raw()).decode())
+    counting.set_password("poolhouse", keys.account, base64.b64encode(signer.private_raw()).decode())
     mf.verify(keys.sign([], serial=1), signer.public)
-    assert ("ml-stack", keys.account) not in counting.held
+    assert ("poolhouse", keys.account) not in counting.held
     assert json.loads(keys.meta_path.read_text())["store"] == "keystore" and keys.wrapped_path.exists()
     assert holds(signer.private_raw(), tmp_path, home.state()) == []
     mf.verify(keys.sign([], serial=2), signer.public)
@@ -591,17 +591,17 @@ def test_a_signing_key_move_cut_off_after_the_wrap_is_finished_by_the_next_call(
     keys = SigningKeys(tmp_path / "fleet", say=lambda _m: None)
     keys._write({"store": "keyring", "key_id": signer.key_id, "public": base64.b64encode(signer.public).decode(),
                  "created": 1.0, "rotations": [], "revoked": [], "confirm": False})
-    counting.set_password("ml-stack", keys.account, base64.b64encode(signer.private_raw()).decode())
+    counting.set_password("poolhouse", keys.account, base64.b64encode(signer.private_raw()).decode())
     counting.refuse, counting.refuse_ops = KeyringError, {"delete"}
     with pytest.raises(Exception, match="declined"):
         keys.sign([], serial=1)
-    assert keys.wrapped_path.exists() and ("ml-stack", keys.account) in counting.held
+    assert keys.wrapped_path.exists() and ("poolhouse", keys.account) in counting.held
     assert json.loads(keys.meta_path.read_text())["store"] == "keyring"
     counting.refuse = None
     keystore.default()._denied = ""
     (home.state("keystore") / "denied.json").unlink()
     mf.verify(keys.sign([], serial=2), signer.public)
-    assert ("ml-stack", keys.account) not in counting.held
+    assert ("poolhouse", keys.account) not in counting.held
     assert json.loads(keys.meta_path.read_text())["store"] == "keystore"
 
 
@@ -616,7 +616,7 @@ def test_a_signing_key_move_cut_off_after_the_old_item_went_still_signs(tmp_path
 
 
 def test_the_reputation_ledger_is_keyed_under_its_own_purpose_and_migrates_too(tmp_path, counting):
-    from ml_stack.reputation.sealed import SealedGraph
+    from poolhouse.reputation.sealed import SealedGraph
 
     ledger = SealedGraph(tmp_path / "r" / "graph.enc")
     ledger.edit(lambda g: g.upsert_node({"id": "source:a", "kind": "source", "label": "a"}))
@@ -677,8 +677,8 @@ def test_every_backend_operation_is_a_sentinel_event_with_a_purpose_and_an_outco
     bus = Bus()
     ks = make(tmp_path, bus=bus)
     ks.subkey("memory", "a")
-    ks.legacy_get("ml-stack-memory", "someone", "memory")
-    ks.legacy_drop("ml-stack-memory", "someone", "memory")
+    ks.legacy_get("poolhouse-memory", "someone", "memory")
+    ks.legacy_drop("poolhouse-memory", "someone", "memory")
     seen = [(e.kind, e.subject, e.evidence["outcome"]) for e in bus.recent(kind="keystore")]
     assert seen == [("keystore.read", "purpose:memory", "absent"), ("keystore.create", "purpose:memory", "ok"),
                     ("keystore.read", "purpose:memory", "absent"), ("keystore.delete", "purpose:memory", "absent")]

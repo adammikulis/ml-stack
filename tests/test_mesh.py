@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack import macauth
-from ml_stack.fleet.onboard.manifest import Signer
-from ml_stack.fleet.remote import Peer
-from ml_stack.workspace import journal_merge as rules, mesh_fold, mesh_sync
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.mesh import Mesh
-from ml_stack.workspace.service import Workspace
+from poolhouse import macauth
+from poolhouse.fleet.onboard.manifest import Signer
+from poolhouse.fleet.remote import Peer
+from poolhouse.workspace import journal_merge as rules, mesh_fold, mesh_sync
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.mesh import Mesh
+from poolhouse.workspace.service import Workspace
 
 TESTS = Path(__file__).resolve().parent
 SRC = TESTS.parent / 'src'
@@ -101,9 +101,9 @@ def pair(tmp_path, monkeypatch):
     a_for_b, b_for_a = 'a' * 64, 'b' * 64
     root_b = tmp_path / 'device-b'
     environment = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(SRC), str(TESTS)]),
-                   'ML_STACK_WORKSPACE_HOME': str(root_b / 'workspace'), 'ML_STACK_HOME': str(root_b / 'home'),
+                   'POOLHOUSE_WORKSPACE_HOME': str(root_b / 'workspace'), 'POOLHOUSE_HOME': str(root_b / 'home'),
                    'PYTHON_KEYRING_BACKEND': 'onboard_support.FileKeyring',
-                   'ML_STACK_TEST_KEYRING': str(root_b / 'keyring.json'), 'ML_STACK_NOTIFY': 'off'}
+                   'POOLHOUSE_TEST_KEYRING': str(root_b / 'keyring.json'), 'POOLHOUSE_NOTIFY': 'off'}
     environment.pop('CLAUDECODE', None)
     server = subprocess.Popen([sys.executable, str(TESTS / 'mesh_server.py'), str(root_b), a_for_b, secret],
                               env=environment, stdout=subprocess.PIPE, text=True)

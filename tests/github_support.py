@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-REPO = "ownerlogin/ml-stack-test"
+REPO = "ownerlogin/poolhouse-test"
 
 
 def ruleset(name, target, include, rules, bypass=()):

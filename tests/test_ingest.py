@@ -18,8 +18,8 @@ import pytest
 from conftest import json_reply
 from test_sources_pdf import a_textbook
 
-from ml_stack import hub, ingest, jobs
-from ml_stack.contracts import grammar_for
+from poolhouse import hub, ingest, jobs
+from poolhouse.contracts import grammar_for
 
 pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
 
@@ -66,7 +66,7 @@ def a_model(server, script):
 
 
 def a_unit(**over):
-    from ml_stack.sources.pdf import Unit
+    from poolhouse.sources.pdf import Unit
 
     fields = {"source": "lattice", "book_title": "Lattice Studies", "chapter": "1",
               "chapter_title": "The Glimmer Cascade", "section": "1.1",
@@ -143,7 +143,7 @@ def test_the_vague_predicates_are_one_shared_list_and_not_a_refusal():
     """The reader and the import read one list. It marks and it reports; it never fences
     the decode, because a passage that hedges is read as it hedges -- epidemiology says
     'associated with' to avoid claiming cause."""
-    from ml_stack.contracts import load
+    from poolhouse.contracts import load
 
     held = load("vague-predicates.json")
     assert set(held["predicates"]) == set(ingest.VAGUE)
@@ -184,7 +184,7 @@ def test_the_instructions_follow_the_shape_the_section_is_read_under():
 def test_the_schema_mirrors_the_message_one_so_the_same_fold_takes_both():
     """`entities.fold_edges` keys on from/rel/to. A document relation named its fields
     differently would need a second reader, and the two would drift."""
-    from ml_stack.contracts import load
+    from poolhouse.contracts import load
 
     relation = ingest.schema()["properties"]["relations"]["items"]["properties"]
     assert set(relation) == set(load("extraction.schema.json")
@@ -286,8 +286,8 @@ def test_a_plural_and_its_singular_fold_into_the_name_the_source_uses_more():
 
 
 def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     unit = a_unit()
     graph = ingest.fold_source([{"unit": unit.id, "extracted": LATTICE}], {unit.id: unit})
@@ -308,8 +308,8 @@ def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
 def test_a_verb_and_a_kind_from_outside_the_core_lists_survive_the_fold_and_the_store(tmp_path):
     """A book's own vocabulary is a finding: which relations and kinds came out of the core
     lists and which the reader named itself reaches the store."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     said = json.loads(json.dumps(LATTICE))
     said["relations"].append({"from": "glimmer node", "rel": "sits_inside", "to": "vault"})
@@ -338,8 +338,8 @@ def test_a_verb_and_a_kind_from_outside_the_core_lists_survive_the_fold_and_the_
 
 def test_a_kind_a_later_read_takes_from_the_core_list_stops_being_an_extension(tmp_path):
     """The mark is derived from the kind the store ends up holding, never merged into it."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     unit = a_unit()
     coined = json.loads(json.dumps(LATTICE))
@@ -408,7 +408,7 @@ def test_a_perfect_reading_scores_one_and_names_no_misses(server, tmp_path):
             {"from": "glimmer node", "rel": "produces", "to": "a charge"}])
 
     instance, asked = a_model(server, script)
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     scored = ingest.gold_score(Client(instance.base_url), ingest.read_gold(a_gold_file(tmp_path)),
                                ingest.schema())
@@ -427,7 +427,7 @@ def test_a_miss_and_an_invention_are_both_counted_and_both_listed(server, tmp_pa
             {"from": "glimmer node", "rel": "part_of", "to": "vault"}])
 
     instance, _ = a_model(server, script)
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     scored = ingest.gold_score(Client(instance.base_url), ingest.read_gold(a_gold_file(tmp_path)),
                                ingest.schema())
@@ -451,7 +451,7 @@ def test_a_gold_predicate_the_schema_has_no_word_for_is_named_rather_than_hidden
     where.write_text(json.dumps(older))
 
     instance, _ = a_model(server, lambda prompt: EMPTY)
-    from ml_stack.client import Client
+    from poolhouse.client import Client
 
     scored = ingest.gold_score(Client(instance.base_url), ingest.read_gold(where),
                                ingest.schema(core_only=True))
@@ -480,12 +480,12 @@ def a_reading(tmp_path, server, script=lambda prompt: LATTICE):
 
 
 def run(argv):
-    """`ml-stack-ingest` with these arguments, reaching no embedder."""
+    """`poolhouse-ingest` with these arguments, reaching no embedder."""
     return ingest.main([*argv, "--no-embed"])
 
 
 def test_a_source_is_read_section_by_section_into_a_store(tmp_path, server, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     source, instance, asked = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
 
@@ -496,13 +496,13 @@ def test_a_source_is_read_section_by_section_into_a_store(tmp_path, server, caps
     done = ingest.Progress(ingest.Progress.beside(store)).state["sources"]["lattice"]["done"]
     assert set(done) == {"lattice:1:1.1", "lattice:2:2.1"}
 
-    from ml_stack.graph.store import GraphStore
+    from poolhouse.graph.store import GraphStore
     with GraphStore(store, read_only=True) as held:
         assert {n["id"] for n in held.nodes()} >= {"source:lattice", "concept:glimmer-node"}
 
 
 def test_resume_skips_what_is_already_done_and_asks_the_model_nothing_more(tmp_path, server):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     source, instance, asked = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
 
@@ -519,8 +519,8 @@ def test_resume_skips_what_is_already_done_and_asks_the_model_nothing_more(tmp_p
 def test_resume_still_folds_what_an_earlier_run_extracted(tmp_path, server):
     """A resumed run that folded only the sections it read itself would write a graph
     missing everything the run before it found."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     source, instance, _ = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
@@ -536,7 +536,7 @@ def test_resume_still_folds_what_an_earlier_run_extracted(tmp_path, server):
 
 
 def test_sample_reads_only_the_first_sections(tmp_path, server):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     source, instance, asked = a_reading(tmp_path, server)
     run([source, "--out", str(tmp_path / "sources.ladybug"), "--base-url", instance.base_url,
          "--sample", "1"])
@@ -544,7 +544,7 @@ def test_sample_reads_only_the_first_sections(tmp_path, server):
 
 
 def test_a_chapter_reads_only_that_chapter(tmp_path, server):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     source, instance, asked = a_reading(tmp_path, server)
     run([source, "--out", str(tmp_path / "sources.ladybug"), "--base-url", instance.base_url,
          "--chapter", "2"])
@@ -552,7 +552,7 @@ def test_a_chapter_reads_only_that_chapter(tmp_path, server):
 
 
 def test_status_reports_the_sources_the_sections_and_the_rate(tmp_path, server, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     source, instance, _ = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
     run([source, "--out", str(store), "--base-url", instance.base_url])
@@ -570,7 +570,7 @@ def test_status_on_a_store_nothing_was_ingested_into_says_so(tmp_path, capsys):
 
 
 def test_a_failed_section_is_recorded_and_the_next_one_is_still_read(tmp_path, server, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
 
     def script(prompt):
         return LATTICE if "1.1" in prompt else "not json at all"
@@ -597,7 +597,7 @@ def test_gold_through_the_command_prints_the_rates(tmp_path, server, capsys):
 
 def test_core_only_reads_a_section_under_the_core_lists_alone(tmp_path, server, capsys):
     """The two ways of reading, through the command: what the server is sent says which."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
 
     def sent_rel(argv):
         source, instance, asked = a_reading(tmp_path, server)
@@ -656,7 +656,7 @@ def test_the_parser_refuses_an_abbreviated_flag_rather_than_guessing():
 
 
 def test_the_images_go_to_the_model_as_pictures_only_when_asked_for(tmp_path):
-    from ml_stack.sources import pdf
+    from poolhouse.sources import pdf
 
     document = pdf.read(a_textbook(tmp_path / "lattice.pdf"), images=True)
     unit = pdf.units(document)[0]
@@ -672,7 +672,7 @@ def test_the_images_go_to_the_model_as_pictures_only_when_asked_for(tmp_path):
 
 
 def test_a_section_with_no_rendered_figure_sends_no_picture_and_claims_none(tmp_path):
-    from ml_stack.sources import pdf
+    from poolhouse.sources import pdf
 
     unit = pdf.units(pdf.read(a_textbook(tmp_path / "lattice.pdf")))[0]
     turns, shown = ingest.prompt_for(unit, images=True)
@@ -680,8 +680,8 @@ def test_a_section_with_no_rendered_figure_sends_no_picture_and_claims_none(tmp_
 
 
 def test_what_a_section_cost_is_kept_call_by_call(tmp_path, server):
-    from ml_stack.client import Client
-    from ml_stack.sources import pdf
+    from poolhouse.client import Client
+    from poolhouse.sources import pdf
 
     instance, _ = a_model(server, lambda prompt: LATTICE)
     unit = pdf.units(pdf.read(a_textbook(tmp_path / "lattice.pdf")))[0]
@@ -751,7 +751,7 @@ def test_a_unit_that_failed_is_not_done_so_resume_reads_it_again(tmp_path):
 
 
 def test_plurals_fold_into_their_singular_and_nothing_else_does():
-    from ml_stack.graph.names import plurals
+    from poolhouse.graph.names import plurals
 
     got = plurals(["acid", "Acids", "hydrogen ion", "hydrogen ions", "species",
                   "base", "bases", "bus", "vertebrae", "Currents"])
@@ -779,7 +779,7 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
     """Adam: "we shouldn't be handling parallel requests while extracting ... we should never
     be splitting the GPU like that" -- and measured: two workers averaged 140 s a unit
     against 86 alone. One slot, and --context is all its own."""
-    from ml_stack.serve import Config, Serving
+    from poolhouse.serve import Config, Serving
 
     seen = {}
 
@@ -792,15 +792,15 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
-    monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: Found())
+    monkeypatch.setattr("poolhouse.serve.profile.said", lambda m: "measured")
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     def fake_serve(model, manager=None, **lease):
         seen["lease"] = lease
         raise SystemExit(0)
 
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
     (tmp_path / "g.json").write_text(
         '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
     import contextlib
@@ -820,11 +820,11 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
     import contextlib
     from dataclasses import replace
 
-    from ml_stack.serve.profile import Profile
+    from poolhouse.serve.profile import Profile
 
     measured = Profile(model="kestrel-8B-UD-Q4_K_XL.gguf", slot_context=16384, parallel=4,
                        cache_type="q8_0", sampling={"temperature": 1.0})
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for",
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for",
                         lambda m, **_: replace(measured, served=str(m)))
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("kestrel-8B-UD-Q4_K_XL.gguf"))
     seen = {}
@@ -837,7 +837,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
         seen["model"], seen["lease"] = model, lease
         yield Up()
 
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
     args = ingest.parser().parse_args(
         ["--out", str(tmp_path / "sources"), "--model", "kestrel", "--context", "40000",
          "--per-section", "120", "--n-predict", "999", "--top-k", "20"])
@@ -928,8 +928,8 @@ def test_a_run_recorded_before_the_record_moved_into_jobs_is_still_stopped(tmp_p
 
 def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
     """The server cut the reply; the row keeps every character it did write."""
-    from ml_stack.client import Client
-    from ml_stack.client.chat import Reply
+    from poolhouse.client import Client
+    from poolhouse.client.chat import Reply
 
     client = Client("http://127.0.0.1:1")
     half = '{"concepts": [{"name": "Vault Currents", "kind": "concept"}' * 40
@@ -944,7 +944,7 @@ def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
 
 
 def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
-    from ml_stack.serve import Config, Serving
+    from poolhouse.serve import Config, Serving
 
     seen = {}
 
@@ -956,15 +956,15 @@ def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
-    monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: Found())
+    monkeypatch.setattr("poolhouse.serve.profile.said", lambda m: "measured")
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     def fake_serve(model, manager=None, **lease):
         seen["lease"] = lease
         raise SystemExit(0)
 
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
     (tmp_path / "g.json").write_text(
         '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
     import contextlib
@@ -990,7 +990,7 @@ def test_a_unit_that_failed_twice_is_left_alone_and_status_says_so(tmp_path, cap
 
 def test_the_schema_caps_every_list_so_a_greedy_decode_cannot_circle():
     """One unit wrote 378 relations, 282 of them distinct, until n_predict cut it."""
-    from ml_stack.contracts.jsonschema import grammar_for
+    from poolhouse.contracts.jsonschema import grammar_for
 
     shape = ingest.schema()
     for name in ("concepts", "relations", "figures", "key_terms"):
@@ -1067,7 +1067,7 @@ def in_store(where):
 
 
 def test_fold_writes_a_part_read_source_into_the_store_and_says_it_is_partial(tmp_path, capsys):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     store = a_part_read_source(tmp_path)
 
     assert ingest.main(["fold", "--out", str(store)]) == 0
@@ -1082,7 +1082,7 @@ def test_fold_writes_a_part_read_source_into_the_store_and_says_it_is_partial(tm
 
 
 def test_fold_twice_leaves_the_store_exactly_as_it_was(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
     with ingest.Sources(store).store() as held:
@@ -1097,7 +1097,7 @@ def test_a_second_fold_adds_to_the_source_and_only_rebuild_takes_anything_out(tm
     """Adam: "if the source already exists, it should append new nodes/connect new edges.
     additive." A section re-read into something else adds what it now says; what the
     first fold wrote stays until a person asks for a rebuild."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     slug = "velthorne-open-texts"
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
@@ -1124,7 +1124,7 @@ def test_a_second_fold_adds_to_the_source_and_only_rebuild_takes_anything_out(tm
 
 
 def test_a_concept_two_sources_name_survives_one_of_them_being_rebuilt(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     store = tmp_path / "sources.ladybug"
     a_part_read_source(tmp_path, store=store)
     a_part_read_source(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
@@ -1210,8 +1210,8 @@ def test_a_unit_read_in_parts_keeps_the_id_its_provenance_names(tmp_path):
 
 def test_the_sources_view_opens_the_store_read_only_while_a_writer_has_it_open(tmp_path):
     """An application reads a sources the run is still writing into."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack.graph.store import GraphStore
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse.graph.store import GraphStore
 
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
@@ -1228,7 +1228,7 @@ def test_the_sources_view_opens_the_store_read_only_while_a_writer_has_it_open(t
 def test_the_store_holds_the_first_chapter_before_the_second_is_read(tmp_path, server,
                                                                     monkeypatch):
     """The whole point: a sources that takes days is answerable while it is being read."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     monkeypatch.setattr(ingest, "FOLD_EVERY", 1)
     store = tmp_path / "sources.ladybug"
     seen: list[set] = []
@@ -1246,7 +1246,7 @@ def test_the_store_holds_the_first_chapter_before_the_second_is_read(tmp_path, s
 
 
 def test_the_progress_file_records_how_far_each_source_is_folded(tmp_path, server):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     source, instance, _ = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
     run([source, "--out", str(store), "--base-url", instance.base_url])
@@ -1267,7 +1267,7 @@ def test_a_chapter_ends_a_fold_and_a_long_chapter_folds_inside_itself():
 def test_folding_a_few_hundred_units_of_one_source_costs_a_second_or_two(tmp_path):
     """What the interval is chosen from. The fold itself is `entities.fold_names`, which
     grows with the square of the vocabulary; the write grows with the units."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     slug = "velthorne-open-texts"
     words = [f"vault {n}" for n in range(120)] + [f"seam {n}" for n in range(120)]
     rows = []
@@ -1293,13 +1293,13 @@ def test_folding_a_few_hundred_units_of_one_source_costs_a_second_or_two(tmp_pat
 
 def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
     """SIGTERM mid-source: the unit in flight is lost, the units before it are in the store."""
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     import subprocess
     import threading
 
     from conftest import REPO
 
-    from ml_stack.testing.fakes import Served, fake_llama_server
+    from poolhouse.testing.fakes import Served, fake_llama_server
 
     store = tmp_path / "sources.ladybug"
     source = a_textbook(tmp_path / "lattice.pdf")
@@ -1316,7 +1316,7 @@ def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
     with fake_llama_server(Served(answer=extracted)) as model:
         url = model.base_url
         child = subprocess.Popen(
-            [sys.executable, "-m", "ml_stack.ingest", source, "--out", str(store),
+            [sys.executable, "-m", "poolhouse.ingest", source, "--out", str(store),
              "--base-url", url],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env={**os.environ, "PYTHONPATH": str(REPO / "src"), "PYTHONUNBUFFERED": "1"})
@@ -1439,7 +1439,7 @@ def test_status_says_what_is_in_the_store_and_how_long_the_rest_will_take(tmp_pa
     assert "in store: nothing folded yet" in out
     assert "~6 min left" in out, "four units at the 86 s each this source measured"
 
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
     ingest.fold(store, say=lambda _: None)
     capsys.readouterr()
     ingest.status(store)
@@ -1498,12 +1498,12 @@ def _gold_with_a_fake_model(tmp_path, monkeypatch):
         seen["lease"] = lease
         yield Up()
 
-    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
+    monkeypatch.setattr("poolhouse.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("poolhouse.serve.profile.profile_for", lambda m, **_: None)
     monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
-    monkeypatch.setattr("ml_stack.ingest.cli.gold_score",
+    monkeypatch.setattr("poolhouse.ingest.cli.gold_score",
                         lambda *a, **k: ingest.Scored())
-    monkeypatch.setattr("ml_stack.ingest.cli.gold_lines", lambda scored: [])
+    monkeypatch.setattr("poolhouse.ingest.cli.gold_lines", lambda scored: [])
     (tmp_path / "g.json").write_text(
         '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
     return ["--gold", str(tmp_path / "g.json"), "--model", "x"], seen
@@ -1516,8 +1516,8 @@ def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, mo
     bench left there."""
     import contextlib
 
-    import ml_stack.bench as bench
-    import ml_stack.lock
+    import poolhouse.bench as bench
+    import poolhouse.lock
 
     taken = {}
 
@@ -1526,7 +1526,7 @@ def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, mo
         taken["path"], taken["wait"], taken["announce"] = Path(what), wait, announce
         yield Path(what)
 
-    monkeypatch.setattr(ml_stack.lock, "only_one", recording)
+    monkeypatch.setattr(poolhouse.lock, "only_one", recording)
     argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)
     assert ingest.main(argv) == 0
     assert taken["path"] == bench.home_dir() / "measuring.lock"
@@ -1538,8 +1538,8 @@ def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, mo
 
 def test_no_queue_is_refused_at_once_while_the_bench_holds_the_lock(tmp_path, monkeypatch,
                                                                     capsys):
-    import ml_stack.bench as bench
-    from ml_stack.lock import only_one
+    import poolhouse.bench as bench
+    from poolhouse.lock import only_one
 
     argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)
     with only_one(bench.home_dir() / "measuring.lock", wait=False, announce=lambda *a: None):

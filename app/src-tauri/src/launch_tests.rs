@@ -26,6 +26,6 @@ fn tokens_hold_only_url_safe_characters() {
 
 #[test]
 fn without_a_recorded_secret_the_window_opens_the_bare_page() {
-    let root = std::env::temp_dir().join("ml-stack-launch-test-missing");
+    let root = std::env::temp_dir().join("poolhouse-launch-test-missing");
     assert_eq!(page_url(&root, 8770), "http://127.0.0.1:8770/ui/");
 }

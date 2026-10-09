@@ -18,8 +18,8 @@ from gates import deep_components, deep_files  # noqa: E402
 
 
 def plant(root: Path, name: str, lines: int) -> Path:
-    """Write a file of exactly that many lines under src/ml_stack."""
-    path = root / "src" / "ml_stack" / name
+    """Write a file of exactly that many lines under src/poolhouse."""
+    path = root / "src" / "poolhouse" / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(f"x{i} = {i}" for i in range(lines)) + "\n", encoding="utf-8")
     return path
@@ -38,7 +38,7 @@ def test_one_line_over_the_limit_is_a_finding_that_names_the_length(checker, suf
                                                                    tmp_path) -> None:
     plant(tmp_path, f"over{suffix}", checker.LIMIT + 1)
     found = checker.find(tmp_path)
-    assert [f.path for f in found] == [f"src/ml_stack/over{suffix}"]
+    assert [f.path for f in found] == [f"src/poolhouse/over{suffix}"]
     assert found[0].detail == f"{checker.LIMIT + 1} lines"
 
 
@@ -72,7 +72,7 @@ def test_the_size_gates_allow_nothing(checker) -> None:
 @pytest.mark.parametrize("checker", [deep_files, deep_components], ids=lambda c: c.NAME)
 def test_the_limit_a_gate_counts_is_the_limit_the_edit_guard_refuses(checker) -> None:
     guard = REPO / "scripts" / "hooks" / "claude-edit-guard"
-    loader = importlib.machinery.SourceFileLoader("_ml_stack_edit_guard", str(guard))
+    loader = importlib.machinery.SourceFileLoader("_poolhouse_edit_guard", str(guard))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)

@@ -1,6 +1,6 @@
 # Security contract for an assistant that does things for a person
 
-ml-stack is growing from a serving library into something closer to a personal assistant: it
+Poolhouse is growing from a serving library into something closer to a personal assistant: it
 reads mail and files, talks on chat channels, runs commands, remembers things. The first
 generation of such assistants failed in a familiar way. Reports on OpenClaw list the same
 structural faults: no permissions model, no sandboxing, credentials in plain text, unsigned
@@ -84,11 +84,11 @@ These are never offered to any model, role or connector, and no stored fact, sav
 channel message can unlock them: releasing a quarantine, approving a network host, minting a
 grant, changing guard or sentinel policy, changing a role, creating a saved rule, and changing
 the GPU wiring limit (`iogpu.wired_limit_mb`) or the boot-time daemon that keeps it. A person
-does them at their own screen: the Settings slider and `ml-stack-serve memory` refuse a process
+does them at their own screen: the Settings slider and `poolhouse-serve memory` refuse a process
 an agent started, an access token, another web page and another machine, and the password goes
 only into macOS's own dialog or sudo.
 
-Exception, bounded: `ml-stack-workspace invite` is not on the floor. A joined agent may mint a
+Exception, bounded: `poolhouse-workspace invite` is not on the floor. A joined agent may mint a
 one-time invite code for a new agent, and only that: not a token, not a grant, not a lead or
 human identity. The joiner is a standard-role child of the issuer with at most the issuer's
 rights, so nothing can be escalated through it; the code is single-use by default (at most 3),
@@ -104,7 +104,7 @@ above remain person-only.
 
 | Surface | Reaches | Guard |
 | --- | --- | --- |
-| `ml-stack-workspace invite` (agent token) | a new agent's identity in the workspace | role policy (read-only refuses, approve-first asks the person), limits only the person raises, child holds at most the issuer's rights, code stored as a hash and refused in any stored write, announced and audited, `revoke --tree` |
+| `poolhouse-workspace invite` (agent token) | a new agent's identity in the workspace | role policy (read-only refuses, approve-first asks the person), limits only the person raises, child holds at most the issuer's rights, code stored as a hash and refused in any stored write, announced and audited, `revoke --tree` |
 
 ## What a new integration must bring
 

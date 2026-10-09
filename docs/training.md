@@ -4,7 +4,7 @@
 the same call works on a Mac and on a CUDA box:
 
 ```python
-from ml_stack.train import Trainer, warmup_cosine
+from poolhouse.train import Trainer, warmup_cosine
 
 report = Trainer(model, optimizer, loss, out="runs/small").fit(
     batches, steps=100_000,
@@ -23,7 +23,7 @@ Every piece is usable on its own for a loop you write yourself: `CheckpointState
 Or skip the code entirely and use a recipe:
 
 ```
-ml-stack-train-run --recipe text-lm --data corpus.jsonl --out runs/lm --dry-run
+poolhouse-train-run --recipe text-lm --data corpus.jsonl --out runs/lm --dry-run
 ```
 
 `--dry-run` trains twenty steps and writes nothing, so a bad setting costs forty seconds
@@ -32,8 +32,8 @@ instead of six hours.
 ## Fine-tuning a tool caller
 
 ```
-ml-stack-train-tools --tools python:ml_stack.graph.prompts:TOOLS \
-    --prompts python:ml_stack.graph.prompts:TOOL_PROMPTS --out runs/caller
+poolhouse-train-tools --tools python:poolhouse.graph.prompts:TOOLS \
+    --prompts python:poolhouse.graph.prompts:TOOL_PROMPTS --out runs/caller
 ```
 
 Plug in a project's tools and end with a GGUF that calls them. One command, three stages,
@@ -57,23 +57,23 @@ each skipped when `--out` already holds its output:
 - **train** runs the `tool-calls` recipe: `--base` (`unsloth/gemma-4-E4B-it` unless
   told otherwise) with every conversation rendered through its own chat template and the
   loss on the assistant tokens only, into `run/` — checkpoints, `metrics.jsonl`, resumable.
-  `--set steps=600` and the other recipe fields work as in `ml-stack-train-run`. It is
+  `--set steps=600` and the other recipe fields work as in `poolhouse-train-run`. It is
   torch whatever the machine's default backend is, on the accelerator unless
-  `ML_STACK_DEVICE=cpu` says otherwise.
+  `POOLHOUSE_DEVICE=cpu` says otherwise.
 - **export** puts the latest checkpoint back into Hugging Face layout under `model/` and
-  hands it to `ml_stack.gguf.export` — llama.cpp's converter and `llama-quantize`, `--quant
-  Q8_0` — so the GGUF lands in `--out`, ready for `ml-stack-serve up`.
+  hands it to `poolhouse.gguf.export` — llama.cpp's converter and `llama-quantize`, `--quant
+  Q8_0` — so the GGUF lands in `--out`, ready for `poolhouse-serve up`.
 
 `--dry-run` prints the plan with counts and loads no model; `--only synth|train|export` runs
-one stage. The data is plain JSONL rows of `{"messages", "tools"}`, so `ml-stack-train-run
+one stage. The data is plain JSONL rows of `{"messages", "tools"}`, so `poolhouse-train-run
 --recipe tool-calls --data runs/caller/data` trains on it too, and so does anything else
 that writes that shape. Whether the fine-tune beats its base is measured, never assumed:
-serve the GGUF and `ml-stack-bench run` it beside the model it came from.
+serve the GGUF and `poolhouse-bench run` it beside the model it came from.
 
 ### From what a model actually did
 
 ```
-ml-stack-train-tools from-bench --kept ~/.ml-stack/bench/runs.ladybug \
+poolhouse-train-tools from-bench --kept ~/.poolhouse/bench/runs.ladybug \
     --model e4b --min-f1 0.8 --out runs/caller/data
 ```
 
@@ -95,7 +95,7 @@ on.
 
 Runs are traced by default when 20 questions or fewer are asked, and not on the hundred,
 where the transcripts would be tens of megabytes in a store nothing backs up;
-`MLSTACK_BENCH_TRACE=1` traces a run of any size, `=0` traces none. A trace holds, per call,
+`POOLHOUSE_BENCH_TRACE=1` traces a run of any size, `=0` traces none. A trace holds, per call,
 the tool and its arguments, how much came back and how many ids were in it, and the timings
 `Spent` reads — so the per-call record and the per-answer totals are one measurement added
 up two ways. `from-bench --dry-run` says what a store would yield, and what it *would have*
@@ -106,7 +106,7 @@ model turns, none of them kept).
 ### A model too big to fine-tune whole
 
 ```
-ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf \
+poolhouse-train-run --recipe tool-calls --size e4b --lora --export-gguf \
     --data runs/caller/data --out runs/caller --set steps=1000 --yes
 ```
 
@@ -116,7 +116,7 @@ frozen in bf16, ~19G resident for gemma-4 E4B on this machine. `--size e4b` brin
 defaults that suit it (batch 4, context 2048, 1e-4, rank 16), `--lora-rank`,
 `--lora-alpha`, `--lora-dropout` and `--lora-targets` override them, and the checkpoints
 hold the adapter rather than a copy of the frozen base. Needs peft: `pip install
-'ml-stack[train-lora]'`.
+'Poolhouse[train-lora]'`.
 
 What the run will cost is printed before a weight is loaded — parameters, resident
 gigabytes, tokens a step, seconds a step, wall clock — and a run estimated past 30 minutes
@@ -129,9 +129,9 @@ example count, so what a fine-tune learned from can be identified afterwards.
 
 A real fine-tune is hours, and a run started with `&` or `nohup` dies with the shell that
 started it, so `--detach` re-runs the command in its own session with its output in a log
-under `~/.ml-stack/train/logs` and hands the shell straight back. The pid, the argv and the
+under `~/.poolhouse/train/logs` and hands the shell straight back. The pid, the argv and the
 log are recorded as the `train` job the same way the bench and the ingest record theirs, so
-`ml-stack-train-run status` says what is running, `wait` blocks until it has ended — the
+`poolhouse-train-run status` says what is running, `wait` blocks until it has ended — the
 next command is `wait && next` rather than a loop written by hand — and `stop` ends it. One
 at a time: a second `--detach` beside a run still going is refused, because the two would
 share one GPU and neither measurement would be worth having.
@@ -142,7 +142,7 @@ train, on whose traces, what it would cost, and what is unmeasured.
 The small `270m` size of the `tool-calls` recipe (FunctionGemma 270M) was removed on
 2026-10-08 for licence reasons: it is under the Gemma Terms of Use, whose use restrictions
 must flow downstream, and a model that cannot be used broadly is not used. Tool *selection*
-now goes through the embed backend (`src/ml_stack/decide/embed.py`) with `embeddinggemma-2`
+now goes through the embed backend (`src/poolhouse/decide/embed.py`) with `embeddinggemma-2`
 (Apache-2.0) and well-written examples; the generative recipe remains for producing
 free-form arguments, and its only size is E4B (a LoRA). Note: the embed rows in
 `docs/decision-models.md` were measured with the 300M model and are historical.

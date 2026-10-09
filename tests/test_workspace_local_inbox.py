@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.agent.conversation import Conversation, execute
-from ml_stack.workspace import localagent as la, localinbox, localloop, tokens
-from ml_stack.workspace.localtools import TaskState, TaskStopped, workspace_extension
+from poolhouse.agent.conversation import Conversation, execute
+from poolhouse.workspace import localagent as la, localinbox, localloop, tokens
+from poolhouse.workspace.localtools import TaskState, TaskStopped, workspace_extension
 
 
 @pytest.fixture

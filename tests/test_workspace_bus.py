@@ -11,10 +11,10 @@ import time
 import pytest
 from workspace_kit import SRC, STRIPPED, Kit, clean_env, cli, run_python
 
-from ml_stack import private_path
-from ml_stack.platform import process_group_kwargs
-from ml_stack.workspace import ChainBroken, Denied, RateLimited, Refused, Workspace
-from ml_stack.workspace.chain import ChainLog
+from poolhouse import private_path
+from poolhouse.platform import process_group_kwargs
+from poolhouse.workspace import ChainBroken, Denied, RateLimited, Refused, Workspace
+from poolhouse.workspace.chain import ChainLog
 
 
 @pytest.fixture
@@ -24,11 +24,11 @@ def kit(monkeypatch, tmp_path):
 
 SEND_MANY = """
 import os, sys
-from ml_stack.workspace import Workspace
+from poolhouse.workspace import Workspace
 ws = Workspace()
 name = sys.argv[1]
 for i in range(int(sys.argv[2])):
-    ws.send(os.environ["ML_STACK_WORKSPACE_TOKEN"], "sink", "status", f"{name}-{i}")
+    ws.send(os.environ["POOLHOUSE_WORKSPACE_TOKEN"], "sink", "status", f"{name}-{i}")
 """
 
 
@@ -37,8 +37,8 @@ def test_concurrent_senders_get_one_total_order(kit):
     kit.agent("sink")
     tokens = {n: kit.agent(n) for n in ("a", "b", "c", "d")}
     procs = [subprocess.Popen([sys.executable, "-c", SEND_MANY, n, "15"],
-                              env={**os.environ, "ML_STACK_WORKSPACE_HOME": str(kit.base),
-                                   "PYTHONPATH": SRC, "ML_STACK_WORKSPACE_TOKEN": t})
+                              env={**os.environ, "POOLHOUSE_WORKSPACE_HOME": str(kit.base),
+                                   "PYTHONPATH": SRC, "POOLHOUSE_WORKSPACE_TOKEN": t})
              for n, t in tokens.items()]
     assert [p.wait(timeout=120) for p in procs] == [0, 0, 0, 0]
     rows = kit.ws.bus.log.rows()
@@ -80,8 +80,8 @@ def test_a_sender_killed_mid_stream_leaves_a_log_that_still_verifies(kit):
     kit.agent("sink")
     token = kit.agent("doomed")
     proc = subprocess.Popen([sys.executable, "-c", SEND_MANY, "doomed", "100000"],
-                            env={**os.environ, "ML_STACK_WORKSPACE_HOME": str(kit.base),
-                                 "PYTHONPATH": SRC, "ML_STACK_WORKSPACE_TOKEN": token},
+                            env={**os.environ, "POOLHOUSE_WORKSPACE_HOME": str(kit.base),
+                                 "PYTHONPATH": SRC, "POOLHOUSE_WORKSPACE_TOKEN": token},
                             **process_group_kwargs())
     try:
         deadline = time.monotonic() + 60
@@ -260,7 +260,7 @@ def test_credentials_and_private_terms_are_refused_without_being_repeated(kit, t
     kit.agent("reader")
     deny = tmp_path / "terms.txt"
     deny.write_text("# owner's list\nMoonbase Zeta\n")
-    monkeypatch.setenv("ML_STACK_WORKSPACE_DENYLIST", str(deny))
+    monkeypatch.setenv("POOLHOUSE_WORKSPACE_DENYLIST", str(deny))
     ws = Workspace(kit.base)
     token = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
     bad = [f"my key is {token}", "-----BEGIN RSA PRIVATE KEY-----\nMIIB", "password = hunter2hunter2",
@@ -388,8 +388,8 @@ def test_wait_returns_when_a_message_arrives_and_times_out_otherwise(kit):
     assert kit.ws.wait(reader, 0.3) == []
     assert 0.25 <= time.monotonic() - began < 5
     sender = run_python(
-        "import os,time\nfrom ml_stack.workspace import Workspace\ntime.sleep(0.5)\n"
-        "Workspace().send(os.environ['ML_STACK_WORKSPACE_TOKEN'],'reader','status','hello')",
+        "import os,time\nfrom poolhouse.workspace import Workspace\ntime.sleep(0.5)\n"
+        "Workspace().send(os.environ['POOLHOUSE_WORKSPACE_TOKEN'],'reader','status','hello')",
         kit.base, kit.owner)
     assert sender.returncode == 0, sender.stderr
     assert [m["seq"] for m in kit.ws.wait(reader, 20)] == [1]
@@ -398,9 +398,9 @@ def test_wait_returns_when_a_message_arrives_and_times_out_otherwise(kit):
 def test_watch_once_is_a_background_command_that_exits_when_a_message_arrives(kit):
     reader = kit.agent("reader")
     env = {**{k: v for k, v in os.environ.items() if k not in STRIPPED},
-           "ML_STACK_WORKSPACE_HOME": str(kit.base), "PYTHONPATH": SRC,
-           "ML_STACK_WORKSPACE_TOKEN": reader}
-    watcher = subprocess.Popen([sys.executable, "-m", "ml_stack.workspace.cli", "watch", "--once",
+           "POOLHOUSE_WORKSPACE_HOME": str(kit.base), "PYTHONPATH": SRC,
+           "POOLHOUSE_WORKSPACE_TOKEN": reader}
+    watcher = subprocess.Popen([sys.executable, "-m", "poolhouse.workspace.cli", "watch", "--once",
                                 "--timeout", "60", "--json"], env=env, stdout=subprocess.PIPE,
                                text=True)
     time.sleep(1.0)

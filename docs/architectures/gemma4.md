@@ -1,7 +1,7 @@
 # gemma4 -- gemma-4 E2B, E4B, 26B-A4B
 
 From the E4B header (`unsloth/gemma-4-E4B-it-qat-GGUF`, UD-Q4_K_XL). Memory figures are
-`ml-stack-serve fit` records from 2026-09-02; answering and draft figures are the runs in
+`poolhouse-serve fit` records from 2026-09-02; answering and draft figures are the runs in
 [`docs/report-2026-09-23.md`](../report-2026-09-23.md), which names its command and store.
 
 - 42 layers; `attention.sliding_window 512` with `sliding_window_pattern` true on five layers

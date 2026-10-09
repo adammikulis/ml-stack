@@ -11,7 +11,7 @@ reason, what each choice does, an expiry, and a state: pending, approved, denied
 cancelled.
 
 ## Design
-* One module raises and answers requests (`ml_stack.requests`); every component that blocks on a
+* One module raises and answers requests (`poolhouse.requests`); every component that blocks on a
   person today raises a request instead of owning its own prompt. The terminal prompt, the UI and
   the single desktop dialog are three ways to answer the same request; the first answer wins and the
   others show it as resolved. No component may open its own prompt.
@@ -26,7 +26,7 @@ cancelled.
 * Persisted in the per-user encrypted store with the other state; every request and answer is an
   activity-log record; expired requests resolve as denied, never as approved.
 * Views: a Requests panel in the regular UI (pending first, history below, filter by agent,
-  project, kind), the count in the status line and the chip, `ml-stack-requests list|answer`
+  project, kind), the count in the status line and the chip, `poolhouse-requests list|answer`
   for the terminal. A swarm's requests are grouped by agent and project so twenty agents asking
   does not look like twenty popups; "approve all of this kind" is offered only for non-destructive
   kinds and always shows what it covers.

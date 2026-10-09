@@ -7,7 +7,7 @@ import stat
 
 import pytest
 
-from ml_stack import node_binary
+from poolhouse import node_binary
 
 
 def _cargo_shim(directory, record):
@@ -17,7 +17,7 @@ def _cargo_shim(directory, record):
         f"printf '%s\\n' \"$@\" > '{record}.argv'\n"
         f"pwd > '{record}.cwd'\n"
         "mkdir -p \"${CARGO_TARGET_DIR:-target}/release\"\n"
-        "printf x > \"${CARGO_TARGET_DIR:-target}/release/poolside-node\"\n",
+        "printf x > \"${CARGO_TARGET_DIR:-target}/release/poolhouse-node\"\n",
         encoding="utf-8")
     shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
     return shim
@@ -25,8 +25,8 @@ def _cargo_shim(directory, record):
 
 def _tree(root, name):
     source = root / name
-    (source / "app" / "poolside-node").mkdir(parents=True)
-    (source / "app" / "poolside-node" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    (source / "app" / "poolhouse-node").mkdir(parents=True)
+    (source / "app" / "poolhouse-node" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
     return source
 
 
@@ -41,7 +41,7 @@ def test_a_hostile_source_path_reaches_cargo_as_a_directory_and_nothing_else(tmp
     made = node_binary.build(source, cache=tmp_path / "target")
     assert made.is_file()
     argv = (tmp_path / "record.argv").read_text(encoding="utf-8").split("\n")[:-1]
-    assert argv == ["build", "--release", "--locked", "-p", "poolside-node"]
+    assert argv == ["build", "--release", "--locked", "-p", "poolhouse-node"]
     assert (tmp_path / "record.cwd").read_text(encoding="utf-8").strip().endswith(f"{name}/app")
     assert not list(tmp_path.rglob("pwned"))
 

@@ -9,8 +9,8 @@ import pytest
 HOLDER = """
 import sys
 from pathlib import Path
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace.chain import held
+from poolhouse.graph.store import GraphStore
+from poolhouse.workspace.chain import held
 base = Path(sys.argv[1])
 with held(base / 'device-accounts.lock'), GraphStore(base / 'device-accounts.db') as graph:
     graph.upsert_node({'id': 'device:test', 'kind': 'device-account', 'label': 'worker',
@@ -26,7 +26,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from ml_stack.workspace.device_accounts import account_for
+from poolhouse.workspace.device_accounts import account_for
 print('reading', flush=True)
 print(json.dumps(account_for(SimpleNamespace(base=Path(sys.argv[1])), 'worker')), flush=True)
 """

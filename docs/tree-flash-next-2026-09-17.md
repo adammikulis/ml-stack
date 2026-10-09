@@ -1,6 +1,6 @@
 # Qwen3.8-Flash-Next through the MLX tree engine, 2026-09-17
 
-Machine: M4 Max, 128G, macOS 25.6, mlx 0.32.2, mlx-vlm 0.7.1, ml-stack at `88cde1b`.
+Machine: M4 Max, 128G, macOS 25.6, mlx 0.32.2, mlx-vlm 0.7.1, Poolhouse at `88cde1b`.
 Target: `mlx-community/Qwen3.8-Flash-Next-4bit` (snapshot `07b5dc6c`), 4-bit affine,
 group 32; MoE 512 experts top-10, 48 layers, 3:1 Gated-DeltaNet to QSA attention, one PLE
 layer, indexer budget 2048 over blocks of 4.
@@ -10,7 +10,7 @@ Drafters: `ngram` (depth 8); `mtp` = `unsloth/Qwen3.8-Flash-Next-GGUF`
 
 ## What the checkpoint costs to load
 
-    ml-stack-bench tree lossless --drafter ngram ...
+    poolhouse-bench tree lossless --drafter ngram ...
 
 | | bytes |
 |---|---|
@@ -32,7 +32,7 @@ A reply that differs is judged against the model's own shape noise: the largest
 disagreement between decoding one token at a time and reading the same tokens in one
 batched pass, measured over the same positions in the same run.
 
-    ml-stack-bench tree lossless --tokens 128 --drafter ngram --drafter mtp=<gguf> \
+    poolhouse-bench tree lossless --tokens 128 --drafter ngram --drafter mtp=<gguf> \
         --drafter dflash=PixelML/Qwen3.8-Flash-Next-NVFP4-DFlash
 
 | drafter | prompt | tokens | verdict |

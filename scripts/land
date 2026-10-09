@@ -34,7 +34,7 @@ import land_plan
 import land_run
 import land_supervise
 
-from ml_stack.devbranch import development_branch
+from poolhouse.devbranch import development_branch
 
 
 def show_plan(plan: land_plan.Plan) -> dict:
@@ -62,7 +62,7 @@ def show_plan(plan: land_plan.Plan) -> dict:
 
 def supervise_command(args: argparse.Namespace, root: Path) -> int:
     """The supervisor commands; they act on this workspace's runner, not on a branch."""
-    from ml_stack.workspace import Workspace
+    from poolhouse.workspace import Workspace
 
     base = Workspace().base
     flags = {"interval": args.interval, "stall_minutes": args.stall_minutes, "remote": args.remote,

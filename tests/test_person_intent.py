@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.workspace.person_intent import interpret, proposal_kinds
+from poolhouse.workspace.person_intent import interpret, proposal_kinds
 
 PROPOSED = ("release-main",)
 

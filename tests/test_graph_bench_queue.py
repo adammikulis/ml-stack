@@ -2,7 +2,7 @@
 
 Every fixture here is invented and lives in ``tmp_path``: no store outside it is opened, no
 model is served, and the steps are run by a fake in place of `queue.run_step`, so nothing
-here starts an `ml-stack-bench` or touches a GPU.
+here starts an `poolhouse-bench` or touches a GPU.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ import pathlib
 import pytest
 from conftest import a_row
 
-import ml_stack.bench as bench
-from ml_stack.bench import queue as q
+import poolhouse.bench as bench
+from poolhouse.bench import queue as q
 
 FX = ("hf:hearthstone/Bellwether-12B-GGUF/UD-Q4_K_XL/"
       "Bellwether-12B-UD-Q4_K_XL-00001-of-00002.gguf")
@@ -113,7 +113,7 @@ def test_the_label_a_step_keeps_under_is_read_off_the_line(tmp_path):
 # -- running it -------------------------------------------------------------------------------
 
 class FakeBench:
-    """An `ml-stack-bench` that runs nothing: it writes down the line and returns a code."""
+    """An `poolhouse-bench` that runs nothing: it writes down the line and returns a code."""
 
     def __init__(self, codes: dict[str, int] | None = None) -> None:
         self.calls: list[list[str]] = []
@@ -199,7 +199,7 @@ def test_dry_run_prints_the_steps_expanded_and_runs_none_of_them(tmp_path, capsy
     assert fake.calls == []
     said = capsys.readouterr().out
     assert "2 step(s), 1 smoke/then pair(s)" in said
-    assert f"ml-stack-bench sweep --serve {FX} --label-suffix=-v2 --smoke" in said
+    assert f"poolhouse-bench sweep --serve {FX} --label-suffix=-v2 --smoke" in said
     assert "[label Bellwether-12B-v2]" in said
     assert "--yes" in said                                   # what would be added, shown
     assert "nothing ran: --dry-run" in said
@@ -209,7 +209,7 @@ def test_dry_run_prints_the_steps_expanded_and_runs_none_of_them(tmp_path, capsy
 def test_resume_skips_a_step_whose_label_the_store_already_holds(tmp_path, capsys):
     """A queue stopped half-way does not measure the first half again -- and what counts as
     done is a run in the store since this queue started, not a line in a log."""
-    from ml_stack.bench import save
+    from poolhouse.bench import save
 
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n")
@@ -228,12 +228,12 @@ def test_resume_skips_a_step_whose_label_the_store_already_holds(tmp_path, capsy
 
 
 def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatch):
-    """`ml-stack-bench status` reads the same file the queue writes as it goes, so what is
+    """`poolhouse-bench status` reads the same file the queue writes as it goes, so what is
     running is a fact about the machine and not a line somebody remembers typing."""
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n"
                               "show --rank ranking.md\n")
-    from ml_stack.bench.progress import status
+    from poolhouse.bench.progress import status
 
     seen = []
 
@@ -258,7 +258,7 @@ def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatc
 
 def test_the_queue_runs_each_step_as_its_own_bench_so_each_takes_the_lock_itself(
         tmp_path, monkeypatch):
-    """Not one process running four sweeps: a step is `python -m ml_stack.bench ...`,
+    """Not one process running four sweeps: a step is `python -m poolhouse.bench ...`,
     which is what puts it through the self-check, the estimate, the smoke and the measuring
     lock that already exist. Two steps therefore never share the GPU."""
     import subprocess
@@ -279,7 +279,7 @@ def test_the_queue_runs_each_step_as_its_own_bench_so_each_takes_the_lock_itself
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     assert q.run_step(["sweep", "--serve", "raincoat-2b.gguf"]) == 0
-    assert started["command"] == [sys.executable, "-m", "ml_stack.bench",
+    assert started["command"] == [sys.executable, "-m", "poolhouse.bench",
                                   "sweep", "--serve", "raincoat-2b.gguf"]
     assert started["kw"]["env"]["PYTHONUNBUFFERED"] == "1"
     assert "stdout" not in started["kw"]                     # the queue's log, unredirected
@@ -299,7 +299,7 @@ def test_the_whole_queue_detaches_the_way_a_run_does(tmp_path, monkeypatch, caps
     argv = ["queue", str(where), "--detach", "--yes"]
     assert bench.main(argv) == 0
 
-    assert started["command"][:3] == [sys.executable, "-m", "ml_stack.bench"]
+    assert started["command"][:3] == [sys.executable, "-m", "poolhouse.bench"]
     assert started["command"][3:] == ["queue", str(where), "--yes"]
     assert started["kw"]["start_new_session"] is True
     log = pathlib.Path(started["kw"]["stdout"].name)
@@ -309,7 +309,7 @@ def test_the_whole_queue_detaches_the_way_a_run_does(tmp_path, monkeypatch, caps
     assert held["pid"] == 4343 and held["argv"] == ["queue", str(where), "--yes"]
 
     said = capsys.readouterr().out
-    assert "ml-stack-bench status" in said and "ml-stack-bench stop" in said
+    assert "poolhouse-bench status" in said and "poolhouse-bench stop" in said
 
 
 def test_the_queue_is_dispatched_by_the_command_and_returns_what_the_steps_did(
@@ -337,12 +337,12 @@ def test_the_shipped_example_reads_as_the_evening_it_replaces(monkeypatch):
     assert steps[0].argv[-1] == "--smoke" and steps[1].argv[-2:] == ["--sample", "10"]
     assert steps[4].label == steps[3].label == "Qwen3.8-Flash--all"
     assert "--yes" not in steps[4].argv                      # the queue's --yes, given once
-    assert "/Users/invented/.ml-stack/" in " ".join(steps[0].argv)   # ${HOME}, expanded
+    assert "/Users/invented/.poolhouse/" in " ".join(steps[0].argv)   # ${HOME}, expanded
     assert steps[5].argv[1] == "--rank" and steps[6].argv[0] == "report"
 
 
 def _bench_swapped_for(monkeypatch, program: str):
-    """`run_step`'s `python -m ml_stack.bench ...` replaced by `python -c program`,
+    """`run_step`'s `python -m poolhouse.bench ...` replaced by `python -c program`,
     with every other argument to Popen kept -- so the real pipe and reader are exercised."""
     import subprocess
     import sys
@@ -350,7 +350,7 @@ def _bench_swapped_for(monkeypatch, program: str):
     real = subprocess.Popen
 
     def swapped(command, **kw):
-        assert command[:3] == [sys.executable, "-m", "ml_stack.bench"]
+        assert command[:3] == [sys.executable, "-m", "poolhouse.bench"]
         return real([sys.executable, "-c", program], **kw)
 
     monkeypatch.setattr(subprocess, "Popen", swapped)
@@ -363,11 +363,11 @@ def test_a_step_that_dies_at_once_has_its_last_stderr_lines_in_the_queue_log(
     _bench_swapped_for(monkeypatch, "import sys; "
                        "sys.stderr.write('Traceback (most recent call last):\\n'); "
                        "sys.stderr.write('ModuleNotFoundError: No module named "
-                       "ml_stack.nowhere\\n'); sys.exit(1)")
+                       "poolhouse.nowhere\\n'); sys.exit(1)")
     assert q.run_step(["sweep", "--serve", "raincoat-2b.gguf"]) == 1
     out = capsys.readouterr().out
     assert "died in 0." in out and "s:" in out
-    assert "ModuleNotFoundError: No module named ml_stack.nowhere" in out
+    assert "ModuleNotFoundError: No module named poolhouse.nowhere" in out
 
 
 def test_a_step_that_ran_for_a_while_before_failing_is_not_called_a_fast_death(

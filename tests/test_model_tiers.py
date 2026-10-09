@@ -5,8 +5,8 @@ import json
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace.agent_display import SPAWN_NOTICE, metadata
-from ml_stack.workspace.model_tiers import (
+from poolhouse.workspace.agent_display import SPAWN_NOTICE, metadata
+from poolhouse.workspace.model_tiers import (
     LOWEST,
     NOT_LISTED,
     NOT_VERIFIED,
@@ -15,7 +15,7 @@ from ml_stack.workspace.model_tiers import (
     load_table,
     tier_of,
 )
-from ml_stack.workspace.modelid import CLAIMED, INHERITED, VERIFIED
+from poolhouse.workspace.modelid import CLAIMED, INHERITED, VERIFIED
 
 PERSON = {'terminal': (True, True), 'env': {}}
 SHIPPED = json.loads(TABLE.read_text(encoding='utf-8'))

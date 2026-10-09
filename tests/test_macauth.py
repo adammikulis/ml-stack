@@ -2,8 +2,8 @@
 
 import pytest
 
-from ml_stack import macauth
-from ml_stack.macauth import Authenticator, Lockout, Stamp
+from poolhouse import macauth
+from poolhouse.macauth import Authenticator, Lockout, Stamp
 
 KEY = b"a-cluster-key-of-thirty-two-bytes"
 SECRET = macauth.derive(KEY)
@@ -121,11 +121,11 @@ def test_the_nonce_cache_is_bounded():
 
 
 @pytest.mark.parametrize("header", [
-    "", "Bearer mlsk1.abc", "ML-Stack-MAC", "ML-Stack-MAC k=,t=,n=,s=",
-    "ML-Stack-MAC k=abc,t=notnumber,n=" + "n" * 24 + ",s=" + "0" * 64,
-    "ML-Stack-MAC k=abc,t=1700000000,n=short,s=" + "0" * 64,
-    "ML-Stack-MAC k=abc,t=1700000000,n=" + "n" * 24 + ",s=tooshort",
-    "ML-Stack-MAC " + "garbage," * 50,
+    "", "Bearer mlsk1.abc", "Poolhouse-MAC", "Poolhouse-MAC k=,t=,n=,s=",
+    "Poolhouse-MAC k=abc,t=notnumber,n=" + "n" * 24 + ",s=" + "0" * 64,
+    "Poolhouse-MAC k=abc,t=1700000000,n=short,s=" + "0" * 64,
+    "Poolhouse-MAC k=abc,t=1700000000,n=" + "n" * 24 + ",s=tooshort",
+    "Poolhouse-MAC " + "garbage," * 50,
 ])
 def test_a_header_that_is_not_a_signature_is_refused(header):
     got = _auth().check("GET", "/jobs", {"Authorization": header, "Host": "h"}, None, "1.1.1.1")

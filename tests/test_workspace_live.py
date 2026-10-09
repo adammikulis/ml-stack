@@ -18,14 +18,14 @@ from pathlib import Path
 import pytest
 from workspace_kit import SRC, STRIPPED, Kit, clean_env, cli
 
-from ml_stack.workspace import Denied, boardroute, chat, tokens
-from ml_stack.workspace.boardapi import Follow
+from poolhouse.workspace import Denied, boardroute, chat, tokens
+from poolhouse.workspace.boardapi import Follow
 
 WAITER = """
 import sys, time
 from pathlib import Path
-from ml_stack.workspace import Workspace
-from ml_stack.workspace import wake
+from poolhouse.workspace import Workspace
+from poolhouse.workspace import wake
 woke = []
 real_sleep = wake.Waiter.sleep
 def stamped(self, seconds):
@@ -170,9 +170,9 @@ def test_watch_once_on_a_board_exits_with_the_fenced_message_without_acking(kit)
     ws.board.create(t["alice"], "#ops")
     ws.board.join(t["bob"], "#ops")
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
-    env.update({"PYTHONPATH": SRC, "ML_STACK_WORKSPACE_HOME": str(kit.base),
-                "ML_STACK_WORKSPACE_TOKEN": t["bob"]})
-    proc = subprocess.Popen([sys.executable, "-m", "ml_stack.workspace.cli", "watch", "--board", "#ops",
+    env.update({"PYTHONPATH": SRC, "POOLHOUSE_WORKSPACE_HOME": str(kit.base),
+                "POOLHOUSE_WORKSPACE_TOKEN": t["bob"]})
+    proc = subprocess.Popen([sys.executable, "-m", "poolhouse.workspace.cli", "watch", "--board", "#ops",
                              "--once", "--timeout", "30"], env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True)
     time.sleep(2.0)
@@ -272,8 +272,8 @@ def test_the_chat_command_runs_for_a_person_at_a_terminal(kit, monkeypatch):
     kit.ws.board.create(kit.tokens["alice"], "#ops")
     master, slave = pty.openpty()
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
-    env.update({"PYTHONPATH": SRC, "ML_STACK_WORKSPACE_HOME": str(kit.base)})
-    proc = subprocess.Popen([sys.executable, "-m", "ml_stack.workspace.cli", "chat", "--board", "#ops"],
+    env.update({"PYTHONPATH": SRC, "POOLHOUSE_WORKSPACE_HOME": str(kit.base)})
+    proc = subprocess.Popen([sys.executable, "-m", "poolhouse.workspace.cli", "chat", "--board", "#ops"],
                             stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True)
     os.close(slave)
     seen = b""

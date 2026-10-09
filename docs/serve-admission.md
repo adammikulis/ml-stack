@@ -19,7 +19,7 @@ caller -> ServerManager.lease(spec)          serve/manager.py
 
 `Broker` (`serve/broker.py`, `serve/broker_wire.py`) was a second, separate way in: a daemon
 that started servers for a purpose and recorded who held them in `broker-leases.json`. Only
-`ml_stack.bench.tree` used it. `ServerManager.lease` did not know the broker existed, so a
+`poolhouse.bench.tree` used it. `ServerManager.lease` did not know the broker existed, so a
 caller that used the manager directly (every other caller) got:
 
 - no memory check beyond the weights file against free memory, only for a busy port;
@@ -46,7 +46,7 @@ caller -> ServerManager.lease(spec) -> broker.start(spec)
             backend.start(spec, lease=...)
           Broker records the holder (pid, label) and returns ServerInfo(lease=...)
 
-caller -> request_json / request_stream / Client -> ml_stack.http
+caller -> request_json / request_stream / Client -> poolhouse.http
             gate.turn(url)           FIFO queue of the device the server is in
 ```
 
@@ -63,12 +63,12 @@ manager and by `Broker` only; the backends refuse to launch without the manager'
 - `backend.start(..., lease=...)` or `Lease(...)` appears outside the manager;
 - a private start is reached from any module but the manager and the broker;
 - `Broker(...)` is built anywhere but `broker_wire.broker_for`;
-- a module other than `ml_stack.http` and the fleet proxy opens a connection with `urlopen`.
+- a module other than `poolhouse.http` and the fleet proxy opens a connection with `urlopen`.
 
 `broker_for` picks the transport: the machine's broker when the manager keeps the machine's
 lease file and uses the ordinary llama.cpp backend (its binary and build travel with the
 call); otherwise a `Broker` in the process, over the same registry, admission lock and
-request queue. `ML_STACK_BROKER_LOCAL=1` chooses the in-process broker for the machine's
+request queue. `POOLHOUSE_BROKER_LOCAL=1` chooses the in-process broker for the machine's
 manager too. No argument of `lease` turns the broker off.
 
 `on_event` and `say` are called only for an in-process broker; the machine's broker runs
@@ -80,7 +80,7 @@ in another process and answers with the result.
 estimate, else its weights file times 1.1) and each unmanaged `llama-server` (its resident
 size) to the estimate of the server being started: weights, draft and projector files, the
 KV cache read off the GGUF header, 512 MiB for the runtime. It rates the sum against
-`hub.room()` (the machine's wired limit, capped by `ml-stack-serve limits --memory`):
+`hub.room()` (the machine's wired limit, capped by `poolhouse-serve limits --memory`):
 
 | share  | rating | what happens                                                       |
 |--------|--------|--------------------------------------------------------------------|
@@ -88,11 +88,11 @@ KV cache read off the GGUF header, 512 MiB for the runtime. It rates the sum aga
 | < 0.95 | yellow | it starts and the share is said                                    |
 | >= 0.95 | red   | the start waits, then raises `AdmissionRefused` naming the holders |
 
-The wait is `ML_STACK_ADMISSION_WAIT_S` (default 60). Entries whose process has gone are not
+The wait is `POOLHOUSE_ADMISSION_WAIT_S` (default 60). Entries whose process has gone are not
 counted, and are removed from the file the next time it is written. When the rating is red,
 a server whose leasing process has gone (`owner_pid` dead, the server alive) is stopped
 and the rating is taken again. There is no limit on the number of servers unless
-`ml-stack-serve limits --servers N` sets one.
+`poolhouse-serve limits --servers N` sets one.
 
 ### Reuse
 
@@ -102,43 +102,43 @@ returns that server (`adopted=True`) instead of loading the weights again. A lea
 arrives while a compatible server is still loading waits for it. A caller that needs a
 specific port (`roam=False`) does not get another.
 
-A reranker is served with `ml-stack-serve up MODEL --reranking` (`llama-server --reranking`, which
-answers `/v1/rerank`; `ml_stack.client.rerank.rerank` is the client). Like an embedding server it
+A reranker is served with `poolhouse-serve up MODEL --reranking` (`llama-server --reranking`, which
+answers `/v1/rerank`; `poolhouse.client.rerank.rerank` is the client). Like an embedding server it
 is a different kind of server: a `reranking` lease is never given a chat or embedding server, and
-a chat or embedding lease is never given a reranker. `ml-stack-bench retrieval --rerank-url URL`
+a chat or embedding lease is never given a reranker. `poolhouse-bench retrieval --rerank-url URL`
 compares it with the fused and vector orders on the scored questions.
 
 ### Requests
 
-`ml_stack.gate` queues generation and embedding requests (`/v1/chat/completions`,
+`poolhouse.gate` queues generation and embedding requests (`/v1/chat/completions`,
 `/completion`, `/v1/embeddings`, `/embedding`, `/infill`, `/v1/messages`) to a loopback
 port on the lease registry. The device is `gpu` for a server with offload layers and `cpu`
 for `-ngl 0` or `device: cpu` in the spec. A request takes a ticket in `<state>/gate/<device>/`, named by the time it was
 taken, and holds an exclusive file lock on it while it runs; the oldest live ticket runs.
 A process that dies releases its lock, and the next request removes the ticket. A request
-that has waited `ML_STACK_REQUEST_WAIT_S` (default 600) raises `ServerError` with status 429
+that has waited `POOLHOUSE_REQUEST_WAIT_S` (default 600) raises `ServerError` with status 429
 naming the request ahead of it: pid, label, how long and which server. Requests to
 different servers on one device queue behind each other, requests to different devices do not,
 and a thread that already holds the device is not queued again. A streamed answer holds its
 turn until the stream is read to the end or closed. Servers that are not on the registry
 (including unmanaged ones that were not adopted) are not queued.
 
-Parallel requests are the one escape hatch, and it is named: `ML_STACK_PARALLEL_REQUESTS=1`
+Parallel requests are the one escape hatch, and it is named: `POOLHOUSE_PARALLEL_REQUESTS=1`
 for the process, or `with gate.parallel("bench sweep"):` for a block of one thread. The first
 use of each name logs a warning. The benchmarks that measure streams in flight together
 (`bench.speed.cell`, `bench.measure.concurrent`) name themselves and send in parallel.
 
-`ml-stack-serve queue` (and `Broker.snapshot()["requests"]`) lists each device's line of requests.
+`poolhouse-serve queue` (and `Broker.snapshot()["requests"]`) lists each device's line of requests.
 
 ### Unmanaged servers
 
-A `llama-server` the registry does not hold is reported as `unmanaged` (`ml-stack-serve
+A `llama-server` the registry does not hold is reported as `unmanaged` (`poolhouse-serve
 status`, `status --every`, `queue`, the bench's "beside the card" line, `Broker.snapshot()`), counted
 against the memory budget, and never leased from, shared, stopped or restarted. Leasing a
 port such an unmanaged server holds moves the new server to another port, or is refused for
 `roam=False`.
 
-`ML_STACK_ADOPT_UNMANAGED` (or `ml-stack-serve limits --adopt-unmanaged`) sets what the
+`POOLHOUSE_ADOPT_UNMANAGED` (or `poolhouse-serve limits --adopt-unmanaged`) sets what the
 broker does about them:
 
 | setting | behaviour |
@@ -159,7 +159,7 @@ before anything is sent to it:
 
 An adopted server is written to the registry with `unmanaged: true` and `owner_pid` set to its
 own pid; its estimate is its resident size and its device is read from its `-ngl` (`gpu` when absent). Its requests queue like any
-other, `release`, `stop_all`, `stop_all_servers`, `ml-stack-serve down`, idle reclaim and the
+other, `release`, `stop_all`, `stop_all_servers`, `poolhouse-serve down`, idle reclaim and the
 orphan sweep leave it alone, and it leaves the registry when its process ends. The adoption is
 logged with pid, port and model.
 
@@ -187,6 +187,6 @@ servers and the sum; a fourth asking for one of the three models gets that serve
 - Devices are `gpu` and `cpu`; a machine with several GPUs has one `gpu` device.
 - A process that holds a turn and neither finishes nor dies holds the device until its request
   times out.
-- A server started by `ml-stack` in a process that has since exited without releasing is
+- A server started by `poolhouse` in a process that has since exited without releasing is
   stopped when the memory is needed (local broker) or when the machine's broker has found
-  no holder for it for `idle_s` (default 600 s, `ml-stack-serve limits --idle`).
+  no holder for it for `idle_s` (default 600 s, `poolhouse-serve limits --idle`).

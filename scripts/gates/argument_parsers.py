@@ -11,7 +11,7 @@ from ._util import calls, dotted, parse
 NAME = "argument-parsers"
 OWNER = ""
 INCREMENTAL = True
-ROOTS = ("src/ml_stack",)
+ROOTS = ("src/poolhouse",)
 
 
 def describe() -> str:

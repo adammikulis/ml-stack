@@ -1,4 +1,4 @@
-"""The ``ml-stack-models`` commands over a tree of installed models."""
+"""The ``poolhouse-models`` commands over a tree of installed models."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ import pytest
 from conftest import LLAMA_SERVER_HELP
 from test_hub_discover import hf_repo, ollama
 
-from ml_stack import hub
-from ml_stack.hub import hf_cache
-from ml_stack.hub.probe import GIB, MachineMemory
-from ml_stack.serve import models_cli
-from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
-from ml_stack.serve.manager import reusing_installed
-from ml_stack.serve.suggest import suggest_meta
-from ml_stack.testing.fakes import fake_binary
+from poolhouse import hub
+from poolhouse.hub import hf_cache
+from poolhouse.hub.probe import GIB, MachineMemory
+from poolhouse.serve import models_cli
+from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
+from poolhouse.serve.manager import reusing_installed
+from poolhouse.serve.suggest import suggest_meta
+from poolhouse.testing.fakes import fake_binary
 
 
 @pytest.fixture

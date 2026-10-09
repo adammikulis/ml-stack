@@ -10,20 +10,20 @@ import os
 
 import pytest
 
-from ml_stack import home, sandbox, sentinel
-from ml_stack.agent import Agent, Budget, Done, FunctionTools
-from ml_stack.agent.watched import Watch
-from ml_stack.client import Client
-from ml_stack.interventions import Call as GuardCall, Deny, Proceed, Run
-from ml_stack.sandbox import Limits
-from ml_stack.sentinel import State, human
-from ml_stack.sentinel.score import QUARANTINE_AT, WATCH_AT
-from ml_stack.serve import LlamaServerBackend, ServerManager
-from ml_stack.serve.broker import Ask, Broker, BrokerError
-from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.process import kill_process_tree
-from ml_stack.testing.fakes import fake_llama_binary
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from poolhouse import home, sandbox, sentinel
+from poolhouse.agent import Agent, Budget, Done, FunctionTools
+from poolhouse.agent.watched import Watch
+from poolhouse.client import Client
+from poolhouse.interventions import Call as GuardCall, Deny, Proceed, Run
+from poolhouse.sandbox import Limits
+from poolhouse.sentinel import State, human
+from poolhouse.sentinel.score import QUARANTINE_AT, WATCH_AT
+from poolhouse.serve import LlamaServerBackend, ServerManager
+from poolhouse.serve.broker import Ask, Broker, BrokerError
+from poolhouse.serve.leases import recorded_servers
+from poolhouse.serve.process import kill_process_tree
+from poolhouse.testing.fakes import fake_llama_binary
+from poolhouse.testing.tool_server import ToolCallingServer, Turn
 from tests.sandbox_kit import policy, seatbelt  # noqa: F401
 
 FETCH = {"name": "web_fetch", "description": "Read a page.", "inputSchema": {

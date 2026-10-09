@@ -1,8 +1,8 @@
-"""Nothing but `ml_stack/keystore.py` reaches the operating system's keystore.
+"""Nothing but `poolhouse/keystore.py` reaches the operating system's keystore.
 
-The scan reads every module under ``src/ml_stack`` and flags an import of `keyring`, a
+The scan reads every module under ``src/poolhouse`` and flags an import of `keyring`, a
 `import_module` of it, a call to one of the backend's three methods, and a command-line
-keystore tool run by subprocess. A module that wants a key asks `ml_stack.keystore`, which
+keystore tool run by subprocess. A module that wants a key asks `poolhouse.keystore`, which
 counts, limits and audits every call.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent / "src" / "ml_stack"
+ROOT = Path(__file__).resolve().parent.parent / "src" / "poolhouse"
 ALLOWED = {"keystore.py": "the one module that talks to the keystore"}
 METHODS = {"get_password", "set_password", "delete_password", "get_credential"}
 LOADERS = {"import_module", "__import__"}
@@ -55,7 +55,7 @@ def modules() -> list[tuple[str, Path]]:
 
 def test_no_module_but_the_keystore_reaches_the_os_keystore():
     bad = [f"{rel}: {item}" for rel, path in modules() if rel not in ALLOWED for item in findings(path)]
-    assert not bad, "OS keystore access outside ml_stack.keystore:\n  " + "\n  ".join(bad)
+    assert not bad, "OS keystore access outside poolhouse.keystore:\n  " + "\n  ".join(bad)
 
 
 def test_the_keystore_module_is_where_the_access_lives():
@@ -82,7 +82,7 @@ def test_the_scan_recognises_each_way_of_reaching_the_keystore(tmp_path, source)
 
 
 @pytest.mark.parametrize("source", [
-    "from ml_stack import keystore\nkeystore.default().subkey('memory', 'a')\n",
+    "from poolhouse import keystore\nkeystore.default().subkey('memory', 'a')\n",
     "from . import keyring_notes\n",
     "import subprocess\nsubprocess.run(['security', 'help'])\n",
     "import json\njson.loads('{}')\n",

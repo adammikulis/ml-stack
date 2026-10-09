@@ -11,9 +11,9 @@ import io
 
 import pytest
 
-from ml_stack import chat, do, guard as rails
-from ml_stack.testing import canary
-from ml_stack.testing.canary import ATTACKS, BENIGN, Obeying, Run, play
+from poolhouse import chat, do, guard as rails
+from poolhouse.testing import canary
+from poolhouse.testing.canary import ATTACKS, BENIGN, Obeying, Run, play
 
 NAMES = [a.name for a in ATTACKS]
 ARMLESS = {"unknown-argument"}

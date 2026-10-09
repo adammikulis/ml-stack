@@ -1,5 +1,5 @@
 """The tool-calling loop under attack, with a scripted model that obeys (or ignores) every
-instruction it is shown. Needs the redteam extra and ml_stack.agent: run with --redteam."""
+instruction it is shown. Needs the redteam extra and poolhouse.agent: run with --redteam."""
 
 from __future__ import annotations
 
@@ -7,16 +7,16 @@ import asyncio
 
 import pytest
 
-from ml_stack.redteam.lab import lab as make_lab
-from ml_stack.redteam.report import Report
-from ml_stack.redteam.scenarios import Options
-from ml_stack.redteam.stub import StubModel
+from poolhouse.redteam.lab import lab as make_lab
+from poolhouse.redteam.report import Report
+from poolhouse.redteam.scenarios import Options
+from poolhouse.redteam.stub import StubModel
 
 pytestmark = pytest.mark.redteam
 
 
 def attacked(mode: str) -> Report:
-    loop = pytest.importorskip("ml_stack.redteam.scenarios.loop")
+    loop = pytest.importorskip("poolhouse.redteam.scenarios.loop")
     stub = StubModel(mode)
     report = Report()
     try:

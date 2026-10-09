@@ -23,10 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 import workspace_hook
 
-from ml_stack import trees, trees_notice
+from poolhouse import trees, trees_notice
 
 FAILURES = (RuntimeError, OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.TimeoutExpired)
-AGENT = "ML_STACK_WORKSPACE_AGENT"
+AGENT = "POOLHOUSE_WORKSPACE_AGENT"
 BUDGET_S = 8
 DETACH = True
 """Whether delivery runs in a detached process: the board commands take seconds and must not hold up a hook."""
@@ -63,10 +63,10 @@ def deliver(found: list[trees_notice.Notice], stage: str, environment: dict | No
     """Post each notice to the board (when it earned a board slot) and message each named recipient."""
     for note in found:
         if note.board:
-            workspace_hook.run(["ml-stack-workspace", "announce", "milestone", note.text[:200]], stage,
+            workspace_hook.run(["poolhouse-workspace", "announce", "milestone", note.text[:200]], stage,
                                environment=environment)
         for name in note.to:
-            workspace_hook.run(["ml-stack-workspace", "dm", name, note.text], stage, environment=environment)
+            workspace_hook.run(["poolhouse-workspace", "dm", name, note.text], stage, environment=environment)
 
 
 def send(found: list[trees_notice.Notice], stage: str, environment: dict | None) -> None:

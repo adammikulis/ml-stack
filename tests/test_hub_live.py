@@ -1,7 +1,7 @@
 """Optional checks against the real Hugging Face endpoint and this machine's llama-server.
 
-Skipped unless ``ML_STACK_LIVE=1``; ``ML_STACK_LIVE_GGUF`` names an installed GGUF and
-``ML_STACK_LIVE_LLAMA`` the llama-server binary for the load check.
+Skipped unless ``POOLHOUSE_LIVE=1``; ``POOLHOUSE_LIVE_GGUF`` names an installed GGUF and
+``POOLHOUSE_LIVE_LLAMA`` the llama-server binary for the load check.
 """
 
 from __future__ import annotations
@@ -12,17 +12,17 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.hub import remote
-from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
-from ml_stack.serve.estimate import estimate
-from ml_stack.serve.measuring import measure
-from ml_stack.serve.ports import free_port
+from poolhouse.hub import remote
+from poolhouse.serve.backend import LlamaServerBackend, ServerSpec
+from poolhouse.serve.estimate import estimate
+from poolhouse.serve.measuring import measure
+from poolhouse.serve.ports import free_port
 
 
 def live() -> None:
     """Stop the calling test unless the person asked for the network and a model server."""
-    if os.environ.get("ML_STACK_LIVE") != "1":
-        pytest.skip("set ML_STACK_LIVE=1 to reach the network and a model server")
+    if os.environ.get("POOLHOUSE_LIVE") != "1":
+        pytest.skip("set POOLHOUSE_LIVE=1 to reach the network and a model server")
 
 
 @pytest.mark.slow
@@ -42,10 +42,10 @@ def test_a_search_finds_gguf_repositories():
 @pytest.mark.slow
 def test_a_load_log_reports_the_quantised_cache_the_estimate_assumed():
     live()
-    model = os.environ.get("ML_STACK_LIVE_GGUF")
-    binary = os.environ.get("ML_STACK_LIVE_LLAMA") or shutil.which("llama-server")
+    model = os.environ.get("POOLHOUSE_LIVE_GGUF")
+    binary = os.environ.get("POOLHOUSE_LIVE_LLAMA") or shutil.which("llama-server")
     if not (model and binary and Path(model).is_file()):
-        pytest.skip("ML_STACK_LIVE_GGUF and a llama-server are needed")
+        pytest.skip("POOLHOUSE_LIVE_GGUF and a llama-server are needed")
     spec = ServerSpec(model=model, port=free_port(), context=4096, cache_type_k="q8_0",
                       cache_type_v="q8_0", flash_attn=True)
     seen = measure(spec, backend=LlamaServerBackend(binary=binary), timeout=300)

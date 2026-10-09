@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import agent_dependency
-from ml_stack.fleet.chat_routes import ChatRoutes
-from ml_stack.workspace import localstart
+from poolhouse import agent_dependency
+from poolhouse.fleet.chat_routes import ChatRoutes
+from poolhouse.workspace import localstart
 
 
 def test_missing_sdk_reports_dependency(monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
-    assert "ml-stack[agents]" in agent_dependency.problem()
+    assert "poolhouse[agents]" in agent_dependency.problem()
 
 
 def test_local_chat_refuses_before_spawn(monkeypatch, tmp_path):
@@ -26,7 +26,7 @@ def test_local_chat_refuses_before_spawn(monkeypatch, tmp_path):
 
 def test_chat_readiness_reports_actual_dependency(monkeypatch):
     monkeypatch.setitem(sys.modules, "agents", None)
-    from ml_stack.fleet import chat_routes
+    from poolhouse.fleet import chat_routes
     monkeypatch.setattr(chat_routes, "load_cluster_key", lambda path: None)
     monkeypatch.setattr(chat_routes, "targets", lambda *args: [])
     route = ChatRoutes()
@@ -37,7 +37,7 @@ def test_chat_readiness_reports_actual_dependency(monkeypatch):
     assert route._chat()
     assert replies[0][0] == 200
     assert replies[0][1]["runtime_ready"] is False
-    assert "ml-stack[agents]" in replies[0][1]["runtime_error"]
+    assert "poolhouse[agents]" in replies[0][1]["runtime_error"]
 
 
 def test_missing_chat_sdk_does_not_change_coding_prerequisites(monkeypatch, tmp_path):
@@ -54,9 +54,9 @@ def test_missing_sdk_disables_send_and_enter(tmp_path, playwright, monkeypatch):
     from playwright.sync_api import expect
     from test_fleet_ui import Serving
 
-    from ml_stack.fleet.conversations import Conversations
-    from ml_stack.fleet.serving import Serving as ModelsServing
-    from ml_stack.testing.fakes import FakeLlamaServer, Served
+    from poolhouse.fleet.conversations import Conversations
+    from poolhouse.fleet.serving import Serving as ModelsServing
+    from poolhouse.testing.fakes import FakeLlamaServer, Served
 
     fake = FakeLlamaServer(Served(model="qwen3.8-test.gguf", pieces=("hello",)))
     served = Serving(tmp_path)

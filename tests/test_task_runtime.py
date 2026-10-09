@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.workspace import task_runtime
+from poolhouse.workspace import task_runtime
 
 
 class Board:

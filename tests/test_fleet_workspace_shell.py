@@ -75,8 +75,8 @@ def test_phone_navigation_and_chat_do_not_overflow(joined, open_page):
 
 @pytest.fixture
 def serving_chat(joined, tmp_path):
-    from ml_stack.fleet.serving import Serving
-    from ml_stack.testing.fakes import FakeLlamaServer, Served
+    from poolhouse.fleet.serving import Serving
+    from poolhouse.testing.fakes import FakeLlamaServer, Served
 
     fake = FakeLlamaServer(Served(pieces=("**Hello**", " world"), gap=0.05))
     joined.ui.serving = Serving(tmp_path / "serving.json")
@@ -116,7 +116,7 @@ def test_chat_sends_history_and_renders_sanitized_markdown(joined, serving_chat,
 
 
 def test_stop_closes_model_stream_and_releases_chat_controls(joined, serving_chat, open_page):
-    from ml_stack.testing.fakes import Served
+    from poolhouse.testing.fakes import Served
 
     serving_chat.served = Served(pieces=tuple("Still writing " for _ in range(80)), gap=0.1)
     page, errors = open_page(joined, cookie=joined.cookie, path="/ui/#chat")

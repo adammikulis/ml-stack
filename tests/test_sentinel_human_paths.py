@@ -2,7 +2,7 @@
 
 import pytest
 
-from ml_stack.sentinel import human
+from poolhouse.sentinel import human
 
 pytestmark = pytest.mark.redteam
 
@@ -26,4 +26,4 @@ def test_sentinel_state_and_forbidden_source_remain_denied(tmp_path, monkeypatch
     directory = tmp_path / "sentinel"
     monkeypatch.setattr(human.home, "state", lambda name: directory)
     assert human.agent_may("Read", {"path": directory.as_posix().replace("/", separator) + "/held"})
-    assert human.agent_may("Bash", {"command": "cat ml_stack" + separator + "sentinel" + separator + "cli.py"})
+    assert human.agent_may("Bash", {"command": "cat poolhouse" + separator + "sentinel" + separator + "cli.py"})

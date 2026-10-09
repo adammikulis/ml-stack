@@ -10,7 +10,7 @@ built.
 ## 1. What exists today
 
 Most of issue #42 is **already built for one user's machine**; what is missing is the network side and
-sharing. [V `src/ml_stack/reputation/`, `docs/reputation.md`]
+sharing. [V `src/poolhouse/reputation/`, `docs/reputation.md`]
 
 | #42 asks for | State |
 |---|---|
@@ -20,7 +20,7 @@ sharing. [V `src/ml_stack/reputation/`, `docs/reputation.md`]
 | divergence alert | built: an established source (10 clean runs, 3 days) with short term >= 1 steps to watch at once; one notice through the single-flight dialog; unknown misbehaving source is just bad [V `model.py`, `notice.py`, `hooks.py`] |
 | recovery needs clean runs, not waiting | built: 10 clean runs for watch, 3x for bad; `forget` is human-only [V] |
 | only tightens; only observations move a score | built: `net.Policy.admit` raises `Distrusted`; no score function takes text [D `docs/reputation.md`] |
-| CLI | built: `ml-stack-reputation list|show|forget|export|stats`, person only [V] |
+| CLI | built: `poolhouse-reputation list|show|forget|export|stats`, person only [V] |
 | observation points | built for `net.Pipeline`, `net.download`, `PeerWatch.note` (addresses), `web.read` [D] |
 | signed sharing across the user's own machines, as hearsay | **missing** |
 | the Rust node as an observer or an enforcer | **missing**: `accept_loop` takes every TCP connection and spawns a thread before TLS, with no source check, rate or cap; beacon intake has none either [V `net.rs` lines 73 to 103, `beacon.rs`] |
@@ -150,7 +150,7 @@ Addresses, MAC addresses and names are personal-ish data. [analysis]
    from the member devices that hold it; they go only to members of the one pool.
 3. **Retention:** 30 days after `last_seen` for a `watching` or `cleared` row; the blocklist keeps a row
    until its expiry plus 30 days; the 1000-source cap evicts the oldest first. A row whose address is
-   a private-range address of this segment is removed at 7 days. An export is `ml-stack-reputation
+   a private-range address of this segment is removed at 7 days. An export is `poolhouse-reputation
    export` (person only); `forget --all` removes the local store; a pool row is removed by a
    `cleared` entry that carries no subject after retention (a redaction row), so history does not hold
    addresses forever. [analysis]
@@ -162,20 +162,20 @@ Addresses, MAC addresses and names are personal-ish data. [analysis]
 ## 6. CLI and UI
 
 ```
-ml-stack sources list [--state S] [--scope local|pool] [--json]
-ml-stack sources show SUBJECT
-ml-stack sources block SUBJECT [--for DURATION] --reason TEXT
-ml-stack sources unblock SUBJECT --reason TEXT
-ml-stack sources allow SUBJECT --reason TEXT      # also: allow --remove
-ml-stack sources safe-mode on|off
+poolhouse sources list [--state S] [--scope local|pool] [--json]
+poolhouse sources show SUBJECT
+poolhouse sources block SUBJECT [--for DURATION] --reason TEXT
+poolhouse sources unblock SUBJECT --reason TEXT
+poolhouse sources allow SUBJECT --reason TEXT      # also: allow --remove
+poolhouse sources safe-mode on|off
 ```
 
-- `list` and `show` are not privileged (as `ml-stack-security review --list`); `block`, `unblock`,
+- `list` and `show` are not privileged (as `poolhouse-security review --list`); `block`, `unblock`,
   `allow`, `safe-mode` need the person's `HumanGrant`, and refuse under any agent marker. `show` prints
   both scores, traits, counts, evidence ids, who set it and `scope` (local or pool). [V pattern
   `sentinel/human.py`]
 - `reputation list/show` stay for web sources; `sources` is the network face of the same ledger and
-  prints a source from either store, tagged. `ml-stack-reputation forget` and `sources unblock` clear the
+  prints a source from either store, tagged. `poolhouse-reputation forget` and `sources unblock` clear the
   same record.
 - UI: one component on the Fleet page next to the flags panel: a table (subject, state, scope, short and
   long score, last seen, set by) with Block, Unblock, Allow, each one confirmation; `digest --status`
@@ -186,7 +186,7 @@ ml-stack sources safe-mode on|off
 
 | Piece | State |
 |---|---|
-| local ledger with short/long scores, divergence, recovery, notice, `ml-stack-reputation` | implemented [V] |
+| local ledger with short/long scores, divergence, recovery, notice, `poolhouse-reputation` | implemented [V] |
 | `PeerWatch` for HTTP peers | implemented [V] |
 | sealed per-user store | implemented [V] |
 | `source` entry kind, traits, expiry, scope | missing |

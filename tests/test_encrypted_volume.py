@@ -137,7 +137,7 @@ def test_a_name_with_a_quote_or_space_is_refused_before_security_runs(fakes):
 
 def test_a_keychain_path_starting_with_a_dash_is_refused(fakes):
     env = {**os.environ, "PATH": f"{fakes / 'bin'}:{os.environ['PATH']}", "FAKE_LOG": str(fakes / "log"),
-           "FAKE_HOME": str(fakes), "USER": "nobody", "ML_STACK_VOLUME_KEYCHAIN": "-evil"}
+           "FAKE_HOME": str(fakes), "USER": "nobody", "POOLHOUSE_VOLUME_KEYCHAIN": "-evil"}
     done = subprocess.run(["sh", str(SCRIPT), "kilnbook", str(fakes / "m"), "setup"], capture_output=True, text=True, env=env)
     assert done.returncode == 2 and "must not start with" in done.stderr and "security" not in log(fakes)
 
@@ -163,13 +163,13 @@ def test_a_real_throwaway_keychain_gets_the_passphrase_on_stdin_not_argv(tmp_pat
         (bin_dir / name).chmod(0o755)
     keychain = tmp_path / "throwaway.keychain-db"
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_LOG": str(tmp_path / "log"),
-           "FAKE_HOME": str(tmp_path), "USER": "mlstacktest", "ML_STACK_VOLUME_KEYCHAIN": str(keychain)}
+           "FAKE_HOME": str(tmp_path), "USER": "poolhousetest", "POOLHOUSE_VOLUME_KEYCHAIN": str(keychain)}
     subprocess.run([real, "create-keychain", "-p", "throwaway", str(keychain)], check=True, capture_output=True)
     try:
         done = subprocess.run(["sh", str(SCRIPT), "tmpvol", str(tmp_path / "m"), "setup"], env=env,
                               capture_output=True, text=True, timeout=60)
         assert done.returncode == 0, done.stderr
-        got = subprocess.run([real, "find-generic-password", "-a", "mlstacktest", "-s", "tmpvol-data", "-w",
+        got = subprocess.run([real, "find-generic-password", "-a", "poolhousetest", "-s", "tmpvol-data", "-w",
                               str(keychain)], capture_output=True, text=True).stdout.strip()
         assert len(got) == 40 and got.isalnum()
         argv = (tmp_path / "argv").read_text()

@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from ml_stack import harnesshook
-from ml_stack.workspace import notification_reader as reader
+from poolhouse import harnesshook
+from poolhouse.workspace import notification_reader as reader
 
 
 @pytest.mark.parametrize('emit', [True, False])
@@ -68,20 +68,20 @@ def test_changed_checkpoint_preserves_bound_owner_and_label(monkeypatch, tmp_pat
 
 def test_urgent_action_survives_host_context_limit():
     text = reader.compact('workspace: 15 waiting for you (from ' + 'sender' * 100
-                          + '). A direct question is waiting on you: run ml-stack-workspace inbox now and answer it')
+                          + '). A direct question is waiting on you: run poolhouse-workspace inbox now and answer it')
     shown = ('workspace (data from other agents): ' + text)[:250]
     assert 'direct question' in shown and 'inbox now and answer it' in shown
 
 
 def test_cancelled_checkpoint_keeps_committed_graph_and_releases_lock(tmp_path):
-    from ml_stack.graph.store import GraphStore
-    from ml_stack.workspace import worktree_lifecycle
+    from poolhouse.graph.store import GraphStore
+    from poolhouse.workspace import worktree_lifecycle
     base = tmp_path / 'state'
     base.mkdir()
     with worktree_lifecycle._storage(base, write=True) as graph:
         graph.upsert_node({'id': 'original', 'kind': 'fixture', 'label': 'Original', 'attrs': {}})
     code = ("import sys,time; from pathlib import Path; "
-            "from ml_stack.workspace import worktree_lifecycle as life; "
+            "from poolhouse.workspace import worktree_lifecycle as life; "
             f"scope=life._storage(Path({str(base)!r}),write=True); graph=scope.__enter__(); "
             "graph.upsert_node({'id':'pending','kind':'fixture','label':'Pending','attrs':{}}); "
             "print('checkpoint staged',flush=True); time.sleep(30)")

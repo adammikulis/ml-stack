@@ -1,6 +1,6 @@
 # Sentinel: detecting and containing attacks on a node and its fleet
 
-Status: implemented in `src/ml_stack/sentinel/`. The first half of this file is the design
+Status: implemented in `src/poolhouse/sentinel/`. The first half of this file is the design
 and threat model; "What is built and tested" and "Results" say what exists and what was
 measured. Where the two differ, the last two sections are the truth.
 
@@ -18,7 +18,7 @@ Designed against these branches (their public interfaces, no merge into this bra
 
 | Branch | Used for |
 |---|---|
-| `agent/guardrails` | the `ml_stack.guard` logger and `Guard.events` (a deny or a tainted modify is a security event); `ToolCall` and `Rail` shapes |
+| `agent/guardrails` | the `poolhouse.guard` logger and `Guard.events` (a deny or a tainted modify is a security event); `ToolCall` and `Rail` shapes |
 | `agent/hardening` | `macauth.Authenticator.check` (auth failure, replay, lockout), `httpguard` refusals, the `credentials` redaction rules (sentinel carries its own copy of the patterns), orphan sweep |
 | `fix/serve-admission-control` | the Broker (canaries go through it, serially), its unmanaged-server detection |
 | `agent/decide`, `agent/port-pcbe` | tool-loop and MCP surfaces that sentinel must keep away from its own verbs |
@@ -106,7 +106,7 @@ behaviour shows, and can drop its key from this node, but a stolen key is a rota
 | Signal | Class | False-positive cost |
 |---|---|---|
 | llama-server or other binary digest differs from the one pinned at build or install | reliable | a rebuild looks like tampering until re-pinned |
-| a listener on a port in the model-server range that ml-stack does not manage | reliable as observation; the Broker already classifies it | an unrelated program is only reported, never stopped |
+| a listener on a port in the model-server range that Poolhouse does not manage | reliable as observation; the Broker already classifies it | an unrelated program is only reported, never stopped |
 | a managed server's recorded pid now has a different executable | reliable | none |
 | a managed server has children or connections it should not | heuristic, platform dependent | watch only |
 
@@ -156,19 +156,19 @@ digests, never secrets or raw content).
 
 ## Reviewing what is held
 
-`ml-stack-security review` is one screen with every held subject, quarantined and watched,
+`poolhouse-security review` is one screen with every held subject, quarantined and watched,
 newest first: a number, the kind, a short name (a file's name, an address, a port; never the
 raw key), how long ago, why in a sentence, what it blocks ("Requests from this machine are
 refused", "This model cannot be leased or started", "This session is frozen") and what to do
 about it ("Watch only. Release to stop watching; nothing changes for anything else.").
 
 ```
-ml-stack-security review   1 held, 1 watched
+poolhouse-security review   1 held, 1 watched
 
 > 1  QUARANTINED peer 127.0.0.1   3 min ago
   2  WATCH       server :51089   1 h ago
 
-  why:    This machine sent requests with a forged or replayed signature, which no honest ml-stack peer does.
+  why:    This machine sent requests with a forged or replayed signature, which no honest poolhouse peer does.
   blocks: Requests from this machine are refused.
   next:   Keep it held unless you know this is a false alarm; releasing puts it back in use.
 
@@ -187,7 +187,7 @@ ml-stack-security review   1 held, 1 watched
 
 `review --list` and `review --json` print the same table anywhere, inside an agent too:
 viewing is not privileged. `status` and `chip` name what is held ("2 held: peer 127.0.0.1
-(forged traffic), server :51089 (unmanaged). Review them: ml-stack-security review").
+(forged traffic), server :51089 (unmanaged). Review them: poolhouse-security review").
 Everything printed from a record (names, reasons, peers, paths, arguments) is untrusted: it
 is secret-masked, control, bidi and invisible characters become visible escapes such as
 `\x1b` and `‮`, and every field is length-bounded. The sentence for each finding kind
@@ -195,9 +195,9 @@ is `explain.WHY`, and `tests/test_sentinel_explain.py` reads the detectors and f
 kind has none.
 
 The interactive screen needs a POSIX terminal. It refuses, before drawing anything, when
-stdin or stdout is not a terminal or when `CLAUDECODE`, `ML_STACK_AGENT` or
-`ML_STACK_NONINTERACTIVE` is set, and exits 2 with the reason. Elsewhere use `--list` and
-`quarantine release ID`. With no terminal, `ml-stack-security review` started by a person
+stdin or stdout is not a terminal or when `CLAUDECODE`, `POOLHOUSE_AGENT` or
+`POOLHOUSE_NONINTERACTIVE` is set, and exits 2 with the reason. Elsewhere use `--list` and
+`quarantine release ID`. With no terminal, `poolhouse-security review` started by a person
 shows the dialog below instead (and prints the list when an agent started it or there is no
 desktop); it never opens Terminal or a text editor.
 
@@ -211,7 +211,7 @@ Most things need nobody, and say nothing on the screen:
   version made for a missing file settles on the next scan.
 * **A model server that was watched and has exited** clears itself.
 * **Anything only watched**, and anything quarantined that is not one of the cases below,
-  shows in `ml-stack-security status` and `chip` and nowhere else.
+  shows in `poolhouse-security status` and `chip` and nowhere else.
 * **The decider trainer** pins a trained decider only after it is registered, and unpins on
   any failure while pinning. A run killed before that leaves nothing pinned.
 
@@ -232,7 +232,7 @@ plus names that are escaped and cut short; nothing held is quoted.
 | `Keep held` | leaves them held and does not ask about them again |
 | `Later` | leaves them held and asks again in four hours (also what Escape, closing it and a time-out mean) |
 
-`ML_STACK_NOTIFY=off` shows no dialog from any ml-stack process; it is read on every
+`POOLHOUSE_NOTIFY=off` shows no dialog from any Poolhouse process; it is read on every
 scan, so a process started with it set stays silent. The status line carries the information
 either way. Where no dialog can be shown (no desktop, Windows) `status` still names what is
 held.
@@ -248,31 +248,31 @@ Modes, chosen by a person:
   threshold within a window. Everything else is watch plus an alert.
 * `enforce`: the heuristic rules also act (freeze a session at N denies, disable a tool at
   M abuse events, block a peer on sustained rate abuse).
-* `off`: the kill switch. Set by `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE` at process start or by the person
+* `off`: the kill switch. Set by `POOLHOUSE_SENTINEL=off` with `POOLHOUSE_SENTINEL_BECAUSE` at process start or by the person
   through the command line; detectors keep logging that they are off.
 
 Dry-run: `Sentinel(dry_run=True)` writes the event that says what would have been done.
 
 ## Self-protection
 
-* State, key, log and held text live under `<ML_STACK_HOME>/sentinel/`; files are written
+* State, key, log and held text live under `<POOLHOUSE_HOME>/sentinel/`; files are written
   atomically and are mode 0600.
 * The state file, the pin manifest, the canary baselines, the decoy list and the log head are
   each sealed with an HMAC under a key file beside them. A state file that fails its seal
   raises a critical event and is replaced by the previous sealed copy when that holds;
   otherwise the store starts in fail-closed mode: every subject reads as blocked and nothing
-  can be released. The held files stay where they were moved (`.ml-stack-quarantine/<id>/`
+  can be released. The held files stay where they were moved (`.poolhouse-quarantine/<id>/`
   under the managed root), but the list of what was held is gone in that case.
 * Releasing, purging, reading held text and changing the mode need a `HumanGrant`. The
   command line mints one only when stdin and stdout are terminals, when none of
-  `CLAUDECODE`, `ML_STACK_AGENT` or `ML_STACK_NONINTERACTIVE` is set, and when the person
+  `CLAUDECODE`, `POOLHOUSE_AGENT` or `POOLHOUSE_NONINTERACTIVE` is set, and when the person
   types the record's id back. A grant covers one action on one subject for two minutes.
 * `human.agent_may(tool, arguments)` is the check an agent loop makes before running any
   tool: it refuses a call whose name or arguments name a sentinel verb, the sentinel code,
   or the state directory (including the directory a running sentinel was pointed at).
   `adapters.agent_gate` joins it to the screening of decoys and frozen sessions.
 * Limits. The checks are on strings and on the environment. A call that builds a forbidden
-  name at run time (`"ml-stack " + "sec" + "urity"`, a base64 payload, a script written to
+  name at run time (`"poolhouse " + "sec" + "urity"`, a base64 payload, a script written to
   disk and run) is not recognised by `agent_may`; the terminal and environment checks and the
   seal are what stop it then. Code running as the owner inside this process can build a
   grant, and a process running as the owner can read the key file and rewrite everything.
@@ -290,20 +290,20 @@ mixed-case runs, private key blocks) and every value under a key-like name is ma
 The log is JSON lines, mode 0600, rotated at 1 MB and kept to four files. Each line carries
 `seq`, the `prev` hash and its own `hash`, an HMAC-SHA256 under the head file's key. The head
 (count, last hash, the hash before the oldest kept line) is sealed in `events.log.head`.
-`ml-stack security verify` finds an edited line, a removed or reordered line, a log cut
+`poolhouse security verify` finds an edited line, a removed or reordered line, a log cut
 short, a deleted log, a head that fails its seal, and a line appended without the key.
-`ml-stack security verify --anchor "<count> <hash>"` also compares the head with a line
+`poolhouse security verify --anchor "<count> <hash>"` also compares the head with a line
 written down elsewhere; `<state>/anchor.log` appends the head after every event, and the
 person can copy it somewhere the account cannot write. A process killed between writing a
 line and updating the head leaves a log that verifies and is adopted by the next append.
 What it does not do: stop someone with the key and write access from rewriting the whole
 log and head together; only an anchor kept elsewhere catches that.
 
-Subscribers (`bus.subscribe(fn)`) get every event; a program that embeds ml-stack subscribes there.
+Subscribers (`bus.subscribe(fn)`) get every event; a program that embeds Poolhouse subscribes there.
 
 ## Honeytokens
 
-`ml-stack security honey plant` (also `baseline --honey`) writes decoy files into the state
+`poolhouse security honey plant` (also `baseline --honey`) writes decoy files into the state
 root (`.env`, `credentials.toml.bak`, `cluster.key.old`, never over a file the person already
 has) carrying random values shaped like a Hugging Face token and a cluster secret. Nothing
 legitimate reads or sends them, so a sighting is a high-confidence event: the value, or its
@@ -321,18 +321,18 @@ A process that does nothing about sentinel gets this (tests: `tests/test_sentine
 
 | Where | What runs | Turn it off |
 |---|---|---|
-| Every `agent.Agent` | Each tool call goes through `agent_gate` before the rails: a call naming a sentinel verb or path, a decoy, a tool or session sentinel holds is refused with the reason. A call the rails refuse is reported to sentinel, which parks it as a `tool_call` and counts the denial. Each tool result is screened with the rails' own answer: held text, a decoy value or a text the rails withhold becomes a placeholder. A frozen session ends the run (`Done("denied")`) before the next model call. | `Agent(..., sentinel=agent.unwatched(because="..."))`, or `interventions=guard.off(because="...")`. Both need a reason, log a `sentinel.opt_out` event and print a warning. `ML_STACK_SENTINEL=off` turns the whole sentinel off only together with `ML_STACK_SENTINEL_BECAUSE=<reason>`: it then logs `sentinel.opt_out` with the reason and `ml-stack security status` shows `mode: off` and `off_because`. Without a reason the switch is ignored, sentinel stays armed and `sentinel.off_refused` is logged. |
-| First run of an agent, the Broker daemon or the fleet daemon | The decoy files are planted under `ML_STACK_HOME` (never in a project). | `ML_STACK_SENTINEL=off` with a reason, or `ml-stack security honey remove`, which the next run plants again. |
-| Every server start (`ServerManager._launch`, the one place a process is asked for) | `serve/guarded.verify`: a model held by sentinel is refused; a pinned model must equal its pin (it is hashed in full the first time, and again whenever its size, mtime or inode differ from the last full verification, which is remembered in the sealed `verified.json`), else it is refused and, when it sits under a managed root, moved aside; a model with no pin is pinned on first use (`source=first-use`, event `model.pinned_first_use`, a warning in the log), so the next start is checked against it; a model ml-stack pulled already has its pin (below), so first use is only for files it did not bring in. After the pin check, `verify` looks the file up by name in the signed manifests this machine accepted and returns `verified by manifest serial N` (event `model.manifest_verified`), or, when a manifest names the file and lists other bytes, quarantines it and refuses (finding `integrity.manifest_mismatch`; the file is not pinned). A directory or a name that is not a file here (an MLX directory, a repository id) is not pinned. The check also runs in `ServerManager._permitted` and `Broker.lease`/`start` against the store only, so a held model is not shared from a server that is still up. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
-| Stop hooks | `serve_hooks` is registered with the manager's lease file on first use: quarantining a `model` or a `server` stops the servers ml-stack recorded for it (`ServerManager.reclaim`). A process not in the lease file is never touched. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
-| Broker daemon and fleet daemon | A scan loop in a daemon thread: every pin and decoy once at start (hashing every file), then every `ML_STACK_SENTINEL_SCAN` seconds (default 300), hashing everything every twelfth round. It writes a sealed heartbeat `scanner.json`; `ml-stack security status` reports `scanner: armed, pid N, every Ns` or `NOT ARMED (reason)`, and is armed when a process beat within three intervals and did not stop it. | `ML_STACK_SENTINEL_SCAN=off` together with `ML_STACK_SENTINEL_SCAN_BECAUSE="..."`. `off` without a reason is ignored (the scan runs at the default and `sentinel.scan_off_refused` is logged); with one it logs `sentinel.opt_out`. A number sets the cadence in seconds. |
-| Fleet daemon | The request authenticator is wrapped by `watch_authenticator`: forged, replayed and locked-out requests count against the sender's address, and an address sentinel holds is refused. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
-| Behavioural canaries, in the Broker daemon's and the fleet daemon's scan loop | After each scan, every served model that is due is asked six fixed probes (a product, a capital, a JSON object, an exact word, a refusal and a benign recipe) three times each at temperature 0, at most 64 tokens per answer: 18 short requests per model per round, default once an hour (`ML_STACK_SENTINEL_CANARY`, seconds). The Broker daemon asks through a lease on the running server (never starting another; a lease that would is let go), the fleet daemon over the lease file's servers without one. A server that is processing is skipped, and the requests queue behind real traffic in the machine's request gate. The first healthy round records the baseline, sealed in `canaries.json` and keyed by model path and pin, so a replaced file gets a new baseline. A fall of the pooled pass rate by 0.15, or pass-rate intervals that no longer overlap, puts the model on `watch`; intervals apart together with a fall of 0.25 (or four probes moved) is a hard drift, confirmed by a second run straight after, and quarantines the model (moved aside, its servers stopped, restored by a person). | `ML_STACK_SENTINEL_CANARY=off` together with `ML_STACK_SENTINEL_CANARY_BECAUSE="..."`; `off` without a reason is ignored (`sentinel.canary_off_refused`); with one it logs `sentinel.opt_out`. |
-| Guard events, aggregated to a score per session or caller | Every denial the guard logs for a running agent (`GuardLogHandler`, attached when the first `Agent` is watched, reading the session of the agent whose context is current), a call refused because a Confirm went unanswered, every sandbox event of a run while a session has a tool in flight (`sandbox_listener`, called from `sandbox.run` through a hook that `sentinel.default()` sets, so a process that never asks for the sentinel leaves sandbox runs unwatched), every refused lease and every resource-limit hit of a Broker caller (`broker_listener`, called from `Broker.lease` and `start`) adds its weight (`sentinel/score.py`: denial 1, sandbox denial 2, refused lease 2, resource limit 3, sandbox timeout 0.5) to the subject over a 600 s window. At 3 the subject is on `watch`; at 10 it is quarantined (a frozen session, a blocked caller; `Broker.lease` refuses a blocked caller) in `guarded` and `enforce` mode, and only watched in `observe`. This is a threshold, so it can be wrong: a person releases, which also starts the count again. Listeners ml-stack did not start are reported once each (`unmanaged_findings`) and only watched. | `ML_STACK_SENTINEL=off` with a reason, or the agent opt-outs above. There is no separate switch for the score. |
-| Model output, compaction summaries | The final reply of a watched agent is screened before it is stored or returned: a decoy value, held content or a secret-shaped string in it is labelled in `guarded` mode (a `[sentinel: ...]` line in front of the text, event `output.suspect`) and held as a message with a placeholder in `enforce`. A decoy value also freezes the session. A compaction summary goes through `screen_memory`: one that repeats held content or carries a decoy value is quarantined as a `memory` and replaced by nothing, so the compaction falls back to its other strategies and the summary is never fed back. Rewording defeats the held-content check. | The agent opt-outs above, or `ML_STACK_SENTINEL=off` with a reason. |
-| Child processes | `scrub_env` leaves any variable named as a quarantined `credential` out of the environment of the sandbox's child (`sandbox.run`), a detached job (`jobs.detach`), a model server (`serve.backend.launch`) and an MCP server launched by `agent.confined` (the last two are wired but have no test of their own). An environment passed as `None` (inherit) is not scrubbed. | `ML_STACK_SENTINEL=off` with a reason. |
-| MCP connect | `McpTools.__aenter__` asks `mcp_allowed(label)`: a server that is quarantined is not connected (`McpBlocked`). Nothing quarantines an MCP server on its own yet: a person or an embedding program does that. | `ML_STACK_SENTINEL=off` with a reason. |
-| Decoy endpoint, in the Broker daemon and the fleet daemon | A listener on 127.0.0.1 and an ephemeral port, the onboarding servers' shared handler, answering any path with an obviously fake credentials document. Its address is written only to `credentials.endpoint` under `ML_STACK_HOME` (and is a decoy value, so naming it in a tool call, result or reply is caught as the other decoys are). A request to it is a high-confidence `honey.endpoint_hit`: every session with a tool call running at that moment is quarantined (the only attribution a loopback request has; two sessions running tools together are both frozen), and with none running the hit is recorded against `caller:unattributed-decoy-hit`. | `ML_STACK_SENTINEL_DECOY=off` with `ML_STACK_SENTINEL_DECOY_BECAUSE="..."`; without a reason it is ignored and `sentinel.decoy_off_refused` is logged. |
+| Every `agent.Agent` | Each tool call goes through `agent_gate` before the rails: a call naming a sentinel verb or path, a decoy, a tool or session sentinel holds is refused with the reason. A call the rails refuse is reported to sentinel, which parks it as a `tool_call` and counts the denial. Each tool result is screened with the rails' own answer: held text, a decoy value or a text the rails withhold becomes a placeholder. A frozen session ends the run (`Done("denied")`) before the next model call. | `Agent(..., sentinel=agent.unwatched(because="..."))`, or `interventions=guard.off(because="...")`. Both need a reason, log a `sentinel.opt_out` event and print a warning. `POOLHOUSE_SENTINEL=off` turns the whole sentinel off only together with `POOLHOUSE_SENTINEL_BECAUSE=<reason>`: it then logs `sentinel.opt_out` with the reason and `poolhouse security status` shows `mode: off` and `off_because`. Without a reason the switch is ignored, sentinel stays armed and `sentinel.off_refused` is logged. |
+| First run of an agent, the Broker daemon or the fleet daemon | The decoy files are planted under `POOLHOUSE_HOME` (never in a project). | `POOLHOUSE_SENTINEL=off` with a reason, or `poolhouse security honey remove`, which the next run plants again. |
+| Every server start (`ServerManager._launch`, the one place a process is asked for) | `serve/guarded.verify`: a model held by sentinel is refused; a pinned model must equal its pin (it is hashed in full the first time, and again whenever its size, mtime or inode differ from the last full verification, which is remembered in the sealed `verified.json`), else it is refused and, when it sits under a managed root, moved aside; a model with no pin is pinned on first use (`source=first-use`, event `model.pinned_first_use`, a warning in the log), so the next start is checked against it; a model Poolhouse pulled already has its pin (below), so first use is only for files it did not bring in. After the pin check, `verify` looks the file up by name in the signed manifests this machine accepted and returns `verified by manifest serial N` (event `model.manifest_verified`), or, when a manifest names the file and lists other bytes, quarantines it and refuses (finding `integrity.manifest_mismatch`; the file is not pinned). A directory or a name that is not a file here (an MLX directory, a repository id) is not pinned. The check also runs in `ServerManager._permitted` and `Broker.lease`/`start` against the store only, so a held model is not shared from a server that is still up. | `POOLHOUSE_SENTINEL=off` with `POOLHOUSE_SENTINEL_BECAUSE`. |
+| Stop hooks | `serve_hooks` is registered with the manager's lease file on first use: quarantining a `model` or a `server` stops the servers Poolhouse recorded for it (`ServerManager.reclaim`). A process not in the lease file is never touched. | `POOLHOUSE_SENTINEL=off` with `POOLHOUSE_SENTINEL_BECAUSE`. |
+| Broker daemon and fleet daemon | A scan loop in a daemon thread: every pin and decoy once at start (hashing every file), then every `POOLHOUSE_SENTINEL_SCAN` seconds (default 300), hashing everything every twelfth round. It writes a sealed heartbeat `scanner.json`; `poolhouse security status` reports `scanner: armed, pid N, every Ns` or `NOT ARMED (reason)`, and is armed when a process beat within three intervals and did not stop it. | `POOLHOUSE_SENTINEL_SCAN=off` together with `POOLHOUSE_SENTINEL_SCAN_BECAUSE="..."`. `off` without a reason is ignored (the scan runs at the default and `sentinel.scan_off_refused` is logged); with one it logs `sentinel.opt_out`. A number sets the cadence in seconds. |
+| Fleet daemon | The request authenticator is wrapped by `watch_authenticator`: forged, replayed and locked-out requests count against the sender's address, and an address sentinel holds is refused. | `POOLHOUSE_SENTINEL=off` with `POOLHOUSE_SENTINEL_BECAUSE`. |
+| Behavioural canaries, in the Broker daemon's and the fleet daemon's scan loop | After each scan, every served model that is due is asked six fixed probes (a product, a capital, a JSON object, an exact word, a refusal and a benign recipe) three times each at temperature 0, at most 64 tokens per answer: 18 short requests per model per round, default once an hour (`POOLHOUSE_SENTINEL_CANARY`, seconds). The Broker daemon asks through a lease on the running server (never starting another; a lease that would is let go), the fleet daemon over the lease file's servers without one. A server that is processing is skipped, and the requests queue behind real traffic in the machine's request gate. The first healthy round records the baseline, sealed in `canaries.json` and keyed by model path and pin, so a replaced file gets a new baseline. A fall of the pooled pass rate by 0.15, or pass-rate intervals that no longer overlap, puts the model on `watch`; intervals apart together with a fall of 0.25 (or four probes moved) is a hard drift, confirmed by a second run straight after, and quarantines the model (moved aside, its servers stopped, restored by a person). | `POOLHOUSE_SENTINEL_CANARY=off` together with `POOLHOUSE_SENTINEL_CANARY_BECAUSE="..."`; `off` without a reason is ignored (`sentinel.canary_off_refused`); with one it logs `sentinel.opt_out`. |
+| Guard events, aggregated to a score per session or caller | Every denial the guard logs for a running agent (`GuardLogHandler`, attached when the first `Agent` is watched, reading the session of the agent whose context is current), a call refused because a Confirm went unanswered, every sandbox event of a run while a session has a tool in flight (`sandbox_listener`, called from `sandbox.run` through a hook that `sentinel.default()` sets, so a process that never asks for the sentinel leaves sandbox runs unwatched), every refused lease and every resource-limit hit of a Broker caller (`broker_listener`, called from `Broker.lease` and `start`) adds its weight (`sentinel/score.py`: denial 1, sandbox denial 2, refused lease 2, resource limit 3, sandbox timeout 0.5) to the subject over a 600 s window. At 3 the subject is on `watch`; at 10 it is quarantined (a frozen session, a blocked caller; `Broker.lease` refuses a blocked caller) in `guarded` and `enforce` mode, and only watched in `observe`. This is a threshold, so it can be wrong: a person releases, which also starts the count again. Listeners Poolhouse did not start are reported once each (`unmanaged_findings`) and only watched. | `POOLHOUSE_SENTINEL=off` with a reason, or the agent opt-outs above. There is no separate switch for the score. |
+| Model output, compaction summaries | The final reply of a watched agent is screened before it is stored or returned: a decoy value, held content or a secret-shaped string in it is labelled in `guarded` mode (a `[sentinel: ...]` line in front of the text, event `output.suspect`) and held as a message with a placeholder in `enforce`. A decoy value also freezes the session. A compaction summary goes through `screen_memory`: one that repeats held content or carries a decoy value is quarantined as a `memory` and replaced by nothing, so the compaction falls back to its other strategies and the summary is never fed back. Rewording defeats the held-content check. | The agent opt-outs above, or `POOLHOUSE_SENTINEL=off` with a reason. |
+| Child processes | `scrub_env` leaves any variable named as a quarantined `credential` out of the environment of the sandbox's child (`sandbox.run`), a detached job (`jobs.detach`), a model server (`serve.backend.launch`) and an MCP server launched by `agent.confined` (the last two are wired but have no test of their own). An environment passed as `None` (inherit) is not scrubbed. | `POOLHOUSE_SENTINEL=off` with a reason. |
+| MCP connect | `McpTools.__aenter__` asks `mcp_allowed(label)`: a server that is quarantined is not connected (`McpBlocked`). Nothing quarantines an MCP server on its own yet: a person or an embedding program does that. | `POOLHOUSE_SENTINEL=off` with a reason. |
+| Decoy endpoint, in the Broker daemon and the fleet daemon | A listener on 127.0.0.1 and an ephemeral port, the onboarding servers' shared handler, answering any path with an obviously fake credentials document. Its address is written only to `credentials.endpoint` under `POOLHOUSE_HOME` (and is a decoy value, so naming it in a tool call, result or reply is caught as the other decoys are). A request to it is a high-confidence `honey.endpoint_hit`: every session with a tool call running at that moment is quarantined (the only attribution a loopback request has; two sessions running tools together are both frozen), and with none running the hit is recorded against `caller:unattributed-decoy-hit`. | `POOLHOUSE_SENTINEL_DECOY=off` with `POOLHOUSE_SENTINEL_DECOY_BECAUSE="..."`; without a reason it is ignored and `sentinel.decoy_off_refused` is logged. |
 
 Not armed: a plain process that only calls `serve.serve()` gets the start-time checks but no
 scan loop, canaries or decoy listener (they live in the daemons); an in-process `Agent` run in a
@@ -354,7 +354,7 @@ Start-time verification skips the hash when the file's resolved path, size, mtim
 are those recorded at its last full verification against the same pin, and its size equals the
 pin's. Residual window: a file edited in place with its size and mtime restored (same inode) is
 not caught at the next start. The scan loop's deep rounds (every twelfth, and the first) and
-`ml-stack security scan --deep` hash every file regardless of the cache and catch it; between
+`poolhouse security scan --deep` hash every file regardless of the cache and catch it; between
 deep rounds (about an hour at the default cadence) the window is open. The window is pinned by
 `test_an_edit_that_restores_size_and_mtime_passes_the_start_and_fails_the_deep_scan`.
 
@@ -407,8 +407,8 @@ Not armed:
 | suspect credentials withheld from child environments | `Sentinel.scrub_env` | built, tested; applied at the four spawn helpers |
 | unmanaged listeners, changed server executable | `servers.py` | built; unmanaged listeners are reported by the Broker's adoption, the changed-executable check is not scheduled |
 | hooks that stop a server or a model's servers | `adapters.serve_hooks` | built, tested with real processes |
-| status mark | `Sentinel.chip`, `ml-stack security chip` | built; not yet drawn by the page |
-| `ml-stack security` | `cli.py` | built, tested |
+| status mark | `Sentinel.chip`, `poolhouse security chip` | built; not yet drawn by the page |
+| `poolhouse security` | `cli.py` | built, tested |
 
 Not built. Rotating a
 credential is left to the person. No detector reads KV cache or prompt cache contents:
@@ -418,7 +418,7 @@ scans model weights. A server's children and network connections are not examine
 mix, flapping, rate and unmanaged-server signals only watch.
 
 Considered and left out: filtering the machine's network egress (no portable signal);
-judging a model's weights for backdoors (unsolved); stopping any process ml-stack did not
+judging a model's weights for backdoors (unsolved); stopping any process Poolhouse did not
 start (against the rules); deleting anything on its own (only a person's confirmed purge
 deletes).
 

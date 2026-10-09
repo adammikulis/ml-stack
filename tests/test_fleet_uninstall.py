@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.fleet.uninstall import plan, remove
+from poolhouse.fleet.uninstall import plan, remove
 
 
 @pytest.fixture
 def installed(tmp_path):
     """A machine with everything an install leaves behind."""
-    home = tmp_path / ".ml-stack"
+    home = tmp_path / ".poolhouse"
     root = home / "traind"
     for name in ("chats", "files", "models", "env", "llama"):
         (root / name).mkdir(parents=True)

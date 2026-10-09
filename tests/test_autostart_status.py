@@ -13,13 +13,13 @@ import pytest
 from autostart_support import Recorder, environment, seams, staged, write_launcher
 from workspace_kit import Kit, clean_env, cli
 
-from ml_stack import home
-from ml_stack.fleet import autostart_check, autostart_guard, autostart_ledger
-from ml_stack.fleet.autostart_apply import install
-from ml_stack.fleet.autostart_manifest import launcher_problem
-from ml_stack.fleet.autostart_prepare import platform_of
-from ml_stack.lock import only_one
-from ml_stack.workspace import autostart_status
+from poolhouse import home
+from poolhouse.fleet import autostart_check, autostart_guard, autostart_ledger
+from poolhouse.fleet.autostart_apply import install
+from poolhouse.fleet.autostart_manifest import launcher_problem
+from poolhouse.fleet.autostart_prepare import platform_of
+from poolhouse.lock import only_one
+from poolhouse.workspace import autostart_status
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def test_status_reads_and_changes_nothing(tmp_path, user):
 
 def test_an_edited_unit_is_drifted(tmp_path, user):
     _, recorder = installed(tmp_path)
-    unit = user / ".config" / "systemd" / "user" / "ml-stack-traind.service"
+    unit = user / ".config" / "systemd" / "user" / "poolhouse-traind.service"
     unit.write_text(unit.read_text() + "# edited\n")
     report = state(recorder)
     assert report.state == "drifted" and "edited" in report.reasons[0]
@@ -76,7 +76,7 @@ def test_an_edited_unit_is_drifted(tmp_path, user):
 
 def test_a_removed_unit_is_drifted(tmp_path, user):
     _, recorder = installed(tmp_path)
-    (user / ".config" / "systemd" / "user" / "ml-stack-traind.service").unlink()
+    (user / ".config" / "systemd" / "user" / "poolhouse-traind.service").unlink()
     assert state(recorder).state == "drifted"
 
 
@@ -142,7 +142,7 @@ def test_the_launcher_path_stays_launchable_while_the_selected_runtime_is_switch
 
 def test_the_cli_reports_and_verify_fails_unless_current(tmp_path, user, monkeypatch):
     for verb, expect in (("status", 0), ("verify", 1)):
-        done = subprocess.run([sys.executable, "-m", "ml_stack.fleet.autostart", verb, "--json"],
+        done = subprocess.run([sys.executable, "-m", "poolhouse.fleet.autostart", verb, "--json"],
                               capture_output=True, text=True, timeout=60,
                               env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")})
         assert done.returncode == expect, done.stderr

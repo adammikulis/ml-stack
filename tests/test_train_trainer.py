@@ -16,8 +16,8 @@ import time
 
 import pytest
 
-from ml_stack.testing import needs_mlx, needs_torch
-from ml_stack.train import (
+from poolhouse.testing import needs_mlx, needs_torch
+from poolhouse.train import (
     RunLock,
     RunLockError,
     Trainer,
@@ -30,7 +30,7 @@ from ml_stack.train import (
     read,
     warmup_cosine,
 )
-from ml_stack.train.recipes import Hook
+from poolhouse.train.recipes import Hook
 
 
 # -- torch fixtures ------------------------------------------------------

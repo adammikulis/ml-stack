@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from conftest import threaded_server
 
-from ml_stack.fleet import launch_open
-from ml_stack.fleet.launch_secret import DIRECTORY, FILE, HEADER, LaunchError, LaunchSecret, read
+from poolhouse.fleet import launch_open
+from poolhouse.fleet.launch_secret import DIRECTORY, FILE, HEADER, LaunchError, LaunchSecret, read
 
 pytestmark = pytest.mark.redteam
 

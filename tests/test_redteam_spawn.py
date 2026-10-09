@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import checks, jobs, mcp
+from poolhouse import checks, jobs, mcp
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "ml_stack"
+SRC = Path(__file__).resolve().parent.parent / "src" / "poolhouse"
 HOSTILE = ["x; touch /tmp/pwned", "$(id)", "`id`", "a | b > c", "--exec=/bin/sh", "a\nb",
            "'; rm -rf ~ #", "\u202ehidden"]
 SHELLS = {"os.system", "os.popen", "asyncio.create_subprocess_shell", "subprocess.getoutput",
@@ -85,7 +85,7 @@ def recorded(monkeypatch):
 
 @pytest.mark.parametrize("text", HOSTILE)
 def test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell(tmp_path, recorded, text):
-    jobs.detach("ml_stack.serve.cli", ["up", text], log=tmp_path / "a.log")
+    jobs.detach("poolhouse.serve.cli", ["up", text], log=tmp_path / "a.log")
     if text.startswith("-"):
         assert mcp.call("serve_up", {"model": text, "extra": [text]})["isError"]
         assert mcp.call("models_fetch", {"reference": text})["isError"]

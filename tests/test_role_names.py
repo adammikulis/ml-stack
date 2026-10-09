@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import chatpolicy, roles, rules as saved
+from poolhouse import chatpolicy, roles, rules as saved
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD = ("reader", "operator", "runner")
-SCANNED = ["src/ml_stack/roles.py", "src/ml_stack/rules.py", "src/ml_stack/chat.py",
+SCANNED = ["src/poolhouse/roles.py", "src/poolhouse/rules.py", "src/poolhouse/chat.py",
            "docs/agent-roles.md", "docs/assistant-security.md", "README.md", "docs/FEATURES.md",
-           "docs/memory.md", "docs/commands.md", "src/ml_stack/cli/reference.py",
+           "docs/memory.md", "docs/commands.md", "src/poolhouse/cli/reference.py",
            "docs/notes/agent-control-plane.md", "docs/notes/undo-mode.md"]
 SCANNED += [str(p.relative_to(ROOT)) for pat in ("tests/test_roles.py", "tests/test_redteam_*.py",
                                                  "tests/test_requests*.py", "tests/test_chat*.py")

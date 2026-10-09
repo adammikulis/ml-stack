@@ -9,8 +9,8 @@ import re
 import pytest
 from workspace_kit import cli as old_cli
 
-from ml_stack import node_supervise
-from ml_stack.workspace import board_cli, nudge
+from poolhouse import node_supervise
+from poolhouse.workspace import board_cli, nudge
 
 pytest_plugins = ["node_kit"]
 LONG_AGO = 3 * 3600 + 12 * 60 + 20
@@ -47,7 +47,7 @@ def test_the_plain_line_counts_kinds_names_senders_and_gives_the_age_without_a_b
         say(kit, kit.carol, kit.bob, "status", f"SECRET-BODY progress {step}")
     out = waiting(kit).line()
     assert out.startswith(f"workspace: 6 waiting for you (2 questions, 1 task, 3 status; from {kit.alice.name}, {kit.carol.name}; "
-                          "oldest 3h12m). A direct question or task is waiting on you: run ml-stack-workspace inbox now and answer it")
+                          "oldest 3h12m). A direct question or task is waiting on you: run poolhouse-workspace inbox now and answer it")
     assert "SECRET" not in out
     cli_line = kit.cli("nudge", who=kit.bob).stdout
     assert re.match(r"workspace: 6 waiting for you \(2 questions, 1 task, 3 status; from .*; oldest \d+s\)\. A direct", cli_line)
@@ -127,4 +127,4 @@ def test_the_installer_is_for_a_person(tmp_path):
 
 def test_the_stamp_file_name_needs_no_posix_uid(monkeypatch):
     monkeypatch.delattr(os, "getuid", raising=False)
-    assert nudge._stamp("ml-stack-nudge").name.startswith("ml-stack-nudge.")
+    assert nudge._stamp("poolhouse-nudge").name.startswith("poolhouse-nudge.")

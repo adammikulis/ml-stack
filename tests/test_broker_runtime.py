@@ -8,16 +8,16 @@ from pathlib import Path
 import psutil
 import pytest
 
-import ml_stack
-from ml_stack.files import read_json
-from ml_stack.net import git
-from ml_stack.serve import broker_runtime, broker_wire
+import poolhouse
+from poolhouse.files import read_json
+from poolhouse.net import git
+from poolhouse.serve import broker_runtime, broker_wire
 
 
 def test_runtime_source_tracks_loaded_package_not_callers_worktree(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     snapshot = broker_runtime.snapshot()
-    source = Path(ml_stack.__file__).resolve().parents[2]
+    source = Path(poolhouse.__file__).resolve().parents[2]
     assert snapshot['source_commit'] == git.head(source)
     assert snapshot['pid'] == os.getpid()
     assert snapshot['pid_started'] == psutil.Process().create_time()
@@ -28,10 +28,10 @@ def test_runtime_source_tracks_loaded_package_not_callers_worktree(monkeypatch, 
 
 
 def test_installed_package_does_not_claim_an_unrelated_git_commit(monkeypatch, tmp_path):
-    package = tmp_path / 'site' / 'ml_stack'
+    package = tmp_path / 'site' / 'poolhouse'
     (package / 'serve').mkdir(parents=True)
     (package / 'serve' / 'broker_wire.py').write_text('installed implementation')
-    monkeypatch.setattr(ml_stack, '__file__', str(package / '__init__.py'))
+    monkeypatch.setattr(poolhouse, '__file__', str(package / '__init__.py'))
     monkeypatch.setattr(git, 'head', lambda *_: pytest.fail('unrelated repository lookup'))
     snapshot = broker_runtime.snapshot()
     assert snapshot['source_commit'] is None and snapshot['source_dirty'] is None

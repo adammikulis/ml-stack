@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import harnessing
-from ml_stack.serve import ServerManager, chat_template
-from ml_stack.serve.backend import LlamaServerBackend
-from ml_stack.serve.broker import Ask, Broker, Held, _shape_of
-from ml_stack.serve.process import kill_process_tree
-from ml_stack.serve.serving import Config, Serving
-from ml_stack.testing.fakes import fake_llama_binary
-from ml_stack.workspace import localloop, localmodel
+from poolhouse import harnessing
+from poolhouse.serve import ServerManager, chat_template
+from poolhouse.serve.backend import LlamaServerBackend
+from poolhouse.serve.broker import Ask, Broker, Held, _shape_of
+from poolhouse.serve.process import kill_process_tree
+from poolhouse.serve.serving import Config, Serving
+from poolhouse.testing.fakes import fake_llama_binary
+from poolhouse.workspace import localloop, localmodel
 
 
 def test_installed_selection_keeps_snapshot_path_instead_of_hub_alias(tmp_path):

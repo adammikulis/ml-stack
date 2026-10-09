@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.looking import tools_for
-from ml_stack.graph.prompts import CHAT, TOOL_PROMPTS, TOOLS, prompts_for
-from ml_stack.graph.route import Routed, narrow, rank
-from ml_stack.testing.embedding import bag_of_words_embedder
+from poolhouse.graph.looking import tools_for
+from poolhouse.graph.prompts import CHAT, TOOL_PROMPTS, TOOLS, prompts_for
+from poolhouse.graph.route import Routed, narrow, rank
+from poolhouse.testing.embedding import bag_of_words_embedder
 
 GRAPH = {"nodes": [], "edges": [], "messages": {}}
 

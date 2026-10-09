@@ -16,13 +16,13 @@ import time
 import pytest
 from test_fleet_ui import WORDS, Serving as UIServing
 
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.chat import find, targets
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.serving import Serving
-from ml_stack.http import Server, ServerError, open_stream
-from ml_stack.testing.fakes import FakeLlamaServer, Served
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.chat import find, targets
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.serving import Serving
+from poolhouse.http import Server, ServerError, open_stream
+from poolhouse.testing.fakes import FakeLlamaServer, Served
 from tests.cluster_support import a_keystore, join_cluster  # noqa: F401
 from tests.keystore_support import counting  # noqa: F401
 from tests.net_site import gguf_bytes
@@ -45,13 +45,13 @@ def the_passphrase_is_kept(a_keystore):  # noqa: F811
 @pytest.fixture(autouse=True)
 def loopback_is_the_internet(monkeypatch):
     """The download test fetches from a server on this machine, which has to be named."""
-    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1")
+    monkeypatch.setenv("POOLHOUSE_FETCH_ALLOW_HOSTS", "127.0.0.1")
 
 
 @pytest.fixture(autouse=True)
 def nobody_else_is_on_the_network(monkeypatch):
     """A join finds no machine to shake hands with, so it makes the cluster."""
-    from ml_stack.fleet.onboard import joining
+    from poolhouse.fleet.onboard import joining
 
     monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
 
@@ -99,7 +99,7 @@ def host(tmp_path, model_server):
 
 class TestPickingWhereToSend:
     def test_known_non_chat_local_and_peer_targets_are_excluded(self):
-        from ml_stack.fleet.serving import Served as LocalServed
+        from poolhouse.fleet.serving import Served as LocalServed
 
         class Local:
             def live(self):
@@ -124,7 +124,7 @@ class TestPickingWhereToSend:
     def test_this_machine_is_preferred_over_a_peer_holding_the_same_model(self, host):
         class Fake:
             def live(self):
-                from ml_stack.fleet.serving import Served
+                from poolhouse.fleet.serving import Served
                 return [Served(port=9999, models=["qwen3-4b.gguf"])]
 
         found = targets([host], serving=Fake(), token="t")
@@ -187,7 +187,7 @@ class TestChattingThroughTheInterface:
             body={"model": "qwen3-4b.gguf",
                   "messages": [{"role": "user", "content": "hi"}]})
         assert status == 200
-        assert headers.get("X-ML-Stack-Peer") == "host"
+        assert headers.get("X-Poolhouse-Peer") == "host"
         text = raw["raw"] if "raw" in raw else json.dumps(raw)
         assert "Hel" in text and "there" in text
 
@@ -208,7 +208,7 @@ class TestChattingThroughTheInterface:
             data=json.dumps({"model": "qwen3-4b.gguf",
                              "messages": [{"role": "user", "content": "hi"}]}).encode())
         req.add_header("Content-Type", "application/json")
-        req.add_header("X-ML-Stack-UI", "1")
+        req.add_header("X-Poolhouse-UI", "1")
         req.add_header("Cookie", cookie)
 
         began = time.monotonic()
@@ -226,7 +226,7 @@ class TestChattingThroughTheInterface:
         assert spread > 0.05, f"every piece arrived at once ({spread:.3f}s apart)"
 
     def test_what_was_said_is_kept(self, bare, tmp_path):
-        from ml_stack.fleet.conversations import Conversations
+        from poolhouse.fleet.conversations import Conversations
 
         ui, cookie = bare
         ui.ui.conversations = Conversations(tmp_path / "bare" / "chats")
@@ -246,7 +246,7 @@ class TestChattingThroughTheInterface:
         assert kept.title == "hi"
 
     def test_chats_are_listed_and_searchable_over_the_interface(self, bare, tmp_path):
-        from ml_stack.fleet.conversations import Conversations
+        from poolhouse.fleet.conversations import Conversations
 
         ui, cookie = bare
         ui.ui.conversations = Conversations(tmp_path / "bare" / "chats")
@@ -273,7 +273,7 @@ class TestChattingThroughTheInterface:
         assert [c["id"] for c in left["conversations"]] == [b["id"]]
 
     def test_asking_for_a_chat_that_is_not_there_is_a_404(self, bare, tmp_path):
-        from ml_stack.fleet.conversations import Conversations
+        from poolhouse.fleet.conversations import Conversations
 
         ui, cookie = bare
         ui.ui.conversations = Conversations(tmp_path / "bare" / "chats")
@@ -282,7 +282,7 @@ class TestChattingThroughTheInterface:
     def test_a_machine_that_cannot_run_a_model_says_so_rather_than_breaking(
             self, bare, monkeypatch):
         """The install that cannot serve is the common one. It must still answer."""
-        from ml_stack.fleet import routes as routes_mod
+        from poolhouse.fleet import routes as routes_mod
 
         ui, cookie = bare
         ui.ui.serving = Serving(tmp_path_of(ui) / "serving.json")
@@ -314,8 +314,8 @@ class TestChattingThroughTheInterface:
         from dataclasses import replace
         from http.server import BaseHTTPRequestHandler
 
-        from ml_stack.fleet import models as model_module
-        from ml_stack.fleet.models import CHUNK, Downloads, Models
+        from poolhouse.fleet import models as model_module
+        from poolhouse.fleet.models import CHUNK, Downloads, Models
 
         payload = gguf_bytes() + os.urandom(2 * CHUNK)
         seen = threading.Event()
@@ -381,7 +381,7 @@ class TestChattingThroughTheInterface:
         assert (models_dir / "big.gguf").read_bytes() == payload
 
     def test_a_model_already_here_answers_at_once(self, bare, tmp_path):
-        from ml_stack.fleet.models import Downloads, Models
+        from poolhouse.fleet.models import Downloads, Models
 
         ui, cookie = bare
         models_dir = tmp_path / "bare" / "models"
@@ -419,10 +419,10 @@ class TestAnsweringToSeveralClusters:
     has two tokens and must accept either."""
 
     def daemon(self, tmp_path, anchor):
-        from ml_stack.fleet.api import Daemon, make_handler
-        from ml_stack.fleet.daemon import load_or_create_token
-        from ml_stack.fleet.discovery import derive_token, memberships
-        from ml_stack.fleet.jobs import JobRunner
+        from poolhouse.fleet.api import Daemon, make_handler
+        from poolhouse.fleet.daemon import load_or_create_token
+        from poolhouse.fleet.discovery import derive_token, memberships
+        from poolhouse.fleet.jobs import JobRunner
 
         root = tmp_path / "traind"
         files = root / "files"
@@ -443,7 +443,7 @@ class TestAnsweringToSeveralClusters:
     def ask(self, base, token):
         # /health answers anyone with whether the daemon is there. /jobs wants a request
         # signed with the cluster's secret, which is what this is about.
-        from ml_stack.http import build_request
+        from poolhouse.http import build_request
 
         req = build_request(f"{base}/jobs", token=token)
         try:
@@ -453,14 +453,14 @@ class TestAnsweringToSeveralClusters:
             return exc.status
 
     def test_either_cluster_can_reach_it(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token
+        from poolhouse.fleet.discovery import derive_token
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(WORDS, group="home", path=anchor)
         join("a different set of words here", group="work", path=anchor)
         rows = {m.group: m.key for m in __import__(
-            "ml_stack.fleet.discovery", fromlist=["memberships"]).memberships(anchor)}
+            "poolhouse.fleet.discovery", fromlist=["memberships"]).memberships(anchor)}
 
         base, runner, httpd = self.daemon(tmp_path, anchor)
         try:
@@ -474,7 +474,7 @@ class TestAnsweringToSeveralClusters:
             httpd.server_close()
 
     def test_a_cluster_it_left_is_refused(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, leave, memberships
+        from poolhouse.fleet.discovery import derive_token, leave, memberships
         from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"

@@ -24,7 +24,7 @@ duplicates = _load()
 
 
 def tree(tmp_path: Path, **modules: str) -> Path:
-    where = tmp_path / "src" / "ml_stack"
+    where = tmp_path / "src" / "poolhouse"
     where.mkdir(parents=True)
     for name, text in modules.items():
         (where / f"{name}.py").write_text(text, encoding="utf-8")
@@ -60,8 +60,8 @@ def test_the_same_routine_under_another_vocabulary_is_found(tmp_path):
     root = tree(tmp_path, one=COUNTER, two=RENAMED)
     found = duplicates.find(root)
     assert len(found) == 2
-    assert {one.path for one in found} == {"src/ml_stack/one.py", "src/ml_stack/two.py"}
-    assert "count_kinds" in found[0].detail and "src/ml_stack/two.py" in found[0].detail
+    assert {one.path for one in found} == {"src/poolhouse/one.py", "src/poolhouse/two.py"}
+    assert "count_kinds" in found[0].detail and "src/poolhouse/two.py" in found[0].detail
 
 
 def test_a_shared_shape_over_different_apis_is_not_a_duplicate(tmp_path):
@@ -130,7 +130,7 @@ class Two:
 
 def test_test_modules_are_not_read(tmp_path):
     root = tree(tmp_path, one=COUNTER)
-    (root / "src" / "ml_stack" / "test_two.py").write_text(RENAMED, encoding="utf-8")
+    (root / "src" / "poolhouse" / "test_two.py").write_text(RENAMED, encoding="utf-8")
     assert duplicates.find(root) == []
 
 

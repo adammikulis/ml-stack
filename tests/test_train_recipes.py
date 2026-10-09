@@ -7,11 +7,11 @@ import math
 
 import pytest
 
-from ml_stack.contracts import ContractError, recipe, recipes
-from ml_stack.testing import needs_a_backend
-from ml_stack.train.holdout import LeakageError, stratified
-from ml_stack.train.recipes import build, known, validate
-from ml_stack.train.recipes.models import suggest_size
+from poolhouse.contracts import ContractError, recipe, recipes
+from poolhouse.testing import needs_a_backend
+from poolhouse.train.holdout import LeakageError, stratified
+from poolhouse.train.recipes import build, known, validate
+from poolhouse.train.recipes.models import suggest_size
 
 
 @pytest.fixture
@@ -120,7 +120,7 @@ class TestBuild:
     @pytest.mark.slow
     @needs_a_backend
     def test_a_language_model_trains_on_real_text(self, corpus, tmp_path):
-        from ml_stack.train.run import run
+        from poolhouse.train.run import run
 
         got = run("text-lm", {"size": "small", "steps": 120, "context": 64,
                               "batch_size": 8}, corpus, tmp_path / "run")
@@ -132,7 +132,7 @@ class TestBuild:
 
     @needs_a_backend
     def test_a_classifier_generalises_to_held_out_rows(self, reviews, tmp_path):
-        from ml_stack.train.run import run
+        from poolhouse.train.run import run
 
         got = run("classify-text", {"size": "small", "steps": 200, "context": 48},
                   reviews, tmp_path / "run")
@@ -143,7 +143,7 @@ class TestBuild:
 
     @needs_a_backend
     def test_a_dry_run_leaves_no_checkpoint_behind(self, reviews, tmp_path):
-        from ml_stack.train.run import run
+        from poolhouse.train.run import run
 
         out = tmp_path / "dry"
         got = run("classify-text", {"size": "small"}, reviews, out, dry=True)
@@ -167,8 +167,8 @@ class TestBuild:
 
     @needs_a_backend
     def test_the_run_records_what_it_actually_trained_on(self, corpus, tmp_path):
-        from ml_stack.train import read
-        from ml_stack.train.run import run
+        from poolhouse.train import read
+        from poolhouse.train.run import run
 
         run("text-lm", {"size": "small", "steps": 40, "context": 64}, corpus,
             tmp_path / "run")
@@ -184,7 +184,7 @@ class TestBuild:
 class TestCommandLine:
     @needs_a_backend
     def test_the_cli_trains_and_prints_json(self, corpus, tmp_path, capsys):
-        from ml_stack.train.run import main
+        from poolhouse.train.run import main
 
         code = main(["--recipe", "text-lm", "--data", str(corpus),
                      "--out", str(tmp_path / "run"), "--set", "size=small",
@@ -195,7 +195,7 @@ class TestCommandLine:
 
     def test_a_bad_setting_fails_with_a_message_not_a_traceback(self, corpus, tmp_path,
                                                                capsys):
-        from ml_stack.train.run import main
+        from poolhouse.train.run import main
 
         code = main(["--recipe", "text-lm", "--data", str(corpus),
                      "--out", str(tmp_path / "run"), "--set", "steps=1"])

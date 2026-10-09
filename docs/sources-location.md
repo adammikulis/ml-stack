@@ -35,7 +35,7 @@ offered in the first version, since each query tells a third party which address
 | Tor exit list | `tor` flag | published by the Tor Project | hourly to daily | optional, fetched as one list |
 | Live lookup service | everything | n/a | n/a | rejected as a default |
 
-Fetched on consent into `home.cache("geoip")` (`ML_STACK_CACHE`), size-capped, digest-checked against the
+Fetched on consent into `home.cache("geoip")` (`POOLHOUSE_CACHE`), size-capped, digest-checked against the
 vendor's published digest, atomic write, mode 0600, read by a bounded MMDB reader that refuses a malformed
 file; refreshed monthly or twice weekly; over 120 days old it is marked stale. Country is usually right for
 fixed addresses; region and city often are not; VPN, CDN, cloud and mobile addresses are located where the
@@ -76,11 +76,11 @@ A member that roams to a hosting ASN or a VPN keeps working, judged by key and f
 ## 4. CLI and UI
 
 ```
-ml-stack sources map [--window 24h] [--by country|region|asn|place] [--json]
-ml-stack sources place SUBJECT_OR_CIDR LABEL
-ml-stack sources geo status|update|off
-ml-stack sources export ADDRESS     # everything held about one address
-ml-stack sources delete ADDRESS     # removes it locally; writes a redaction row for the pool
+poolhouse sources map [--window 24h] [--by country|region|asn|place] [--json]
+poolhouse sources place SUBJECT_OR_CIDR LABEL
+poolhouse sources geo status|update|off
+poolhouse sources export ADDRESS     # everything held about one address
+poolhouse sources delete ADDRESS     # removes it locally; writes a redaction row for the pool
 ```
 
 `map` is a table sorted by distinct hostile sources: key, count, text sparkline, top detectors, current

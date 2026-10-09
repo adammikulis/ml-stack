@@ -3,7 +3,7 @@
 import sys
 from types import ModuleType, SimpleNamespace
 
-from ml_stack.train.accelerator import mlx_report
+from poolhouse.train.accelerator import mlx_report
 
 
 def test_metal_limit_is_not_reported_as_free_physical_memory(monkeypatch):

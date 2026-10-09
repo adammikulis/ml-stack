@@ -7,11 +7,11 @@ import os
 import pytest
 from onboard_support import Clock, Recorder, info, requests
 
-from ml_stack import macauth
-from ml_stack.fleet.onboard import manifest as mf, sharing, transfer
-from ml_stack.fleet.onboard.human import HumanRequired, mint
-from ml_stack.fleet.onboard.requests import Requests
-from ml_stack.fleet.onboard.sharing import Licences
+from poolhouse import macauth
+from poolhouse.fleet.onboard import manifest as mf, sharing, transfer
+from poolhouse.fleet.onboard.human import HumanRequired, mint
+from poolhouse.fleet.onboard.requests import Requests
+from poolhouse.fleet.onboard.sharing import Licences
 
 CHUNK = 65536
 PAYLOAD = os.urandom(CHUNK * 2 + 17)

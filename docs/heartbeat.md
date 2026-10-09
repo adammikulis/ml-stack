@@ -14,7 +14,7 @@ every session (and after a week) with the `CronCreate` tool: a recurring job at 
 ## The prompt
 
 > Heartbeat. Read the lead's queue and log (the scratch queue file, or HANDOFF.md if there is none), then:
-> (1) read the inbox (`ml-stack-workspace inbox --agent <lead>`) and answer what is addressed to you;
+> (1) read the inbox (`poolhouse-workspace inbox --agent <lead>`) and answer what is addressed to you;
 > (2) check which workers have reported or gone idle and which branch is ready, and run
 > `scripts/worktrees` (exit 1 means an orphan tree or one over a limit: land, bundle or abandon each with
 > `scripts/worktrees close`, never by removing it by hand); (3) read `digest --status`: when the runner line says

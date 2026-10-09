@@ -1,11 +1,11 @@
 # An invented world
 
 A demo of a graph read out of a community needs a community, and a real one cannot be shown.
-`ml_stack.world` invents one from a seed: an organised group with people who have reasonable
+`poolhouse.world` invents one from a seed: an organised group with people who have reasonable
 jobs, a voice each, and a memory -- the graph -- so that when they talk (`world.simulate`)
 what they say makes sense. A company is one kind of organised group; anything that
 communicates in an organised way is another, and five are built in, all producing the same
-schema `ml_stack.graph.community` uses so the store, the bench, the page and the ask loop
+schema `poolhouse.graph.community` uses so the store, the bench, the page and the ask loop
 take them unchanged:
 
 | kind | structure |
@@ -17,11 +17,11 @@ take them unchanged:
 | `nonprofit` | programmes under an executive director, a board that `advises`, volunteers, funders |
 
 ```sh
-ml-stack-world make --kind company --size medium --seed 3 --out ./world --json
-ml-stack-world questions --world ./world --n 40 --out questions.jsonl
-ml-stack-bench run <model> --graph ./world/graph.json --questions questions.jsonl
-ml-stack-world simulate --world ./world --out ./talk --days 20 --mix 0.3 --model-url http://127.0.0.1:8080
-ml-stack-world emit --from ./talk --as slack-export --out ./export
+poolhouse-world make --kind company --size medium --seed 3 --out ./world --json
+poolhouse-world questions --world ./world --n 40 --out questions.jsonl
+poolhouse-bench run <model> --graph ./world/graph.json --questions questions.jsonl
+poolhouse-world simulate --world ./world --out ./talk --days 20 --mix 0.3 --model-url http://127.0.0.1:8080
+poolhouse-world emit --from ./talk --as slack-export --out ./export
 ```
 
 `make` writes `graph.json`, `personas.json`, an empty `calendar.json` and `world.json`;
@@ -29,12 +29,12 @@ ml-stack-world emit --from ./talk --as slack-export --out ./export
 `world.story` for the kind, launches or defences or releases, and routine chatter along
 whatever relations the graph holds -- templated unless `--mix` hands a share of threads to
 a model at `--model-url`; `emit` writes `messages.jsonl` the way Slack, a mail client, Teams
-or a scraper exports it (`--as slack-export|mbox|teams|rows`), so `ml_stack.sources` reads
+or a scraper exports it (`--as slack-export|mbox|teams|rows`), so `poolhouse.sources` reads
 the invented corpus exactly as it reads a real one.
 
 ```python
-from ml_stack.world.organisation import make, summary
-from ml_stack.world.questions import questions
+from poolhouse.world.organisation import make, summary
+from poolhouse.world.questions import questions
 
 world = make("community", "small", seed=0)   # the same world every time for a seed
 world.graph                                  # nodes, edges, messages: the community schema
@@ -76,10 +76,10 @@ question carries its `kind`, which the bench ignores, and `--kinds` draws only s
 
 ```python
 import random
-from ml_stack.world.sentences import template_writer
-from ml_stack.world.simulate import run, simulate
-from ml_stack.world.speaking import model_writer
-from ml_stack.world.story import calendar
+from poolhouse.world.sentences import template_writer
+from poolhouse.world.simulate import run, simulate
+from poolhouse.world.speaking import model_writer
+from poolhouse.world.story import calendar
 
 world.calendar = calendar(world, days=20, rng=random.Random(world.seed))
 for message in simulate(world, days=20, writer=None, rng=random.Random(1)):   # no model
@@ -131,9 +131,9 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 
 ## Message formats
 
-**A corpus is one list, whichever product it came from.** `ml_stack.messages.Message` is the
+**A corpus is one list, whichever product it came from.** `poolhouse.messages.Message` is the
 shape every reader returns and every emitter writes: a world id, a `source`, a `channel`, a
-`sender`, a Slack-style `ts`, the text, and `thread` naming the root. `ml_stack.sources.read`
+`sender`, a Slack-style `ts`, the text, and `thread` naming the root. `poolhouse.sources.read`
 looks at a path and reads a Slack export directory, an mbox, a Microsoft Graph
 `chatMessage` dump or the rows a Slack scraper writes -- each also there by name
 (`sources.slack_export`, `sources.mbox`, `sources.teams`, `sources.rows`). Given the
@@ -142,8 +142,8 @@ every `U0…`, address and Graph uuid; without them the product's id stays in `s
 `attrs["sender_kind"]` says whose it is.
 
 ```python
-from ml_stack import sources
-from ml_stack.world.emit import slack_export, mbox, teams, rows
+from poolhouse import sources
+from poolhouse.world.emit import slack_export, mbox, teams, rows
 
 slack_export(messages, people, "demo/slack", domain="pellard.example")  # users.json, channels.json, dms.json, <channel>/<day>.json, dms/<D0…>/
 mbox(messages, people, "demo/mail.mbox")                              # From/To/Cc/Date/Subject/Message-ID/In-Reply-To/References

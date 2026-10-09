@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.files import write_json
-from ml_stack.fleet import project_client, project_source as source, projects
-from ml_stack.fleet.projects import ProjectRegistry, answer, identity
-from ml_stack.net import git
+from poolhouse.files import write_json
+from poolhouse.fleet import project_client, project_source as source, projects
+from poolhouse.fleet.projects import ProjectRegistry, answer, identity
+from poolhouse.net import git
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def test_same_git_origin_has_same_board_identity(repository, tmp_path):
 ])
 def test_authority_claim_refuses_host_remapping(repository, tmp_path, authority, error):
     identifier = identity(repository)
-    write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": identifier,
+    write_json(repository / ".poolhouse-project.json", {"kind": "project-checkout", "project_id": identifier,
                                                         "authority": authority})
     registry = ProjectRegistry(tmp_path / "registry", "device", (repository,), "https://device:8770")
     with pytest.raises(source.ProjectError, match=error):
@@ -69,7 +69,7 @@ def test_authority_claim_refuses_host_remapping(repository, tmp_path, authority,
 @pytest.mark.redteam
 @pytest.mark.parametrize("authority", [[], {"host": "x" * 2049}, {"host": "bad\naddress"}])
 def test_malformed_checkout_authority_is_not_registered(repository, tmp_path, authority):
-    write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout",
+    write_json(repository / ".poolhouse-project.json", {"kind": "project-checkout",
                                                         "project_id": identity(repository),
                                                         "authority": authority})
     registry = ProjectRegistry(tmp_path / "registry", "device", (repository,))

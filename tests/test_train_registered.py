@@ -18,12 +18,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ml_stack.contracts import ContractError
-from ml_stack.testing import needs_a_backend, needs_mlx, needs_torch
-from ml_stack.train import find_latest, load_state, read
-from ml_stack.train.probes import INBOX
-from ml_stack.train.recipes import build, known, load, register, spec, specs, validate
-from ml_stack.train.run import main, run
+from poolhouse.contracts import ContractError
+from poolhouse.testing import needs_a_backend, needs_mlx, needs_torch
+from poolhouse.train import find_latest, load_state, read
+from poolhouse.train.probes import INBOX
+from poolhouse.train.recipes import build, known, load, register, spec, specs, validate
+from poolhouse.train.run import main, run
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -32,7 +32,7 @@ import time
 
 import numpy as np
 
-from ml_stack.train.recipes import Built, Hook, Phase, register
+from poolhouse.train.recipes import Built, Hook, Phase, register
 
 SPEC = {
     "id": "RECIPE_ID", "title": "A line through points", "blurb": "Fits y = w.x.",
@@ -238,7 +238,7 @@ class TestRun:
 class TestLoad:
     @pytest.mark.parametrize("framework", FRAMEWORKS)
     def test_a_trained_text_lm_is_rebuilt_from_its_checkpoint(self, tmp_path, framework):
-        from ml_stack.train import Trainer
+        from poolhouse.train import Trainer
 
         corpus = tmp_path / "corpus"
         corpus.mkdir()
@@ -306,7 +306,7 @@ class TestCommandLine:
         env = {**os.environ,
                "PYTHONPATH": os.pathsep.join([str(SRC), str(tmp_path)])}
         child = subprocess.Popen(
-            [sys.executable, "-m", "ml_stack.train.run", "--import", name,
+            [sys.executable, "-m", "poolhouse.train.run", "--import", name,
              "--recipe", recipe_id, "--data", str(data), "--out", str(out),
              "--set", "steps=100000", "--set", "pause=0.02", "--set", "framework=torch"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)

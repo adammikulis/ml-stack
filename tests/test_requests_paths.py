@@ -1,6 +1,6 @@
 """Every component that waits for a person raises a request, and the terminal, the UI and the
 dialog answer the same one: the chat confirmation, the remember question, the sentinel dialog and
-the `ml-stack-requests` command. Real pipes, real files, a real keystore over a fake keyring."""
+the `poolhouse-requests` command. Real pipes, real files, a real keystore over a fake keyring."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ import time
 
 import pytest
 
-from ml_stack import do, requests, rules, sentinel
-from ml_stack.inbox import cli
-from ml_stack.interventions import Call, Confirm
-from ml_stack.sentinel.heads_up import KEEP, LATER, RELEASE
-from ml_stack.sentinel.store import State
+from poolhouse import do, requests, rules, sentinel
+from poolhouse.inbox import cli
+from poolhouse.interventions import Call, Confirm
+from poolhouse.sentinel.heads_up import KEEP, LATER, RELEASE
+from poolhouse.sentinel.store import State
 from tests.requests_support import SRC, ask, no_markers, person_home
 
 __all__ = ["no_markers", "person_home"]
@@ -72,7 +72,7 @@ def test_the_confirmation_is_a_request_with_the_classifiers_reason_and_the_termi
     thread, got = confirm_in_thread(person, classifier_ask(), CALL)
     shown = waiting("tool_call")
     assert "bench_run" in shown.subject and "Asked because: destructive: deletes files (rm -r)" in shown.reason
-    assert shown.raised_by.agent == "ml-stack-chat" and [c.id for c in shown.choices] == ["allow-once", "deny"]
+    assert shown.raised_by.agent == "poolhouse-chat" and [c.id for c in shown.choices] == ["allow-once", "deny"]
     typed.write("1\n")
     thread.join(20)
     done = requests.get(shown.id)
@@ -232,7 +232,7 @@ def test_the_dialog_shows_the_oldest_waiting_request_and_answers_it_through_the_
 def quiet_node(name: str):
     """A node whose dialog is off, so what it raises stays waiting for an answer."""
     node = held_node(Desk(LATER))
-    node.heads_up.env = {"ML_STACK_NOTIFY": "off"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "off"}
     held = quarantine(node, name)
     shown = next(r for r in requests.list_requests(state="pending") if r.kind == "quarantine_release")
     return node, held, shown
@@ -258,10 +258,10 @@ def test_a_release_answered_in_the_ui_is_refused_by_the_sentinel_in_an_agent_pro
 
 def test_a_request_another_component_raised_with_a_held_id_releases_nothing_when_approved():
     node = held_node(Desk(LATER))
-    node.heads_up.env = {"ML_STACK_NOTIFY": "off"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "off"}
     held = quarantine(node, "10.9.0.7")
     forged = requests.raise_request(requests.Ask(
-        "quarantine_release", "ml-stack is holding peer 10.9.0.99", "Looks harmless.", ("later", "release"),
+        "quarantine_release", "Poolhouse is holding peer 10.9.0.99", "Looks harmless.", ("later", "release"),
         requests.Origin("sentinel"), extra=(("ids", held.id), ("total", "1"))))
     requests.answer(forged.id, "release", forged.fingerprint, "ui")
     node.heads_up.env = {}
@@ -282,7 +282,7 @@ def test_keep_held_in_the_ui_stops_the_asking_and_releases_nothing():
 def test_with_notify_off_the_request_is_still_raised_for_the_ui_and_no_dialog_opens():
     desk = Desk(RELEASE)
     node = held_node(desk)
-    node.heads_up.env = {"ML_STACK_NOTIFY": "off"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "off"}
     quarantine(node, "10.9.0.4")
     assert desk.shown == []
     assert [r.kind for r in requests.list_requests(state="pending")] == ["quarantine_release"]
@@ -327,12 +327,12 @@ def test_list_escapes_hostile_text(monkeypatch, capsys):
     assert "\x1b" not in out and "‮" not in out and "\x07" not in out
 
 
-CHILD = "import sys\nfrom ml_stack.inbox.cli import main\nsys.exit(main(sys.argv[1:]))\n"
+CHILD = "import sys\nfrom poolhouse.inbox.cli import main\nsys.exit(main(sys.argv[1:]))\n"
 
 
 def test_a_child_without_a_terminal_cannot_answer_and_leaves_the_store_untouched(person_home):
     held = requests.raise_request(ask())
-    from ml_stack import home
+    from poolhouse import home
     path = home.state("requests") / "requests.enc"
     before = path.read_bytes()
     done = subprocess.run([sys.executable, "-c", CHILD, "answer", held.id, "allow-once", "--fingerprint",

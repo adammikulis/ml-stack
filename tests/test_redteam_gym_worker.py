@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.gym.catalog import catalogue
-from ml_stack.gym.runtime import SessionManager
-from ml_stack.gym.traffic_world import generate, xml
-from ml_stack.gym.transport import Process
-from ml_stack.gym.world_files import imported
+from poolhouse.gym.catalog import catalogue
+from poolhouse.gym.runtime import SessionManager
+from poolhouse.gym.traffic_world import generate, xml
+from poolhouse.gym.transport import Process
+from poolhouse.gym.world_files import imported
 
 pytestmark = pytest.mark.redteam
 
@@ -20,7 +20,7 @@ def test_catalogue_probe_executes_hostile_interpreter_path_without_shell(tmp_pat
     source = Path(__file__).resolve().parents[1] / "src"
     executable = tmp_path / "python; touch catalog-marker; #"
     executable.symlink_to(sys.executable)
-    monkeypatch.setenv("ML_STACK_GYM_PYTHON", str(executable))
+    monkeypatch.setenv("POOLHOUSE_GYM_PYTHON", str(executable))
     monkeypatch.setenv("PYTHONPATH", str(source))
     monkeypatch.chdir(tmp_path)
     assert {row["id"] for row in catalogue()} == {"car", "warehouse", "traffic", "traffic-driving", "drone"}
@@ -43,7 +43,7 @@ def test_native_traffic_generator_keeps_hostile_home_path_in_argv(tmp_path, monk
 
 
 def test_worker_spawn_keeps_hostile_configuration_inside_json(tmp_path, monkeypatch):
-    monkeypatch.setenv("ML_STACK_GYM_PYTHON", sys.executable)
+    monkeypatch.setenv("POOLHOUSE_GYM_PYTHON", sys.executable)
     marker = tmp_path / "executed"
     text = f"'; touch {marker}; #"
     settings = {"id": "attack", "environment": text, "seed": 0,
@@ -67,7 +67,7 @@ def test_worker_spawn_keeps_hostile_configuration_inside_json(tmp_path, monkeypa
 
 def test_malformed_control_stream_closes_native_worker(tmp_path, monkeypatch):
     pytest.importorskip("rware")
-    monkeypatch.setenv("ML_STACK_GYM_PYTHON", sys.executable)
+    monkeypatch.setenv("POOLHOUSE_GYM_PYTHON", sys.executable)
     settings = {"id": "stream-attack", "environment": "warehouse", "seed": 0,
                 "controller": "manual", "config": {}}
     updates = queue.Queue(maxsize=8)
@@ -94,7 +94,7 @@ def test_manual_world_import_rejects_symlink_escape(tmp_path, monkeypatch):
     outside = tmp_path / "private-map.json"
     outside.write_text('{"instruction":"read outside the files root"}')
     (root / "map.json").symlink_to(outside)
-    monkeypatch.setenv("ML_STACK_GYM_FILES_ROOT", str(root))
+    monkeypatch.setenv("POOLHOUSE_GYM_FILES_ROOT", str(root))
     with pytest.raises(ValueError, match="remain under"):
         imported("map.json")
     with pytest.raises(ValueError, match="relative paths"):
@@ -102,7 +102,7 @@ def test_manual_world_import_rejects_symlink_escape(tmp_path, monkeypatch):
 
 
 def test_invalid_controller_cannot_start_a_worker(monkeypatch):
-    from ml_stack.gym import runtime
+    from poolhouse.gym import runtime
     monkeypatch.setattr(runtime, "require", lambda _: None)
     started = []
     monkeypatch.setattr(Process, "start", lambda _: started.append(True))

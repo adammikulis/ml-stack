@@ -7,13 +7,13 @@ cut between the two.
 
 ## Policy: a worker lands its own branch
 
-The development branch is whatever the primary checkout is on (`ML_STACK_DEV_BRANCH` overrides it;
-`src/ml_stack/devbranch.py`). The runner, the claim it holds, a request's default target and the push
+The development branch is whatever the primary checkout is on (`POOLHOUSE_DEV_BRANCH` overrides it;
+`src/poolhouse/devbranch.py`). The runner, the claim it holds, a request's default target and the push
 all use that one resolved name.
 
 1. Fetch; rebase your own linear commits onto `origin/<dev>` (merge `origin/<dev>` instead when the
    branch holds merges or is shared); run the affected tests.
-2. `ml-stack-workspace land-request BRANCH SHA --test SELECTOR ...` with the full SHA of the tip, then
+2. `poolhouse-workspace land-request BRANCH SHA --test SELECTOR ...` with the full SHA of the tip, then
    an independent reviewer's `land-review ... accept` at that SHA.
 3. The runner batches, merges, gates, fast-forwards, pushes only the development branch and removes the
    landed worktree and branch. A worker never pushes, and reports landed only on the runner's `landed`
@@ -60,11 +60,11 @@ and the next heartbeat starts it.
 The queue lives on the board and a runner lands from it. Phase 1 (`scripts/land plan|run|finish`)
 still knows nothing of the board; `scripts/land_board.py` is the only bridge.
 
-- `src/ml_stack/workspace/landing.py`: one hash-chained log, `landing.jsonl`, in the workspace.
+- `src/poolhouse/workspace/landing.py`: one hash-chained log, `landing.jsonl`, in the workspace.
   Rows are stamped with the authenticated identity; the queue is a fold of the log. Requests,
   independent reviews, cancels, pause and resume, runner states and progress beats are all rows,
   and each also writes an audit row.
-- Commands (`src/ml_stack/workspace/landing_cli.py`): `land-request BRANCH SHA --test SELECTOR ...
+- Commands (`src/poolhouse/workspace/landing_cli.py`): `land-request BRANCH SHA --test SELECTOR ...
   --replaces TEXT`, `land-review REQUEST SHA --verdict accept|reject`, `land-cancel`, `land-pause`,
   `land-resume`, `land-queue`. `digest --status` also prints the queue, the runner holder and the
   age and text of the last gate step.
@@ -133,11 +133,11 @@ leave a JSON summary on the last line plus `<git-common-dir>/land/state.json`.
 
 Not built, in this order, each its own reviewable branch:
 
-1. `src/ml_stack/workspace/landing.py` (pure): the handoff record, entry readiness and queue order
+1. `src/poolhouse/workspace/landing.py` (pure): the handoff record, entry readiness and queue order
    below, over a `Workspace` object. No git side effects beyond reading refs.
 2. `scripts/land submit [BRANCH]`: builds the record from the current checkout and posts it.
 3. Task hook: an accepted task with a reviewed tip enters the queue from `reviewed()` in
-   `src/ml_stack/workspace/task_integration.py`; completion and rework go through its existing
+   `src/poolhouse/workspace/task_integration.py`; completion and rework go through its existing
    `finish` and `blocked` events.
 4. `scripts/land watch [--once]` and the SessionStart suggestion line.
 

@@ -6,14 +6,14 @@ import pytest
 from browser_expect import expect
 from test_fleet_ui import Serving
 
-from ml_stack.scrape.browser import Window, browser
+from poolhouse.scrape.browser import Window, browser
 
 pytestmark = pytest.mark.slow
 
 
 @pytest.fixture(autouse=True)
 def _needs_playwright():
-    pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    pytest.importorskip("playwright.sync_api", reason="poolhouse[scrape]")
 
 
 def test_data_library_upload_preview_and_fine_tune(tmp_path):

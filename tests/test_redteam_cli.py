@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ml_stack.redteam.cli import main
-from ml_stack.redteam.report import Attempt, Report
+from poolhouse.redteam.cli import main
+from poolhouse.redteam.report import Attempt, Report
 
 
 def saved(tmp_path, name: str, *wins: bool) -> str:

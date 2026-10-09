@@ -1,7 +1,7 @@
 {
   "id": "tool-calls",
   "title": "Teach a model to call my tools",
-  "blurb": "Give it conversations that end in a tool call -- ml-stack-train-tools makes them from your tool schemas, or from what a model actually called on a bench run -- and a chat model learns which tool a question wants and how to call it. A small base is fine-tuned whole; anything bigger takes a LoRA.",
+  "blurb": "Give it conversations that end in a tool call -- poolhouse-train-tools makes them from your tool schemas, or from what a model actually called on a bench run -- and a chat model learns which tool a question wants and how to call it. A small base is fine-tuned whole; anything bigger takes a LoRA.",
   "data": {
     "formats": [
       ".jsonl"
@@ -75,7 +75,7 @@
      "help": "A full fine-tune of a pretrained model wants a small one; 3e-3 is for training from scratch, and a LoRA wants about 1e-4 because only the adapter moves."},
     {"name": "lora", "type": "bool", "default": false,
      "label": "Train an adapter instead of every weight",
-     "help": "Two small matrices on each projection, the base frozen: ~0.5% of the weights train, and an 8B model fits where a full fine-tune of it would need ~128G of optimizer state. Needs peft: pip install 'ml-stack[train-lora]'."},
+     "help": "Two small matrices on each projection, the base frozen: ~0.5% of the weights train, and an 8B model fits where a full fine-tune of it would need ~128G of optimizer state. Needs peft: pip install 'poolhouse[train-lora]'."},
     {"name": "lora_rank", "type": "int", "default": 16, "min": 1, "max": 256,
      "label": "Adapter rank",
      "help": "How much the adapter can express, and what it costs. 16 is the usual answer for teaching a format and a habit; 64 is for teaching new knowledge, which this is not."},

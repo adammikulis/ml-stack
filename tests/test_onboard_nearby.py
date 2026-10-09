@@ -6,7 +6,7 @@ import json
 import pytest
 from onboard_support import Clock, Recorder
 
-from ml_stack.fleet.onboard import nearby as near
+from poolhouse.fleet.onboard import nearby as near
 
 FP = "ab" * 32
 

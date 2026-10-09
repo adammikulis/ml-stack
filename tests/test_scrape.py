@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.scrape.browser import Window, within_hours
-from ml_stack.scrape.presets import DISCORD, SLACK, WEBSITE, preset
-from ml_stack.scrape.read import read_all, read_once
-from ml_stack.scrape.seen import Seen
+from poolhouse.scrape.browser import Window, within_hours
+from poolhouse.scrape.presets import DISCORD, SLACK, WEBSITE, preset
+from poolhouse.scrape.read import read_all, read_once
+from poolhouse.scrape.seen import Seen
 
 
 class VirtualList:
@@ -133,7 +133,7 @@ def test_an_edited_row_is_caught_by_its_own_digest(tmp_path):
     because nothing grew. Marking the content is what makes an edit visible at all, and
     without it an edit is not late, it is never noticed.
     """
-    from ml_stack.scrape import Seen, digest
+    from poolhouse.scrape import Seen, digest
 
     said = {"m1": "we should meet on tuesday", "m2": "agreed"}
     marks = {k: digest(v) for k, v in said.items()}
@@ -154,7 +154,7 @@ def test_an_edited_row_is_caught_by_its_own_digest(tmp_path):
 
 
 def test_a_digest_is_stable_short_and_not_a_copy_of_what_was_read():
-    from ml_stack.scrape import digest
+    from poolhouse.scrape import digest
 
     assert digest("a message") == digest("a message")
     assert digest("a message") != digest("a messagf")
@@ -165,18 +165,18 @@ def test_a_digest_is_stable_short_and_not_a_copy_of_what_was_read():
 
 class TestWhereAWindowOpens:
     def test_no_position_asks_for_no_flag(self, monkeypatch):
-        monkeypatch.delenv("ML_STACK_WINDOW_POSITION", raising=False)
+        monkeypatch.delenv("POOLHOUSE_WINDOW_POSITION", raising=False)
         assert Window(profile=Path("p")).args() == []
 
     def test_the_environment_places_it(self, monkeypatch):
-        monkeypatch.setenv("ML_STACK_WINDOW_POSITION", "3460,20")
+        monkeypatch.setenv("POOLHOUSE_WINDOW_POSITION", "3460,20")
         assert Window(profile=Path("p")).args() == ["--window-position=3460,20"]
 
     def test_the_window_wins_over_the_environment(self, monkeypatch):
-        monkeypatch.setenv("ML_STACK_WINDOW_POSITION", "0,0")
+        monkeypatch.setenv("POOLHOUSE_WINDOW_POSITION", "0,0")
         window = Window(profile=Path("p"), position=(3460, 20))
         assert window.args() == ["--window-position=3460,20"]
 
     def test_nonsense_is_no_position_rather_than_a_crash(self, monkeypatch):
-        monkeypatch.setenv("ML_STACK_WINDOW_POSITION", "over there")
+        monkeypatch.setenv("POOLHOUSE_WINDOW_POSITION", "over there")
         assert Window(profile=Path("p")).args() == []

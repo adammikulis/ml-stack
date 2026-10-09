@@ -20,14 +20,14 @@ from test_fleet_page import (  # noqa: E402, F401
 )
 from test_wired import Recorder  # noqa: E402
 
-from ml_stack.serve import wired, wired_apply  # noqa: E402
+from poolhouse.serve import wired, wired_apply  # noqa: E402
 
 GIB = 1024**3
 
 
 @pytest.fixture
 def wired_page(joined, tmp_path, monkeypatch, open_page):  # noqa: F811
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     for name in wired_apply.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)

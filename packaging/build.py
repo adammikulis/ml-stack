@@ -20,9 +20,9 @@ from packaging.version import InvalidVersion, Version
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP = ROOT / "app"
-STAMP = runpy.run_path(str(ROOT / "src/ml_stack/fleet/wheel_provenance.py"))["stamp"]
+STAMP = runpy.run_path(str(ROOT / "src/poolhouse/fleet/wheel_provenance.py"))["stamp"]
 EXTERNAL = ("pyinstaller", "packaging", "psutil", "ladybug>=0.20.4,<0.21", "py-machineid")
-SIDECAR = "ml-stack-headless"
+SIDECAR = "poolhouse-headless"
 
 
 def run(argv: list[str], **kw) -> None:
@@ -33,14 +33,14 @@ def run(argv: list[str], **kw) -> None:
 
 def wheels() -> list[Path]:
     DIST.mkdir(exist_ok=True)
-    for old in DIST.glob("ml_stack-*.whl"):
+    for old in DIST.glob("poolhouse-*.whl"):
         old.unlink()
     run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST), str(ROOT)],
         stdout=subprocess.DEVNULL)
     made = sorted(DIST.glob("*.whl"))
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     for wheel in made:
-        if wheel.name.startswith("ml_stack-"):
+        if wheel.name.startswith("poolhouse-"):
             STAMP(wheel, commit, ROOT)
     return made
 
@@ -48,13 +48,13 @@ def wheels() -> list[Path]:
 def wheelhouse(out: Path) -> list[Path]:
     """Download every extra a full install has into ``out``, as wheels."""
     sys.path.insert(0, str(ROOT / "src"))
-    from ml_stack.installed import extras
+    from poolhouse.installed import extras
 
     out.mkdir(parents=True, exist_ok=True)
     run([sys.executable, "-m", "pip", "wheel", "--wheel-dir", str(out),
          "--find-links", str(DIST), "--find-links", str(out),
-         f"ml-stack[{extras()}] @ file://{ROOT}"], stdout=subprocess.DEVNULL)
-    for mine in out.glob("ml_stack-*.whl"):
+         f"poolhouse[{extras()}] @ file://{ROOT}"], stdout=subprocess.DEVNULL)
+    for mine in out.glob("poolhouse-*.whl"):
         mine.unlink()
     return sorted(out.glob("*.whl"))
 
@@ -64,7 +64,7 @@ def owned_telemetry(source: Path) -> Path:
     source = source.expanduser().resolve()
     if not source.is_dir() or not (source / 'pyproject.toml').is_file():
         raise SystemExit('--metal-smi-source must name a project directory with pyproject.toml')
-    with tempfile.TemporaryDirectory(prefix='ml-stack-metal-smi-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='poolhouse-metal-smi-') as temporary:
         stage = Path(temporary)
         copied, output = stage / 'source', stage / 'wheels'
         shutil.copytree(source, copied, ignore=shutil.ignore_patterns(
@@ -98,17 +98,17 @@ def _telemetry_metadata(wheel: Path) -> None:
 
 
 def node(out: Path = DIST) -> Path:
-    """Build the release `poolside-node` for this machine into ``out``/node (dist by default), named by target, with its SHA-256 beside it.
+    """Build the release `poolhouse-node` for this machine into ``out``/node (dist by default), named by target, with its SHA-256 beside it.
 
-    A runtime build (`ml-stack runtime ensure`) compiles the node from its own commit and records the same checksum in the
-    runtime tree; this is the standalone copy a bundle or a release asset carries. On Windows it is `poolside-node.exe`.
+    A runtime build (`poolhouse runtime ensure`) compiles the node from its own commit and records the same checksum in the
+    runtime tree; this is the standalone copy a bundle or a release asset carries. On Windows it is `poolhouse-node.exe`.
     """
     suffix = ".exe" if sys.platform == "win32" else ""
-    run(["cargo", "build", "--release", "--locked", "-p", "poolside-node"], cwd=APP)
-    made = APP / "target" / "release" / f"poolside-node{suffix}"
+    run(["cargo", "build", "--release", "--locked", "-p", "poolhouse-node"], cwd=APP)
+    made = APP / "target" / "release" / f"poolhouse-node{suffix}"
     if not made.is_file():
-        raise SystemExit(f"cargo wrote no poolside-node{suffix}")
-    into = out / "node" / f"poolside-node-{target_triple()}{suffix}"
+        raise SystemExit(f"cargo wrote no poolhouse-node{suffix}")
+    into = out / "node" / f"poolhouse-node-{target_triple()}{suffix}"
     into.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(made, into)
     digest = hashlib.sha256(into.read_bytes()).hexdigest()
@@ -119,10 +119,10 @@ def node(out: Path = DIST) -> Path:
 def built_from(python: Path) -> Path:
     """Write the current commit marker into the build directory.
 
-    Asked of the build venv's interpreter, which has ml-stack's dependencies; the
+    Asked of the build venv's interpreter, which has poolhouse's dependencies; the
     interpreter running this script has none, and importing the package there fails.
     """
-    probe = ("from ml_stack.fleet.measuring import BUILT_FROM, installed_commit;"
+    probe = ("from poolhouse.fleet.measuring import BUILT_FROM, installed_commit;"
              "print(BUILT_FROM);print(installed_commit())")
     done = subprocess.run([str(python), "-c", probe], cwd=ROOT, capture_output=True, text=True,
                           env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
@@ -143,14 +143,14 @@ def daemon() -> Path:
     pip = env / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
     run([str(pip), "install", "-q", "--upgrade", *EXTERNAL])
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
-         "--force-reinstall", "--no-deps", "ml-stack"])
+         "--force-reinstall", "--no-deps", "poolhouse"])
     run([str(pip), "install", "-q", "--find-links", str(DIST),
-         "ml-stack[agents,hub,fleet-onboard,coordinator]"])
+         "poolhouse[agents,hub,fleet-onboard,coordinator]"])
 
     built_from(env / ("Scripts" if sys.platform == "win32" else "bin") / ("python.exe" if sys.platform == "win32" else "python"))
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
     run([str(tool), "--clean", "--noconfirm", "--distpath", str(DIST / "bundle"),
-         "--workpath", str(ROOT / ".build-work"), "ml-stack.spec"],
+         "--workpath", str(ROOT / ".build-work"), "poolhouse.spec"],
         cwd=ROOT / "packaging")
     made = DIST / "bundle" / (SIDECAR + (".exe" if sys.platform == "win32" else ""))
     if not made.is_file():
@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wheelhouse", action="store_true",
                     help="also download the extras, for a machine with no network")
     ap.add_argument("--node", action="store_true",
-                    help="also build the poolside-node binary for this platform into dist/node, with its checksum")
+                    help="also build the poolhouse-node binary for this platform into dist/node, with its checksum")
     ap.add_argument("--clean", action="store_true")
     ap.add_argument('--metal-smi-source', type=Path,
                     help='build and bundle owned metal-smi>=1.1.0 from this local source directory')

@@ -1,4 +1,4 @@
-//! The ml-stack daemon: the one already answering on the port, or one started here.
+//! The poolhouse daemon: the one already answering on the port, or one started here.
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
@@ -10,7 +10,7 @@ use tauri::AppHandle;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
-const SIDECAR: &str = "ml-stack-headless";
+const SIDECAR: &str = "poolhouse-headless";
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 const HEALTH_SECONDS: u64 = 60;
 const HEALTH_BYTES: u64 = 1024 * 1024;

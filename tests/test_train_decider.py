@@ -8,12 +8,12 @@ import re
 
 import pytest
 
-from ml_stack.decide import registry
-from ml_stack.decide.cases import Case
-from ml_stack.decide.guards import guard_cases
-from ml_stack.decide.sources import local_source
-from ml_stack.decide.types import DecideError, options_of
-from ml_stack.train.decider import Settings, collate, encode, metrics_of, splits
+from poolhouse.decide import registry
+from poolhouse.decide.cases import Case
+from poolhouse.decide.guards import guard_cases
+from poolhouse.decide.sources import local_source
+from poolhouse.decide.types import DecideError, options_of
+from poolhouse.train.decider import Settings, collate, encode, metrics_of, splits
 
 OPTS = options_of({"yes": "it is", "no": "it is not"})
 
@@ -88,7 +88,7 @@ def test_collate_right_pads_and_marks_the_query_and_option_positions():
 
 def test_each_parameter_group_trains_at_its_own_multiple_of_the_rate():
     torch = pytest.importorskip("torch")
-    from ml_stack.train.decider import DeciderStep
+    from poolhouse.train.decider import DeciderStep
     a, b = torch.nn.Parameter(torch.zeros(1)), torch.nn.Parameter(torch.zeros(1))
     opt = torch.optim.AdamW([{"params": [a], "scale": 1.0}, {"params": [b], "scale": 5.0}])
     DeciderStep(torch.nn.Module(), opt, lambda m, x: x).learning_rate(0.01)
@@ -101,7 +101,7 @@ def tiny_base(tmp_path):
     transformers = pytest.importorskip("transformers")
     pytest.importorskip("peft")
     tokenizers = pytest.importorskip("tokenizers")
-    from ml_stack.decide import pointer_prompt
+    from poolhouse.decide import pointer_prompt
     words = {"[UNK]": 0}
     for case in tiny_cases():
         text = pointer_prompt.render(case.question, str(case.state), case.options).text
@@ -122,8 +122,8 @@ def tiny_base(tmp_path):
 
 
 def run_tiny(tiny_base, tmp_path, steps=6):
-    from ml_stack.train.decider import train
-    from ml_stack.train.lora import Lora
+    from poolhouse.train.decider import train
+    from poolhouse.train.lora import Lora
     out = tmp_path / "decider"
     settings = Settings(name="tiny", base=tiny_base, steps=steps, batch_size=4, device="cpu",
                         dtype="float32", lora=Lora(4, 8, 0.0, ("q_proj", "v_proj")), lr=1e-3,
@@ -132,7 +132,7 @@ def run_tiny(tiny_base, tmp_path, steps=6):
 
 
 def test_a_whole_run_writes_a_directory_that_loads_and_decides(tiny_base, tmp_path):
-    from ml_stack.decide.pointer import PointerDecider
+    from poolhouse.decide.pointer import PointerDecider
     result, out = run_tiny(tiny_base, tmp_path)
     for name in ("decider.json", "head.safetensors", "lora/adapter_model.safetensors",
                  "manifest.json", "model_card.md", "tokenizer.json", "train_log.jsonl"):

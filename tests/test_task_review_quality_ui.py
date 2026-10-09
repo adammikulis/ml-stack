@@ -7,11 +7,11 @@ from browser_expect import expect
 from taskboard_kit import board, proposed
 from test_fleet_ui import Serving
 
-from ml_stack.fleet import extension_routes
-from ml_stack.memory import vault
-from ml_stack.reputation.sealed import SealedGraph
-from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import task_credit, task_outcomes, task_routes, tokens, work_reputation
+from poolhouse.fleet import extension_routes
+from poolhouse.memory import vault
+from poolhouse.reputation.sealed import SealedGraph
+from poolhouse.reputation.work import WorkLedger
+from poolhouse.workspace import task_credit, task_outcomes, task_routes, tokens, work_reputation
 
 __all__ = ['board']
 pytestmark = [pytest.mark.slow, pytest.mark.redteam]
@@ -48,7 +48,7 @@ def test_advanced_person_quality_review_records_fixed_bonus_and_separate_rating(
             viewer.get_by_label('Reliability assessment',exact=True).fill('80')
             viewer.get_by_label('Rating reason',exact=True).fill('Reproduced evidence and clear implementation')
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-            page.screenshot(path='/private/tmp/ml-stack-task-quality-form.png',full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-task-quality-form.png',full_page=True)
             viewer.get_by_role('button',name='Record independent review',exact=True).click()
             expect(viewer.locator('.status')).to_contain_text('checks you independently verified')
             assert board.board.get(board.owner,board.task['id'])['review'] is None
@@ -56,7 +56,7 @@ def test_advanced_person_quality_review_records_fixed_bonus_and_separate_rating(
             viewer.get_by_role('button',name='Record independent review',exact=True).click()
             expect(viewer.locator('.badge')).to_have_text('completed')
             expect(viewer.locator('.status')).to_contain_text('15 credits')
-            page.screenshot(path='/private/tmp/ml-stack-task-quality-preview.png',full_page=True)
+            page.screenshot(path='/private/tmp/poolhouse-task-quality-preview.png',full_page=True)
         task = board.board.get(board.owner,board.task['id'])
         assert task['review']['quality'] == [{'kind':'validated','reason':'Replay independently reproduced',
                                              'checks':['Replay passes'],'artifacts':['replay.json']}]

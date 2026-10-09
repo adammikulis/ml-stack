@@ -13,13 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import runtime_stale
+from poolhouse import runtime_stale
 
 
 @pytest.fixture
 def daemon(tmp_path: Path):
-    """A long-running child whose command line names an ml-stack program, and the runtime prefix it was not started from."""
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "ml-stack-fakedaemon"])
+    """A long-running child whose command line names a poolhouse program, and the runtime prefix it was not started from."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "poolhouse-fakedaemon"])
     try:
         deadline = time.monotonic() + 10
         while not any(p.pid == child.pid for p in runtime_stale.running()) and time.monotonic() < deadline:
@@ -33,7 +33,7 @@ def daemon(tmp_path: Path):
 def test_a_daemon_started_before_the_selected_runtime_is_named(daemon) -> None:
     child, prefix = daemon
     lines = runtime_stale.stale_lines(prefix, time.time() + 600)
-    assert any(f"pid {child.pid} " in line and "ml-stack-fakedaemon" in line for line in lines)
+    assert any(f"pid {child.pid} " in line and "poolhouse-fakedaemon" in line for line in lines)
     assert lines[-1].startswith("note")
 
 

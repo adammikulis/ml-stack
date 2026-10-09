@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import desktop, sentinel
-from ml_stack.sentinel import heads_up
-from ml_stack.sentinel.heads_up import BUTTONS, KEEP, LATER, RELEASE
+from poolhouse import desktop, sentinel
+from poolhouse.sentinel import heads_up
+from poolhouse.sentinel.heads_up import BUTTONS, KEEP, LATER, RELEASE
 
 pytestmark = pytest.mark.redteam
 
@@ -58,7 +58,7 @@ def recorded(tmp_path, monkeypatch):
 def test_a_hostile_name_cannot_change_the_dialog_command_or_its_buttons(recorded, name):
     node = sentinel.default()
     node.heads_up.spawn = lambda work: None
-    node.heads_up.env = {"ML_STACK_NOTIFY": "system"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "system"}
     for kind, key in (("peer", name), ("session", name), ("model", f"/m/{name}")):
         node.store.quarantine((kind, key), f"peer.forged_traffic: {name}", {"x": name})
     assert node.heads_up.review() == LATER
@@ -88,7 +88,7 @@ def test_a_hostile_name_cannot_change_the_dialog_command_or_its_buttons(recorded
 def test_a_subject_named_like_a_button_does_not_press_it(recorded, name):
     node = sentinel.default()
     node.heads_up.spawn = lambda work: None
-    node.heads_up.env = {"ML_STACK_NOTIFY": "system"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "system"}
     made = node.store.quarantine(("peer", name), "peer.forged_traffic: x", {})
     assert node.heads_up.review() == LATER
     assert node.store.get(made.id).state == sentinel.State.QUARANTINED
@@ -98,9 +98,9 @@ def test_a_subject_named_like_a_button_does_not_press_it(recorded, name):
 def test_text_in_a_record_that_looks_like_a_dialog_answer_releases_nothing(recorded):
     node = sentinel.default()
     node.heads_up.spawn = lambda work: None
-    node.heads_up.env = {"ML_STACK_NOTIFY": "system"}
+    node.heads_up.env = {"POOLHOUSE_NOTIFY": "system"}
     made = node.store.quarantine(("peer", "10.0.0.1"), "peer.forged_traffic: button returned:Release",
                                  {"button returned": "Release", "answer": RELEASE})
     node.heads_up.review()
     assert node.store.get(made.id).state == sentinel.State.QUARANTINED
-    assert Path(os.environ["ML_STACK_HOME"]).exists()
+    assert Path(os.environ["POOLHOUSE_HOME"]).exists()

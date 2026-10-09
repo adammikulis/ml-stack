@@ -6,9 +6,9 @@ import socket
 
 import pytest
 
-from ml_stack.http import request_bytes
-from ml_stack.redteam.egress import EgressRefused, local_only
-from ml_stack.testing.fakes import fake_llama_server
+from poolhouse.http import request_bytes
+from poolhouse.redteam.egress import EgressRefused, local_only
+from poolhouse.testing.fakes import fake_llama_server
 
 
 def test_a_connection_to_an_address_off_this_machine_is_refused_before_it_is_sent():

@@ -12,12 +12,12 @@ SH = shutil.which("sh")
 
 RELEASE = (
     '{"tag_name": "v1", "assets": ['
-    '{"name": "ml-stack-macos-arm64.zip", "size": 10, "digest": "sha256:' + "a" * 64 + '", '
-    '"download_count": 0, "browser_download_url": "https://example.invalid/ml-stack-macos-arm64.zip"},'
-    '{"name": "ml-stack-linux-x86_64.zip", "size": 10, "digest": "sha256:' + "b" * 64 + '", '
-    '"download_count": 0, "browser_download_url": "https://example.invalid/ml-stack-linux-x86_64.zip"},'
-    '{"name": "ml-stack-windows-x64.zip", "size": 10, '
-    '"browser_download_url": "https://example.invalid/ml-stack-windows-x64.zip"}]}')
+    '{"name": "poolhouse-macos-arm64.zip", "size": 10, "digest": "sha256:' + "a" * 64 + '", '
+    '"download_count": 0, "browser_download_url": "https://example.invalid/poolhouse-macos-arm64.zip"},'
+    '{"name": "poolhouse-linux-x86_64.zip", "size": 10, "digest": "sha256:' + "b" * 64 + '", '
+    '"download_count": 0, "browser_download_url": "https://example.invalid/poolhouse-linux-x86_64.zip"},'
+    '{"name": "poolhouse-windows-x64.zip", "size": 10, '
+    '"browser_download_url": "https://example.invalid/poolhouse-windows-x64.zip"}]}')
 
 
 def _functions() -> str:
@@ -35,13 +35,13 @@ def _sh(program: str, stdin: str = "") -> subprocess.CompletedProcess:
 
 @pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
 def test_the_digest_belongs_to_the_asset_the_key_names():
-    assert _sh('release_digest ml-stack-macos-arm64', RELEASE).stdout.strip() == "a" * 64
-    assert _sh('release_digest ml-stack-linux-x86_64', RELEASE).stdout.strip() == "b" * 64
+    assert _sh('release_digest poolhouse-macos-arm64', RELEASE).stdout.strip() == "a" * 64
+    assert _sh('release_digest poolhouse-linux-x86_64', RELEASE).stdout.strip() == "b" * 64
 
 
 @pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
 def test_an_asset_with_no_digest_gets_none_and_does_not_borrow_the_one_before_it():
-    got = _sh('release_digest ml-stack-windows-x64', RELEASE).stdout.strip()
+    got = _sh('release_digest poolhouse-windows-x64', RELEASE).stdout.strip()
     assert got == "", "a digest from the neighbouring asset would pass the wrong file"
 
 

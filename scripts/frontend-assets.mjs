@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(resolve(root, 'app/package.json'));
 const { transform } = require('esbuild');
 const dependencies = JSON.parse(await readFile(resolve(root, 'app/package.json'), 'utf8')).dependencies;
-const assets = resolve(root, 'src/ml_stack/ui/assets');
+const assets = resolve(root, 'src/poolhouse/ui/assets');
 const modules = resolve(root, 'app/node_modules');
 const files = [
   ['marked', 'lib/marked.umd.js', 'marked.umd.js'],

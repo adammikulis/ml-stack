@@ -21,7 +21,7 @@ pytestmark = pytest.mark.redteam
 
 def row():
     return {"Id": "c" * 64, "Image": "sha256:" + "d" * 64, "State": {"Running": True},
-            "Config": {"Labels": {"ml-stack.test-run": "owner"}, "WorkingDir": "/work",
+            "Config": {"Labels": {"poolhouse.test-run": "owner"}, "WorkingDir": "/work",
                        "Cmd": ["sleep", "infinity"], "Entrypoint": None, "User": "1000:1000", "Volumes": None},
             "HostConfig": {"IpcMode": "private", "Init": True, "NetworkMode": "none", "ReadonlyRootfs": True,
                            "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges"], "Tmpfs": {"/tmp": "rw,nosuid,nodev,noexec,size=1073741824"}},
@@ -41,7 +41,7 @@ def test_foreign_identity_and_image_are_refused():
         with pytest.raises(RuntimeError):
             validate(value)
     value = copy.deepcopy(original)
-    value["Config"]["Labels"]["ml-stack.test-run"] = "foreign"
+    value["Config"]["Labels"]["poolhouse.test-run"] = "foreign"
     with pytest.raises(RuntimeError):
         validate(value)
     original["State"]["Running"] = False

@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from ml_stack.sandbox.policy import Policy, PolicyError, checked_path
+from poolhouse.sandbox.policy import Policy, PolicyError, checked_path
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows paths")
@@ -62,7 +62,7 @@ def test_mcp_policy_grants_native_system_program_directory(tmp_path):
 
     import win32api
 
-    from ml_stack.sandbox import policies
+    from poolhouse.sandbox import policies
 
     policy = policies.mcp_server(sys.executable, tmp_path, tmp_path).validated()
     system = os.path.realpath(win32api.GetSystemDirectory())

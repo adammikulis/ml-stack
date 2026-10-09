@@ -5,7 +5,7 @@ from __future__ import annotations
 import plistlib
 from pathlib import Path
 
-from ml_stack import node_app, node_permission, node_signing
+from poolhouse import node_app, node_permission, node_signing
 
 SHA1 = "4E2F3980AC138E86B7532FF4E3460EF53D0E7B23"
 
@@ -18,7 +18,7 @@ def test_info_plist_carries_the_identity_and_the_prompt_keys():
     plist = plistlib.loads(plistlib.dumps(node_app.info_plist("abc123")))
     assert plist["CFBundleIdentifier"] == "app.poolhouse.node"
     assert plist["CFBundleName"] == "Poolhouse"
-    assert plist["CFBundleExecutable"] == "poolside-node"
+    assert plist["CFBundleExecutable"] == "poolhouse-node"
     assert plist["LSUIElement"] is True
     assert plist["NSLocalNetworkUsageDescription"] == "Poolhouse finds and pairs with your other devices on this network."
     assert plist["NSBonjourServices"] == ["_poolhouse._tcp"]
@@ -35,7 +35,7 @@ def test_requirement_names_the_id_and_the_certificate_never_a_cdhash():
 
 def test_launch_command_runs_the_executable_inside_the_bundle():
     bundle = Path("/x/Poolhouse.app")
-    assert node_app.launch_command(bundle, ["run", "--lan"]) == ["/x/Poolhouse.app/Contents/MacOS/poolside-node", "run", "--lan"]
+    assert node_app.launch_command(bundle, ["run", "--lan"]) == ["/x/Poolhouse.app/Contents/MacOS/poolhouse-node", "run", "--lan"]
 
 
 def test_only_a_lan_start_on_macos_goes_through_the_bundle(monkeypatch):
@@ -90,12 +90,12 @@ def test_gateway_is_read_from_route_output():
 
 
 def test_the_supervisor_runs_the_bundle_for_a_lan_start_and_the_bare_binary_otherwise(monkeypatch):
-    from ml_stack import node_supervise
+    from poolhouse import node_supervise
 
     monkeypatch.setattr(node_app.sys, "platform", "darwin")
-    monkeypatch.setattr(node_app, "bundled", lambda binary, sha: Path("/x/Poolhouse.app/Contents/MacOS/poolside-node"))
-    assert node_supervise._program(Path("/r/poolside-node"), "ab", ["--lan"]) == Path("/x/Poolhouse.app/Contents/MacOS/poolside-node")
-    assert node_supervise._program(Path("/r/poolside-node"), "ab", []) == Path("/r/poolside-node")
+    monkeypatch.setattr(node_app, "bundled", lambda binary, sha: Path("/x/Poolhouse.app/Contents/MacOS/poolhouse-node"))
+    assert node_supervise._program(Path("/r/poolhouse-node"), "ab", ["--lan"]) == Path("/x/Poolhouse.app/Contents/MacOS/poolhouse-node")
+    assert node_supervise._program(Path("/r/poolhouse-node"), "ab", []) == Path("/r/poolhouse-node")
 
 
 def test_a_hostile_path_is_one_argument_in_every_command_line_the_app_builds():

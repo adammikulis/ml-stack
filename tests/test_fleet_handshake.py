@@ -12,12 +12,12 @@ from collections import Counter
 
 import pytest
 
-from ml_stack import http, macauth, sealing
-from ml_stack.fleet import tls
-from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.availability import Availability
-from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import (
+from poolhouse import http, macauth, sealing
+from poolhouse.fleet import tls
+from poolhouse.fleet.api import Daemon, make_handler
+from poolhouse.fleet.availability import Availability
+from poolhouse.fleet.daemon import load_or_create_token
+from poolhouse.fleet.discovery import (
     Advertiser,
     Beacon,
     DiscoveryError,
@@ -27,12 +27,12 @@ from ml_stack.fleet.discovery import (
     memberships,
     mint_cluster,
 )
-from ml_stack.fleet.framing import LimitedServer
-from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.onboard import joining, pake
-from ml_stack.fleet.onboard.joining import Joining, join_by_passphrase, join_secret, matches
-from ml_stack.fleet.pool_roster import Pool
-from ml_stack.fleet.remote import Peer, PeerError
+from poolhouse.fleet.framing import LimitedServer
+from poolhouse.fleet.jobs import JobRunner
+from poolhouse.fleet.onboard import joining, pake
+from poolhouse.fleet.onboard.joining import Joining, join_by_passphrase, join_secret, matches
+from poolhouse.fleet.pool_roster import Pool
+from poolhouse.fleet.remote import Peer, PeerError
 
 WORDS = "quince larch marlow"
 
@@ -253,7 +253,7 @@ def test_a_machine_that_does_not_know_the_passphrase_takes_nobody_in(tmp_path):
 
 
 def test_a_beacon_captured_off_the_network_is_not_readable_and_holds_nothing_to_guess_at(machine, udp):
-    from ml_stack.fleet import discovery
+    from poolhouse.fleet import discovery
 
     listener = discovery._socket(broadcast=True, bind=("", udp), group=discovery.default_group())
     listener.settimeout(3.0)
@@ -265,7 +265,7 @@ def test_a_beacon_captured_off_the_network_is_not_readable_and_holds_nothing_to_
     finally:
         listener.close()
     assert b"\"name\"" not in raw and str(machine.port).encode() not in raw
-    for guess in (WORDS, "ml-stack", "lab", "password"):
+    for guess in (WORDS, "poolhouse", "lab", "password"):
         assert discovery._verify(guess.encode(), raw, kind="beacon") is None
         assert discovery._verify(macauth.derive(guess.encode()).encode(), raw, kind="beacon") is None
     assert discovery._verify(machine.member.key, raw, kind="beacon")["beacon"]["name"] == "a"

@@ -7,11 +7,11 @@ from dataclasses import replace
 import pytest
 from taskboard_kit import accepted, board as _board_fixture, proposed
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.memory import vault
-from ml_stack.reputation.sealed import SealedGraph
-from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import (
+from poolhouse.graph.store import GraphStore
+from poolhouse.memory import vault
+from poolhouse.reputation.sealed import SealedGraph
+from poolhouse.reputation.work import WorkLedger
+from poolhouse.workspace import (
     coordination,
     device_agent,
     localagent,
@@ -19,8 +19,8 @@ from ml_stack.workspace import (
     tokens,
     work_reputation,
 )
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.service import Workspace
+from poolhouse.workspace.identity import Denied
+from poolhouse.workspace.service import Workspace
 
 board = _board_fixture
 
@@ -159,7 +159,7 @@ def test_concurrent_award_and_outcome_record_once(board, ledger):
 def test_awards_follow_verified_model_family_not_device_or_worker_label(board, ledger, model, balance, monkeypatch):
     from pathlib import Path
 
-    from ml_stack.workspace import (
+    from poolhouse.workspace import (
         device_agent,
         localagent,
         resource_allocations as resources,
@@ -203,7 +203,7 @@ def test_awards_follow_verified_model_family_not_device_or_worker_label(board, l
 
 @pytest.mark.redteam
 def test_designated_peer_review_awards_with_live_person_grant_and_revocation_is_enforced(board, ledger):
-    from ml_stack.workspace import resource_allocations as resources
+    from poolhouse.workspace import resource_allocations as resources
 
     peer = board.agent('review-peer')
     project = {'root': '/approved/project'}
@@ -251,7 +251,7 @@ def test_same_device_parent_still_recovers_expired_worker_lease(board):
 
 
 def test_model_switch_binds_live_family_without_moving_historical_awards(board, ledger):
-    from ml_stack.workspace import resource_allocations as resources
+    from poolhouse.workspace import resource_allocations as resources
 
     board.board.claim(board.child, board.task['id'], board.allocation['allocation_id'])
     pending = work_reputation.standings(board.ws, board.child, ledger=ledger)['own']

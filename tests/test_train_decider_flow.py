@@ -9,13 +9,13 @@ import re
 
 import pytest
 
-from ml_stack import sentinel
-from ml_stack.decide import dataset, metrics, registry
-from ml_stack.decide.cases import Case, write_cases
-from ml_stack.decide.types import DecideError, options_of
-from ml_stack.train import gpu
-from ml_stack.train.decider import Settings, fit_temperatures, question_kinds, train
-from ml_stack.train.lora import Lora
+from poolhouse import sentinel
+from poolhouse.decide import dataset, metrics, registry
+from poolhouse.decide.cases import Case, write_cases
+from poolhouse.decide.types import DecideError, options_of
+from poolhouse.train import gpu
+from poolhouse.train.decider import Settings, fit_temperatures, question_kinds, train
+from poolhouse.train.lora import Lora
 
 OPTS = options_of({"yes": "it is", "no": "it is not"})
 
@@ -32,7 +32,7 @@ def tiny_base(tmp_path):
     transformers = pytest.importorskip("transformers")
     pytest.importorskip("peft")
     tokenizers = pytest.importorskip("tokenizers")
-    from ml_stack.decide import pointer_prompt
+    from poolhouse.decide import pointer_prompt
     words = {"[UNK]": 0}
     for case in numbers(0, 200) + numbers(1000, 100):
         text = pointer_prompt.render(case.question, str(case.state), case.options).text
@@ -154,7 +154,7 @@ def run(tiny_base, tmp_path, name="flow", cases=None, **changes):
 
 def test_a_run_registers_pins_and_writes_the_metrics_and_per_kind_temperatures(tiny_base,
                                                                               tmp_path):
-    from ml_stack.decide.pointer import PointerDecider
+    from poolhouse.decide.pointer import PointerDecider
     result, out = run(tiny_base, tmp_path)
     assert result.registered and registry.find("flow") == out.resolve()
     config = json.loads((out / "decider.json").read_text())
@@ -195,7 +195,7 @@ def test_a_registered_name_is_not_replaced_without_asking_and_the_old_one_is_kep
 
 
 def test_the_registry_refuses_a_second_directory_under_a_taken_name_by_itself(tmp_path):
-    from ml_stack.decide.sources import FORMAT
+    from poolhouse.decide.sources import FORMAT
     dirs = []
     for n in ("a", "b"):
         d = tmp_path / n
@@ -264,7 +264,7 @@ def test_a_name_that_is_not_plain_is_refused(name):
 
 
 def test_a_config_edited_to_a_hostile_temperature_is_refused(tiny_base, tmp_path):
-    from ml_stack.decide.sources import local_source
+    from poolhouse.decide.sources import local_source
     _, out = run(tiny_base, tmp_path)
     config = json.loads((out / "decider.json").read_text())
     for bad in (0, -1, 1e9, "nan", None):
@@ -313,7 +313,7 @@ def test_the_gpu_is_claimed_for_the_block_and_given_back_even_on_error():
 
 def test_a_held_server_or_a_second_run_refuses_the_hold():
     busy = Wire([{"model": "big", "port": 1, "loading": False,
-                  "holders": [{"label": "ml-stack-agent", "pid": 3}]}])
+                  "holders": [{"label": "poolhouse-agent", "pid": 3}]}])
     with pytest.raises(DecideError, match=r"in use.*big"), gpu.hold("t", wire=busy):
         pass
     assert busy.calls == []
@@ -335,7 +335,7 @@ def test_waiting_gpu_hold_delegates_busy_server_admission_to_broker():
 
 def test_the_train_command_dry_runs_trains_registers_and_the_eval_command_scores_it(
         tiny_base, tmp_path, capsys):
-    from ml_stack.decide_cli import main
+    from poolhouse.decide_cli import main
     data, held = tmp_path / "d.jsonl", tmp_path / "e.jsonl"
     write_cases(data, numbers(0, 120))
     write_cases(held, numbers(1000, 40, group="h"))
@@ -356,7 +356,7 @@ def test_the_train_command_dry_runs_trains_registers_and_the_eval_command_scores
 
 
 def test_a_missing_or_bad_base_is_an_error_not_a_traceback(tmp_path, capsys):
-    from ml_stack.decide_cli import main
+    from poolhouse.decide_cli import main
     data = tmp_path / "d.jsonl"
     write_cases(data, numbers(0, 120))
     assert main(["train", "--data", str(data), "--name", "n", "--base", str(tmp_path / "nope"),

@@ -9,7 +9,7 @@ from pathlib import Path
 import land_git as lg
 import land_run
 
-from ml_stack.activity.gate import tree_hash
+from poolhouse.activity.gate import tree_hash
 
 
 def load(root: Path) -> dict:

@@ -112,11 +112,11 @@ jobs:
           test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY is not set"; exit 1; }
           key="$RUNNER_TEMP/release_key"
           (umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key")
-          find artifacts -name 'ml-stack-*.zip' -type f | while read -r zip; do
-            ssh-keygen -Y sign -f "$key" -n ml-stack-release "$zip"
+          find artifacts -name 'poolhouse-*.zip' -type f | while read -r zip; do
+            ssh-keygen -Y sign -f "$key" -n poolhouse-release "$zip"
           done
           rm -f "$key"
-          test -n "$(find artifacts -name 'ml-stack-*.zip.sig' -type f -print -quit)"
+          test -n "$(find artifacts -name 'poolhouse-*.zip.sig' -type f -print -quit)"
 
       - name: what to download
         id: downloads
@@ -141,11 +141,11 @@ jobs:
           {
             echo "body<<DOWNLOADS_EOF"
             echo "## Download"
-            section "**macOS** — Apple silicon (M1 or later)" ml-stack-macos-arm64
-            section "**Windows** — 64-bit" ml-stack-windows-x86_64
-            section "**Linux** — 64-bit" ml-stack-linux-x86_64
+            section "**macOS** — Apple silicon (M1 or later)" poolhouse-macos-arm64
+            section "**Windows** — 64-bit" poolhouse-windows-x86_64
+            section "**Linux** — 64-bit" poolhouse-linux-x86_64
             echo
-            echo "Each holds the app and \`ml-stack-headless\`, for a machine with no screen. Unzip it and open it."
+            echo "Each holds the app and \`poolhouse-headless\`, for a machine with no screen. Unzip it and open it."
             if here install.sh && here install.ps1; then
               echo
               echo "**Or install from a terminal**, which picks the right one for you:"
@@ -185,7 +185,7 @@ jobs:
               case "$file" in
                 "") ;;
                 *.md|docs/*) ;;
-                pyproject.toml|app/src-tauri/Cargo.toml|app/poolside-node/Cargo.toml) ;;
+                pyproject.toml|app/src-tauri/Cargo.toml|app/poolhouse-node/Cargo.toml) ;;
                 *) return 0 ;;
               esac
             done < <(git show --name-only --pretty=format: "$1")

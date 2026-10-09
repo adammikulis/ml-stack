@@ -8,12 +8,12 @@ import types
 
 import pytest
 
-from ml_stack import home
-from ml_stack.reputation import cli, model
-from ml_stack.reputation.notice import BLOCK, BUTTONS, LATER, WATCHING, Notifier
-from ml_stack.reputation.store import MAX_EVENTS, MAX_SOURCES, Ledger
-from ml_stack.sentinel import observers
-from ml_stack.sentinel.heads_up import Wires
+from poolhouse import home
+from poolhouse.reputation import cli, model
+from poolhouse.reputation.notice import BLOCK, BUTTONS, LATER, WATCHING, Notifier
+from poolhouse.reputation.store import MAX_EVENTS, MAX_SOURCES, Ledger
+from poolhouse.sentinel import observers
+from poolhouse.sentinel.heads_up import Wires
 from tests import memory_keys
 
 ring = memory_keys.ring
@@ -124,7 +124,7 @@ def test_waiting_never_restores_a_source_only_a_clean_run_does(ledger, clock, mo
 
 
 def test_the_clean_run_is_configurable_and_a_bad_source_needs_three_times_as_many(ledger, clock, monkeypatch):
-    monkeypatch.setenv("ML_STACK_REPUTATION_RECOVER", "2")
+    monkeypatch.setenv("POOLHOUSE_REPUTATION_RECOVER", "2")
     ledger.observe("host", "bad.example", "scan_hit")
     for _ in range(5):
         ledger.clean("host", "bad.example")
@@ -251,7 +251,7 @@ def test_two_processes_raise_one_dialog(tmp_path, clock):
 
 def test_notify_off_shows_nothing_and_the_notice_waits_in_the_summary(tmp_path, ledger, clock):
     desk = Desk()
-    note = notifier(tmp_path, ledger, clock, desk, ML_STACK_NOTIFY="off")
+    note = notifier(tmp_path, ledger, clock, desk, POOLHOUSE_NOTIFY="off")
     ledger.on_notice = note.on_divergence
     make_established(ledger, clock)
     ledger.observe("host", "good.example", "hash_change")
@@ -271,7 +271,7 @@ class Tty:
 
 @pytest.fixture
 def person(monkeypatch):
-    for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE"):
+    for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(cli, "sys", types.SimpleNamespace(stdin=Tty(True), stdout=Tty(True)))
 
@@ -280,7 +280,7 @@ COMMANDS = [["list"], ["show", "host:a.example"], ["forget", "host:a.example"],
             ["forget", "--all", "--yes"], ["export"], ["stats"]]
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_AGENT"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_AGENT"])
 @pytest.mark.parametrize("argv", COMMANDS)
 def test_an_agents_process_is_refused_and_nothing_changes(person, monkeypatch, capsys, marker, argv):
     held = Ledger()

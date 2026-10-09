@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import credentials
-from ml_stack.fleet import signing
+from poolhouse import credentials
+from poolhouse.fleet import signing
 from tests import memory_keys
 
 ring = memory_keys.ring
@@ -28,9 +28,9 @@ SIGNING_TEXT = 'NAMESPACE = "x"\nRELEASE_KEY = ""\nOTHER = 1\n'
 
 @pytest.fixture
 def rk(tmp_path, monkeypatch):
-    for name in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "WIDGET"):
+    for name in ("CLAUDECODE", "POOLHOUSE_AGENT", "POOLHOUSE_NONINTERACTIVE", "WIDGET"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("POOLHOUSE_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
     (tmp_path / "tmp").mkdir()
     tempfile.tempdir = None
@@ -164,7 +164,7 @@ def test_a_missing_gh_is_named(rk, monkeypatch, capsys, tmp_path):
     assert credentials.get(rk.ITEM) is None
 
 
-@pytest.mark.parametrize("marker", ["CLAUDECODE", "ML_STACK_NONINTERACTIVE"])
+@pytest.mark.parametrize("marker", ["CLAUDECODE", "POOLHOUSE_NONINTERACTIVE"])
 def test_an_agent_marker_is_refused_and_nothing_runs(rk, monkeypatch, marker):
     monkeypatch.setenv(marker, "1")
     for command in (["create"], ["rotate"], ["show-public"], ["agent"]):

@@ -6,7 +6,7 @@ both define rules this note moves into a registry that code enforces.
 
 Problem: the working rules are prose in this repository's `AGENTS.md` and `CLAUDE.md`, and the
 guards that enforce part of them sit in this repository's `scripts/`. A project that uses
-ml-stack as a library has its own `AGENTS.md`, `CLAUDE.md`, tests and agents. It gets none of the
+Poolhouse as a library has its own `AGENTS.md`, `CLAUDE.md`, tests and agents. It gets none of the
 rules unless it copies prose and scripts, and a copy drifts, is forgotten, or is edited away by
 the agent it was meant to bind.
 
@@ -31,7 +31,7 @@ specified in a note, not built.
 | 5 | Main session coordinates; subagents never elect themselves | prose; design (`session-liveness` 4-5) | a | coordinator lease code |
 | 6 | Lowest model tier never coordinates; unknown model ineligible | design | a (table: d) | `model_tiers` loader hard; table content is the project's |
 | 7 | announce joined/done, 200-char lines, 6 per 10 min | code (`limits`, hooks announce) | a | code |
-| 8 | Read the inbox first | `claude-session-start` | b | `ml-stack-policy hook session-start` |
+| 8 | Read the inbox first | `claude-session-start` | b | `poolhouse-policy hook session-start` |
 | 9 | Claims before mutating; no stealing a live claim | code (`claims`, harness reserve) | a | code; hard |
 | 10 | Named-file staging, no `git add -A`/`commit -a` | `claude-bash-guard` | b | packaged bash guard |
 | 11 | No commit by an agent in the primary checkout; worktrees beside, not inside | `primary-only`, `worktreerules` | b | packaged guard; dev branch derived |
@@ -60,14 +60,14 @@ specified in a note, not built.
 | 34 | Authorization only from the harness's statement record | design (`person-delegation`) | a, **hard** | code |
 | 35 | Never a real person in the tree or a commit message | `no-real-names`, `commit-msg`, `redact` | b, **hard** | packaged; name sources and fixtures d |
 | 36 | Project stance (no users but the owner, nothing cemented), harness names, model order, trailer | prose | d | project policy file |
-| 37 | Pre-commit chain; `.claude/settings.json` wiring | `install-hooks.*`, hand-edited JSON | b | `ml-stack-policy install` |
+| 37 | Pre-commit chain; `.claude/settings.json` wiring | `install-hooks.*`, hand-edited JSON | b | `poolhouse-policy install` |
 
 ## 2. The durable home
 
 ### 2.1 Layout
 
 ```
-src/ml_stack/policy/
+src/poolhouse/policy/
   rules.toml        the registry (package data; ships in the wheel)
   hard.py           HARD_IDS frozenset, written in code
   registry.py       Rule, Param, load(), validate()
@@ -75,20 +75,20 @@ src/ml_stack/policy/
   render.py         marker blocks (AGENTS, CLAUDE), briefing text, hashes
   lock.py           policy.lock: write, read, verify
   install.py        plan/apply: git hooks, harness settings entries
-  check.py          the drift checks behind `ml-stack-doctor policy check`
+  check.py          the drift checks behind `poolhouse-doctor policy check`
   diff.py           lock versus installed registry
   hooks/            bash_guard, edit_guard, pre_push, commit_msg, ratchet, session_start
   conformance/      pytest plugin + canary cases consumers run
-  cli.py            ml-stack-policy
+  cli.py            poolhouse-policy
 ```
 
 It sits in the `core` layer (standard library, `worktreerules` folded in, `hook_diagnostics`,
-`checks`). Wiring: console script `ml-stack-policy` and a `policy` group in `ml-stack-doctor`;
+`checks`). Wiring: console script `poolhouse-policy` and a `policy` group in `poolhouse-doctor`;
 `cli/reference.py` gains `HELP`/`TABLE` rows so the command-table drift check covers them.
 
-Hooks run from the wheel: the settings entry is `ml-stack-policy hook bash-guard`. No script is
+Hooks run from the wheel: the settings entry is `poolhouse-policy hook bash-guard`. No script is
 copied into the consumer, so there is no copy to drift and no editable path. Hook start-up
-imports only `ml_stack.policy.hooks.*`; cold-start time is measured in slice 2 (not measured here).
+imports only `poolhouse.policy.hooks.*`; cold-start time is measured in slice 2 (not measured here).
 
 ### 2.2 Rule record
 
@@ -105,8 +105,8 @@ brief      = true               # included in the generated briefing
 summary    = "An agent pushes the development branch by name. main, tags, force and ref deletion are the owner's."
 detail     = "docs/policy/git.md#main"      # optional, shown by `explain`
 enforced_by = [
-  { kind = "hook", ref = "ml_stack.policy.hooks.pre_push" },
-  { kind = "hook", ref = "ml_stack.policy.hooks.bash_guard:PUSH_MAIN" },
+  { kind = "hook", ref = "poolhouse.policy.hooks.pre_push" },
+  { kind = "hook", ref = "poolhouse.policy.hooks.bash_guard:PUSH_MAIN" },
 ]
 proof      = ["tests/test_pre_push.py", "tests/test_bash_guard.py::test_push_main"]
 params     = {}
@@ -155,10 +155,10 @@ project only when it imports that package; `person.*`, `git.*`, `ratchet.*`, `po
 
 ### 2.4 Project policy file
 
-`.ml-stack/policy.toml`, committed:
+`.poolhouse/policy.toml`, committed:
 
 ```toml
-requires = "ml-stack>=0.9"             # floor; the lock records the exact version
+requires = "poolhouse>=0.9"             # floor; the lock records the exact version
 
 [docs]
 agents = "AGENTS.md"                   # block inserted under the first H1
@@ -173,7 +173,7 @@ commit_prefixes    = ["feat", "fix", "chore"]   # subset of the library's list
 "edit.max-parameters" = 6
 
 [models]
-tiers = ".ml-stack/model_tiers.json"   # project-owned table (rule 8)
+tiers = ".poolhouse/model_tiers.json"   # project-owned table (rule 8)
 
 [[local]]                              # a project rule; ids must start with "local."
 id = "local.no-print"
@@ -197,7 +197,7 @@ That matches AGENTS.md ("a budget is a debt") and gives no path to switch a rule
 
 Policy version is the package version; `rules_sha` is the SHA-256 of the sorted compact JSON of the
 registry. A rule added or tightened lands in a `feat:`; removing or loosening a rule is a major
-change and the owner's. `.ml-stack/policy.lock` (JSON, `version` field, written with the atomic
+change and the owner's. `.poolhouse/policy.lock` (JSON, `version` field, written with the atomic
 writer) records:
 
 ```
@@ -207,17 +207,17 @@ hooks:  {git/pre-commit: sha256 of installed file, ...},
 settings: {.claude/settings.json: [expected entries]}
 ```
 
-`ml-stack-policy diff` compares the lock with the installed wheel and the files: rules added,
+`poolhouse-policy diff` compares the lock with the installed wheel and the files: rules added,
 changed or removed (by id), effective parameter changes, each block's unified diff, hook files
 that differ, settings entries missing. Hooks run from the wheel, so a code-enforced rule takes
 effect on upgrade; `sync` brings prose, lock and wiring up to date, and `policy check` fails when
 `rules_sha` differs from the lock and the difference touches a hard or required rule.
 
-`ml-stack-policy sync` rewrites blocks, the lock and wiring. It is a person's command (2.6).
+`poolhouse-policy sync` rewrites blocks, the lock and wiring. It is a person's command (2.6).
 
 ### 2.6 Machine settings stay a person's
 
-Project files (`.claude/settings.json`, `.git/hooks`, `.ml-stack/policy.*`) are not machine
+Project files (`.claude/settings.json`, `.git/hooks`, `.poolhouse/policy.*`) are not machine
 settings, but changing them changes what binds an agent. `install` and `sync` print the plan
 (unified diff of every file, hook names, interpreter). With an agent marker set or no TTY they
 stop there and exit non-zero ("a person applies this"); a person at a terminal confirms. A new
@@ -240,16 +240,16 @@ hard rule to a red-team test. No parameter, variable or config key reaches
 |---|---|---|---|
 | bash guard, edit guard (PreToolUse) | `install` writes the entries into `.claude/settings.json` (diff first) | `sync` | `check` compares entries to the lock; SessionStart hook compares at every session start |
 | `session-start`, `subagent-start/stop` | same | same | same |
-| `pre-commit`, `commit-msg`, `pre-push` | `install` writes shims into the git hooks dir (`export PYTHON=...; exec ml-stack-policy hook NAME`) | `sync` | `check` hashes them; CI runs the same checks, so a skipped local hook is caught there |
+| `pre-commit`, `commit-msg`, `pre-push` | `install` writes shims into the git hooks dir (`export PYTHON=...; exec poolhouse-policy hook NAME`) | `sync` | `check` hashes them; CI runs the same checks, so a skipped local hook is caught there |
 | ratchet (`budgets-only-fall`, generalised to policy file and `--against REV`) | pre-commit chain and CI | with the wheel | CI `--against $BASE` |
 | gates framework (`budgets`, size, duplicates, layers) | wheel; project supplies `budgets.json`, layer map | with the wheel | `policy check` runs the project's registered gates in `--fast` mode |
 | test runner/broker (`scripts/test`, `testslots`) | wheel entry point; project supplies selectors | with the wheel | the pytest plugin refuses an unbrokered run when an agent marker is set |
-| harness adapters | claude-code: settings entries; codex: the managed block pattern in `agent_hooks.py` (`BEGIN`/`END`); local models: in-process call of `policy.check_bash` / `check_edit` in the `ml-stack-agent` tool loop | `sync` | `check` prints a per-harness coverage table (which events are guarded, which are not) |
+| harness adapters | claude-code: settings entries; codex: the managed block pattern in `agent_hooks.py` (`BEGIN`/`END`); local models: in-process call of `policy.check_bash` / `check_edit` in the `poolhouse-agent` tool loop | `sync` | `check` prints a per-harness coverage table (which events are guarded, which are not) |
 
-`ml-stack-doctor policy check` (CI-safe, no network, no `~/.ml-stack` writes) does, in order:
+`poolhouse-doctor policy check` (CI-safe, no network, no `~/.poolhouse` writes) does, in order:
 
 1. Load registry; verify `rules_sha` and hard ids against code.
-2. Validate `.ml-stack/policy.toml`.
+2. Validate `.poolhouse/policy.toml`.
 3. Re-render the blocks and compare with the files and the lock.
 4. Verify hook files and settings entries against the lock; run `selftest`.
 5. Compare against the base: with `--against REV`, the policy file, lock and wiring at `REV` are
@@ -259,16 +259,16 @@ hard rule to a red-team test. No parameter, variable or config key reaches
 
 Exit codes: 0 clean, 1 drift or violation, 2 could not check.
 
-`ml-stack-policy selftest` feeds canary inputs to each installed hook (a `git push origin main`
+`poolhouse-policy selftest` feeds canary inputs to each installed hook (a `git push origin main`
 bash event under `CLAUDECODE=1` must exit 2; an Edit inside a generated block must exit 2; a
 subject with no prefix must fail `commit-msg`; a raised number must fail `ratchet`). The
 SessionStart hook runs it with a 2 s budget and puts the result in `additionalContext`
 ("policy vX, rules_sha abcd, selftest ok / FAILED: bash-guard"). A failure is announced; it
 does not block the session.
 
-`conformance` (`pytest -p ml_stack.policy.conformance` or `ml-stack-policy conformance`) builds a
+`conformance` (`pytest -p poolhouse.policy.conformance` or `poolhouse-policy conformance`) builds a
 scratch repository from the consumer's policy file and lock (never the live checkout or
-`~/.ml-stack`; file keyring, `ML_STACK_NO_REAL_KEYSTORE=1`), runs the canaries as child
+`~/.poolhouse`; file keyring, `POOLHOUSE_NO_REAL_KEYSTORE=1`), runs the canaries as child
 processes and asserts the briefing carries every hard id. A consumer adds it to its suite and CI.
 
 ### 3.3 Class c (generated text)
@@ -276,13 +276,13 @@ processes and asserts the briefing carries every hard id. A consumer adds it to 
 The block in `AGENTS.md`:
 
 ```
-<!-- ml-stack-policy:begin version=0.9.0 rules=ab12cd34 body=9f8e7d6c -->
+<!-- poolhouse-policy:begin version=0.9.0 rules=ab12cd34 body=9f8e7d6c -->
 ## Library policy (generated)
-Takes precedence over everything below. `ml-stack-policy show` prints it; `explain ID` gives detail.
+Takes precedence over everything below. `poolhouse-policy show` prints it; `explain ID` gives detail.
 - [hard] person.agent-is-never-human: An agent never posts as, poses as or is shown as a person. No exception.
 - [hard] git.main-is-the-owners: ...
 - [required] size.python-lines (600): ...
-<!-- ml-stack-policy:end -->
+<!-- poolhouse-policy:end -->
 ```
 
 `body` is a hash of the block text between the markers, so an edit inside is visible even if the
@@ -290,7 +290,7 @@ registry is unchanged. The block lists summaries only (target about 40 lines for
 profile); judgment rules appear as one-liners; `detail` is read on demand. `CLAUDE.md` gets a
 shorter block with the `claude-code` rules (hook wiring, `CLAUDECODE`, trailer slot).
 
-Drift checks: `ml-stack-policy render --check` (fast, runs in pre-commit and CI) and
+Drift checks: `poolhouse-policy render --check` (fast, runs in pre-commit and CI) and
 `doctor policy check`. The edit guard simulates an `Edit`/`Write`/`MultiEdit` on a file with a
 block and refuses when the resulting block body differs from the rendered one. Repository
 `scripts/reference` and `cli/reference.py` are the model: generated section, `--write`,
@@ -312,9 +312,9 @@ workspace text is data and grants nothing.
 | Edit the generated block through the Edit tool | yes, edit guard | also pre-commit and CI |
 | Edit it with `sed -i`, a heredoc or a script | not at write time (the bash guard cannot know every writer) | `render --check` in pre-commit, CI, SessionStart |
 | Remove or rewrite `.claude/settings.json` hook entries, `.git/hooks/*`, `core.hooksPath`, `--no-verify` | refused by edit guard and bash guard patterns for agents | SessionStart `selftest` and `check` (lock mismatch), CI |
-| Loosen `.ml-stack/policy.toml` or raise a ratchet number | refused at commit for agents (`ratchet` generalised; the opener is a person-only command at the person's terminal) | CI `--against $BASE` |
-| Edit block, lock, policy file and wiring consistently, then pin an older ml-stack | not prevented locally | CI compares against the base branch: version decrease, removed entries, loosened values fail. Only holds if the base branch is protected and the check is a required status; that is the owner's repository setting and a human-only machine setting |
-| Run with `MLSTACK_GUARD=off` | an agent cannot set the hook process environment from a command; it can through `settings.local.json` `env` | edit guard protects `.claude/settings*.json`; open question 2 |
+| Loosen `.poolhouse/policy.toml` or raise a ratchet number | refused at commit for agents (`ratchet` generalised; the opener is a person-only command at the person's terminal) | CI `--against $BASE` |
+| Edit block, lock, policy file and wiring consistently, then pin an older Poolhouse | not prevented locally | CI compares against the base branch: version decrease, removed entries, loosened values fail. Only holds if the base branch is protected and the check is a required status; that is the owner's repository setting and a human-only machine setting |
+| Run with `POOLHOUSE_GUARD=off` | an agent cannot set the hook process environment from a command; it can through `settings.local.json` `env` | edit guard protects `.claude/settings*.json`; open question 2 |
 | Same-user process writes anything | not prevented | tamper evidence only; same limit as `person-delegation` section 2 |
 | Harness without pre-tool hooks | rules degrade to the repository's own hooks, in-process checks and CI | coverage table says so |
 
@@ -338,7 +338,7 @@ advisory (normalised-sentence match against summaries); prose that contradicts a
 detectable, and the block's first line says the block wins.
 
 Discovery: the generated pointer in `AGENTS.md` (Codex and local harnesses read it), the
-`SessionStart` context, the subagent brief and `ml-stack-policy show`. `CLAUDE.md` is Claude Code
+`SessionStart` context, the subagent brief and `poolhouse-policy show`. `CLAUDE.md` is Claude Code
 only. Rules carry `harness`, so Codex does not read `CLAUDECODE` instructions as binding it; a
 harness without hooks is told which rules it must follow by instruction alone.
 
@@ -353,20 +353,20 @@ kept to preserve an old path: tests move with the code in the same commit.
 
 ### Slice 1 (days): registry, generated block, drift check, `doctor policy check`
 
-- New: `src/ml_stack/policy/{__init__,registry,hard,render,check,cli}.py`, `rules.toml` (the
+- New: `src/poolhouse/policy/{__init__,registry,hard,render,check,cli}.py`, `rules.toml` (the
   hard set and the `required` rules of section 1 with their `enforced_by` and `proof`),
-  console script `ml-stack-policy` in `pyproject.toml`.
-- Edit: `src/ml_stack/doctor.py` (`policy` group), `src/ml_stack/cli/reference.py` (`HELP`,
+  console script `poolhouse-policy` in `pyproject.toml`.
+- Edit: `src/poolhouse/doctor.py` (`policy` group), `src/poolhouse/cli/reference.py` (`HELP`,
   `TABLE`), `docs/commands.md` (via `scripts/reference --write`), `tests/test_layers.py`
   (`policy` in `core`), `docs/redteam/coverage-map.toml`, `scripts/hooks/pre-commit` (add
-  `ml-stack-policy render --check`), CI workflow (add `doctor policy check`), `AGENTS.md`
+  `poolhouse-policy render --check`), CI workflow (add `doctor policy check`), `AGENTS.md`
   (section 6 hard-rule prose replaced by the block, rest unchanged).
 - Gates this touches: `entry-points`, `argument-parsers`, `print-calls`, `atomic-writes`,
   `unversioned-records`, `deep-files`; new modules write through the existing helpers.
 - Tests: `tests/test_policy_registry.py` (2.2 list), `test_policy_render.py` (round trip, stale
   detection, marker injection in a rule text), `test_policy_check.py` (child process, clean and
   drifted trees), `tests/test_redteam_policy_block.py`. Packaging: the wheel contains
-  `ml_stack/policy/rules.toml` (extend `test_packaging_install.py`).
+  `poolhouse/policy/rules.toml` (extend `test_packaging_install.py`).
 - Not in slice 1: hooks move, install, lock, project policy file.
 
 ### Second slice: hooks into the wheel, install, lock
@@ -374,8 +374,8 @@ kept to preserve an old path: tests move with the code in the same commit.
 - Move `scripts/hooks/{claude-bash-guard,claude-edit-guard,pre-push,commit-msg,primary-only,
   budgets-only-fall,pushed,no-data-files,claude-session-*}` logic to `policy/hooks/`; fold
   `worktreerules.py` and `rules_loader.py` in; `scripts/hooks/*` and `scripts/install-hooks.*`
-  deleted. `.claude/settings.json` points at `ml-stack-policy hook NAME`.
-- New: `policy/{install,lock,diff}.py`, `.ml-stack/policy.lock`, `selftest`.
+  deleted. `.claude/settings.json` points at `poolhouse-policy hook NAME`.
+- New: `policy/{install,lock,diff}.py`, `.poolhouse/policy.lock`, `selftest`.
 - Edit: `doctor.hooks_of`/`HOOKS` (read the lock), `agent_hooks.py`, `onboard.hook_snippet`.
 - Tests rewritten in the same commits: `test_bash_guard.py`, `test_edit_guard.py`,
   `test_hook_installer.py`, `test_hooks_installed.py`, `test_claude_workspace_hooks.py`; new
@@ -385,7 +385,7 @@ kept to preserve an old path: tests move with the code in the same commit.
 ### Slice 3: project policy file, ratchet generalised, briefing from the registry
 
 - New: `policy/config.py`, `hooks/ratchet.py` (from `budgets-only-fall`, takes files from the
-  policy file, `--against`), `.ml-stack/policy.toml` for this repository (its sizes, prefixes,
+  policy file, `--against`), `.poolhouse/policy.toml` for this repository (its sizes, prefixes,
   `OWNED`, models, `local.*` rules).
 - Edit: `briefing.py`, `workspace/onboard.py` (`BRIEF`, `SNIPPET` as templates),
   `scripts/budgets` (reads the policy file), `AGENTS.md` and `CLAUDE.md` trimmed to project
@@ -397,7 +397,7 @@ kept to preserve an old path: tests move with the code in the same commit.
 ### Slices 4-6
 
 - 4: `policy/conformance/`, CI template, `check --against`, codex and local-model adapters
-  (in-process call in the `ml-stack-agent` loop), coverage table. Test: `conformance` against a
+  (in-process call in the `poolhouse-agent` loop), coverage table. Test: `conformance` against a
   scratch consumer repository with its own `AGENTS.md` and policy file.
 - 5: gate framework (`scripts/gates` importable), broker-admitted runner, pytest plugin, `policy
   check landing` ship as library features; project checkers stay project code.
@@ -418,23 +418,23 @@ kept to preserve an old path: tests move with the code in the same commit.
 | Policy file mentions a hard id (`enabled = false`, `waive`) | refused |
 | `[[local]] id = "person.agent-is-never-human"` or `ml.` prefix | refused (`local.` only) |
 | Agent commit that loosens the policy file | `ratchet` refuses without the person's opener |
-| Lock downgraded and older ml-stack pinned in one commit | `check --against $BASE` fails |
-| Rule text containing `<!-- ml-stack-policy:end -->` | registry test and renderer refuse |
+| Lock downgraded and older Poolhouse pinned in one commit | `check --against $BASE` fails |
+| Rule text containing `<!-- poolhouse-policy:end -->` | registry test and renderer refuse |
 | `install`/`sync` run by an agent | prints the plan, exits non-zero, writes nothing |
 | `person.agent-is-never-human` anywhere in a writable consumer file | tamper test fails |
 
 ## 6. Decisions
 
 1. The policy version is the package version.
-2. Hard-rule guards ignore `MLSTACK_GUARD=off` whenever an agent marker (`CLAUDECODE` or another
+2. Hard-rule guards ignore `POOLHOUSE_GUARD=off` whenever an agent marker (`CLAUDECODE` or another
    harness marker) is set. The switch still disables the soft guards.
 3. `install` and `sync` are person-only (`policy.sync` gate fixed at `person`).
-4. `.ml-stack/policy.lock` is committed in consumers.
+4. `.poolhouse/policy.lock` is committed in consumers.
 5. The generated block carries rule summaries and a link, not the full prose.
-6. The commands are a `policy` group in `ml-stack-doctor`; no new console script (the entry-points
+6. The commands are a `policy` group in `poolhouse-doctor`; no new console script (the entry-points
    budget does not rise).
 7. No waivers; debt goes in a ratchet file that only falls.
 8. Making `scripts/gates` and the test runner public library API before 1.0 is acceptable.
 9. The hard set is confirmed as proposed.
-10. In-process enforcement inside `ml-stack-agent` is acceptable for harnesses with no pre-tool
+10. In-process enforcement inside `poolhouse-agent` is acceptable for harnesses with no pre-tool
     hook event.

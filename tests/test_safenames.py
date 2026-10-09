@@ -8,7 +8,7 @@ import zipfile
 
 import pytest
 
-from ml_stack.safenames import Unsafe, safe_filename, safe_join, unpack
+from poolhouse.safenames import Unsafe, safe_filename, safe_join, unpack
 
 
 @pytest.mark.parametrize("name", [

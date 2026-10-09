@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from ml_stack.decide import pointer_prompt
-from ml_stack.decide.cases import Case, case_from, fingerprint, read_cases, write_cases
-from ml_stack.decide.types import options_of
+from poolhouse.decide import pointer_prompt
+from poolhouse.decide.cases import Case, case_from, fingerprint, read_cases, write_cases
+from poolhouse.decide.types import options_of
 
 
 def test_cases_round_trip_through_jsonl(tmp_path):

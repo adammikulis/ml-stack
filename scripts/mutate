@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     code = 0
     try:
         if not tree.imports_the_copy():
-            print("the copy's ml_stack is not what a test run imports", file=sys.stderr)
+            print("the copy's poolhouse is not what a test run imports", file=sys.stderr)
             code = 2
         elif args.verify:
             code = verify(root, tree, args)

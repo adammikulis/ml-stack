@@ -2,8 +2,8 @@
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import device_metadata, onboard, tokens
-from ml_stack.workspace.identity import Denied
+from poolhouse.workspace import device_metadata, onboard, tokens
+from poolhouse.workspace.identity import Denied
 
 
 @pytest.fixture

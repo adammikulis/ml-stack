@@ -1,16 +1,16 @@
-"""The "Ingest" section of ``ml-stack-bench report``: one row per source on a ``--sources``.
+"""The "Ingest" section of ``poolhouse-bench report``: one row per source on a ``--sources``.
 
 An ingest run and a bench run are kept in different places -- ``<store>.ingest.json``,
 ``<store>.<slug>.reads.json`` and the store's own ``ingest:unit:`` documents and hidden
 ``run:`` nodes, rather than a `bench.save`d row -- so this section is read straight off
-`ml_stack.ingest.Sources` and never off ``kept``. What is tested here is the reading and the
+`poolhouse.ingest.Sources` and never off ``kept``. What is tested here is the reading and the
 arranging: that a source's counts, cost and run(s) land in the right cells, that a sources's
 total line sums what its sources measured, that the store's judged-decisions count is read
 when the hygiene pass has run, and that a ``--sources`` naming nothing prints no section at
 all -- the same convention `report()` already keeps for an empty ``extracted``.
 
 Everything is built in ``tmp_path`` with `test_ingest`'s own helpers
-(`a_part_read_source`, `a_read`) and invented sources; nothing here reads ``~/.ml-stack``,
+(`a_part_read_source`, `a_read`) and invented sources; nothing here reads ``~/.poolhouse``,
 serves a model or touches a GPU.
 """
 
@@ -21,10 +21,10 @@ import pathlib
 import pytest
 from test_ingest import a_part_read_source, a_read
 
-from ml_stack import ingest
-from ml_stack.bench.report import report
+from poolhouse import ingest
+from poolhouse.bench.report import report
 
-pytest.importorskip("ladybug", reason="ml-stack[store]")
+pytest.importorskip("ladybug", reason="poolhouse[store]")
 
 RUN = "run:20260101T090000"
 RUN2 = "run:20260101T113000"
@@ -70,7 +70,7 @@ def a_store(tmp_path: pathlib.Path, *, slug: str = "velthorne-open-texts",
                                  "serving": "llama.cpp current",
                                  "started": "2026-01-01T09:00:00"})
     if decisions is not None:
-        from ml_stack.graph.store import GraphStore
+        from poolhouse.graph.store import GraphStore
 
         with GraphStore(where) as handle:
             handle.put_doc("tidy:decisions", {"pairs": decisions, "hidden": True})
@@ -203,8 +203,8 @@ def test_one_empty_store_beside_one_real_one_only_tables_the_real_one(tmp_path):
 # -- alongside the rest of the document ---------------------------------------------------
 
 def test_ingest_sits_beside_answering_runs_in_the_same_document(tmp_path):
-    pytest.importorskip("ladybug", reason="ml-stack[store]")
-    from ml_stack import bench
+    pytest.importorskip("ladybug", reason="poolhouse[store]")
+    from poolhouse import bench
 
     answering_store = str(tmp_path / "runs.ladybug")
     rows = [bench.Row(label="kestrel-plain", question=f"who runs the vault, q{n}?",

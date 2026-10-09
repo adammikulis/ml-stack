@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_stack.spec.accept import Rule, walk
-from ml_stack.spec.tree import Candidates, Tree, budgeted, chain
+from poolhouse.spec.accept import Rule, walk
+from poolhouse.spec.tree import Candidates, Tree, budgeted, chain
 
 
 def test_a_node_knows_its_depth_ancestors_and_children() -> None:

@@ -11,10 +11,10 @@ import json
 import pytest
 from keyring.errors import KeyringError
 
-from ml_stack import home, keystore, mcp
-from ml_stack.keystore import Keystore, Wires
-from ml_stack.net import cli
-from ml_stack.sentinel import human
+from poolhouse import home, keystore, mcp
+from poolhouse.keystore import Keystore, Wires
+from poolhouse.net import cli
+from poolhouse.sentinel import human
 from tests import keystore_support
 from tests.test_chat import call, session
 
@@ -34,22 +34,22 @@ def test_no_tool_an_agent_is_offered_names_the_keystore():
     names = [t.name for t in mcp.TOOLS]
     assert names and not [n for n in names if any(w in n.lower() for w in WORDS)]
     described = " ".join(f"{t.name} {t.description}" for t in mcp.TOOLS).lower()
-    assert "master key" not in described and "ml-stack-security" not in described
+    assert "master key" not in described and "poolhouse-security" not in described
 
 
 @pytest.mark.parametrize("calls", [
     [("keystore_unlock", {}), ("keystore_status", {}), ("keystore_subkey", {"purpose": "memory"})],
-    [("run_command", {"command": "ml-stack-security unlock"}),
-     ("bash", {"command": "ml-stack-security keystore-reset"}),
-     ("bash", {"command": "security find-generic-password -s ml-stack -w"}),
-     ("bash", {"command": "secret-tool lookup service ml-stack"})],
+    [("run_command", {"command": "poolhouse-security unlock"}),
+     ("bash", {"command": "poolhouse-security keystore-reset"}),
+     ("bash", {"command": "security find-generic-password -s poolhouse -w"}),
+     ("bash", {"command": "secret-tool lookup service poolhouse"})],
     [("read_file", {"path": "KEYSTORE/credentials.json"}), ("read_file", {"path": "KEYSTORE/provisioned.json"}),
-     ("python", {"code": "from ml_stack import keystore; print(keystore.default().subkey('memory', 'x'))"})],
+     ("python", {"code": "from poolhouse import keystore; print(keystore.default().subkey('memory', 'x'))"})],
 ])
 def test_a_model_that_obeys_everything_never_reaches_the_master_key(counting, calls):
     ks = person_ks()
     ks.subkey("memory", "a")
-    master = counting.held[("ml-stack", ks.account)]
+    master = counting.held[("poolhouse", ks.account)]
     state = str(home.state("keystore"))
     script = [(name, {k: v.replace("KEYSTORE", state) if isinstance(v, str) else v for k, v in args.items()})
               for name, args in calls]
@@ -65,8 +65,8 @@ def test_a_model_that_obeys_everything_never_reaches_the_master_key(counting, ca
         assert human.agent_may(name, args) or name not in {t.name for t in mcp.TOOLS}
 
 
-@pytest.mark.parametrize("argv", [["ml-stack-security", "unlock"], ["ml-stack", "security", "unlock"],
-                                  ["ml-stack-security", "keystore-reset"]])
+@pytest.mark.parametrize("argv", [["poolhouse-security", "unlock"], ["poolhouse", "security", "unlock"],
+                                  ["poolhouse-security", "keystore-reset"]])
 def test_a_command_naming_the_security_tool_or_the_keystore_directory_is_refused(counting, argv):
     person_ks().subkey("memory", "a")
     assert human.agent_may("run", {"argv": argv})
@@ -131,7 +131,7 @@ def test_a_background_process_cannot_turn_itself_into_a_person(counting, monkeyp
     monkeypatch.setenv(keystore.ENV_NONINTERACTIVE, "1")
     monkeypatch.setattr(keystore, "interactive", REAL_INTERACTIVE)
     background = Keystore(wires=Wires(say=lambda _m: None))
-    with pytest.raises(keystore.KeystoreLocked, match="ml-stack-security unlock"):
+    with pytest.raises(keystore.KeystoreLocked, match="poolhouse-security unlock"):
         background.subkey("memory", "a")
     assert counting.calls == []
 
@@ -139,11 +139,11 @@ def test_a_background_process_cannot_turn_itself_into_a_person(counting, monkeyp
 def test_the_master_key_is_in_no_status_error_or_event_text(counting):
     ks = person_ks()
     ks.subkey("memory", "a")
-    raw = counting.held[("ml-stack", ks.account)][3:]
+    raw = counting.held[("poolhouse", ks.account)][3:]
     counting.refuse = KeyringError
     ks.lock()
     with pytest.raises(keystore.KeystoreDenied) as refused:
         person_ks().subkey("memory", "a")
-    from ml_stack import sentinel
+    from poolhouse import sentinel
     text = json.dumps([ks.status(), str(refused.value), [e.to_record() for e in sentinel.default().bus.recent()]])
     assert raw not in text and base64.b64decode(raw).hex() not in text

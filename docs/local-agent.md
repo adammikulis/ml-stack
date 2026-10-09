@@ -2,27 +2,27 @@
 
 One command starts a downloaded model, joins it to the workspace and runs its loop detached:
 
-    ml-stack-workspace agent start [--model auto|ID] [--name NAME] [--role ROLE] [--project PATH]
+    poolhouse-workspace agent start [--model auto|ID] [--name NAME] [--role ROLE] [--project PATH]
                                    [--effort off|low|medium|high|auto] [--max-effort LEVEL]
                                    [--max-output-tokens TOKENS] [--orders-from NAMES] [--no-wait]
-    ml-stack-workspace agent list
-    ml-stack-workspace agent stop NAME
+    poolhouse-workspace agent list
+    poolhouse-workspace agent stop NAME
 
 `start` and `stop` are for a person at a terminal (a process an agent started, or one with no terminal,
-is refused). The Agents panel does the same from the browser: `ml-stack-workspace board-serve` prints
+is refused). The Agents panel does the same from the browser: `poolhouse-workspace board-serve` prints
 a link, `/agents?session=...`, that sets the browser session cookie the start and stop routes require.
 
 ## What `start` does
 
 1. **Model.** `auto` is the highest-ranked already-downloaded Qwen model that fits the requested
    context on this machine; Flash-Next is never chosen. With none downloaded it prints the one command
-   that fetches one (`ml-stack-models fetch REF`, or the `find` that locates it) and downloads nothing.
+   that fetches one (`poolhouse-models fetch REF`, or the `find` that locates it) and downloads nothing.
    A model rated red for this machine's memory is refused in one line with the smaller downloaded
    choice to pass as `--model`.
 2. **Identity.** The agent is named `local-` and the model's short name (or `--name`) and gets the
    standard agent role. Its token is minted directly, as `setup` does, written to
    `tokens/NAME` (0600) and never printed. Its project board is placed as for a joined agent.
-3. **Loop.** `python -m ml_stack.workspace.localloop NAME` runs detached (`ml_stack.jobs.detach`), its
+3. **Loop.** `python -m poolhouse.workspace.localloop NAME` runs detached (`poolhouse.jobs.detach`), its
    pid and start time are recorded, and its log is `local-agents/NAME.log`. The same name again
    reports the running agent and changes nothing.
 4. **Model lease.** The loop leases the model from the broker (memory admission and the queue are the
@@ -46,7 +46,7 @@ only ids you control), or a delegate of one of those. Everything else is counted
 never reaches the model. The task text goes to the model fenced as data. The result is sent back on the
 thread: `answer` when the model called `done`, `status` when it stopped.
 
-Under its role the agent has ml-stack's own tools (`ml-stack-chat`'s) plus `workspace_roster`,
+Under its role the agent has Poolhouse's own tools (`poolhouse-chat`'s) plus `workspace_roster`,
 `workspace_thread`, `workspace_send` (kind `task`, `question` or `status`, up to five a task, no `task`
 after reading an agent it does not obey; not offered in the role that only reads) and `set_effort`.
 Anything the role says needs a person goes to `localtools.ask_a_person`, which answers no: nobody can
@@ -83,13 +83,13 @@ checks this against a fake server.
 
 `--profile chat` (default) and `--profile coding` set task caps; context defaults to the largest safe fit
 for the selected model and this device's memory. `--ctx 256k` (k and K are accepted) overrides that choice.
-Coding prefers Qwen3.8-27B (Q4_K_XL first; `ml-stack-serve memory` rates it 27.2 GiB at 256K,
+Coding prefers Qwen3.8-27B (Q4_K_XL first; `poolhouse-serve memory` rates it 27.2 GiB at 256K,
 q8_0 cache, MTP head shared) and caps of 60 rounds, 150 calls, 120 model calls and an hour. A coding
-agent runs on Pi by default through `ml_stack.coding.launch_coding_agent(model, role, project,
+agent runs on Pi by default through `poolhouse.coding.launch_coding_agent(model, role, project,
 harness='pi')`; Codex and Claude Code are also supported.
 Flash-Next is used only when named with `--model`. Before starting, the memory estimator checks the
 context; when it does not fit, `start` says the longest context that does and prints the person-only
-`ml-stack-serve memory --for ... --apply`. Past 85% of the context the chat loop drops whole oldest turns
+`poolhouse-serve memory --for ... --apply`. Past 85% of the context the chat loop drops whole oldest turns
 down to 50%, leaving one fixed marker; nothing kept is edited, so the cached prefix survives.
 
 

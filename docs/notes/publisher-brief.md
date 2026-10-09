@@ -9,12 +9,12 @@ to tag, to create a GitHub release, to upload a package, or to set a version num
 sets the version and releases.
 
 ## What to build (phase 1: local publisher)
-`ml-stack-publish` (one console script, new module `ml_stack/publish/`):
+`poolhouse-publish` (one console script, new module `poolhouse/publish/`):
 1. **Agents never hold credentials.** The push credential (a fine-grained GitHub token or deploy
    key scoped to this one repo, contents: write, no admin, no workflows/secrets) lives in the OS
-   keystore under a dedicated purpose, read only by the publisher process. `ml-stack-publish setup`
+   keystore under a dedicated purpose, read only by the publisher process. `poolhouse-publish setup`
    is person-only (terminal, no agent marker) and is where the owner provides it once; it never
-   prints it. Agents call `ml-stack-publish request` (allowed for agents: it records "please
+   prints it. Agents call `poolhouse-publish request` (allowed for agents: it records "please
    publish commit X") and `status`; only the publisher pushes. Add the command names and the
    credential purpose to the human-only floor tests and the red-team coverage map.
 2. **Refuses everything except a fast-forward of `0.2dev`.** Tags, other refs, `--force`, deleting
@@ -41,13 +41,13 @@ sets the version and releases.
    author; Claude Code or Codex) re-ran the gate and read the diff, with its model identity.
    No review record, no push. (Reviews are data written to the workspace; the publisher
    verifies the reviewer identity is registered and is not the author.)
-6. **Limits and kill switch.** At most N pushes per hour (default 6); `ml-stack-publish pause`
+6. **Limits and kill switch.** At most N pushes per hour (default 6); `poolhouse-publish pause`
    and `resume` (person-only); a red result, a refused push or a gate flake outside the
    allow-list pauses the publisher and raises a Requests item; every attempt (commit, gates run,
    result, reviewer) goes to the activity log (no secrets) and the hash-chained event log.
 7. **Dry run is the default in tests and `--dry-run` everywhere**: tests use a bare local repo as
    `origin` and fake scanners; never the real network, never the real Keychain
-   (ML_STACK_NO_REAL_KEYSTORE; children use tests/onboard_support.FileKeyring); mutation-check each
+   (POOLHOUSE_NO_REAL_KEYSTORE; children use tests/onboard_support.FileKeyring); mutation-check each
    refusal and each gate once. Red-team rows for the new surfaces. Budgets only fall.
 8. Docs: docs/publishing.md (what auto-publishes, what never does, how to pause, how to rotate
    the credential), `python3 scripts/reference --write`, no version number.
@@ -60,7 +60,7 @@ publisher as the pusher until CI is trusted; then the push comes from CI auto-me
 the Linux run (`scripts/test-on-linux`) that has not been done yet.
 
 ## Order and rules
-Build on a branch from `0.2dev` (not the dev branch directly), announce with `ml-stack-workspace
+Build on a branch from `0.2dev` (not the dev branch directly), announce with `poolhouse-workspace
 announce`, keep messages short, tell the lead the branch and head. The lead merges it (the
 publisher is a protected path, so the owner reads its diff once before it is first enabled).
 Until the publisher exists and is enabled by the owner, nothing is pushed by any agent.
