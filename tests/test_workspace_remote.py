@@ -1,5 +1,6 @@
 """Project-scoped agent authentication across a fleet transport."""
 
+import base64
 import socket
 import threading
 from contextlib import contextmanager
@@ -327,6 +328,9 @@ def host(tmp_path):
             return SimpleNamespace(name="ml-stack", board_host="https://board.invalid:8770")
         def hosts(self, board_host):
             return board_host == "https://board.invalid:8770"
+        def list(self):
+            return [{"id": ident, "name": "ml-stack", "board_host": "https://board.invalid:8770"}
+                    for ident in (PROJECT, OTHER)]
         def workspace_base(self, project_id):
             self.get(project_id)
             return tmp_path / project_id
@@ -433,13 +437,20 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
     files = tmp_path / "files"
     files.mkdir()
     runner = JobRunner(tmp_path / "jobs", files)
-    daemon = Daemon(runner, files, fleet_token)
+    from ml_stack import macauth
+    from ml_stack.fleet.onboard.requests import Device
+    from ml_stack.workspace import coordinator_client
+    secret = base64.urlsafe_b64encode(b"d" * 32).decode()
+    device = Device("d" * 64, "peer", "peer-host", "127.0.0.1", 1, mine=True, secret=secret)
+    daemon = Daemon(runner, files, fleet_token, devices=lambda: [device])
     daemon.projects = host.projects
     daemon.workspaces = host
     server = Server(("127.0.0.1", 0), make_handler(daemon))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
+    monkeypatch.setattr(coordinator_client, "_device_peer", lambda config: SimpleNamespace(
+        token=macauth.derive(base64.urlsafe_b64decode(secret))))
     try:
         remote = RemoteWorkspace(base, PROJECT)
         invite = host.invite(PROJECT)
@@ -453,7 +464,7 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
         monkeypatch.chdir(project_root)
         args = SimpleNamespace(agent="", token_file="")
         board_ws, selected_token = cli._context(args)
-        board_ws.announce(selected_token, "joined", "Mac agent attached", "")
+        board_ws.announce(selected_token, "joined", "Mac agent attached")
         assert "Mac agent attached" in host.status(PROJECT)["messages"][0]["text"]
         with pytest.raises(ServerError):
             request_json(f"{base}/workspace/v1/projects/{PROJECT}/board",
