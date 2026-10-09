@@ -12,10 +12,11 @@ import platform
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import home, platform as host
 
 __all__ = ["ABSENT", "LANGUAGES", "MAX_SIZE", "Ccache", "find"]
 
@@ -24,6 +25,10 @@ MAX_SIZE = "5G"
 LANGUAGES = ("C", "CXX", "OBJC", "OBJCXX")
 """The languages that get a ``CMAKE_<lang>_COMPILER_LAUNCHER``; one a build never enables is ignored."""
 ABSENT = "ccache not found: building without a compile cache (install ccache to speed up updates)"
+SECONDS = 60.0
+"""The longest any one ccache or loader-listing process may run before it is killed."""
+OUTPUT_BYTES = 1_000_000
+"""The most output read from one of them; the process is killed past it."""
 FIELDS = ("direct_cache_hit", "preprocessed_cache_hit", "cache_miss", "uncacheable")
 
 
@@ -32,14 +37,43 @@ def cache_dir() -> Path:
     return home.state("llama.cpp", "ccache")
 
 
+def _spawn(argv: list[str], env: dict[str, str] | None = None) -> tuple[int, str]:
+    """Run ``argv`` (never through a shell) for at most `SECONDS`, reading at most `OUTPUT_BYTES`
+    of its output; (-1, "") when it cannot start, hangs, or floods. Its group is killed."""
+    try:
+        proc = host.start_process(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL)
+    except (OSError, ValueError):
+        return -1, ""
+
+    def stop() -> None:
+        try:
+            host.terminate_process_group(proc, force=True)
+        except OSError:
+            proc.kill()
+
+    timer = threading.Timer(SECONDS, stop)
+    timer.start()
+    try:
+        data = proc.stdout.read(OUTPUT_BYTES + 1) if proc.stdout else b""
+        flooded = len(data) > OUTPUT_BYTES
+        if flooded:
+            stop()
+        code = proc.wait()
+    finally:
+        timer.cancel()
+        stop()
+        if proc.stdout:
+            proc.stdout.close()
+    expired = code < 0
+    return (-1, "") if flooded or expired else (code, data.decode("utf-8", errors="replace"))
+
+
 def _libraries(exe: str) -> list[str]:
     """The shared libraries ``exe`` loads from outside the system directories."""
     query = ["otool", "-L", exe] if platform.system() == "Darwin" else ["ldd", exe]
-    try:
-        done = subprocess.run(query, capture_output=True, text=True, timeout=30, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    paths = re.findall(r"(?:=>\s+|^\s+)(/\S+)", done.stdout, re.M)
+    _, out = _spawn(query)
+    paths = re.findall(r"(?:=>\s+|^\s+)(/\S+)", out, re.M)
     return [p for p in paths if not p.startswith(("/usr/lib", "/System", "/lib"))]
 
 
@@ -94,8 +128,11 @@ class Ccache:
 
     def summary(self, basedir: Path) -> str:
         """One line of this build's hits, misses and the cache size limit."""
+        stats = self._run(basedir, "--print-stats")
+        if not stats.strip():
+            return "ccache: statistics unavailable"
         counts = dict.fromkeys(FIELDS, 0)
-        for line in self._run(basedir, "--print-stats").splitlines():
+        for line in stats.splitlines():
             key, _, value = line.partition("\t")
             if key in counts and value.strip().isdigit():
                 counts[key] = int(value)
@@ -106,13 +143,8 @@ class Ccache:
                 f"{counts['uncacheable']} uncacheable; cache {self.directory} (limit {MAX_SIZE})")
 
     def _run(self, basedir: Path, *args: str) -> str:
-        env = {**os.environ, **self.environment(basedir)}
-        try:
-            done = subprocess.run([self.exe, *args], env=env, capture_output=True, text=True,
-                                  timeout=60, check=False)
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        return done.stdout
+        code, out = _spawn([self.exe, *args], {**os.environ, **self.environment(basedir)})
+        return out if code == 0 else ""
 
 
 def find() -> Ccache | None:
@@ -121,6 +153,8 @@ def find() -> Ccache | None:
     if not found:
         return None
     exe = os.path.realpath(found)
+    if _spawn([exe, "--version"])[0] != 0:
+        return None
     directory = cache_dir()
     directory.mkdir(parents=True, exist_ok=True)
     libs = _libraries(exe)

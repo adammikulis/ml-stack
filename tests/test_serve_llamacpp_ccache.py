@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -153,7 +154,7 @@ def test_the_summary_is_one_line_even_when_ccache_gives_nothing(tmp_path):
     silent.write_text("#!/bin/sh\nexit 1\n")
     silent.chmod(0o755)
     line = llamacpp_ccache.Ccache(str(silent), tmp_path / "cc", ()).summary(tmp_path)
-    assert "\n" not in line and line.startswith("ccache: 0 hits, 0 misses (n/a hit rate)")
+    assert "\n" not in line and line == "ccache: statistics unavailable"
 
 
 def test_a_build_without_ccache_says_so_in_one_line_and_still_builds(tmp_path, seatbelt):
@@ -169,3 +170,75 @@ def test_a_build_without_ccache_says_so_in_one_line_and_still_builds(tmp_path, s
     assert said.count("  " + llamacpp_ccache.ABSENT) == 1
     assert not any("hits" in line for line in said)
     assert "writes only " + str(Path(os.path.realpath(scratch))) + ")" in " ".join(said)
+
+
+def fake(directory: Path, body: str, name: str = "ccache") -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+    return path
+
+
+def test_a_ccache_that_hangs_is_killed_and_the_build_goes_without_it(tmp_path, monkeypatch):
+    fake(tmp_path / "bin", "sleep 300\n")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    monkeypatch.setattr(llamacpp_ccache, "SECONDS", 1.0)
+    started = time.monotonic()
+    assert llamacpp_ccache.find() is None
+    assert time.monotonic() - started < 20
+    assert llamacpp_ccache.ABSENT.count("\n") == 0
+
+
+def test_a_statistics_call_that_hangs_gives_a_line_and_not_a_hang(tmp_path, monkeypatch):
+    path = fake(tmp_path / "bin", 'case "$1" in --version) exit 0;; *) sleep 300;; esac\n')
+    monkeypatch.setattr(llamacpp_ccache, "SECONDS", 1.0)
+    started = time.monotonic()
+    line = llamacpp_ccache.Ccache(str(path), tmp_path / "cc", ()).summary(tmp_path)
+    assert line == "ccache: statistics unavailable" and time.monotonic() - started < 20
+
+
+def test_a_flood_of_output_is_cut_off_and_non_utf8_bytes_do_not_crash_the_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(llamacpp_ccache, "OUTPUT_BYTES", 10_000)
+    flood = fake(tmp_path / "a", "yes 'cache_miss\t5'\n")
+    assert llamacpp_ccache.Ccache(str(flood), tmp_path / "cc", ()).summary(tmp_path) == "ccache: statistics unavailable"
+    junk = fake(tmp_path / "b", "printf 'direct_cache_hit\\t3\\n\\377\\376garbage\\ncache_miss\\t1\\n'\n")
+    line = llamacpp_ccache.Ccache(str(junk), tmp_path / "cc", ()).summary(tmp_path)
+    assert line.startswith("ccache: 3 hits, 1 misses (75% hit rate)")
+
+
+def test_a_statistics_call_that_fails_does_not_fail_the_build_line(tmp_path):
+    bad = fake(tmp_path / "bin", "exit 3\n")
+    line = llamacpp_ccache.Ccache(str(bad), tmp_path / "cc", ()).summary(tmp_path)
+    assert line == "ccache: statistics unavailable"
+    llamacpp_ccache.Ccache(str(bad), tmp_path / "cc", ()).reset(tmp_path)
+
+
+def test_a_path_with_spaces_quotes_semicolons_and_a_newline_reaches_the_process_as_one_argument(tmp_path, monkeypatch):
+    log = tmp_path / "log"
+    odd = tmp_path / "it's a; dir $(touch pwned)\n`x`" / "bin"
+    fake(odd, f'printf "%s|%s\\n" "$0" "$#" >> "{log}"\nexit 0\n')
+    monkeypatch.setenv("PATH", str(odd))
+    found = llamacpp_ccache.find()
+    assert found is not None and found.exe == os.path.realpath(odd / "ccache")
+    found.reset(tmp_path)
+    lines = log.read_text().split("\n|")
+    assert all(entry.rstrip().endswith("|1") or entry.rstrip().endswith("|2") for entry in lines if entry)
+    assert not list(tmp_path.rglob("pwned")) and not Path("pwned").exists()
+
+
+def test_library_listing_survives_a_non_binary_a_symlink_loop_and_an_unreadable_file(tmp_path):
+    text = tmp_path / "text"
+    text.write_text("not a binary\n")
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    locked = tmp_path / "locked"
+    locked.write_text("x")
+    locked.chmod(0)
+    try:
+        for target in (text, loop, locked, tmp_path / "missing", Path("/odd 'name'; \n")):
+            assert isinstance(llamacpp_ccache._libraries(str(target)), list)
+            assert isinstance(llamacpp_ccache._tree(str(target)), str)
+            assert isinstance(llamacpp_ccache._link_parent(str(target)), str)
+    finally:
+        locked.chmod(0o600)
