@@ -10,6 +10,7 @@ import sys
 import webbrowser
 from typing import Any
 
+from ml_stack import node_pool
 from ml_stack.log import say, warn
 from ml_stack.person import HumanRequired, require_person
 
@@ -141,6 +142,9 @@ def cmd_token(args: argparse.Namespace) -> int:
 
 
 def cmd_ls(args: argparse.Namespace) -> int:
+    if load_cluster_key(args.cluster_key) is None and (pool := node_pool.status()) is not None:
+        say(node_pool.render(pool, as_json=args.json))     # joined through the node's pool: no key file
+        return 0
     peers = discover(_require_key(args.cluster_key), timeout_s=args.timeout)
     if args.json:
         say(json.dumps([{**p.public(), "host": p.host,

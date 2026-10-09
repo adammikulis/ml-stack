@@ -14,7 +14,7 @@ use crate::row::valid_name;
 pub const PROJECT_FILE: &str = ".poolside/project.toml";
 
 /// The top of the working tree containing ``dir`` (the nearest ancestor with a `.git`).
-fn top(dir: &Path) -> Result<PathBuf> {
+pub(crate) fn top(dir: &Path) -> Result<PathBuf> {
     let start = dir.canonicalize()?;
     start.ancestors().find(|d| d.join(".git").exists()).map(Path::to_path_buf)
         .ok_or_else(|| Error::Invalid("this directory is not in a git repository".into()))
@@ -22,7 +22,7 @@ fn top(dir: &Path) -> Result<PathBuf> {
 
 /// The main working tree of the repository that ``top`` belongs to: for a linked worktree, the
 /// parent of the common git directory.
-fn common_root(top: &Path) -> Result<PathBuf> {
+pub(crate) fn common_root(top: &Path) -> Result<PathBuf> {
     let git = top.join(".git");
     if git.is_dir() {
         return Ok(top.to_path_buf());

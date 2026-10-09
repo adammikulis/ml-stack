@@ -13,7 +13,7 @@ use rustls::ServerConfig;
 use serde_json::{json, Value};
 
 use crate::api::{parse, respond, Call};
-use crate::beacon::{self, Beacon, BeaconConfig, Hooks};
+use crate::beacon::{self, Advert, Beacon, BeaconConfig, Hooks};
 use crate::cert::{board_fingerprint, Identity};
 use crate::error::{Error, Result};
 use crate::fsutil::{sha256_hex, unhex};
@@ -26,6 +26,9 @@ use crate::poolapi::{authorize, NETWORK};
 use crate::poolops::wall_ms;
 use crate::tls::{server_config, StandingFn};
 
+/// How long a device with a project listens for a pool of it before it makes one.
+pub const SETTLE: Duration = Duration::from_secs(4);
+
 /// How this node reaches other machines.
 #[derive(Clone, Debug)]
 pub struct NetConfig {
@@ -33,12 +36,17 @@ pub struct NetConfig {
     pub beacon: Option<BeaconConfig>,
     /// How often to swap pool records and boards with every member; None for only on request.
     pub sync_every: Option<Duration>,
+    /// The project key (`projectid::project_of`) this device finds a pool for on its own: it
+    /// listens for ``settle`` for an `open` pool of that project to join, and makes one if it
+    /// hears none. None leaves the pool as it is.
+    pub project: Option<String>,
+    pub settle: Duration,
 }
 
 impl NetConfig {
     /// Listen on every interface on ``port`` with the default beacon on ``beacon_port``.
     pub fn standard(port: u16, beacon_port: u16) -> NetConfig {
-        NetConfig { listen: SocketAddr::from(([0, 0, 0, 0], port)), beacon: Some(BeaconConfig::multicast(beacon_port)), sync_every: Some(Duration::from_secs(20)) }
+        NetConfig { listen: SocketAddr::from(([0, 0, 0, 0], port)), beacon: Some(BeaconConfig::multicast(beacon_port)), sync_every: Some(Duration::from_secs(20)), project: None, settle: SETTLE }
     }
 }
 
@@ -50,6 +58,8 @@ pub struct Net {
     pub stop: Arc<AtomicBool>,
     window: Mutex<Option<Window>>,
     joining: Mutex<BTreeSet<String>>,
+    /// True while the device listens for a pool of its project before making one.
+    settling: AtomicBool,
 }
 
 fn locked<T>(m: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
@@ -75,11 +85,14 @@ impl Net {
         let port = listener.local_addr()?.port();
         let net = Arc::new(Net {
             node, server_config: server_config(&me, standing)?, me, port, stop,
-            window: Mutex::new(None), joining: Mutex::new(BTreeSet::new()),
+            window: Mutex::new(None), joining: Mutex::new(BTreeSet::new()), settling: AtomicBool::new(false),
         });
         locked(&net.node)?.facts.listen = Some(listener.local_addr()?.to_string());
         let n = net.clone();
         std::thread::spawn(move || n.accept_loop(listener));
+        if let Some(project) = cfg.project.as_deref().filter(|_| cfg.beacon.is_some()) {
+            net.settle(project, cfg.settle)?;
+        }
         if let Some(b) = cfg.beacon {
             net.start_beacon(b)?;
         }
@@ -133,16 +146,53 @@ impl Net {
         let key = locked(&self.node)?.key.clone();
         let (a, b) = (self.clone(), self.clone());
         let hooks = Hooks {
-            identity: Box::new(move || a.node.lock().map(|n| (n.members.id.clone(), n.cert.fingerprint(), a.port)).unwrap_or_default()),
+            identity: Box::new(move || {
+                let quiet = a.settling.load(Ordering::SeqCst);
+                a.node.lock().map(|n| Advert {
+                    pool: if quiet { String::new() } else { n.members.id.clone() }, fingerprint: n.cert.fingerprint(), port: a.port,
+                    project: n.members.project.clone(), lone: n.members.alone(),
+                }).unwrap_or_default()
+            }),
             on_beacon: Box::new(move |beacon| b.heard(beacon)),
         };
         locked(&self.node)?.facts.beacon = true;
         beacon::start(cfg, key, hooks, self.stop.clone(), wall_ms)
     }
 
+    /// Take the project of this device (when it is alone) and look for an `open` pool of it: for
+    /// ``window`` this device is quiet and joins the first one heard; when none is, it makes its
+    /// pool `open` and beacons. A device that already belongs to the project is left as it is,
+    /// and one with members of another is not moved.
+    fn settle(self: &Arc<Net>, project: &str, window: Duration) -> Result<()> {
+        {
+            let mut node = locked(&self.node)?;
+            if node.members.project == project || !node.members.alone() {
+                return Ok(());
+            }
+            node.members.claim_project(project)?;
+        }
+        self.settling.store(true, Ordering::SeqCst);
+        let net = self.clone();
+        std::thread::spawn(move || {
+            let end = std::time::Instant::now() + window;
+            while std::time::Instant::now() < end && !net.stop.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            if let Ok(mut node) = net.node.lock() {
+                if node.members.alone() {
+                    let _ = node.members.set_policy(Policy::Open, wall_ms(), "auto");
+                }
+            }
+            net.settling.store(false, Ordering::SeqCst);
+        });
+        Ok(())
+    }
+
     /// A valid beacon was heard. A member's address is remembered; a non-member is answered
-    /// only under policy `open`, and only by a device in the same pool or alone in a pool whose id
-    /// sorts later (so two lone devices never join each other at once). Every other pool is ignored.
+    /// only when its pool is of this device's project and the policy is `open` (or this device is
+    /// still settling), and only by a device in the same pool or one alone in a pool whose id
+    /// sorts later or whose sender is not alone (so two lone devices never join each other at once,
+    /// and a lone device always joins an established pool). Every other pool is ignored.
     fn heard(self: &Arc<Net>, b: Beacon) {
         let Ok(mut node) = self.node.lock() else { return };
         if b.fingerprint == node.cert.fingerprint() {
@@ -159,8 +209,11 @@ impl Net {
                 }
             }
             Standing::Unknown => {
-                let eligible = node.members.policy == Policy::Open
-                    && (b.pool == node.members.id || (node.members.alone() && b.pool < node.members.id));
+                let settling = self.settling.load(Ordering::SeqCst);
+                let lone_joins = node.members.alone() && (b.pool < node.members.id || !b.lone);
+                let eligible = b.project == node.members.project
+                    && ((node.members.policy == Policy::Open && (b.pool == node.members.id || lone_joins))
+                        || (settling && b.pool != node.members.id && lone_joins));
                 drop(node);
                 if eligible && self.joining.lock().is_ok_and(|mut j| j.insert(b.fingerprint.clone())) {
                     let (net, fp) = (self.clone(), b.fingerprint.clone());
@@ -182,6 +235,9 @@ impl Net {
         let mut c = PeerClient::connect(&self.me, addr, Some(expect))?;
         let name = locked(&self.node)?.members.get(&self.me.fingerprint()).map(|d| d.name.clone()).unwrap_or_default();
         let hello = c.call(&json!({"op": "hello"}))?;
+        if hello["project"].as_str().unwrap_or("") != locked(&self.node)?.members.project {
+            return Err(Error::Denied("that pool belongs to another project".into()));
+        }
         if hello["policy"] != "open" {
             return Err(Error::Denied("that pool does not take a device without a code".into()));
         }
