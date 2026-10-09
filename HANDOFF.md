@@ -49,6 +49,20 @@
   - Hook diagnostics `post.reader-timeout` and `host not authenticated by cluster discovery` entries are untouched.
 - **Runtime cost.** `ml-stack runtime ensure --settle` has not run end to end on a real checkout.
 
+## Deferred by the third landing batch (2026-10-08)
+
+- **UI publication stack.**
+  - `GET /ui/board/agents` takes 4-8 s for 43 agents because `registered()` opens a store per agent; board routes are still O(N) in the verified log read.
+  - The python launcher `_health` accepts any JSON dict.
+  - `fix/poolside-chat-capabilities` was not brought in.
+  - Not driven for real: the Tauri window, an MLX run in Studio, runtime repair.
+  - The Development pool sign-in (the `local-session` route, its screen and pool scoping) was dropped because launch tickets replaced it; a pool choice after sign-out needs a new design on the ticket model.
+  - About 22 older UI browser tests drift from the current page (credentials, invites, model_tasks, pool_browser, sdk_chat, simple_controls, workspace_browser, startup_model_page, tasks_ui, agent_controls, workspace_board_ui).
+- **Disk writes (`docs/disk-writes.md`, "What remains").** `claude-edit-guard` rewrites its whole index (4.5 s, 0.75 MB) after any `src/ml_stack` edit and agents may not edit it, so the HEAD-keyed index is the owner's change; bytes per SQLite/ladybug touch need `fs_usage` under sudo; `HEARTBEAT_S` for task leases needs a liveness decision.
+- **Earned trust (`docs/earned-trust.md`).** Section 8 slices (landing record M1, reviewer concentration M7, suspension rules, signed-head anchor in the keystore, coordinator eligibility from the ledger) are not built; the owner decisions are recorded in section 9 and its wording for AGENTS.md (section 10) is not yet added.
+- **Service and home pool (`docs/service.md`, `docs/home-pool.md`, `docs/pool-encryption.md`).** Plans only; the section 8 checklist items marked Violates (one cluster key, one account per device, no tenant id) are open.
+- **Coordination plumbing.** The lead-answer rule is in AGENTS.md; whether the claude-lead-attention hook nudges often enough is unmeasured.
+
 ## Autostart units (prepare and install)
 
 - **`runtime-ensure` has not run unattended against a real checkout.** The unit runs `ml-stack runtime ensure` as no agent (no `ML_STACK_WORKSPACE_AGENT` in its environment) from the `ml-stack` launcher in the `--launchers` directory; it needs a first `ensure --checkout --launchers` run by a person or agent, and hourly runs on a checkout with local edits or a held commit have not been observed.
