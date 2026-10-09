@@ -35,6 +35,7 @@ def board(workspace_node, monkeypatch, tmp_path):
     wrapper.write_text(f'#!{sys.executable}\nimport sys\nfrom ml_stack.workspace.cli import main\n'
                        'raise SystemExit(main(sys.argv[1:]))\n')
     wrapper.chmod(0o700)
+    monkeypatch.chdir(tmp_path)  # outside any checkout, so the hooks report no worktrees of the real one
     monkeypatch.setenv('PATH', f'{binary}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.setenv('PYTHONPATH', SRC)
     monkeypatch.setenv('ML_STACK_HOOK_STATE', str(tmp_path / 'hookstate'))
