@@ -32,17 +32,68 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ml_stack import home
 
 ENV = "DEV_TEST_WRITE_DENY"
-"""``0`` turns the denial off for a run; ``1`` marks a process already under it."""
+"""Input: ``0`` turns the denial off for a run. Output: the supervisor sets ``1`` in a child only after
+it wrapped that child, so a value a user sets is never proof (`denied_here` checks by effect)."""
+WRAP_ENV = "DEV_TEST_WRITE_DENY_WRAP"
+"""Set by `run_pytest` on a pass that is to be wrapped."""
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 MARKER = "seatbelt"
 
 
+def say(text: str) -> None:
+    """A notice on stderr, where a run's other supervisor lines go."""
+    print(f"test: {text}", file=sys.stderr, flush=True)
+
+
+def candidates() -> list[Path]:
+    """Every real path a test must not write: the account's state and cache roots, the roots the
+    launching environment names (``ML_STACK_HOME``, ``ML_STACK_CACHE`` and each ``home.OVERRIDES``
+    variable that is set)."""
+    state, cache = home.account_roots()
+    named = [home.home(), home.cache(), *(home.expand(os.environ[v]) for v in home.OVERRIDES.values() if os.environ.get(v))]
+    return sorted({path.resolve() for path in (state, cache, *named)})
+
+
 def protected(repo: Path) -> list[Path]:
-    """The real state roots a test must not write: the account's own and the one the launching
-    environment names, minus any that would contain the checkout or the temporary directory."""
-    roots = {home.account_roots()[0].resolve(), home.home().resolve()}
-    fenced = (repo.resolve(), Path(tempfile.gettempdir()).resolve(), Path.home().resolve())
-    return sorted(root for root in roots if not any(root == keep or root in keep.parents for keep in fenced))
+    """`candidates` minus any that would contain the checkout, the temporary directory or HOME,
+    which would make the run unable to work; each one dropped is said out loud."""
+    fenced = {"the checkout": repo.resolve(), "the temporary directory": Path(tempfile.gettempdir()).resolve(),
+              "HOME": Path.home().resolve()}
+    kept = []
+    for root in candidates():
+        holds = [name for name, keep in fenced.items() if root == keep or root in keep.parents]
+        if holds:
+            say(f"write denial: {root} is not denied because it holds {' and '.join(holds)}")
+        else:
+            kept.append(root)
+    return kept
+
+
+def probe_file(root: Path) -> Path | None:
+    """An existing regular file under ``root`` outside the keystore, to open for writing without
+    changing it, or None."""
+    for here, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs if d != "keystore"][:8]
+        for name in names:
+            path = Path(here, name)
+            if path.is_file() and not path.is_symlink():
+                return path
+    return None
+
+
+def denied_here(root: Path) -> bool | None:
+    """Whether this process cannot write under ``root``, by effect: opening an existing file there
+    for writing (no create, no truncate, nothing written) is refused. None when there is no file to try."""
+    target = probe_file(root)
+    if target is None:
+        return None
+    try:
+        os.close(os.open(target, os.O_WRONLY))
+    except PermissionError:
+        return True
+    except OSError as exc:  # a read-only bind mount is EROFS
+        return exc.errno == 30
+    return False
 
 
 def quote(path: str) -> str:
@@ -60,8 +111,9 @@ def profile(roots: list[Path]) -> str:
 
 def bubblewrap(roots: list[Path], command: list[str]) -> list[str]:
     """``command`` under bwrap with ``roots`` bound read-only over a bind of the whole filesystem."""
-    binds = [arg for root in roots for arg in ("--ro-bind", str(root), str(root))]
-    return ["bwrap", "--bind", "/", "/", "--dev-bind", "/dev", "/dev", *binds, "--", *command]
+    binds = [arg for root in roots if root.exists() for arg in ("--ro-bind", str(root), str(root))]
+    return ["bwrap", "--die-with-parent", "--new-session", "--bind", "/", "/", "--dev-bind", "/dev", "/dev",
+            *binds, "--", *command]
 
 
 def wrapper(roots: list[Path], command: list[str]) -> list[str] | None:
@@ -102,20 +154,26 @@ class Pass:
 
 
 def select(command: list[str], marked: bool) -> list[str]:
-    """``command`` narrowed to the tests with the marker (``marked``) or without it, by `-m`."""
+    """``command`` narrowed to the tests with the marker (``marked``) or without it, by `-m`
+    (written ``-m EXPR``, ``-mEXPR`` or ``-m=EXPR``)."""
     out = list(command)
     clause = MARKER if marked else f"not {MARKER}"
     first = out.index("pytest") + 1
-    if "-m" in out[first:]:
-        at = first + out[first:].index("-m") + 1
-        out[at] = f"({out[at]}) and {clause}"
-    else:
-        out[first:first] = ["-m", clause]
+    for at in range(first, len(out)):
+        part = out[at]
+        if part == "-m" and at + 1 < len(out):
+            out[at + 1] = f"({out[at + 1]}) and {clause}"
+            return out
+        if part.startswith("-m") and len(part) > 2:
+            out[at] = f"-m=({part[3:] if part[2] == '=' else part[2:]}) and {clause}"
+            return out
+    out[first:first] = ["-m", clause]
     return out
 
 
 def listed(repo: Path) -> frozenset[str]:
-    """The test modules in ``tests/seatbelt-modules.txt`` that run `sandbox-exec` themselves."""
+    """The test modules in ``tests/seatbelt-modules.txt`` that run `sandbox-exec` themselves, as
+    paths relative to ``tests/`` (so a module of the same name in a subdirectory is not one)."""
     try:
         text = (repo / "tests" / "seatbelt-modules.txt").read_text(encoding="utf-8")
     except OSError:
@@ -124,25 +182,35 @@ def listed(repo: Path) -> frozenset[str]:
 
 
 def named(command: list[str]) -> set[str]:
-    """The test file names a command selects by path or node id; empty when it selects a directory or all."""
+    """The test files a command selects by path or node id, relative to ``tests/``; empty when it
+    selects a directory or everything."""
     out = set()
     for arg in command[command.index("pytest") + 1:]:
         if arg.startswith("tests/") and ".py" in arg:
-            out.add(Path(arg.split("::")[0]).name)
+            out.add(arg.split("::")[0][len("tests/"):])
     return out
 
 
 def passes(command: list[str], environment: dict[str, str], repo: Path) -> list[Pass] | None:
     """The passes of a run under the denial, or None to run it as given.
 
-    None when the run opted out (``DEV_TEST_WRITE_DENY=0``), is already inside a denial, is not a
-    plain ``python -m pytest`` command, or the platform cannot apply it. Two passes when the
-    selection reaches both ordinary tests and ``seatbelt`` modules, else the one that is needed.
+    None (with a notice when it is not routine) when the run opted out (``DEV_TEST_WRITE_DENY=0``),
+    is already inside a denial (found by effect, not by a variable), is not a plain
+    ``python -m pytest`` command, or the platform cannot apply it. Two passes when the selection
+    reaches both ordinary tests and ``seatbelt`` modules, else the one that is needed.
     """
-    if environment.get(ENV) in ("0", "1") or "pytest" not in command:
+    if "pytest" not in command:
+        return None
+    if environment.get(ENV) == "0":
+        say("real-state write denial is off (DEV_TEST_WRITE_DENY=0); only the after-the-fact check applies")
         return None
     roots = protected(repo)
-    if not roots or not works():
+    if not roots:
+        return None
+    if all(denied_here(root) for root in roots):
+        return None
+    if not works():
+        say("real-state write denial cannot be applied on this host; only the after-the-fact check applies")
         return None
     nested, picked = listed(repo), named(command)
     if not nested:
@@ -155,11 +223,47 @@ def passes(command: list[str], environment: dict[str, str], repo: Path) -> list[
     return result
 
 
+def junit_at(command: list[str]) -> int | None:
+    """The index of the argument holding the JUnit path: ``--junitxml=PATH`` itself, or the value
+    after a bare ``--junitxml``."""
+    for index, part in enumerate(command):
+        if part.startswith("--junitxml="):
+            return index
+        if part == "--junitxml" and index + 1 < len(command):
+            return index + 1
+    return None
+
+
+def junit_path(command: list[str]) -> Path | None:
+    """Where the command writes its JUnit file, or None."""
+    at = junit_at(command)
+    if at is None:
+        return None
+    return Path(command[at].split("=", 1)[1] if command[at].startswith("--junitxml=") else command[at])
+
+
+def with_junit(command: list[str], path: Path) -> list[str]:
+    """``command`` writing its JUnit file to ``path`` instead."""
+    out = list(command)
+    at = junit_at(out)
+    if at is not None:
+        out[at] = f"--junitxml={path}" if out[at].startswith("--junitxml=") else str(path)
+    return out
+
+
 def merge_junit(into: Path, other: Path) -> None:
     """Fold the testcases and counts of the JUnit file ``other`` into ``into``."""
     from xml.etree import ElementTree
 
-    first, second = ElementTree.parse(into), ElementTree.parse(other)  # noqa: S314 - files pytest just wrote
+    try:
+        second = ElementTree.parse(other)  # noqa: S314 - a file pytest just wrote
+    except (OSError, ElementTree.ParseError):
+        return  # that pass died before writing one; its exit status still counts
+    try:
+        first = ElementTree.parse(into)  # noqa: S314 - a file pytest just wrote
+    except (OSError, ElementTree.ParseError):
+        second.write(into, encoding="utf-8", xml_declaration=True)  # the first died: the second is all there is
+        return
     head = first.getroot().find("testsuite") if first.getroot().tag == "testsuites" else first.getroot()
     tail = second.getroot().find("testsuite") if second.getroot().tag == "testsuites" else second.getroot()
     if head is None or tail is None:

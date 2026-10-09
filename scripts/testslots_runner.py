@@ -74,9 +74,10 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
     (scripts/testwritedeny.py), the rest beside them without it."""
     environment = environment_for(env)
     plan = None if container or confining(environment) else testwritedeny.passes(command, environment, ROOT)
+    environment.pop(testwritedeny.ENV, None)
     if plan is None:
-        return run_once(command, want, label, env, container=container)
-    given = next((i for i, part in enumerate(command) if part.startswith("--junitxml=")), None)
+        return run_once(command, want, label, environment, container=container)
+    given = testwritedeny.junit_path(command)
     statuses, extra = [], []
     for index, one in enumerate(plan):
         shown = list(one.command)
@@ -84,12 +85,12 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
             descriptor, name = tempfile.mkstemp(suffix=".xml")
             os.close(descriptor)
             extra.append(Path(name))
-            shown[next(i for i, part in enumerate(shown) if part.startswith("--junitxml="))] = f"--junitxml={name}"
-        statuses.append(run_once(shown, want, label, {**environment, testwritedeny.ENV: "1" if one.denied else "0"}))
+            shown = testwritedeny.with_junit(shown, Path(name))
+        statuses.append(run_once(shown, want, label, {**environment, **({testwritedeny.WRAP_ENV: "1"} if one.denied else {})}))
     try:
         for path in extra:
-            if given is not None and path.stat().st_size:
-                testwritedeny.merge_junit(Path(command[given].split("=", 1)[1]), path)
+            if given is not None:
+                testwritedeny.merge_junit(given, path)
     finally:
         for path in extra:
             path.unlink(missing_ok=True)
@@ -217,6 +218,10 @@ def prepare_pytest(command, environment, admission, launch, prepared):
         prepared.confined = confined
         command, environment = confined.wrapped.argv, confined.environment
         confined.recheck_images()
-    if environment.get(testwritedeny.ENV) == "1":
-        command = testwritedeny.wrapper(testwritedeny.protected(ROOT), command) or command
+    if environment.pop(testwritedeny.WRAP_ENV, "") == "1":
+        wrapped = testwritedeny.wrapper(testwritedeny.protected(ROOT), command)
+        if wrapped is None:
+            testwritedeny.say("real-state write denial could not wrap this pass; only the after-the-fact check applies")
+        else:
+            command, environment[testwritedeny.ENV] = wrapped, "1"
     return command, environment
