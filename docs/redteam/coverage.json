@@ -1,8 +1,8 @@
 {
- "surfaces": 841,
+ "surfaces": 842,
  "by_status": {
   "covered": 516,
-  "partial": 197,
+  "partial": 198,
   "uncovered": 53,
   "n/a": 75,
   "unmapped": 0
@@ -101,7 +101,7 @@
   },
   "spawn": {
    "covered": 64,
-   "partial": 60,
+   "partial": 61,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -11577,6 +11577,18 @@
     "tests/test_net_scan.py"
    ],
    "note": ""
+  },
+  {
+   "id": "spawn:node_binary.py:build",
+   "kind": "spawn",
+   "source": "node_binary.py:build",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
    "id": "spawn:pi.py:launch",
