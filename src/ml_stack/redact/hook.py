@@ -39,7 +39,7 @@ from ml_stack import home
 from ml_stack.contracts import ContractError, load
 from ml_stack.redact.added import added_lines
 from ml_stack.redact.allowlist import allow
-from ml_stack.redact.benign import documented, not_a_name, phone_is_code, quoted
+from ml_stack.redact.benign import documented, not_a_name, phone_is_code, placeholder, quoted
 
 __all__ = ["Shapes", "main", "recogniser", "shapes"]
 
@@ -494,7 +494,7 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
             else:
                 # no span: the match is a quoted string, and what surrounds a literal says
                 # nothing about what is inside it -- a name in a JS string is still refused
-                fired = rules.stood_down(body) or rules.in_context(body, line)
+                fired = rules.stood_down(body) or rules.in_context(body, line) or placeholder(body)
             if fired is None:
                 yield path, i, f"{body!r} is shaped like a name (patterns: nameish; nothing stood it down)"
             elif why is not None:
@@ -526,7 +526,8 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
         line = text[opened:closed if closed != -1 else len(text)]
         # the recogniser is left as strict as it was about people; what stands a hit down is
         # only ever a shape that is code -- a table cell of digits, an expression, a product
-        fired = rules.in_context(body, line, (hit.start - opened, hit.end - opened)) or not_a_name(body)
+        fired = (rules.in_context(body, line, (hit.start - opened, hit.end - opened)) or not_a_name(body)
+                 or placeholder(body))
         if fired is not None:
             if why is not None:
                 why.append((path, at, f"{body!r} cleared by {fired}"))
