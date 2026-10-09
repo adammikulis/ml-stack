@@ -40,6 +40,7 @@ from . import (
     invite_routes,
     project_workers,
     projects as project_routes,
+    shard_routes,
 )
 from .availability import Availability, parse_window
 from .daemon_control import protected
@@ -118,6 +119,8 @@ class Daemon:
     """Answers a machine that asks to join with the passphrase; without it the join routes are off."""
     command: Callable[[list[str]], list[str]] = commands.allowed
     """Which argv a ``POST /jobs`` may run, and in what form; raises ValueError to refuse."""
+    shards: Any | None = None
+    """A `fleet.shard_host.ShardHost`; without one the daemon builds it from the saved test-shards setting."""
 
 
 def _count(text: str, fallback: int, most: int = 1_000_000) -> int:
@@ -425,7 +428,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     and not self._guard():
                 return
             if project_routes.answer(self, daemon.projects, parsed,
-                                     cluster_key_path=cluster_key_path) or self._extension():
+                                     cluster_key_path=cluster_key_path) or self._shards() or self._extension():
                 return
             if path == "/health":
                 status = runner.status()
@@ -633,7 +636,12 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            return project_workers.answer(self, daemon.workspaces, body, cluster_key_path)
+            return project_workers.answer(self, daemon.workspaces, body, cluster_key_path) or self._shards(body)
+
+        def _shards(self, body: bytes | None = None) -> bool:
+            if not shard_routes.PATH.fullmatch(self.path.split("?")[0]):
+                return False
+            return shard_routes.answer(self, daemon.shards or shard_routes.default_host(daemon), body)
 
         def _route_post(self, body: bytes) -> None:
             parsed = urllib.parse.urlparse(self.path)
