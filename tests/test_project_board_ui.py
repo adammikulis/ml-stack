@@ -46,7 +46,7 @@ def project_board(tmp_path):
     cookie_value = f"ml_stack_ui={session.sid}"
     ui = SimpleNamespace(sessions=sessions, projects=registry, record=lambda *a, **k: None,
                          workspaces=WorkspaceHost(registry),
-                         authed=lambda cookie: cookie == cookie_value, host_ok=lambda host: host == "127.0.0.1:8770")
+                         authed=lambda cookie: cookie == cookie_value, credentialed=lambda cookie: cookie == cookie_value, host_ok=lambda host: host == "127.0.0.1:8770")
     def call(suffix, *, project=PROJECT, method="GET", body=None, **options):
         cookie = options.get("cookie", cookie_value)
         ip = options.get("ip", "127.0.0.1")

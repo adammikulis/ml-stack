@@ -41,6 +41,7 @@ from . import (
     invite_routes,
     project_workers,
     projects as project_routes,
+    shard_routes,
 )
 from .availability import Availability, parse_window
 from .daemon_control import protected
@@ -123,6 +124,7 @@ class Daemon:
     """Which devices are in this daemon's clusters; by default the record beside ``cluster_key_path``."""
     command: Callable[[list[str]], list[str]] = commands.allowed
     """Which argv a ``POST /jobs`` may run, and in what form; raises ValueError to refuse."""
+    shards: Any | None = None  # a fleet.shard_host.ShardHost; default: built from the saved test-shards setting
 
 
 def _count(text: str, fallback: int, most: int = 1_000_000) -> int:
@@ -439,7 +441,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if member_answer(self, roster, "GET", path, None):
                 return
             if project_routes.answer(self, daemon.projects, parsed,
-                                     cluster_key_path=cluster_key_path) or self._extension():
+                                     cluster_key_path=cluster_key_path) or shard_routes.serve(self, daemon) or self._extension():
                 return
             if path == "/health":
                 status = runner.status()
@@ -649,7 +651,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            return project_workers.answer(self, daemon.workspaces, body, cluster_key_path)
+            return project_workers.answer(self, daemon.workspaces, body, cluster_key_path) or shard_routes.serve(self, daemon, body)
 
         def _route_post(self, body: bytes) -> None:
             parsed = urllib.parse.urlparse(self.path)

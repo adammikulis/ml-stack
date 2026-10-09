@@ -986,8 +986,8 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
 
 
 def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypatch):
-    """`--draft-kv` sets the head's cache and leaves `--kv`'s alone; without it the build
-    keeps its own, which is the full-size one."""
+    """`--draft-kv` sets the head's cache and leaves `--kv`'s alone; without it the head's
+    cache is q8_0."""
     import contextlib
     import types
 
@@ -1017,8 +1017,12 @@ def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypat
 
     with contextlib.suppress(SystemExit):
         cli.main(["up", str(model), "--draft", str(head), "--port", "1"])
-    assert seen["spec"].spec_draft_type_k == ""
-    assert seen["spec"].spec_draft_type_v == ""
+    assert seen["spec"].spec_draft_type_k == "q8_0", "the head's cache defaults to q8_0"
+    assert seen["spec"].spec_draft_type_v == "q8_0"
+
+    with contextlib.suppress(SystemExit):
+        cli.main(["up", str(model), "--draft", str(head), "--draft-kv", "f16", "--port", "1"])
+    assert (seen["spec"].spec_draft_type_k, seen["spec"].spec_draft_type_v) == ("f16", "f16")
 
 
 class TestTheMeasuredShapeIsTheDefault:
