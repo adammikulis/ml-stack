@@ -24,7 +24,7 @@ pub fn params(method: &str) -> Option<&'static [&'static str]> {
         "pair_accept" => &["passphrase", "ttl_s"],
         "pair_start" => &["host", "port", "passphrase", "fingerprint"],
         "shard_call" => &["device", "op", "args"],
-        "shard_consent" => &["enabled", "python", "repo"],
+        "shard_consent" => &["enabled", "python", "repo", "allow", "deny"],
         _ => return None,
     })
 }
@@ -63,6 +63,9 @@ pub fn dispatch(node: &mut Node, method: &str, token: &str, p: &Map<String, Valu
                 return Err(Error::Denied("a device does not revoke itself; leave by removing its state".into()));
             }
             let device = node.revoke_device(fingerprint, &format!("{}/{}", who.board, who.name))?;
+            if crate::shard::consent::forget(&node.dir, fingerprint)? {
+                node.record_event("shard_allow", fingerprint, &format!("removed: put out of the pool by {}/{}", who.board, who.name))?;
+            }
             Ok(json!({"fingerprint": device.fingerprint, "status": device.status}))
         }
         "set_join_policy" => {

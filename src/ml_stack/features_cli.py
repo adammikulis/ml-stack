@@ -13,8 +13,10 @@ import argparse
 import json
 
 from ml_stack import features
+from ml_stack.board.client import NodeError
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
+from ml_stack.testfarm import consent
 
 __all__ = ["GROUP", "main"]
 
@@ -34,6 +36,15 @@ def _list(args: argparse.Namespace) -> int:
     return 0
 
 
+def stop_shards() -> None:
+    """Turning remote tests off also switches this device's node off, so nothing keeps taking tests behind the feature."""
+    try:
+        consent.switch("off")
+        say("test shards: off")
+    except (NodeError, OSError, ValueError) as exc:
+        warn(f"the feature is off but this device's node was not switched off ({exc}); run `python -m ml_stack.testfarm.consent off`")
+
+
 def _switch(on: bool):
     def run(args: argparse.Namespace) -> int:
         try:
@@ -42,6 +53,8 @@ def _switch(on: bool):
             warn(str(no.args[0]))
             return 2
         say(f"{args.name}: {'on' if on else 'off'}" + ("" if changed else " (already)"))
+        if not on and args.name == "remote-tests":
+            stop_shards()
         return 0
     return run
 

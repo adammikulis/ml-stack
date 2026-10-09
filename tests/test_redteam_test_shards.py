@@ -226,7 +226,7 @@ def test_a_paired_device_that_is_not_marked_as_the_owners_is_refused(pool, third
     code = b.call("pair_accept", token=b.token)
     third.call("pair_start", token=third.token, host="127.0.0.1", port=code["port"], passphrase=code["code"])
     ours, fp_b = Shards(seat(third)), peer(a)["fingerprint"]
-    assert ours.capability(fp_b)["accepts"] is True, "a member is answered"
+    assert ours.capability(fp_b)["accepts"] is False, "a member is answered, and told it is not allowed"
     b.call("member_revoke", token=b.token, fingerprint=node_health.call(third.state, "pool_status")["fingerprint"])
     with pytest.raises(ShardError):
         ours.capability(fp_b)
@@ -268,3 +268,32 @@ def test_an_unknown_or_hostile_shard_id_has_no_result(pool, shard_id):
 def seat(device):
     """A device's own registered session."""
     return board_session.Session(device.client, "demo", device.token)
+
+
+def test_a_member_that_is_not_on_the_allowed_list_is_refused_every_op_but_the_question(pool, third):
+    """Joining the pool, however it happened (a code, or `open` on the same network), does not let a device run anything here."""
+    a, b, _shards, _tree = pool
+    enable(b)
+    code = b.call("pair_accept", token=b.token)
+    third.call("pair_start", token=third.token, host="127.0.0.1", port=code["port"], passphrase=code["code"])
+    ours, fp_b = Shards(seat(third)), peer(a)["fingerprint"]
+    asked = ours.capability(fp_b)
+    assert asked["accepts"] is False and asked["allowed"] is False
+    for op, args in [("shard_put", {"id": GOOD_ID, "offset": 0, "data": "00"}), ("shard_start", start_request(b"x")),
+                     ("shard_status", {"id": GOOD_ID}), ("shard_cancel", {"id": GOOD_ID})]:
+        refused(ours, fp_b, op, "does not take tests from you", **args)
+    assert jobs_on(b) == 0
+
+
+def test_allowing_a_device_names_a_pool_member_and_never_everyone(pool, third):
+    _a, b, _shards, _tree = pool
+    stranger = node_health.call(third.state, "pool_status")["fingerprint"]
+    with pytest.raises(NodeError, match="another active member"):
+        b.call("shard_consent", token=b.token, allow=[stranger])
+    with pytest.raises(NodeError):
+        b.call("shard_consent", token=b.token, allow=["*"])
+    with pytest.raises(NodeError):
+        b.call("shard_consent", token=b.token, allow="all")
+    with pytest.raises(NodeError):
+        b.call("shard_consent", token=b.token, allow=[node_health.call(b.state, "pool_status")["fingerprint"]])
+    assert b.call("shard_consent")["allowed"] == [], "nobody is allowed until a person names a device"

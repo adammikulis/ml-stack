@@ -27,6 +27,7 @@ from testfarm_tree import MARKERS, make_tree
 from ml_stack import features
 from ml_stack.fleet import shard_exec, shard_spec, shard_split, shard_tree
 from ml_stack.testfarm import consent, devices, ledger, report
+from ml_stack.testfarm.client import ShardError
 
 ROOT = Path(__file__).resolve().parents[1]
 ID = "ab" * 16
@@ -255,3 +256,21 @@ def test_nothing_is_sent_or_taken_until_the_experimental_feature_is_on(tmp_path,
     assert "experimental feature" in capsys.readouterr().err
     assert features.enabled(consent.FEATURE) is False and consent.run(["on"]) == 1
     assert "ml-stack features enable remote-tests" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("words", [[], ["allow"], ["deny"], ["on", "--from"], ["on", "--from", "--python"], ["off", "--from", "mac"], ["status", "mac"],
+                                   ["allow", "--json"], ["allow", "mac", "--bogus"], ["on", "extra"], ["--from", "mac"], ["on", "off"]])
+def test_the_consent_command_line_refuses_what_it_cannot_read(words, capsys):
+    assert consent.options(words) is None and consent.run(words) == 2
+    assert "usage:" in capsys.readouterr().out
+
+
+def test_the_consent_command_line_reads_devices_and_options():
+    got = consent.options(["on", "--from", "mac", "--from", "win", "--python", "/p", "--repo", "/r", "--json"])
+    assert got == {"action": "on", "python": "/p", "repo": "/r", "json": "1", "devices": ["mac", "win"]}
+    assert consent.options(["allow", "mac", "win"])["devices"] == ["mac", "win"] and consent.options(["deny", "mac"])["action"] == "deny"
+
+
+def test_everyone_is_not_a_device_to_allow():
+    with pytest.raises(ShardError, match="one by one"):
+        consent.fingerprints(["all"])

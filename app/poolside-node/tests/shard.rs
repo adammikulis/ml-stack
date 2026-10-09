@@ -49,7 +49,7 @@ impl Rig {
 
     /// `b` with shards switched on, the way its person would.
     fn enable(&self) -> Value {
-        self.b.ok("shard_consent", "", &self.b.token, json!({"enabled": true, "python": self.python(), "repo": self.repo()}))
+        self.b.ok("shard_consent", "", &self.b.token, json!({"enabled": true, "python": self.python(), "repo": self.repo(), "allow": [self.a.fp()]}))
     }
 
     /// Ask `b` something as `a`'s session.
@@ -212,6 +212,7 @@ fn the_requester_is_the_certificate_never_a_field_of_the_request() {
     let c = device();
     rig.a.pair_secure(&c);
     rig.b.ok("sync_now", "", &rig.b.token, json!({}));
+    rig.b.ok("shard_consent", "", &rig.b.token, json!({"allow": [c.fp()]}));
     let mut other = PeerClient::connect(&c.net.me, rig.b.addr(), Some(&rig.b.fp())).unwrap();
     {
         assert!(other.call(&json!({"op": "shard_caps"})).is_ok(), "c is a member of b's record by now");
@@ -385,4 +386,73 @@ fn cancel_ends_the_executor_and_everything_it_started() {
 fn kit_identity(seed: u8) -> Identity {
     let dir = tempfile::tempdir().unwrap();
     poolside_node::cert::load_or_create(dir.path(), &kit::key(seed)).unwrap()
+}
+
+// -- the allowed list ---------------------------------------------------------
+
+/// A third device paired into b's pool, and a client of b as it.
+fn member_of_b(rig: &Rig) -> (Dev, PeerClient) {
+    let c = device();
+    rig.b.pair_secure(&c);
+    let client = PeerClient::connect(&c.net.me, rig.b.addr(), Some(&rig.b.fp())).unwrap();
+    (c, client)
+}
+
+#[test]
+fn a_member_that_is_not_allowed_is_refused_every_op_but_the_question_and_the_refusal_is_on_the_board() {
+    let rig = rig();
+    rig.enable();
+    let (_c, mut client) = member_of_b(&rig);
+    let caps = client.call(&json!({"op": "shard_caps"})).unwrap();
+    assert_eq!((caps["accepts"].clone(), caps["allowed"].clone()), (json!(false), json!(false)));
+    assert!(caps["reason"].as_str().unwrap().contains("consent allow"), "{caps}");
+    for req in [json!({"op": "shard_put", "id": id(60), "offset": 0, "data": "00"}), json!({"op": "shard_status", "id": id(60)}),
+                json!({"op": "shard_cancel", "id": id(60)}), json!({"op": "shard_start", "id": id(60)}), json!({"op": "shard_put"})] {
+        assert!(matches!(client.call(&req), Err(Error::Denied(_))), "{req}");
+    }
+    assert!(!job_dir(&rig, &id(60)).exists());
+    let trail = rig.b.node.lock().unwrap().view("pool").unwrap();
+    let refused = trail.iter().filter(|e| e.fields.get("event").and_then(Value::as_str) == Some("shard_refused")).count();
+    assert_eq!(refused, 1, "one entry for a burst");
+    assert_eq!(rig.ok("shard_caps", json!({}))["allowed"], true, "the allowed device is answered");
+}
+
+#[test]
+fn allowing_names_active_members_only_is_audited_and_denying_ends_the_runs() {
+    let rig = rig();
+    rig.enable();
+    let stranger = device();
+    let r = rig.b.call("shard_consent", "", &rig.b.token, json!({"allow": [stranger.fp()]}));
+    assert_eq!(r["error"]["code"], "invalid", "a device outside the pool cannot be allowed: {r}");
+    for bad in [json!(["xyz"]), json!("a"), json!([rig.b.fp()])] {
+        assert_eq!(rig.b.call("shard_consent", "", &rig.b.token, json!({"allow": bad}))["ok"], false);
+    }
+    assert_eq!(rig.b.call("shard_consent", "", "", json!({"deny": [rig.a.fp()]}))["error"]["code"], "denied", "a token is needed");
+    let (c, mut client) = member_of_b(&rig);
+    rig.b.ok("shard_consent", "", &rig.b.token, json!({"allow": [c.fp()]}));
+    assert_eq!(client.call(&json!({"op": "shard_status", "id": id(61)})).map_err(|e| e.code()), Err("invalid"), "allowed now");
+    let trail = rig.b.node.lock().unwrap().view("pool").unwrap();
+    assert!(trail.iter().any(|e| e.fields.get("event").and_then(Value::as_str) == Some("shard_allow") && e.fields["detail"].as_str().unwrap().contains("demo/")), "who allowed whom is recorded");
+    let tree = b"w".repeat(64);
+    assert_eq!(rig.run(&id(62), &tree, "slow", &[], 600)["ok"], true);
+    let dir = job_dir(&rig, &id(62));
+    let (executor, child) = (pid_in(&dir, "executor.pid"), pid_in(&dir, "grandchild.pid"));
+    rig.b.ok("shard_consent", "", &rig.b.token, json!({"deny": [rig.a.fp()]}));
+    eventually("the denied device's run is ended", 30, || dead(executor) && dead(child));
+    assert_eq!(rig.code("shard_status", json!({"id": id(62)})), "denied");
+}
+
+#[test]
+fn putting_a_member_out_of_the_pool_takes_it_off_the_allowed_list() {
+    let rig = rig();
+    rig.enable();
+    let (c, mut client) = member_of_b(&rig);
+    rig.b.ok("shard_consent", "", &rig.b.token, json!({"allow": [c.fp()]}));
+    assert_eq!(rig.b.ok("shard_consent", "", "", json!({}))["allowed"].as_array().unwrap().len(), 2);
+    rig.b.ok("member_revoke", "", &rig.b.token, json!({"fingerprint": c.fp()}));
+    let left = rig.b.ok("shard_consent", "", "", json!({}));
+    assert_eq!(left["allowed"], json!([rig.a.fp()]), "only the device still in the pool is left");
+    assert!(client.call(&json!({"op": "shard_caps"})).is_err(), "and it is refused at its next request");
+    let trail = rig.b.node.lock().unwrap().view("pool").unwrap();
+    assert!(trail.iter().any(|e| e.fields.get("event").and_then(Value::as_str) == Some("shard_allow") && e.fields["detail"].as_str().unwrap().contains("put out of the pool")));
 }

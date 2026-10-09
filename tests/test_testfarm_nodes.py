@@ -19,7 +19,7 @@ import pytest
 import test_on
 from testfarm_kit import BOARD, enable, go, gone, jobs_on, peer, until
 
-from ml_stack import features, node_launch
+from ml_stack import features, features_cli, node_launch
 from ml_stack.fleet import shard_split, shard_tree
 from ml_stack.testfarm import consent, devices
 from ml_stack.testfarm.client import ShardError, Shards, choose
@@ -42,7 +42,7 @@ def test_a_device_nobody_enabled_takes_nothing_and_is_listed_with_why(pool, caps
     assert row["caps"]["accepts"] is False and row["fingerprint"] == fp
 
 
-def test_the_person_turns_a_device_on_with_the_command_and_off_stops_the_next_upload(pool, monkeypatch, capsys):
+def test_the_person_turns_a_device_on_names_whose_tests_it_takes_and_off_stops_the_next_upload(pool, monkeypatch, capsys):
     a, b, shards, _tree = pool
     fp = peer(a)["fingerprint"]
     monkeypatch.setenv("ML_STACK_HOME", str(b.root))
@@ -50,14 +50,41 @@ def test_the_person_turns_a_device_on_with_the_command_and_off_stops_the_next_up
     assert consent.run(["on"]) == 1 and "experimental feature" in capsys.readouterr().out
     assert shards.capability(fp)["accepts"] is False, "the feature is off on B, so the switch stays off"
     features.switch("remote-tests", True)
-    assert consent.run(["on"]) == 0 and "test shards: on" in capsys.readouterr().out
+    assert consent.run(["on"]) == 0 and "takes tests from nobody yet" in capsys.readouterr().out
     assert consent.run(["status", "--json"]) == 0 and json.loads(capsys.readouterr().out)["python"] == sys.executable
+    monkeypatch.setenv("ML_STACK_HOME", str(a.root))
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a.token)
+    asked = shards.capability(fp)
+    assert asked["accepts"] is False and asked["allowed"] is False and "consent allow" in asked["reason"]
+    monkeypatch.setenv("ML_STACK_HOME", str(b.root))
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", b.token)
+    named = peer(b)["name"]
+    assert consent.run(["allow", named]) == 0 and "takes tests from 1 device" in capsys.readouterr().out
     monkeypatch.setenv("ML_STACK_HOME", str(a.root))
     monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a.token)
     assert shards.capability(fp)["accepts"] is True
     monkeypatch.setenv("ML_STACK_HOME", str(b.root))
     monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", b.token)
+    assert consent.run(["deny", named]) == 0 and "takes tests from nobody yet" in capsys.readouterr().out
+    assert consent.run(["on", "--from", named]) == 0 and "takes tests from 1 device" in capsys.readouterr().out
     assert consent.run(["off"]) == 0
+    monkeypatch.setenv("ML_STACK_HOME", str(a.root))
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a.token)
+    assert shards.capability(fp)["accepts"] is False
+
+
+def test_disabling_the_feature_switches_the_node_off_too(pool, monkeypatch, capsys):
+    a, b, shards, _tree = pool
+    enable(b)
+    fp = peer(a)["fingerprint"]
+    assert shards.capability(fp)["accepts"] is True
+    monkeypatch.setenv("ML_STACK_HOME", str(b.root))
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", b.token)
+    features.switch("remote-tests", True)
+    assert features_cli.main(["disable", "remote-tests"]) == 0
+    assert features.enabled("remote-tests") is False and "test shards: off" in capsys.readouterr().out
+    monkeypatch.setenv("ML_STACK_HOME", str(a.root))
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a.token)
     assert shards.capability(fp)["accepts"] is False
 
 

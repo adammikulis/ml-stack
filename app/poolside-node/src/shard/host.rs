@@ -88,6 +88,7 @@ pub struct Shards {
     root: PathBuf,
     stop: Arc<AtomicBool>,
     jobs: Mutex<BTreeMap<String, Job>>,
+    refused: Mutex<BTreeMap<String, Instant>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
@@ -122,13 +123,16 @@ impl Shards {
         let root = dir.join(SHARDS);
         let _ = std::fs::remove_dir_all(&root);
         crate::fsutil::private_dir(&root)?;
-        Ok(Arc::new(Shards { node, root, stop, jobs: Mutex::new(BTreeMap::new()) }))
+        Ok(Arc::new(Shards { node, root, stop, jobs: Mutex::new(BTreeMap::new()), refused: Mutex::new(BTreeMap::new()) }))
     }
 
     pub fn handle(self: &Arc<Shards>, node: &mut Node, fp: &str, op: &str, req: &Value) -> Result<Value> {
         self.forget_stale()?;
+        if op != "shard_caps" {
+            self.allowed(node, fp, op)?;
+        }
         match op {
-            "shard_caps" => only(req, &[]).and_then(|()| self.caps(node)),
+            "shard_caps" => only(req, &[]).and_then(|()| self.caps(node, fp)),
             "shard_put" => only(req, &["id", "offset", "data"]).and_then(|()| self.put(node, fp, req)),
             "shard_start" => self.start(node, fp, req),
             "shard_status" => only(req, &["id"]).and_then(|()| self.status(fp, req)),
@@ -137,12 +141,34 @@ impl Shards {
         }
     }
 
-    fn caps(&self, node: &Node) -> Result<Value> {
+    /// A member that is not on the allowed list asks nothing but `shard_caps`; the refusal is on the pool board,
+    /// at most once a minute for each device.
+    fn allowed(&self, node: &mut Node, fp: &str, op: &str) -> Result<()> {
+        let consent = consent::load(&node.dir).unwrap_or_default();
+        if consent.allowed.iter().any(|a| a == fp) {
+            return Ok(());
+        }
+        let due = lock(&self.refused)?.get(fp).is_none_or(|at| at.elapsed() > Duration::from_secs(60));
+        if due {
+            lock(&self.refused)?.insert(fp.into(), Instant::now());
+            let name = node.members.get(fp).map(|d| d.name.clone()).unwrap_or_default();
+            node.record_event("shard_refused", fp, &format!("{op} from {name} {}: not on the allowed list", &fp[..8]))?;
+        }
+        if !consent.enabled {
+            return Err(Error::Denied("test shards are off on this device; its person turns them on".into()));
+        }
+        Err(Error::Denied("this device does not take tests from you; its person allows a device with `python -m ml_stack.testfarm.consent allow DEVICE`".into()))
+    }
+
+    fn caps(&self, node: &Node, fp: &str) -> Result<Value> {
         let consent = consent::load(&node.dir).unwrap_or_default();
         let mut reason = String::new();
         let mut python = Value::Null;
+        let allowed = consent.allowed.iter().any(|a| a == fp);
         if !consent.enabled {
             reason = "test shards are off on this device; its person turns them on (python -m ml_stack.testfarm.consent on)".into();
+        } else if !allowed {
+            reason = "this device does not take tests from you; its person allows you with `python -m ml_stack.testfarm.consent allow DEVICE`".into();
         } else {
             match runtime::python_version(&consent.python) {
                 Ok(v) => python = json!(v),
@@ -151,7 +177,7 @@ impl Shards {
         }
         let running = lock(&self.jobs)?.values().filter(|j| j.phase == Phase::Running).count();
         let name = node.members.get(&node.cert.fingerprint()).map(|d| d.name.clone()).unwrap_or_default();
-        Ok(json!({"accepts": reason.is_empty(), "reason": reason, "platform": runtime::platform(), "python": python, "name": name,
+        Ok(json!({"accepts": reason.is_empty(), "reason": reason, "platform": runtime::platform(), "python": python, "name": name, "allowed": allowed,
                   "fingerprint": node.cert.fingerprint(), "active": running, "most_active": MOST_RUNNING, "free": MOST_RUNNING.saturating_sub(running)}))
     }
 
@@ -247,7 +273,8 @@ impl Shards {
             j.phase = Phase::Running;
         }
         let (host, id) = (self.clone(), spec.id.clone());
-        std::thread::spawn(move || host.watch(&id, child, &lease, spec.timeout_s + GRACE_S));
+        let owner = fp.to_string();
+        std::thread::spawn(move || host.watch(&id, (child, owner), &lease, spec.timeout_s + GRACE_S));
         Ok(json!({"id": req["id"], "state": "running", "python": version}))
     }
 
@@ -280,7 +307,8 @@ impl Shards {
         }
     }
 
-    fn watch(&self, id: &str, mut child: std::process::Child, lease: &str, allowed_s: u64) {
+    fn watch(&self, id: &str, (mut child, owner): (std::process::Child, String), lease: &str, allowed_s: u64) {
+        let mut ticks = 0u32;
         let pid = child.id();
         let deadline = Instant::now() + Duration::from_secs(allowed_s);
         let mut asked: Option<Instant> = None;
@@ -291,7 +319,8 @@ impl Shards {
                 Ok(None) => {}
                 Err(_) => break None,
             }
-            cancelled = cancelled || self.stop.load(Ordering::SeqCst) || lock(&self.jobs).map_or(true, |j| j.get(id).is_none_or(|x| x.cancel));
+            ticks += 1;
+            cancelled = cancelled || (ticks % 10 == 0 && !self.still_allowed(&owner)) || self.stop.load(Ordering::SeqCst) || lock(&self.jobs).map_or(true, |j| j.get(id).is_none_or(|x| x.cancel));
             if cancelled || Instant::now() > deadline {
                 match asked {
                     None => {
@@ -322,6 +351,12 @@ impl Shards {
             let who = node.members.get(&owner).map(|d| d.name.clone()).unwrap_or_default();
             let _ = node.record_event("shard_done", id, &format!("{} for {who}: exit {}", phase.word(), code.map_or(-1, i64::from)));
         }
+    }
+
+    /// Whether the sender of a running shard is still on the allowed list (taking it off ends its runs).
+    fn still_allowed(&self, owner: &str) -> bool {
+        let dir = self.root.parent().map(Path::to_path_buf).unwrap_or_default();
+        consent::load(&dir).is_ok_and(|c| c.allowed.iter().any(|a| a == owner))
     }
 
     fn status(&self, fp: &str, req: &Value) -> Result<Value> {

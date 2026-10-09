@@ -24,6 +24,8 @@ pub struct Consent {
     pub python: String,
     /// This device's own checkout, where the executor code comes from (never from a sender).
     pub repo: String,
+    /// Fingerprints of the pool members whose tests this device takes. Empty: nobody, whoever is in the pool.
+    pub allowed: Vec<String>,
     /// Who last changed it (`board/name`) and when.
     pub by: String,
     pub at_ms: u64,
@@ -57,6 +59,18 @@ pub fn check_places(python: &str, repo: &str) -> Result<()> {
         return Err(Error::Invalid(format!("repo {repo} has no {EXECUTOR}: name this device's own checkout")));
     }
     Ok(())
+}
+
+/// Take ``fp`` out of the allowed list (a member put out of the pool, or denied); whether it was there.
+pub fn forget(dir: &Path, fp: &str) -> Result<bool> {
+    let mut saved = load(dir)?;
+    let before = saved.allowed.len();
+    saved.allowed.retain(|a| a != fp);
+    let changed = saved.allowed.len() != before;
+    if changed {
+        save(dir, &saved)?;
+    }
+    Ok(changed)
 }
 
 pub fn save(dir: &Path, consent: &Consent) -> Result<()> {

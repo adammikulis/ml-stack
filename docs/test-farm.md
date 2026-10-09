@@ -28,15 +28,23 @@ both off, and both audited:
    from this repository's checkout, with the Python 3.13 the tests should use:
 
 ```
-python -m ml_stack.testfarm.consent on        # status | off
+python -m ml_stack.testfarm.consent on --from "MAC NAME"     # allow DEVICE... | deny DEVICE... | off | status
 ```
+
+A DEVICE is a name from `ml-stack-test-devices` or a fingerprint. **Being in the pool is not being allowed.**
+The device takes tests only from the devices in its `allowed` list, which is empty until a person names some
+(`--from`, `allow`), so a device that joined the pool by itself (for instance under policy `open` on the same
+network) can ask whether tests are taken (`shard_caps`) and nothing else: `shard_put`, `shard_start`,
+`shard_status` and `shard_cancel` are refused with `denied`, and the refusal is an audit entry on the pool board
+(at most one a minute for each device). Allowing and denying are audit entries naming the session that did it and
+the device. `deny`, and putting a member out of the pool (`member_revoke`), take it off the list, cancel its runs
+that are going, and a revoked member is also refused at the connection.
 
 `on` is `shard_consent` on the device's own node: it saves `<state>/shards.json` (on, the interpreter, the
 checkout), refuses a Python that is not 3.13 and writes an `audit` entry to the pool board naming the session
 that did it. `off` stops the next upload at once (the file is read at every request). Turning it on lets any
 other device of the pool run a tree's tests here as this user, so do it only on a device whose pool you trust;
-revoking a pool member (`member_revoke`) refuses it at its next request. Disabling the feature does not reach the
-node: run `consent off` too.
+revoking a pool member (`member_revoke`) refuses it at its next request. `ml-stack features disable remote-tests` also switches this device's node off.
 
 ## What runs where
 
@@ -58,7 +66,7 @@ the sender is that certificate, never a field of the request. Revoked or unknown
 op. The local API has two methods: `shard_call` (a registered session asks one op of a pool device; the node adds
 `op` and `by`, the session behind the token, as a label for the audit trail) and `shard_consent`.
 
-- Peer ops, members only: `shard_caps`, `shard_put` (one chunk, in order, from offset 0, 256 KiB at most, hex),
+- Peer ops, members only (`shard_caps` for any member; the rest only for a member on the allowed list): `shard_caps`, `shard_put` (one chunk, in order, from offset 0, 256 KiB at most, hex),
   `shard_start`, `shard_status`, `shard_cancel`. A shard belongs to the certificate that created it: another
   member gets "no such shard" for its status and its cancel.
 - The job: `id` (32 hex), `tree_sha256`, `size`, `tier` (`all fast full gate slow`), `files` (0 to 200 names, each

@@ -32,6 +32,16 @@ pub use host::Shards;
 /// The peer ops a pool member may send.
 pub const OPS: [&str; 5] = ["shard_caps", "shard_put", "shard_start", "shard_status", "shard_cancel"];
 
+/// The list of fingerprints a `shard_consent` param holds (empty when absent).
+fn fingerprints(p: &Map<String, Value>, key: &str) -> Result<Vec<String>> {
+    let Some(v) = p.get(key) else { return Ok(Vec::new()) };
+    let list: Vec<String> = serde_json::from_value(v.clone()).map_err(|_| Error::Invalid(format!("{key} is a list of device fingerprints")))?;
+    if list.len() > 64 || list.iter().any(|f| !crate::cert::valid_fingerprint(f)) {
+        return Err(Error::Invalid(format!("{key} is up to 64 device fingerprints, 64 hex digits each")));
+    }
+    Ok(list)
+}
+
 /// `shard_consent`: show the state; with `enabled`, turn shards on or off and write it to the pool board.
 pub fn consent_call(node: &mut Node, token: &str, p: &Map<String, Value>) -> Result<Value> {
     let mut saved = consent::load(&node.dir)?;
@@ -49,5 +59,29 @@ pub fn consent_call(node: &mut Node, token: &str, p: &Map<String, Value>) -> Res
         consent::save(&node.dir, &saved)?;
         node.record_event("shard_consent", if on { "on" } else { "off" }, &format!("by {}; python {}; repo {}", saved.by, saved.python, saved.repo))?;
     }
-    Ok(json!({"enabled": saved.enabled, "python": saved.python, "repo": saved.repo, "by": saved.by, "at_ms": saved.at_ms}))
+    let (allow, deny) = (fingerprints(p, "allow")?, fingerprints(p, "deny")?);
+    if !allow.is_empty() || !deny.is_empty() {
+        let who = authorize(node, token, "shard_consent")?;
+        let by = format!("{}/{}", who.board, who.name);
+        for fp in &allow {
+            if *fp == node.cert.fingerprint() || !node.members.is_active(fp) {
+                return Err(Error::Invalid("only another active member of this pool is allowed".into()));
+            }
+        }
+        saved.allowed.retain(|a| !deny.contains(a));
+        for fp in &allow {
+            if !saved.allowed.contains(fp) {
+                saved.allowed.push(fp.clone());
+            }
+        }
+        (saved.by, saved.at_ms) = (by.clone(), wall_ms());
+        consent::save(&node.dir, &saved)?;
+        for (word, list) in [("allowed", &allow), ("denied", &deny)] {
+            for fp in list {
+                let name = node.members.get(fp).map(|d| d.name.clone()).unwrap_or_default();
+                node.record_event("shard_allow", fp, &format!("{by} {word} {name}"))?;
+            }
+        }
+    }
+    Ok(json!({"enabled": saved.enabled, "python": saved.python, "repo": saved.repo, "allowed": saved.allowed, "by": saved.by, "at_ms": saved.at_ms}))
 }

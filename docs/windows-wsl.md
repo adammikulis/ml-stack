@@ -96,11 +96,14 @@ node (this document's steps) and its own switch, in its own checkout.
    package or pyenv) and give it the test dependencies the way this device already installs ml-stack (`AGENTS.md`).
 2. Turn the experimental feature on (`ml-stack features enable remote-tests`), then turn it on from the repository
    root, with that Python and `PYTHONPATH=src`:
-   `python -m ml_stack.testfarm.consent on` (Windows: `py -3.13 -m ml_stack.testfarm.consent on`, with
+   `python -m ml_stack.testfarm.consent on --from MAC_NAME` (Windows: `py -3.13 -m ml_stack.testfarm.consent on --from MAC_NAME`, with
    `$env:PYTHONPATH="src"`). It prints `test shards: on (python ..., checkout ...)`. If it says Python 3.13 is
    needed, run it with the 3.13 interpreter, or pass `--python PATH`; if it says the repo has no `shard_exec.py`,
    this checkout is older than the feature: update it, restart the node (`python -m ml_stack.node_launch swap`) and
    run it again. The node must be the new build, since it carries the shard ops.
+   `MAC_NAME` is the Mac's name in `ml-stack-test-devices` (or its fingerprint). This device takes tests only from
+   the devices it names; to add or remove one later: `python -m ml_stack.testfarm.consent allow NAME` or `deny NAME`.
+   Never allow a device you did not mean to: it can run code here as this user. Joining the pool is not enough.
 3. Ask the Mac's agent to run `ml-stack-test-devices` and then `scripts/test all tests/test_x.py --on THIS_DEVICE`;
    the result comes back to the Mac's session, and a `test-result` message is on the board.
 4. To stop: `python -m ml_stack.testfarm.consent off`. It takes effect on the next upload; a run already going

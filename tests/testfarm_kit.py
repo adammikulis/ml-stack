@@ -100,8 +100,9 @@ def third(node_binary):  # noqa: F811
 
 
 def enable(b: Device) -> None:
-    """Turn shards on at ``b`` the way its person would: this interpreter, this checkout."""
-    b.call("shard_consent", token=b.token, enabled=True, python=sys.executable, repo=str(ROOT))
+    """Turn shards on at ``b`` the way its person would: this interpreter, this checkout, taking tests from its one pool peer."""
+    (asker,) = pool_devices(b.state)
+    b.call("shard_consent", token=b.token, enabled=True, python=sys.executable, repo=str(ROOT), allow=[asker["fingerprint"]])
 
 
 def peer(a: Device) -> dict:
