@@ -15,10 +15,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ml_stack import node_app, node_binary, runtime, win32
+from ml_stack.features import windows_node
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.node_health import node_stop_event, state_key
-from ml_stack.platform import is_windows, start_process
+from ml_stack.platform import start_process
 
 POINTER = "node-binary.json"
 RUN = "node-run.json"
@@ -137,7 +138,7 @@ def _stop_requests(state: Path) -> tuple[Callable[[], bool], Callable[[], None]]
     """(whether a stop was asked for, how to let go): SIGTERM on Unix; on Windows Ctrl+Break, Ctrl+C and the stop event."""
     stop = {"now": False}
     handler = lambda *_: stop.update(now=True)  # noqa: E731
-    if not is_windows():
+    if not windows_node():
         signal.signal(signal.SIGTERM, handler)
         return (lambda: stop["now"]), (lambda: None)
     signal.signal(signal.SIGBREAK, handler)  # type: ignore[attr-defined]
@@ -174,7 +175,7 @@ def _loop(state: Path, extra: list[str], stopping: Callable[[], bool]) -> int:
 
 def end(child: subprocess.Popen, state: Path) -> None:
     """Stop a node the supervisor was told to leave or replace: ask (the stop event on Windows, SIGTERM elsewhere), then insist."""
-    if not (is_windows() and win32.signal_event(node_stop_event(state))):
+    if not (windows_node() and win32.signal_event(node_stop_event(state))):
         child.terminate()
     try:
         child.wait(timeout=10)

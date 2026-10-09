@@ -647,6 +647,17 @@ tests = [
 ]
 note = "raising the GPU wiring limit is person-only: agent processes, tokens, foreign pages, hostile numbers and model names are refused and the privileged call is never reached"
 
+# -- experimental features ------------------------------------------------------------------
+[[group]]
+match = ["route:fleet/features_routes.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_features.py::test_the_route_takes_no_name_and_changes_nothing",
+  "tests/test_redteam_features.py::test_the_route_needs_the_page_header",
+  "tests/test_redteam_features.py::test_a_settings_file_naming_other_things_turns_nothing_on",
+]
+note = "the settings list is read-only and takes no name; a hostile name, a hostile settings file or a safety floor turns nothing on"
+
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
 match = ["parser:workspace/boardroute.py"]
@@ -1127,8 +1138,12 @@ note = "icacls and whoami start from fixed argument lists; a directory name with
 match = ["spawn:trees.py:git"]
 status = "covered"
 count = 1
-tests = ["tests/test_trees.py::test_a_tree_named_like_an_option_or_a_command_is_only_a_path_to_git"]
-note = "a worktree path is the value of git -C, never an option or a shell word; a hostile directory name is one argument and a missing one is a refusal"
+tests = [
+  "tests/test_trees.py::test_a_tree_named_like_an_option_or_a_command_is_only_a_path_to_git",
+  "tests/test_redteam_trees.py::test_a_hostile_root_is_only_a_path_and_runs_nothing",
+  "tests/test_redteam_trees.py::test_a_stalled_git_is_an_error_not_a_hang",
+]
+note = "a worktree path is the value of git -C, never an option or a shell word; a hostile directory name is one argument, a missing one is a refusal and a stalled git is an error, not a hang"
 
 [[group]]
 match = ["spawn:*"]

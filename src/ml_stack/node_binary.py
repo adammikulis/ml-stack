@@ -11,10 +11,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ml_stack.features import windows_node
 from ml_stack.files import read_json, write_json, writing
 from ml_stack.runtime_store import MARK
 
-NAME = "poolside-node.exe" if sys.platform == "win32" else "poolside-node"
 DIRECTORY = "node"
 RECORD = "node.json"
 BUILD_TIMEOUT = 1800.0
@@ -23,6 +23,11 @@ CHUNK = 1 << 20
 
 class NodeBinaryError(OSError):
     """The node binary is missing, was built wrongly or does not match its recorded checksum."""
+
+
+def name() -> str:
+    """The binary's file name: ``.exe`` on Windows when the `windows-node` feature is on."""
+    return "poolside-node.exe" if windows_node() else "poolside-node"
 
 
 def target() -> str:
@@ -41,7 +46,7 @@ def sha256(path: Path) -> str:
 
 def location(prefix: Path) -> Path:
     """Where a runtime tree keeps its node binary."""
-    return prefix / DIRECTORY / NAME
+    return prefix / DIRECTORY / name()
 
 
 def build(source: Path, *, cache: Path | None = None, timeout: float = BUILD_TIMEOUT) -> Path:
@@ -57,9 +62,9 @@ def build(source: Path, *, cache: Path | None = None, timeout: float = BUILD_TIM
                           capture_output=True, text=True, timeout=timeout, env=env)
     if done.returncode:
         raise NodeBinaryError(f"cargo build failed: {(done.stderr or done.stdout).strip()[-600:]}")
-    made = (cache or workspace / "target") / "release" / NAME
+    made = (cache or workspace / "target") / "release" / name()
     if not made.is_file():
-        raise NodeBinaryError(f"cargo wrote no {NAME}")
+        raise NodeBinaryError(f"cargo wrote no {name()}")
     return made
 
 
