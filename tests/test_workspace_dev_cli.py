@@ -50,7 +50,7 @@ def test_cli_enrolls_authenticated_local_agent_without_manual_metadata(monkeypat
     monkeypatch.setattr(automatic_connection, "attach", attach)
     remote = SimpleNamespace(token=lambda **kw: "project-token")
     monkeypatch.setattr(project_connection, "RemoteWorkspace", lambda *a, **kw: remote)
-    monkeypatch.setattr(project_connection, "CanonicalWorkspace", lambda remote, token: (remote, token))
+    monkeypatch.setattr(project_connection, "BoardWorkspace", lambda remote, token: (remote, token))
     args = SimpleNamespace(agent="worker", token_file="")
     board_ws, token = cli._context(args, choice)
     assert enrolled == [(tmp_path, "worker", (model, harness), choice)]
@@ -126,7 +126,7 @@ def test_saved_connection_resolves_authenticated_local_alias(monkeypatch, tmp_pa
     used = []
     remote = SimpleNamespace(token=lambda **kw: used.append(kw) or "project-token")
     monkeypatch.setattr(project_connection, "RemoteWorkspace", lambda *a, **kw: remote)
-    monkeypatch.setattr(project_connection, "CanonicalWorkspace", lambda *a: object())
+    monkeypatch.setattr(project_connection, "BoardWorkspace", lambda *a: object())
     args = SimpleNamespace(agent="" if environment else "worker", token_file="")
     cli._context(args, choice)
     assert checked == ["local-token"]
@@ -154,7 +154,7 @@ def test_saved_alias_preserves_explicit_other_identity_and_token(monkeypatch, tm
     used = []
     remote = SimpleNamespace(token=lambda **kw: used.append(kw) or "project-token")
     monkeypatch.setattr(project_connection, "RemoteWorkspace", lambda *a, **kw: remote)
-    monkeypatch.setattr(project_connection, "CanonicalWorkspace", lambda *a: object())
+    monkeypatch.setattr(project_connection, "BoardWorkspace", lambda *a: object())
     cli._context(SimpleNamespace(agent=agent, token_file=token_file), choice)
     assert used == [{"agent": agent, "token_file": token_file}]
 
@@ -393,7 +393,7 @@ def test_setup_saved_standard_agent_attaches_without_device_registration(tmp_pat
     monkeypatch.setattr(automatic_connection, 'attach', attach)
     remote = SimpleNamespace(token=lambda **kwargs: 'private-project-session')
     monkeypatch.setattr(project_connection, 'RemoteWorkspace', lambda *args, **kwargs: remote)
-    monkeypatch.setattr(project_connection, 'CanonicalWorkspace', lambda remote, capability: capability)
+    monkeypatch.setattr(project_connection, 'BoardWorkspace', lambda remote, capability: capability)
     actor = SimpleNamespace(agent='worker', token_file='')
     assert cli._context(actor, choice)[1] == 'private-project-session'
     assert calls == [(root, 'worker')] and actor.agent == 'worker-device'

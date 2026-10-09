@@ -62,9 +62,9 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
-    canonical = automatic_connection.startup(project_dir, name, parent, claim=claim)
-    if canonical is not None:
-        return canonical
+    board = automatic_connection.startup(project_dir, name, parent, claim=claim)
+    if board is not None:
+        return board
     try:
         connection = project_connection.selected(project_dir) or project_connection.auto_attach(project_dir)
         if connection is not None:

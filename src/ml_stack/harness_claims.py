@@ -101,9 +101,9 @@ def conflict(name, args, cwd, actor, roots=()):
     required = resources(name, args, cwd)
     if not required:
         return ''
-    canonical = harness_remote.context(actor, cwd, roots or [cwd])
-    if canonical:
-        return harness_remote.conflict(*canonical, required)
+    board = harness_remote.context(actor, cwd, roots or [cwd])
+    if board:
+        return harness_remote.conflict(*board, required)
     ws = Workspace()
     if not ws.registry.role_of(actor):
         return ''
@@ -133,10 +133,10 @@ def reserve(name, args, cwd, actor, roots):
         commit = git.head(Path(cwd))
     except git.GitFailed:
         commit = ''
-    canonical = harness_remote.context(actor, cwd, roots)
-    if canonical:
+    board = harness_remote.context(actor, cwd, roots)
+    if board:
         harness_remote.inspect_shell(name, args)
-        harness_remote.reserve(*canonical, required, {'note': 'native mutation', 'commit': commit,
+        harness_remote.reserve(*board, required, {'note': 'native mutation', 'commit': commit,
                                'owner_pid': os.getppid(), 'owner_started': started_at(os.getppid()),
                                'interpreter': str(Path(sys.executable).resolve()),
                                'environment': str(Path(sys.prefix).resolve())},

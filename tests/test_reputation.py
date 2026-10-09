@@ -140,15 +140,15 @@ def test_clean_runs_in_a_burst_count_once(ledger):
     assert ledger.standing("host", "burst.example").clean == 1
 
 
-def test_names_are_canonical_and_bad_names_are_refused(ledger):
+def test_names_are_normal_and_bad_names_are_refused(ledger):
     ledger.observe("host", "Example.ORG.", "denial")
     assert ledger.standing("host", "example.org").key == "example.org"
     ledger.observe("url", "https://u:p@Example.org/a/b?token=1#x", "denial")
     assert ledger.standing("url", "https://example.org/a/b") is not None
-    assert model.canonical("hash", "SHA256:" + "AB" * 32) == "ab" * 32
+    assert model.normal("hash", "SHA256:" + "AB" * 32) == "ab" * 32
     for kind, key in (("host", "a b"), ("host", "x/y"), ("ip", "nope"), ("hash", "zz"), ("what", "x")):
         with pytest.raises(ValueError):
-            model.canonical(kind, key)
+            model.normal(kind, key)
 
 
 def test_the_store_is_bounded(ledger, clock):

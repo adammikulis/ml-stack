@@ -43,7 +43,7 @@ def context(actor, cwd, roots, *, require_claim=True):
 def physical_owner(remote, who):
     """Namespace the authenticated identity in the shared physical claim store."""
     authority = hashlib.sha256(f'{remote.host}/{remote.project_id}'.encode()).hexdigest()[:32]
-    return Identity(f'canonical:{authority}:{who.id}', AGENT, can=who.can)
+    return Identity(f'board:{authority}:{who.id}', AGENT, can=who.can)
 
 
 def claims():

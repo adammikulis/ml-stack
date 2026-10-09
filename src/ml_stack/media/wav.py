@@ -37,7 +37,7 @@ def header(
     channels: int = 1,
     sample_width: int = 2,
 ) -> bytes:
-    """A 44-byte canonical PCM RIFF header for ``data_len`` bytes of samples."""
+    """A 44-byte standard PCM RIFF header for ``data_len`` bytes of samples."""
     if channels < 1:
         raise WavError(f"channels must be >= 1, got {channels}")
     if sample_width not in (1, 2, 3, 4):

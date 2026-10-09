@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.entities import canonical, fold_duplicates, fold_key, looks_like_handle, stem
+from ml_stack.entities import fold_duplicates, fold_key, looks_like_handle, preferred, stem
 
 # a word and its inflections have to reduce to one form, or a fold key never matches
 SAME = [
@@ -48,11 +48,11 @@ def test_fold_key_drops_stopwords_and_ignores_order():
     assert fold_key("retail") != fold_key("retail industry")
 
 
-def test_canonical_matches_case_insensitively_and_tidies_the_rest():
+def test_preferred_matches_case_insensitively_and_tidies_the_rest():
     aliases = {"ada": "Ada Lovelace"}
-    assert canonical("@Ada", aliases) == "Ada Lovelace"
-    assert canonical(" ADA ", aliases) == "Ada Lovelace"
-    assert canonical("Grace  Hopper,", aliases) == "Grace Hopper"
+    assert preferred("@Ada", aliases) == "Ada Lovelace"
+    assert preferred(" ADA ", aliases) == "Ada Lovelace"
+    assert preferred("Grace  Hopper,", aliases) == "Grace Hopper"
 
 
 def test_looks_like_handle():

@@ -63,12 +63,12 @@ def binding(label: str, cwd: Path, session: str) -> dict:
     return configured
 
 
-def authenticated(label: str, cwd: Path, session: str, *, canonical=None):
+def authenticated(label: str, cwd: Path, session: str, *, board=None):
     """Return the authenticated existing project reader and capability."""
     chosen = binding(label, cwd, session)
     actor = chosen['agent']
-    if canonical is not None:
-        remote, who = canonical
+    if board is not None:
+        remote, who = board
         if (who.id != actor or who.role != AGENT or remote.project_id != chosen['project_id']
                 or remote.host != chosen['host'].rstrip('/')):
             raise Denied('notification context does not match the saved project reader')
@@ -84,9 +84,9 @@ def authenticated(label: str, cwd: Path, session: str, *, canonical=None):
     return remote, actor, token
 
 
-def read(label: str, cwd: Path, session: str, *, canonical=None) -> str:
+def read(label: str, cwd: Path, session: str, *, board=None) -> str:
     """Return unread metadata under the saved authenticated capability."""
-    remote, _, token = authenticated(label, cwd, session, canonical=canonical)
+    remote, _, token = authenticated(label, cwd, session, board=board)
     return remote.call('nudge', token)
 
 

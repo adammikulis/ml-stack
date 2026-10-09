@@ -22,7 +22,7 @@ def test_reviewed_nodes_preserve_complete_invocation_validation():
 @pytest.mark.parametrize("node", [
     "tests/test_task_coordinator.py",
     "tests/test_task_coordinator.py::test_sealed_task_creation_routes_exact_authenticated_coordinator_and_retries",
-    "tests/test_task_coordinator.py::test_automatic_selection_uses_real_project_bound_canonical_quality",
+    "tests/test_task_coordinator.py::test_automatic_selection_uses_real_project_bound_board_quality",
     "tests/test_execution_profile.py::test_future_unreviewed_function",
     "tests/test_workspace_remote.py::test_remote_execution_profiles",
     "tests/test_task_native.py::test_native_task",

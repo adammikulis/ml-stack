@@ -9,7 +9,7 @@ from test_workspace_remote import PROJECT, joined
 from ml_stack.http import ServerError
 from ml_stack.workspace import localagent, localloop, worker_completion, worker_reconnect
 from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.project_connection import CanonicalWorkspace
+from ml_stack.workspace.project_connection import BoardWorkspace
 
 pytest_plugins = ['test_workspace_remote']
 
@@ -39,7 +39,7 @@ class Transport:
         return reply['result']
 
 
-class Worker(CanonicalWorkspace):
+class Worker(BoardWorkspace):
     def __init__(self, base, transport, actor):
         super().__init__(transport, actor['token'])
         base.mkdir(parents=True, exist_ok=True, mode=0o700)

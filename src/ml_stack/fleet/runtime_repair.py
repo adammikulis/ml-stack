@@ -28,7 +28,7 @@ KIND = "agent-runtime"
 
 
 def job_id(value: str) -> str:
-    """Return a bounded canonical setup-job identifier."""
+    """Return a bounded setup-job identifier."""
     if not isinstance(value, str) or len(value) != 32 or any(c not in "0123456789abcdef" for c in value):
         raise ValueError("Agent runtime jobs require a 32-character lowercase hexadecimal identifier.")
     return value

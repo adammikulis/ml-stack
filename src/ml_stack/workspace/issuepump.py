@@ -104,9 +104,9 @@ def _enqueue(ws, token, agent, board, exclude=frozenset()):
         graph.upsert_node({'id': key, 'kind': 'issue-dispatch', 'label': task['title'],
                            'attrs': dispatch})
         graph.upsert_edge({'source': key, 'target': issue['key'], 'rel': 'issue-source'})
-        graph.upsert_node({'id': task['id'], 'kind': 'canonical-task-ref', 'label': task['title'],
+        graph.upsert_node({'id': task['id'], 'kind': 'task-ref', 'label': task['title'],
                            'attrs': {'workspace': board.workspace_id}})
-        graph.upsert_edge({'source': key, 'target': task['id'], 'rel': 'canonical-task'})
+        graph.upsert_edge({'source': key, 'target': task['id'], 'rel': 'task'})
     _deliver_assignment(ws, token, agent, dispatch, task)
     _status(ws, agent, state='queued', task=task['id'], issue_url=issue['url'], title=issue['title'])
     activity.record('agent.task', actor=agent.identity or agent.name, subject=issue['title'], outcome='queued',

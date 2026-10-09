@@ -302,7 +302,7 @@ class HostBridge:
 def guest(directory):
     directory = Path(directory)
     if not directory.is_absolute() or directory.parent.resolve() != directory.parent:
-        raise ValueError("guest socket directory is not canonical")
+        raise ValueError("guest socket directory is not normalised")
     directory.mkdir(mode=0o700)
     endpoint = directory / "admission.sock"
     listener = socket.socket(socket.AF_UNIX)

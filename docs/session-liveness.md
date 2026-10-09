@@ -47,7 +47,7 @@ Facts from code. "Blocks" means what a stale entry stops another agent doing.
   expiry (`:140-142`); `inactive_worktree` refuses recovery while any matching file, area or
   install claim lives (`:253-259`). Worst case a dead agent blocks its area for 15 minutes; a
   *renewing* wedged agent blocks it for 8 h.
-- `physical_owner` namespaces owner as `canonical:<hash>:<agent>` (`harness_remote.py:43-46`); the
+- `physical_owner` namespaces owner as `board:<hash>:<agent>` (`harness_remote.py:43-46`); the
   board-side (`native_reserve`) and physical stores are two separate stores, released
   separately (`release_revoked`, `:173-182`, only on self-revocation).
 

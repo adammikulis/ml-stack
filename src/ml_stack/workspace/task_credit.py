@@ -57,7 +57,7 @@ def verify_task(ws, token, task_id, *, ledger=None):
             'verified_at': review['reviewed_at'], 'task_hash': task['spec_hash'],
             'completion_hash': review['review_hash'],
             'proposal_id': proposal['id'], 'proposal_hash': proposal['proposal_hash'],
-            'source': 'canonical-taskboard'}
+            'source': 'taskboard'}
     with work_reputation._store(ledger) as held:
         contribution = held.record_contribution({key: value for key, value in data.items() if key != 'award'})
         result = held.record(data) if outcome == 'accepted' else {**contribution, 'credited': False}

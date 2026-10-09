@@ -1,4 +1,4 @@
-"""Canonical model discovery, shard details and person-facing library filters."""
+"""Model discovery, shard details and person-facing library filters."""
 
 import os
 from types import SimpleNamespace

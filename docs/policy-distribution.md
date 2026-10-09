@@ -195,7 +195,7 @@ That matches AGENTS.md ("a budget is a debt") and gives no path to switch a rule
 
 ### 2.5 Versions, lock, diff
 
-Policy version is the package version; `rules_sha` is the SHA-256 of the canonical JSON of the
+Policy version is the package version; `rules_sha` is the SHA-256 of the sorted compact JSON of the
 registry. A rule added or tightened lands in a `feat:`; removing or loosening a rule is a major
 change and the owner's. `.ml-stack/policy.lock` (JSON, `version` field, written with the atomic
 writer) records:

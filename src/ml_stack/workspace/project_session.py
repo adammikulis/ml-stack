@@ -57,6 +57,6 @@ def connection(configured: dict) -> dict:
 def owner(value: str) -> str:
     """Return a readable shared Board claim owner."""
     parts = value.split(":", 2)
-    if len(parts) == 3 and parts[0] == "canonical" and len(parts[1]) == 32:
+    if len(parts) == 3 and parts[0] == "board" and len(parts[1]) == 32:
         return f"{parts[2]} on shared project Board"
     return value

@@ -59,14 +59,14 @@ class VisionGate:
         """Pull colour names out of a reply, in order of first appearance."""
         lowered = text.lower()
         hits: list[tuple[int, str]] = []
-        for canonical, (_rgb, synonyms) in PALETTE.items():
+        for colour, (_rgb, synonyms) in PALETTE.items():
             positions = [
                 match.start()
                 for word in synonyms
                 if (match := re.search(rf"\b{re.escape(word)}\b", lowered))
             ]
             if positions:
-                hits.append((min(positions), canonical))
+                hits.append((min(positions), colour))
 
         ordered = [name for _pos, name in sorted(hits)]
         collapsed: list[str] = []

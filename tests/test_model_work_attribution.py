@@ -1,4 +1,4 @@
-"""Canonical actor and exact execution views share independently reviewed outcomes."""
+"""Actor and exact execution views share independently reviewed outcomes."""
 
 from dataclasses import replace
 

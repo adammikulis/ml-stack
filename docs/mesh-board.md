@@ -165,7 +165,7 @@ summary is what lets other devices decide a row is settled.
 
 ### Snapshots, joining, retention
 
-- A **snapshot** is the canonical serialisation of the fold at a vector V: per-kind rows, plus V (each
+- A **snapshot** is the plain serialisation of the fold at a vector V: per-kind rows, plus V (each
   origin's seq and head hash) and a state hash, signed by the producing member. Any member may produce one;
   a device produces one every 10000 rows or 24 h.
 - **Join**: a new device pairs with any one member, receives the latest snapshot and its tail, verifies the

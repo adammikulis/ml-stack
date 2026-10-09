@@ -62,15 +62,15 @@ def fold_names(weight: Mapping[str, int], written: Mapping[str, str] | None = No
 
     said = {k.casefold(): v for k, v in (written or {}).items()}
     prefix = f"{label}: " if label else ""
-    canonical: dict[str, str] = {}
+    chosen: dict[str, str] = {}
     folds: list[dict[str, Any]] = []
     for name in sorted(weight, key=lambda n: (-weight[n], n)):
         if name in said:
-            canonical[name] = said[name]
+            chosen[name] = said[name]
             if said[name] != name:
                 folds.append({"from": name, "into": said[name], "written": True})
             continue
-        for kept in list(canonical.values()):
+        for kept in list(chosen.values()):
             if kept == name or not close(name.replace("_", ""), kept.replace("_", "")):
                 continue
             if weight[name] >= established and weight.get(kept, 0) >= established:
@@ -79,15 +79,15 @@ def fold_names(weight: Mapping[str, int], written: Mapping[str, str] | None = No
                         f"({weight.get(kept, 0)}) are both established, so neither folds; "
                         f"{settles}")
                 continue
-            canonical[name] = kept
+            chosen[name] = kept
             folds.append({"from": name, "into": kept, "written": False})
             if log:
                 log(f"{prefix}'{name}' ({weight[name]}) folded into "
                     f"'{kept}' ({weight.get(kept, 0)})")
             break
         else:
-            canonical[name] = name
-    return canonical, folds
+            chosen[name] = name
+    return chosen, folds
 
 
 def fold_edges(edges: Mapping[tuple[str, str, str], dict[str, Any]],
@@ -108,11 +108,11 @@ def fold_edges(edges: Mapping[tuple[str, str, str], dict[str, Any]],
     weight: dict[str, int] = {}
     for (_, rel, _), e in edges.items():
         weight[rel] = weight.get(rel, 0) + int(e.get("weight") or 1)
-    canonical, folds = fold_names(weight, written, established=established, log=log,
+    chosen, folds = fold_names(weight, written, established=established, log=log,
                                   label=label, settles=settles)
     out: dict[tuple[str, str, str], dict[str, Any]] = {}
     for (source, rel, target), e in edges.items():
-        name = canonical.get(rel, rel)
+        name = chosen.get(rel, rel)
         key = (source, name, target)
         if key in out:
             kept = out[key]

@@ -93,7 +93,7 @@ def test_production_server_refuses_automatic_admission_to_secondary_development_
 
 
 @pytest.mark.parametrize("key", [KEY + b"=", b"x", base64.urlsafe_b64encode(bytes(31)).rstrip(b"=")])
-def test_membership_key_requires_canonical_256_bit_encoding(key):
+def test_membership_key_requires_plain_256_bit_encoding(key):
     with pytest.raises(ValueError):
         discovery.Membership("laboratory", key, mode="prod")
 

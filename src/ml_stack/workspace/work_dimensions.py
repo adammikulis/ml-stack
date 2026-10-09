@@ -1,4 +1,4 @@
-"""Actor and execution views of canonical reviewed outcomes and existing award references."""
+"""Actor and execution views of reviewed outcomes and existing award references."""
 
 from collections import defaultdict
 
@@ -9,7 +9,7 @@ from ml_stack.workspace.task_schema import SPEC_FIELDS, fingerprint
 
 
 def receipt(ws, result):
-    """Link an existing independently recorded award to its canonical review."""
+    """Link an existing independently recorded award to its review."""
     ident = 'work-credit-reference:' + result['completion']
     attrs = {key: result[key] for key in
              ('agent', 'workspace', 'completion', 'proposal_id', 'proposal_hash', 'completion_hash', 'id')}
@@ -49,7 +49,7 @@ def _outcomes(ws, workspace):
         if review['outcome'] == 'accepted' and task.get('state') != 'completed':
             continue
         provenance = proposal.get('provenance', {})
-        row = {**review, 'agent': proposal['worker'], 'source': 'canonical-taskboard',
+        row = {**review, 'agent': proposal['worker'], 'source': 'taskboard',
                'verified_at': review['reviewed_at'], 'provenance': provenance,
                'family_account': proposal.get('family_account'), 'award': None,
                'artifacts': proposal['artifacts'], 'task_limits': task['limits']}

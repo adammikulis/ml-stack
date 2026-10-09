@@ -72,11 +72,11 @@ def summary(evidence: list[dict[str, Any]], contributions: list[dict[str, Any]] 
     awards = [item.get('award') or {'base': 0, 'quality_bonus': 0, 'total': 0, 'quality': []} for item in evidence]
     attempts = contributions or []
     reviews = [item['review'] for item in evidence if item.get('review') is not None
-               and item.get('source') != 'canonical-taskboard']
+               and item.get('source') != 'taskboard']
     reviews += [item['review'] for item in attempts if item.get('review') is not None
                 and item['outcome'] != 'blocked_infrastructure']
     usage = [item['usage'] for item in evidence if item.get('usage') is not None
-             and item.get('source') != 'canonical-taskboard']
+             and item.get('source') != 'taskboard']
     usage += [item['usage'] for item in attempts if item.get('usage') is not None]
     earned = sum(item['total'] for item in awards)
     ratings = {key: round((100 + sum(item[key] for item in reviews)) / (2 + len(reviews)), 2)

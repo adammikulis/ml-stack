@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from ml_stack import worktreerules
+from ml_stack import board_names, worktreerules
 from ml_stack.files import read_json, write_json
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace.chain import held
@@ -62,7 +62,7 @@ def _holder_alive(claim: dict[str, Any]) -> bool:
 
 
 def normal(kind: str, key: str) -> str:
-    """The canonical spelling of ``key`` for ``kind``; raises ValueError for one that is not valid."""
+    """The normal spelling of ``key`` for ``kind``; raises ValueError for one that is not valid."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     if kind == "port":
@@ -117,6 +117,7 @@ class Claims:
         self.ttl_s, self.clock, self.on_swept, self.on_stolen = ttl_s, clock, on_swept, on_stolen
 
     def _load(self) -> dict[str, dict[str, Any]]:
+        board_names.migrate_claims(self.path)
         data = read_json(self.path, {})
         found = data.get("claims") if isinstance(data, dict) else None
         return dict(found) if isinstance(found, dict) else {}

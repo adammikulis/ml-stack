@@ -1,4 +1,4 @@
-"""Canonical names and near-duplicate folding for labelled records."""
+"""Preferred names and near-duplicate folding for labelled records."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def fold_key(label: str, stopwords: Collection[str] | None = None) -> tuple[str,
     return tuple(sorted({stem(w) for w in _WORD.findall(label.casefold()) if w not in stop}))
 
 
-def canonical(name: str, aliases: Mapping[str, str]) -> str:
+def preferred(name: str, aliases: Mapping[str, str]) -> str:
     """The alias target for a name, matched case-insensitively; the tidied name when there is none."""
     key = _LEADING_AT.sub("", " ".join(name.split())).strip().strip(".,;:")
     return aliases.get(key.casefold(), key)

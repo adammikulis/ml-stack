@@ -37,7 +37,7 @@ LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
         "License'; only the legacy License: field is the literal 'UNKNOWN'",
     ),
 }
-"""Packages whose metadata does not state a licence, keyed by (canonical name, exact version).
+"""Packages whose metadata does not state a licence, keyed by (normalised name, exact version).
 
 Each entry names the licence and where the claim was verified. The exact version is part of the key so an upgrade
 has to be looked at again; this is not an allow-list of licences.

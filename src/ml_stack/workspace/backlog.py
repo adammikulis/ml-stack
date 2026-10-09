@@ -10,8 +10,7 @@ import time
 from dataclasses import replace
 from uuid import uuid4
 
-from ml_stack import worktreerules
-from ml_stack.graph.store import GraphStore
+from ml_stack import board_names, worktreerules
 from ml_stack.serve.process import pid_exists
 from ml_stack.workspace import localagent as la, project as projects, tokens
 from ml_stack.workspace.chain import held
@@ -179,7 +178,7 @@ def fetch(repo):
 
 
 def _store(ws):
-    return GraphStore(ws.base / "issue-backlog.db")
+    return board_names.opened(ws.base / "issue-backlog.db")
 
 
 def _scope(ws, agent):
