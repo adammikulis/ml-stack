@@ -216,6 +216,15 @@ branch.
 
 ## 2. Git, worktrees and landing
 
+### Instructions are carried out as given
+
+Every agent, including Codex, does what the owner or the coordinator said, when it was said, in the
+order and on the branch named. An instruction is never postponed, reordered behind other work, or
+widened. A request to land a branch means merge, gate, push, clean up, and nothing more in that branch or turn. Work
+noticed along the way becomes its own item after the landing. A blocker is reported in one line at once,
+and every part that is not blocked is done. A branch cut or a landing target named by the owner (for
+example "cut the release, then work on the next development branch") is used from that point on.
+
 ### Worktrees
 
 Edit, stage and commit only named files in a claimed checkout. Agents may do so in the primary
