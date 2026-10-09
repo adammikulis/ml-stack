@@ -13,6 +13,7 @@ from qrcode.image.svg import SvgPathFillImage
 
 from .discovery import DiscoveryError, adopt
 from .invites import Invitations
+from .onboard.lan import in_tailnet
 from .session import parse_cookie
 
 
@@ -102,7 +103,7 @@ def public(ui: Any, handler: Any, raw: bytes | None) -> bool:
         if raw is None or not 0 < len(raw) <= 4096:
             raise ValueError("invitation exchange is too large or empty")
         source = ipaddress.ip_address(handler.client_address[0])
-        if not source.is_private or source.is_multicast or source.is_unspecified:
+        if not (source.is_private or in_tailnet(str(source))) or source.is_multicast or source.is_unspecified:
             raise ValueError("invitation exchange requires a local network source")
         store(ui).permit(str(source))
         body = json.loads(raw)

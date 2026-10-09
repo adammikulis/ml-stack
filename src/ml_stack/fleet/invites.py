@@ -12,6 +12,8 @@ import time
 import urllib.parse
 from typing import Any
 
+from .onboard.lan import in_tailnet
+
 
 def encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
@@ -67,7 +69,7 @@ class Invitations:
         endpoint, fingerprint = self.origin()
         url = urllib.parse.urlsplit(endpoint)
         address = ipaddress.ip_address(url.hostname or "")
-        if (url.scheme != "https" or not address.is_private or address.is_loopback
+        if (url.scheme != "https" or not (address.is_private or in_tailnet(str(address))) or address.is_loopback
                 or address.is_unspecified or address.is_multicast or url.username
                 or url.password or url.path or url.query or url.fragment
                 or not 1 <= (443 if url.port is None else url.port) <= 65535

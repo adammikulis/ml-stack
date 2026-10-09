@@ -10,6 +10,7 @@ from typing import Any
 from ml_stack.gate import QueueTimeout, turn
 
 from .chat import ChatError, reply_text, targets
+from .onboard.lan import in_tailnet
 
 try:
     from . import sdk_chat
@@ -37,7 +38,7 @@ def answer(ui: Any, handler: Any, raw: bytes | None = None) -> bool:
     try:
         source = ipaddress.ip_address(handler.client_address[0])
         if (ui is None or not isinstance(handler.connection, ssl.SSLSocket)
-                or not source.is_private or source.is_unspecified or source.is_multicast):
+                or not (source.is_private or in_tailnet(str(source))) or source.is_unspecified or source.is_multicast):
             raise ValueError("Android connections require local network TLS")
         auth = handler.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
