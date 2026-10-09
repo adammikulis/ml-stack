@@ -12,6 +12,12 @@ passes its own model id (`--model <id>`; `claude-sonnet-5-5` unless it knows oth
 
 Use Haiku 5.5 (`claude-haiku-5-5`) for read-only search, summarising, narrow mechanical edits,
 and lowering a budget ratchet when the brief names the metric and the test selector that checks it.
+Haiku also writes a small standalone tool or script with its own tests and wires it in with additive
+integration edits to existing files (an index or docs row, an import, a registry line, a regenerated
+file): edits that only add references to its new code and change no existing behaviour. A trial on
+2026-10-08 (a commit-history chart script) passed review: it worked, its tests failed when the code
+was broken, it broke no repo rule and it took a correction cleanly. The lead reviews every such diff
+to existing files before it lands.
 Haiku never deletes or weakens a test or an assertion, edits authorization, grant, claim, guard,
 hook or red-team code, resolves a semantic merge conflict, changes anything outside its worktree
 (an install, an interpreter, a shared service), or decides that a branch is ready to land.
