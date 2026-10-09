@@ -89,13 +89,13 @@ fn connection(mut stream: UnixStream, node: &Mutex<Node>, allowed: u32, net: Opt
         return write_frame(&mut stream, &refusal);
     }
     while let Some(request) = read_frame(&mut stream)? {
-        let reply = match net {
-            Some(net) => net.call(&request),
+        let reply = crate::lease::rpc::serve(&|r| match net {
+            Some(net) => Ok(net.call(r)),
             None => match node.lock() {
-                Ok(mut n) => handle(&mut n, &request),
-                Err(_) => return Err(Error::Damaged("node poisoned".into())),
+                Ok(mut n) => Ok(handle(&mut n, r)),
+                Err(_) => Err(Error::Damaged("node poisoned".into())),
             },
-        };
+        }, &request)?;
         write_frame(&mut stream, &reply)?;
     }
     Ok(())

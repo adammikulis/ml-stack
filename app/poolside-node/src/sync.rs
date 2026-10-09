@@ -49,16 +49,16 @@ pub fn rows_since(board: &Board, since: &BTreeMap<String, u64>) -> BTreeMap<Stri
     out
 }
 
-/// Store what ``journals`` carries from the device ``from``; returns the row count.
-pub fn take(board: &mut Board, journals: &BTreeMap<String, Vec<Row>>, from: &str, report: &mut Report) -> Result<usize> {
-    let total: usize = journals.values().map(Vec::len).sum();
-    if journals.len() > MAX_REQUEST_ORIGINS || total > 2 * MAX_ROWS {
+/// Store what ``logs`` carries from the device ``from``; returns the row count.
+pub fn take(board: &mut Board, logs: &BTreeMap<String, Vec<Row>>, from: &str, report: &mut Report) -> Result<usize> {
+    let total: usize = logs.values().map(Vec::len).sum();
+    if logs.len() > MAX_REQUEST_ORIGINS || total > 2 * MAX_ROWS {
         return Err(Error::Invalid("the request exceeds its bound".into()));
     }
     let mut stored = 0;
-    for (origin, rows) in journals {
+    for (origin, rows) in logs {
         if !valid_origin(origin) || rows.iter().any(|r| r.size() > MAX_ROW_BYTES) {
-            return Err(Error::Invalid("a journal is a list of small rows under an origin id".into()));
+            return Err(Error::Invalid("a log is a list of small rows under an origin id".into()));
         }
         let owned = board.owns(from, origin);
         match board.ingest(origin, rows, owned) {

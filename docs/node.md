@@ -124,6 +124,8 @@ Request `{"v":1, "id":…, "method":…, "board":…, "token":…, "params":{…
 | `pair_start` | token with the grant | `host, port, passphrase`; without a passphrase `fingerprint` (join under `open`) | `{pool, peer}` |
 | `sync_now` | token with the grant | | `{reached}` |
 
+| `lease_acquire`, `lease_renew`, `lease_release`, `lease_list`, `lease_wait` | board, token | see "Leases" | a lease |
+
 The grant check is `grants::Grants` (the standing-grant system comes later); the stub lets any
 registered local session act, and a node can be given a stricter one. The network methods
 (`pair_accept`, `pair_start`, `sync_now`) run without the node's lock held, so a slow peer blocks no
@@ -138,6 +140,65 @@ The Rust client (`client::Client`, `client::ensure_running`) finds a dead socket
 `start.lock` (single-flight, so callers queue and the second finds the first's node), spawns
 `poolside-node run --state DIR` in its own process group, and polls `hello`. State is the logs on
 disk, so a killed node restarts with every committed entry and every token.
+
+## Leases
+
+One table, `<state>/leases.json` (0600, written atomically on every change), admits everything that
+used to be admitted six ways: the GPU, CPU slots, memory, named claims, served models. Code is
+`src/lease/` (`types`, `policy`, `table`, `live`, `merge`, `rpc`). Config is `lease-config.json`
+(optional; every field has a default): `cpu_slots` (cores), `memory_mb` (0 = no budget),
+`max_wait_s` 600, `background_share_percent` 50, `unknown_background_s` 180, `queue_patience_s` 60,
+`default_ttl_s` 300, `max_ttl_s` 86400.
+
+**Resources** (JSON objects with a `type`; `device` defaults to `local`, the only device this node
+decides; another device is `denied`):
+
+| type | fields | rule |
+|---|---|---|
+| `gpu` | `device` | one holder at a time |
+| `cpu_slots` | `device, count` | counted against `cpu_slots` |
+| `memory_mb` | `device, mb` | counted against `memory_mb`; more than the budget is `quota`, less than what is left queues |
+| `claim` | `kind, name` | `kind` is worktree, branch, area, port, server or install; one holder per name; worktree and area names are absolute paths and conflict with a nested path |
+| `model_slot` | `device, model, context, draft, parallel` | one holder per device and model; the shape is kept and shown |
+
+A request names one to eight resources and gets all of them at once or waits. **Order** is
+`scripts/testslots_policy.py`: shortest `estimate_s` first, less the seconds already waited; a request
+that has waited past `max_wait_s` goes ahead of every ordering and cap, by arrival; arrival breaks
+ties (`class` `interactive` estimates 0, `background` estimates `unknown_background_s`). While a
+short run holds or waits for CPU slots of a device, a not-yet-aged long run may hold at most
+`background_share_percent` of them. A request never overtakes an earlier one that wants the same
+resource.
+
+**Holder.** The holder is `board/name` from the token; a request that carries `holder`, `name` and the
+like is refused. Only the holder renews or releases. A holder may pass `pid`: the node records the
+process start time and drops the lease when the process is gone, a zombie, or started at another
+moment (a reused pid). A `remote` holder has no pid and lives by expiry. Every lease expires
+`ttl_s` after the last renewal; a queued request not polled for `queue_patience_s` is dropped. The
+sweep runs on every lease call, and at the first one after a restart, so a stale holder is dropped
+and a live one kept.
+
+**Takeover.** When a request is granted resources a dead or expired holder had, the node writes an
+audit entry (`event lease_takeover`, `subject` the new lease, `detail` naming the old holder and why).
+
+| method | params | result |
+|---|---|---|
+| `lease_acquire` | `resources, class, estimate_s, ttl_s, pid, remote, wait` | the lease, or `{state: "busy", blockers}` when `wait` is false and it is not free |
+| `lease_renew` | `id, ttl_s` | the lease |
+| `lease_release` | `id` | `{id, released}` (a queued request is cancelled) |
+| `lease_list` | | `{leases, config}`; other boards' holders show as `other-board` |
+| `lease_wait` | `id, timeout_ms` | the lease once `held`, or still `queued` at the timeout (at most 10 minutes; the node's lock is not held while it waits) |
+
+A lease is `{id, state (queued|held), holder, resources, class, estimate_s, since_ms, granted_ms,
+expires_ms, ttl_s, pid, remote, position, wait_estimate_s}`. Rust: `node.leases` (`Leases`, with
+`tick`), `lease::table::Table`, `lease::rpc::call` and `serve`, `lease::live::is_alive`.
+
+**On the board.** Every grant and end is a `lease` entry (`#leases`) written under the holder's
+name: `{lease, action: acquire|release|expire|dead|abandon, resources: [lines]}`. `lease::merge::view`
+reads them back in the board's total order: the earliest acquire of an exclusive resource holds it
+until its own end entry; counted resources sum. Gpu, model slots and the path, port, server and
+install claims are scoped to the origin that wrote them (a device's table decides its own, others only
+read); branch and area claims are pool-wide, and a local request for one a peer holds on the board
+queues behind it (`merge::foreign_holds`).
 
 ## Sync
 
@@ -204,7 +265,7 @@ cd app
 cargo build -p poolside-node
 target/debug/poolside-node run --state ~/.poolside/node     # serve
 target/debug/poolside-node status --state ~/.poolside/node
-cargo test -p poolside-node                                  # 76 tests; crash.rs starts two node processes and SIGKILLs one
+cargo test -p poolside-node                                  # about 93 tests; crash.rs starts two node processes and SIGKILLs one
 cargo test -p ml-stack-app                                   # the window; needs the sidecar binary in src-tauri/binaries
 ```
 
@@ -218,7 +279,10 @@ The workspace Cargo.lock is `app/Cargo.lock`, the build output `app/target/`. Cr
   multicast group (`NetConfig::standard`), and a default sync interval; today the network starts only
   with flags.
 - The Python client (`ml_stack.board`) replacing the workspace calls.
-- The lease service (another worker), the rest of the entry kinds (`task`, `landing_request`,
+- Python lease clients (the serve broker, `gate.py` tickets, `testslots` permits, fleet `JobRunner` slots,
+  `lock.only_one` and `claims.py` calling the lease methods, and their own admission code deleted), a local
+  holder yielding when the board shows a peer's earlier acquire of a pool-wide claim, leases on a remote
+  device, the rest of the entry kinds (`task`, `landing_request`,
   `reputation_event`), content screening and quarantine of foreign text (still in Python), owner-only
   grants (the `Grants` stub allows every registered session; links and project sources have the same
   gap), rebuilding the graph index from entries.

@@ -19,6 +19,7 @@ use crate::error::{Error, Result};
 use crate::fold::{self, check_local, holders, Context, Entry};
 use crate::fsutil::private_dir;
 use crate::identity::{Holder, Registry, Tokens};
+use crate::lease::Leases;
 use crate::links::Links;
 use crate::registry::Projects;
 use crate::row::{valid_name, Kind};
@@ -46,6 +47,7 @@ pub struct Node {
     pub tokens: Tokens,
     pub links: Links,
     pub projects: Projects,
+    pub leases: Leases,
     pub stop: Arc<AtomicBool>,
     pub started: Instant,
 }
@@ -70,7 +72,7 @@ impl Node {
         let mut node = Node {
             dir: dir.into(), pool: String::new(), cert, members, grants: Box::new(StubGrants), facts, key, boards: BTreeMap::new(),
             tokens: Tokens::open(&dir.join("tokens.json"))?, links: Links::open(&dir.join("links.json"))?,
-            projects: Projects::open(&dir.join("projects.json"))?,
+            projects: Projects::open(&dir.join("projects.json"))?, leases: Leases::open(dir)?,
             stop: Arc::new(AtomicBool::new(false)), started: Instant::now(),
         };
         let root = dir.join("boards");

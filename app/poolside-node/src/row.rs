@@ -27,6 +27,8 @@ pub enum Kind {
     Identity,
     Audit,
     ReputationEvent,
+    /// A lease granted or ended on a device: what its table says it holds.
+    Lease,
     /// A signature over the row before it; part of the log, never of the view.
     Head,
 }
