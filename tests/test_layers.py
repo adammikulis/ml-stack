@@ -32,7 +32,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
                "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
-               "surface", "testing", "train", "walk", "web", "workspace", "pi", "board", "node_binary", "node_build", "node_join", "node_join_check", "node_launch", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
+               "surface", "testing", "train", "walk", "web", "workspace", "pi", "board", "node_binary", "node_build", "device_host", "device_setup", "node_join", "node_join_check", "node_launch", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
     ("dev", ("redteam",)),
 )
 

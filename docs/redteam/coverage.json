@@ -1,7 +1,7 @@
 {
- "surfaces": 854,
+ "surfaces": 858,
  "by_status": {
-  "covered": 529,
+  "covered": 533,
   "partial": 197,
   "uncovered": 53,
   "n/a": 75,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 73,
+   "covered": 77,
    "partial": 60,
    "uncovered": 0,
    "n/a": 2,
@@ -10881,6 +10881,58 @@
     "tests/test_redteam_devbranch.py"
    ],
    "note": "the argv is fixed and the checkout path is one argument; the environment value is returned as text, never run, and a protected branch name is refused"
+  },
+  {
+   "id": "spawn:device_host.py:_powershell",
+   "kind": "spawn",
+   "source": "device_host.py:_powershell",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
+  },
+  {
+   "id": "spawn:device_host.py:install_rust",
+   "kind": "spawn",
+   "source": "device_host.py:install_rust",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
+  },
+  {
+   "id": "spawn:device_host.py:restart_wsl",
+   "kind": "spawn",
+   "source": "device_host.py:restart_wsl",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
+  },
+  {
+   "id": "spawn:device_host.py:wslconfig_path",
+   "kind": "spawn",
+   "source": "device_host.py:wslconfig_path",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_device_setup.py::test_a_hostile_windows_profile_path_reaches_wslpath_as_one_argument_and_no_command_goes_through_a_shell",
+    "tests/test_device_setup.py::test_every_command_the_host_runs_is_a_fixed_argv_with_no_input_from_outside"
+   ],
+   "note": "every argv is fixed (PowerShell script text is built from constants and travels encoded); the one outside string, the Windows profile path, is a single wslpath argument"
   },
   {
    "id": "spawn:doctor.py:_answers_help",

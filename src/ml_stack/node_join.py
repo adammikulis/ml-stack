@@ -12,6 +12,7 @@ of this on one device and says which fails and what to change.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -27,6 +28,7 @@ DEFAULT_BEACON_PORT = 7448
 BOARD = "pool"
 SESSION = "pool-join"
 POLICIES = ("open", "secure")
+PAIR_CODE_ENV = "ML_STACK_PAIR_CODE"
 POLL_S = 1.0
 
 
@@ -153,6 +155,22 @@ GROUP.add("join", _run(_join),
              flag("--wait", type=float, default=0.0, help="seconds to wait for another device to appear"),
              flag("--yes", action="store_true", help="agree to turning the network on without being asked"),
              flag("--binary", default="", help="run this poolside-node binary instead of the selected runtime's")])
+def _invite(state: Path, a) -> dict:
+    return call(state, "pair_accept", {"ttl_s": a.ttl}, token=_token(state))
+
+
+def _pair(state: Path, a) -> dict:
+    code = a.code or os.environ.get(PAIR_CODE_ENV, "")
+    if not code:
+        raise PoolError(f"give the code the other device printed: --code, or {PAIR_CODE_ENV} in the environment")
+    return call(state, "pair_start", {"host": a.host, "port": a.port, "passphrase": code}, token=_token(state))
+
+
+GROUP.add("invite", _run(_invite), help="make a short-lived pairing code for another device to join this pool with (policy secure)",
+    options=[STATE, flag("--ttl", type=int, default=300, help="seconds the code stays valid")])
+GROUP.add("pair", _run(_pair), help="join the pool of the device that printed a pairing code",
+    options=[STATE, flag("--host", required=True, help="that device's address"), flag("--port", type=int, default=DEFAULT_PORT),
+             flag("--code", default="", help=f"the code (else {PAIR_CODE_ENV})")])
 GROUP.add("status", _run(lambda state, a: status(state)), help="the pool, its members and the beacon's counts", options=[STATE])
 
 main = GROUP.run
