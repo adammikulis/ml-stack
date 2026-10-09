@@ -27,10 +27,13 @@ ALLOWED = {
     "src/ml_stack/workspace/device_agent.py": {"_add", "mint"},
     "src/ml_stack/workspace/guide.py": {"bootstrap_agent", "init"},
     "src/ml_stack/workspace/identity.py": {"_add"},
+    "src/ml_stack/workspace/journal.py": {"_add"},  # appends a journal row; it creates no identity
     "src/ml_stack/workspace/localstart.py": {"mint"},
     "src/ml_stack/workspace/onboard.py": {"adopt", "init", "mint"},
     "src/ml_stack/workspace/remote_host.py": {"enroll_project", "init"},
     "src/ml_stack/workspace/service.py": {"init", "mint"},
+    # a registered parent's own subagent, named by the board, under the parent's limits and expiry
+    "src/ml_stack/workspace/spawn.py": {"adopt"},
 }
 PENDING_REMOVAL = {
     "src/ml_stack/harnessid.py": {"delegate"},
