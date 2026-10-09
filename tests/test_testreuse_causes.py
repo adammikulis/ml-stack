@@ -165,7 +165,8 @@ def test_every_worktree_of_a_repository_without_an_origin_shares_one_scope(tmp_p
 
 
 def run_tests(where: Path, store: Path, *files: str) -> tuple[int, str]:
-    env = {**os.environ, "DEV_TEST_REUSE_DIR": str(store), "DEV_TEST_REUSE_CANARY": "0"}
+    outer = {k: v for k, v in os.environ.items() if not k.startswith("DEV_TEST_")}  # not a run nested in a lease
+    env = {**outer, "DEV_TEST_REUSE_DIR": str(store), "DEV_TEST_REUSE_CANARY": "0"}
     done = subprocess.run([sys.executable, "scripts/test", "all", *files], cwd=where, env=env, capture_output=True,
                           text=True, check=False)
     return done.returncode, done.stdout + done.stderr
