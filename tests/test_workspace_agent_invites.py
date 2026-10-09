@@ -71,7 +71,7 @@ def test_a_joined_child_is_listed_with_its_parent_and_its_sends_count_against_th
     shown = {r["id"]: r for r in kit.ws.registered()}
     assert shown[name]["parent"] == "lead-a" and shown["lead-a"]["parent"] == ""
     out = cli(kit.base, kit.token, "agents").stdout
-    assert f"{name}  agent  child of lead-a" in out
+    assert f"Subagent · {name} (parent " in out
     kit.limits(sends_per_window=3, announce_per_window=1000, child_sends_per_window=2)
     child = tokens.load(kit.base, name)
     sent = 0

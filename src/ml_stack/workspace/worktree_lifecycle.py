@@ -53,14 +53,15 @@ def _storage(base: Path, *, write: bool = False):
         shutil.rmtree(staging)
 
 
-def scopes(base: Path, owner: str, label: str = '') -> list[dict]:
+def scopes(base: Path, owner: str, label: str = '', *, exact: bool = False) -> list[dict]:
     database = base / 'worktree-lifecycle.db'
     if not database.exists():
         return []
     with _storage(base) as graph:
         return [row['attrs'] for row in graph.nodes('worktree-lifecycle')
                 if row['attrs']['owner'] == owner
-                and (not label or row['attrs']['label'] in ('', label))]
+                and (row['attrs']['label'] == label if exact
+                     else not label or row['attrs']['label'] in ('', label))]
 
 
 def remember(base: Path, owner: str, label: str, path: str) -> None:
@@ -144,14 +145,14 @@ def cleanup(base: Path, owner: str, path: str, claims, *, claim_owner: str = '')
     return {'path': str(target), 'commit': commit, 'landed': landed, 'cleanup_verified': True}
 
 
-def pending(base: Path, owner: str, label: str = '') -> list[dict]:
+def pending(base: Path, owner: str, label: str = '', *, exact: bool = False) -> list[dict]:
     """Inspect the worker's durable scopes without removing files or Git references."""
     result = []
-    for scope in scopes(base, owner, label):
+    for scope in scopes(base, owner, label, exact=exact):
         path = Path(scope['path'])
         if scope['primary'] and path.exists():
             remember(base, scope['owner'], scope['label'], str(path))
-            scope = next(row for row in scopes(base, owner, label) if row['path'] == str(path)
+            scope = next(row for row in scopes(base, owner, label, exact=exact) if row['path'] == str(path)
                          and row['label'] == scope['label'])
         if not scope['primary']:
             found = worktreerules.checkouts(path)
@@ -188,9 +189,17 @@ def pending(base: Path, owner: str, label: str = '') -> list[dict]:
     return result
 
 
-def require_clean(base: Path, owner: str, label: str = '') -> None:
-    """Refuse completion while an attributed checkout, registration or branch remains."""
-    scopes = pending(base, owner, label)
+def require_clean(base: Path, owner: str, label: str = '', *, exact: bool = False,
+                  within: tuple[str, ...] = ()) -> None:
+    """Refuse completion while this worker's own attributed checkout, registration or branch
+    remains. With ``exact`` only the scopes of this very label count, and with ``within`` only
+    the checkouts at or around those roots: another worker's checkout never blocks it."""
+    scopes = pending(base, owner, label, exact=exact)
+    if within:
+        roots = [Path(r).resolve() for r in within]
+        scopes = [row for row in scopes if any(
+            (here := Path(row['path']).resolve()) == r or r in here.parents or here in r.parents
+            for r in roots)]
     if scopes:
         detail = '; '.join(f"{row['path']} ({row['branch']}): {', '.join(row['reasons'])}" for row in scopes)
         raise Denied('completion requires landed work and verified cleanup: ' + detail)

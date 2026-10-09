@@ -57,7 +57,7 @@ from ml_stack.workspace.bus import CALL_TYPES, TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
 from ml_stack.workspace.coordination import workspace_id
-from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
+from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, BoardUnavailable, Denied
 from ml_stack.workspace.modelid import describe
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
@@ -72,6 +72,9 @@ LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
 CODES = ((ServerError, 3), (Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
          (HumanRequired, 3), (EOFError, 2), (ValueError, 2), (OSError, 2))
 Handler = Callable[[argparse.Namespace, Workspace, str], Any]
+# Commands an agent runs on the way to local work: with the project board out of reach they warn
+# and succeed, never stopping the agent (what they would have recorded is simply not recorded).
+DEGRADE = frozenset({"announce", "hello-model", "claim", "release", "heartbeat", "nudge", "join"})
 
 COMMON = [option("json"),
           flag("--request-id", default="", help="reuse an exact remote mutation request after a lost response"),
@@ -737,6 +740,12 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
     def wrapped(args: argparse.Namespace) -> int:
         try:
             return int(run(args) or 0)
+        except BoardUnavailable as err:
+            if getattr(args, "cmd", "") not in DEGRADE:
+                warn(f"workspace: {err}")
+                return 3
+            warn(f"workspace: {err} -- carrying on; {args.cmd} was not recorded")
+            return 0
         except tuple(kind for kind, _ in CODES) as err:
             code = next(c for kind, c in CODES if isinstance(err, kind))
             if args.json:

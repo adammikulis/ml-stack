@@ -1016,20 +1016,10 @@ def _external_activity_drop_write(root: Path, rel: Path) -> bool:
         return False
 
 def _external_board_write(root: Path, rel: Path) -> bool:
-    """Whether ``rel`` is under the board daemon's root and a live process outside this session serves it."""
-    import psutil
+    """Whether ``rel`` is under a directory a live process outside this session serves."""
+    from tests.foreign_writers import served_by_foreign
 
-    if rel.parts[:1] != ('traind',):
-        return False
-    target = str(root / 'traind')
-    for process in psutil.process_iter():
-        try:
-            argv = process.cmdline()
-            if '--root' in argv[:-1] and argv[argv.index('--root') + 1] == target:
-                return not ours({'owner_pid': process.pid})
-        except (psutil.Error, OSError):
-            continue
-    return False
+    return served_by_foreign(root, rel, ours)
 
 
 def _external_state_write(root: Path, rel: Path) -> bool:
@@ -1040,7 +1030,11 @@ def _external_state_write(root: Path, rel: Path) -> bool:
 
 
 def real_state_changes(root: Path, before: dict[str, int], after: dict[str, int]) -> list[str]:
-    return [name for name in changed_files(before, after) if not _external_state_write(root, Path(name))]
+    from tests.foreign_writers import held_by_foreign
+
+    names = [n for n in changed_files(before, after) if not _external_state_write(root, Path(n))]
+    foreign = held_by_foreign(root, [Path(n) for n in names]) if names else set()
+    return [n for n in names if Path(n) not in foreign]
 
 
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS, *, attribute_external: bool = True) -> dict[str, int]:

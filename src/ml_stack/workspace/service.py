@@ -225,14 +225,15 @@ class Workspace:
         self._screen(who, what, size_cap, *texts)
         self._rate(who, what)
 
-    def _rate(self, who: Identity, what: str) -> None:
+    def _rate(self, who: Identity, what: str, *, soft: bool = False) -> None:
         try:
             self.rates.admit(who.id, self.limits.child_sends_per_window if who.parent else 0)
             if who.parent:
                 self.rates.admit(who.parent)
         except RateLimited:
-            self.audit("write.refused", who.id, what=what, why="rate")
-            raise
+            self.audit("announce.over_quota" if soft else "write.refused", who.id, what=what, why="rate")
+            if not soft:
+                raise
 
     def _hold(self, who: Identity, kind: str, subject: str, *texts: str) -> tuple[str, list[str]]:
         joined = "\n".join(t for t in texts if t)
@@ -340,9 +341,9 @@ class Workspace:
         recent = [r for r in self.bus.outbox(who.id, 50) if r["to"] == ANNOUNCE and r["type"] not in reports.UNMETERED
                   and r["ts"] > horizon]
         if len(recent) >= lim.announce_per_window:
-            self.audit("write.refused", who.id, what="announcement", why="rate")
-            raise RateLimited(f"{who.id} made {len(recent)} announcements in "
-                              f"{lim.announce_window_s:.0f}s; the limit is {lim.announce_per_window}")
+            # Never fail the caller: the post still lands and the roll-up (announce_rollup lines
+            # plus a count) is what bounds what other agents' context receives.
+            self.audit("announce.over_quota", who.id, recent=len(recent), limit=lim.announce_per_window)
 
     def post(self, who: Identity, to: str, kind: str, body: str, *, announce: bool = False,
              **opts: Unpack[SendOptions]) -> dict[str, Any]:
@@ -400,7 +401,7 @@ class Workspace:
 
     def _post_new(self, who: Identity, row: dict, ttl_s: float) -> dict:
         to = row['to']
-        self._rate(who, 'the message')
+        self._rate(who, 'the message', soft=to == ANNOUNCE)  # an announcement never fails its sender
         if not to.startswith('#') and self.bus.pending(to) >= self.limits.inbox_pending:
             self.audit('write.refused', who.id, what='message', why='inbox-full', to=to)
             raise Refused(f"{to} has {self.limits.inbox_pending} unread messages; wait for it to read")

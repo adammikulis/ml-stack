@@ -8,7 +8,6 @@ import pytest
 from workspace_kit import Kit, clean_env, run_python
 
 from ml_stack.workspace import Denied, Refused
-from ml_stack.workspace.rates import RateLimited
 
 
 @pytest.fixture
@@ -40,9 +39,9 @@ def test_announcement_duplicates_precede_announcement_quota_and_do_not_deadlock(
     kit.limits(announce_per_window=1, sends_per_window=1)
     first = kit.ws.announce(kit.sender, 'done', 'Worker stopped', label='runtime')
     assert kit.ws.send(kit.sender, '*', 'done', 'Worker stopped', label='runtime') == first
-    with pytest.raises(RateLimited):
-        kit.ws.announce(kit.sender, 'done', 'A different report', label='runtime')
-    assert len(kit.ws.bus.outbox('reporter')) == 1
+    second = kit.ws.announce(kit.sender, 'done', 'A different report', label='runtime')
+    assert second != first
+    assert len(kit.ws.bus.outbox('reporter')) == 2
 
 
 def test_human_and_nonreport_messages_are_deliberate_repeats(kit):
