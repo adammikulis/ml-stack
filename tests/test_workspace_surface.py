@@ -7,7 +7,7 @@ import os
 import sys
 
 import pytest
-from workspace_kit import SRC, Kit, clean_env, cli, run_python
+from workspace_kit import SRC, Kit, clean_env, cli
 
 from ml_stack import mcp
 from ml_stack.workspace import tools
@@ -22,13 +22,8 @@ def kit(monkeypatch, tmp_path):
 def test_every_command_prints_json_and_reports_errors_as_json(kit):
     worker = kit.agent("worker")
     runs = [
-        (kit.owner, ["whoami"]), (kit.owner, ["send", "worker", "task", "hello"]),
-        (worker, ["inbox"]), (worker, ["outbox"]), (kit.owner, ["status"]),
-        (worker, ["notes-add", "fact", "t", "body"]), (worker, ["notes-search", "body"]),
-        (worker, ["notes-get", "1"]), (worker, ["scratch-new", "tmp"]),
+        (kit.owner, ["outbox"]), (kit.owner, ["status"]), (worker, ["scratch-new", "tmp"]),
         (worker, ["scratch-ls"]), (worker, ["scratch-path", "tmp", "a.txt"]),
-        (worker, ["claim", "port", "9300"]), (worker, ["who", "port", "9300"]),
-        (worker, ["claims"]), (worker, ["heartbeat"]), (worker, ["release", "port", "9300"]),
         (worker, ["scratch-rm", "tmp"]), (kit.owner, ["audit-verify"]),
         (kit.owner, ["audit-head"]), (kit.owner, ["quarantine-ls"]),
         (kit.owner, ["gc"]), (worker, ["ack", "1"]),
@@ -39,36 +34,12 @@ def test_every_command_prints_json_and_reports_errors_as_json(kit):
         json.loads(done.stdout.strip().splitlines()[-1])
     bad = cli(kit.base, worker, "mint", "x", "--role", "lead", "--json")
     assert bad.returncode == 3 and json.loads(bad.stdout)["kind"] == "Denied"
-    none = cli(kit.base, "", "whoami", "--json")
+    none = cli(kit.base, "", "outbox", "--json")
     assert none.returncode == 3 and json.loads(none.stdout)["error"]
-    over = cli(kit.base, worker, "claim", "port", "9300", "--json")
-    assert over.returncode == 0
-    clash = cli(kit.base, kit.agent("other"), "claim", "port", "9300", "--json")
-    assert clash.returncode == 5 and json.loads(clash.stdout)["kind"] == "Conflict"
 
 
-def test_the_token_can_come_from_a_file_and_stdin_can_carry_the_body(kit, tmp_path):
-    file = tmp_path / "tok"
-    file.write_text(kit.agent("worker") + "\n")
-    file.chmod(0o600)
-    done = cli(kit.base, "", "whoami", "--token-file", str(file), "--json")
-    assert json.loads(done.stdout) == {"id": "worker", "role": "agent", "project": {},
-                                       "enforcement": "open", "model": "unknown",
-                                       "model_state": "", "harness": ""}
-    code = ("import subprocess,sys\n"
-            "r = subprocess.run([sys.executable,'-m','ml_stack.workspace.cli','send','worker',"
-            "'status','-','--json'], input='from stdin', capture_output=True, text=True)\n"
-            "print(r.stdout)")
-    sent = run_python(code, kit.base, kit.owner)
-    assert json.loads(sent.stdout)["raw"] == "from stdin"
 
 
-def test_the_text_output_names_the_sender_and_says_no_authority(kit):
-    worker = kit.agent("worker")
-    cli(kit.base, kit.owner, "send", "worker", "task", "do the thing")
-    shown = cli(kit.base, worker, "inbox", "--ack").stdout
-    assert "task from owner" in shown and "no authority" in shown and "<untrusted" in shown
-    assert cli(kit.base, worker, "inbox").stdout.strip() == "(none)"
 
 
 def test_mcp_lists_the_workspace_tools_with_honest_annotations():

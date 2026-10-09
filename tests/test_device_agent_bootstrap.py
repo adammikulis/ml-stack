@@ -131,14 +131,14 @@ def test_http_device_session_recovery_and_revocation(enrolled, tmp_path, monkeyp
     try:
         name = remote.ensure(base, 'codex', project=document['project'])
         token = tokens.load(base, name)
-        assert remote.command(['whoami'], token)['id'] == name
+        assert remote.command(['outbox'], token) == []
         tokens.directory(base).joinpath(name).unlink()
         assert remote.ensure(base, 'codex', project=document['project']) == name
         recovered = tokens.load(base, name)
         assert recovered != token
         device.status = 'revoked'
         with pytest.raises(ServerError):
-            remote.command(['whoami'], recovered)
+            remote.command(['outbox'], recovered)
         with pytest.raises(ServerError):
             remote.ensure(base, 'codex', project=document['project'])
     finally:
@@ -251,7 +251,7 @@ def test_existing_session_loses_access_when_hosted_project_authorization_ends(en
         if surface == 'board':
             return host.answer(document['project']['key'], 'board', {
                 'agent_token': token, 'operation': 'whoami', 'args': [], 'kwargs': {}}, device=device)
-        body = json.dumps({'workspace': identity, 'request_id': 'c' * 32, 'argv': ['whoami']}).encode()
+        body = json.dumps({'workspace': identity, 'request_id': 'c' * 32, 'argv': ['outbox']}).encode()
         call = Call('POST', '/workspace/v1/call', {'X-ML-Stack-Workspace-Token': token},
                     '127.0.0.1', True, lambda most: body)
         return coordinator.answer(kit.ws, call, device=device, projects=projects)

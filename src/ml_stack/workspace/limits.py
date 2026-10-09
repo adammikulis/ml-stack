@@ -55,6 +55,7 @@ class Limits:
     announce_per_window: int = 6
     announce_window_s: float = 600.0
     announce_rollup: int = 5
+    owed_after_s: float = 600.0
     board_message_chars: int = 4_000
     board_read_chars: int = 60_000
     digest_lines: int = 40

@@ -45,20 +45,6 @@ def project(tmp_path, monkeypatch):
     return root
 
 
-def test_normal_cli_sends_to_saved_board(project, monkeypatch):
-    remote = Remote()
-    connection.bind(remote, project, "mac", "default")
-    monkeypatch.chdir(project)
-    monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: remote)
-    monkeypatch.setattr(cli, "Workspace", RejectLocalWorkspace)
-    args = SimpleNamespace(cmd="send", agent="", token_file="", label="helper", to="pc", type="status",
-                           body="connected", subject="", reply_to=0, ttl=0, json=True)
-    assert cli._runner(cli._send)(args) == 0
-    operation, token, values, _ = remote.calls[-1]
-    assert operation == "send" and token == "project-agent-capability"
-    assert values == ("pc", "status", "connected")
-
-
 def test_connected_project_uses_nearest_root_and_refuses_other_authority(project):
     connection.bind(Remote(), project, "mac")
     nested = project / "subdir"
@@ -84,7 +70,7 @@ def test_offline_connection_does_not_fall_back(project, monkeypatch):
         raise Denied("host offline")
     monkeypatch.setattr(connection, "RemoteWorkspace", offline)
     monkeypatch.setattr(cli, "Workspace", RejectLocalWorkspace)
-    assert cli._runner(cli._agents)(SimpleNamespace(cmd="agents", agent="", token_file="", json=True)) == 3
+    assert cli._runner(lambda args, ws, token: [])(SimpleNamespace(cmd="outbox", agent="", token_file="", json=True)) == 3
 
 
 def test_corrupt_connection_record_disables_local_fallback(project):
@@ -185,19 +171,3 @@ def test_tokens_saved_under_the_lan_name_follow_the_loopback_name(tmp_path, monk
     assert (new / "tokens" / "agent-a").read_text() == "kept"
     assert (new / "tokens" / "agent-b").read_text() == "new b"
     assert not (old / "tokens" / "agent-a").exists()
-
-
-def test_the_owed_list_degrades_on_a_board_that_serves_no_bus_log():
-    from ml_stack.workspace import attention_cli
-    from ml_stack.workspace.identity import Denied
-
-    class Remote:
-        board = SimpleNamespace(rollup=lambda token, ack: None)
-
-        def auth(self, token):
-            return SimpleNamespace(id="me")
-
-        def __getattr__(self, name):
-            raise Denied(f"{name} is unavailable on the board")
-
-    assert attention_cli.owed_text(Remote(), "token", False) == ""

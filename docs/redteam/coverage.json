@@ -1,8 +1,8 @@
 {
- "surfaces": 849,
+ "surfaces": 852,
  "by_status": {
-  "covered": 524,
-  "partial": 197,
+  "covered": 526,
+  "partial": 198,
   "uncovered": 53,
   "n/a": 75,
   "unmapped": 0
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 69,
-   "partial": 60,
+   "covered": 71,
+   "partial": 61,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -10776,6 +10776,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:board/place.py:_git",
+   "kind": "spawn",
+   "source": "board/place.py:_git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_board_client.py::test_a_directory_named_like_an_option_or_a_command_is_only_a_path_to_git"
+   ],
+   "note": "the repository path is a value of git -C, never an option or a shell word; a hostile directory name resolves to no board"
+  },
+  {
    "id": "spawn:checks.py:ask",
    "kind": "spawn",
    "source": "checks.py:ask",
@@ -12262,6 +12274,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:trees.py:git",
+   "kind": "spawn",
+   "source": "trees.py:git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:workspace/backlog.py:fetch",
    "kind": "spawn",
    "source": "workspace/backlog.py:fetch",
@@ -12354,6 +12378,20 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:workspace/notes_cli.py:verify",
+   "kind": "spawn",
+   "source": "workspace/notes_cli.py:verify",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_board_client.py::test_a_notes_command_is_never_run_through_a_shell",
+    "tests/test_redteam_board_client.py::test_a_command_off_the_allow_list_is_refused_whatever_the_note_says",
+    "tests/test_redteam_board_client.py::test_a_peers_note_cannot_choose_the_command_a_verification_records"
+   ],
+   "note": "a note's command runs as an argument vector the owner allow-listed, with no shell; shell syntax and off-list commands do not run, and the recorded command is the note's own"
   },
   {
    "id": "spawn:workspace/person_targets.py:_run",

@@ -89,26 +89,37 @@ def session_environment(value: dict, stage: str) -> dict | None:
         warning(stage, 'invalid native session_id; no session context recorded')
         return None
     environment.update(ML_STACK_SESSION_ID=session, ML_STACK_SESSION_HARNESS='claude-code')
-    try:
-        from ml_stack.workspace import limits, session_name
-        known = session_name.lookup(limits.root(), 'claude-code', session)
-    except (ImportError, OSError, ValueError, RuntimeError):
-        known = ''
+    known = agent_name(session, str(value.get('cwd') or ''))
     if known:
         environment['ML_STACK_WORKSPACE_AGENT'] = known
     return environment
 
 
-def name_session(environment: dict, model: str) -> str:
+def agent_name(native_id: str, cwd: str = '') -> str:
+    """The unique name the board gave the native session with this id in the project of ``cwd`` (default the
+    working directory), or an empty string."""
+    if not native_id:
+        return ''
+    try:
+        from ml_stack.board import session
+        return session.find('claude-code', native_id, cwd=Path(cwd or Path.cwd()))
+    except (ImportError, OSError, ValueError, RuntimeError, LookupError, KeyError) as error:
+        warning('lookup', error)
+        return ''
+
+
+def name_session(environment: dict, model: str, event: dict | None = None) -> str:
     """Give the session its unique name and put it in `environment`; empty (with a warning) when it has no native session."""
     session = environment.get('ML_STACK_SESSION_ID', '')
     if not session:
         warning('SessionStart', 'no native session id; the session cannot be given its own name')
         return ''
     try:
-        from ml_stack.workspace import limits, session_name
-        name = session_name.assign(limits.root(), model, 'claude-code', session)
-    except (ImportError, OSError, ValueError, RuntimeError) as error:
+        from ml_stack.board import client, place, session as board_session
+        node = client.Client()
+        board = place.resolve(node, Path(str((event or {}).get('cwd') or Path.cwd())))
+        name = board_session.register(node, board, board_session.Native(model, 'claude-code', session)).name
+    except (ImportError, OSError, ValueError, RuntimeError, LookupError, client.NodeError) as error:
         warning('SessionStart', error)
         return ''
     environment['ML_STACK_WORKSPACE_AGENT'] = name
@@ -213,21 +224,12 @@ def spawner_id(event: dict) -> str:
     return ''
 
 
-def agent_name(agent_id: str) -> str:
-    """The unique name the board gave the subagent with this agent id, or an empty string."""
-    try:
-        from ml_stack.workspace import limits, session_name
-        return session_name.lookup(limits.root(), 'claude-code', agent_id) if agent_id else ''
-    except (ImportError, OSError, ValueError, RuntimeError):
-        return ''
-
-
 def parent_environment(event: dict, stage: str) -> dict | None:
     """The environment of the identity that started this subagent: the subagent that spawned it, else the main session."""
     environment = session_environment(event, stage)
     if environment is None:
         return None
-    above = agent_name(spawner_id(event))
+    above = agent_name(spawner_id(event), str(event.get('cwd') or ''))
     if above:
         environment['ML_STACK_WORKSPACE_AGENT'] = above
     return environment
@@ -236,7 +238,7 @@ def parent_environment(event: dict, stage: str) -> dict | None:
 def own_environment(event: dict, stage: str) -> dict | None:
     """The environment of a subagent acting as itself, or None when the board has not named it."""
     environment = session_environment(event, stage)
-    name = agent_name(str(event.get('agent_id') or ''))
+    name = agent_name(str(event.get('agent_id') or ''), str(event.get('cwd') or ''))
     if environment is None or not name:
         return None
     environment['ML_STACK_WORKSPACE_AGENT'] = name

@@ -1,166 +1,130 @@
-"""The inbox nudge and the Claude Code hooks built on it, against a real workspace and real hook processes."""
+"""The inbox nudge and the Claude Code hooks built on it, against a real node and real hook processes."""
 
 from __future__ import annotations
 
 import json
-import time
+import os
+import re
 
 import pytest
-from workspace_kit import Kit, clean_env, cli
+from workspace_kit import cli as old_cli
 
-from ml_stack.workspace import nudge
-from ml_stack.workspace.remote_protocol import METHODS
+from ml_stack import node_supervise
+from ml_stack.workspace import board_cli, nudge
 
+pytest_plugins = ["node_kit"]
 LONG_AGO = 3 * 3600 + 12 * 60 + 20
 
 
 @pytest.fixture
-def kit(monkeypatch, tmp_path):
-    k = Kit(clean_env(monkeypatch, tmp_path), clock=lambda: time.time() - LONG_AGO)
-    k.limits(sends_per_window=1000)
-    k.t = {n: k.agent(n) for n in ("alice", "bob", "carol")}
-    return k
+def kit(workspace_node, monkeypatch, tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    monkeypatch.setattr(nudge.tempfile, "gettempdir", lambda: str(state))
+    workspace_node.alice, workspace_node.bob, workspace_node.carol = (workspace_node.member(n) for n in ("alice", "bob", "carol"))
+    return workspace_node
 
 
-def hook(kit, event, stdin="", tmp="state"):
-    tmpdir = kit.base.parent / tmp
-    tmpdir.mkdir(exist_ok=True)
-    return cli(kit.base, kit.t["bob"], "nudge", "--hook", event, env_extra={"TMPDIR": str(tmpdir)},
-               input=stdin)
+def say(kit, who, to, kind, text):
+    return kit.session(who).post(to.name, kind, text)
+
+
+def waiting(kit, aged=True):
+    """What waits for bob, as the hook sees it; ``aged`` moves the clock on so the messages are old."""
+    summary = board_cli.waiting(kit.session(kit.bob))
+    return nudge.Waiting.of({**summary, "now": summary["now"] + (LONG_AGO if aged else 0)})
+
+
+def hook(kit, event, stdin=""):
+    return nudge.output(event, waiting(kit), stdin)
 
 
 def test_the_plain_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(kit):
-    ws, t = kit.ws, kit.t
-    ws.send(t["alice"], "bob", "question", "SECRET-BODY which port?")
-    ws.send(t["alice"], "bob", "question", "SECRET-BODY and the lease?")
-    ws.send(t["carol"], "bob", "task", "SECRET-BODY build it")
+    for text in ("which port?", "and the lease?"):
+        say(kit, kit.alice, kit.bob, "question", f"SECRET-BODY {text}")
+    say(kit, kit.carol, kit.bob, "task", "SECRET-BODY build it")
     for step in range(3):
-        ws.send(t["carol"], "bob", "status", f"SECRET-BODY progress {step}")
-    out = cli(kit.base, t["bob"], "nudge").stdout
-    assert out.startswith("workspace: 6 waiting for you (2 questions, 1 task, 3 status; "
-                          "from alice, carol; oldest 3h12m). A direct question or "
-                          "task is waiting on you: run ml-stack-workspace inbox now and answer it")
+        say(kit, kit.carol, kit.bob, "status", f"SECRET-BODY progress {step}")
+    out = waiting(kit).line()
+    assert out.startswith(f"workspace: 6 waiting for you (2 questions, 1 task, 3 status; from {kit.alice.name}, {kit.carol.name}; "
+                          "oldest 3h12m). A direct question or task is waiting on you: run ml-stack-workspace inbox now and answer it")
     assert "SECRET" not in out
+    cli_line = kit.cli("nudge", who=kit.bob).stdout
+    assert re.match(r"workspace: 6 waiting for you \(2 questions, 1 task, 3 status; from .*; oldest \d+s\)\. A direct", cli_line)
+    assert "SECRET" not in cli_line
 
 
 def test_routine_kinds_keep_the_short_form(kit):
-    kit.ws.send(kit.t["alice"], "bob", "status", "SECRET-BODY on it")
-    kit.ws.send(kit.t["alice"], "bob", "note", "SECRET-BODY fyi")
-    out = cli(kit.base, kit.t["bob"], "nudge").stdout
-    assert out == "workspace: 2 waiting for you (1 note, 1 status; from alice; oldest 3h12m); run inbox\n"
+    say(kit, kit.alice, kit.bob, "status", "SECRET-BODY on it")
+    say(kit, kit.alice, kit.bob, "note", "SECRET-BODY fyi")
+    assert waiting(kit).line() == f"workspace: 2 waiting for you (1 note, 1 status; from {kit.alice.name}; oldest 3h12m); run inbox"
 
 
 def test_prompt_hook_injects_the_line_as_context_and_stays_silent_when_empty(kit):
-    assert hook(kit, "prompt").stdout == ""
-    kit.ws.send(kit.t["alice"], "bob", "status", "x")
-    shape = json.loads(hook(kit, "prompt").stdout)
+    assert hook(kit, "prompt") == ""
+    say(kit, kit.alice, kit.bob, "status", "x")
+    shape = json.loads(hook(kit, "prompt"))
     text = shape["hookSpecificOutput"]["additionalContext"]
-    assert shape == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text},
-                     "systemMessage": text}
+    assert shape == {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}, "systemMessage": text}
     assert text.startswith("workspace: 1 waiting for you")
-    assert hook(kit, "prompt").stdout == ""
+    assert hook(kit, "prompt") == ""
+
+
+def test_the_cli_hook_prints_the_same_json_as_the_library(kit, tmp_path):
+    say(kit, kit.alice, kit.bob, "question", "SECRET-BODY ready?")
+    done = kit.cli("nudge", "--hook", "prompt", who=kit.bob, env={"TMPDIR": str(tmp_path / "state")})
+    shape = json.loads(done.stdout)
+    assert shape["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit" and "SECRET-BODY ready?" in shape["systemMessage"]
 
 
 def test_post_hook_is_rate_limited_to_one_check_in_twenty_seconds(kit):
-    kit.ws.send(kit.t["alice"], "bob", "status", "x")
-    first = hook(kit, "post")
-    assert json.loads(first.stdout)["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
-    assert hook(kit, "post").stdout == ""
+    say(kit, kit.alice, kit.bob, "status", "x")
+    assert json.loads(hook(kit, "post"))["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+    assert hook(kit, "post") == ""
 
 
 def test_stop_hook_blocks_once_per_set_of_unread_urgent_messages(kit):
-    ws, t = kit.ws, kit.t
-    assert hook(kit, "stop", "{}").stdout == ""
-    ws.send(t["alice"], "bob", "question", "SECRET-BODY ready?")
-    first = hook(kit, "stop", "{}")
-    verdict = json.loads(first.stdout)
+    assert hook(kit, "stop", "{}") == ""
+    say(kit, kit.alice, kit.bob, "question", "SECRET-BODY ready?")
+    verdict = json.loads(hook(kit, "stop", "{}"))
     assert verdict["decision"] == "block" and "1 question" in verdict["reason"]
     assert "SECRET-BODY ready?" in verdict["reason"] and verdict["systemMessage"] == verdict["reason"]
-    assert hook(kit, "stop", "{}").stdout == ""
-    ws.send(t["carol"], "bob", "handoff", "SECRET-BODY yours")
-    again = json.loads(hook(kit, "stop", "{}").stdout)
+    assert hook(kit, "stop", "{}") == ""
+    say(kit, kit.carol, kit.bob, "handoff", "SECRET-BODY yours")
+    again = json.loads(hook(kit, "stop", "{}"))
     assert again["decision"] == "block" and "2 urgent" not in again["reason"]
     assert "SECRET-BODY yours" in again["reason"] and "SECRET-BODY ready?" not in again["reason"]
 
 
 def test_stop_hook_allows_when_continuing_or_when_only_routine_kinds_wait(kit):
-    ws, t = kit.ws, kit.t
-    ws.send(t["alice"], "bob", "status", "x")
-    ws.send(t["alice"], "bob", "note", "x")
-    assert hook(kit, "stop", "{}").stdout == ""
-    ws.send(t["alice"], "bob", "question", "x")
-    assert hook(kit, "stop", '{"stop_hook_active": true}').stdout == ""
-    assert json.loads(hook(kit, "stop", "{}").stdout)["decision"] == "block"
+    say(kit, kit.alice, kit.bob, "status", "x")
+    say(kit, kit.alice, kit.bob, "note", "x")
+    assert hook(kit, "stop", "{}") == ""
+    say(kit, kit.alice, kit.bob, "question", "x")
+    assert hook(kit, "stop", '{"stop_hook_active": true}') == ""
+    assert json.loads(hook(kit, "stop", "{}"))["decision"] == "block"
 
 
-def test_stop_hook_allows_a_question_younger_than_two_minutes(monkeypatch, tmp_path):
-    fresh = Kit(clean_env(monkeypatch, tmp_path))
-    bob, dan = fresh.agent("bob"), fresh.agent("dan")
-    fresh.ws.send(dan, "bob", "question", "x")
-    done = cli(fresh.base, bob, "nudge", "--hook", "stop", env_extra={"TMPDIR": str(tmp_path)}, input="{}")
-    assert done.returncode == 0 and done.stdout == ""
+def test_stop_hook_allows_a_question_younger_than_two_minutes(kit):
+    say(kit, kit.alice, kit.bob, "question", "x")
+    assert nudge.output("stop", waiting(kit, aged=False), "{}") == ""
 
 
-def test_hooks_print_nothing_and_exit_zero_when_the_workspace_is_unreachable(tmp_path):
-    out = cli(tmp_path / "nowhere", "", "nudge", "--hook", "stop", input="{}")
+def test_hooks_print_nothing_and_exit_zero_when_the_node_cannot_be_reached(kit):
+    kit.stop()
+    node_supervise.point(kit.state, None)
+    gone = {}
+    out = kit.cli("nudge", "--hook", "stop", stdin="{}", env=gone, who=kit.bob)
     assert out.returncode == 0 and out.stdout == "" and out.stderr == ""
+    plain = kit.cli("nudge", env=gone, who=kit.bob)
+    assert plain.returncode == 3
 
 
 def test_the_installer_is_for_a_person(tmp_path):
-    out = cli(tmp_path / "ws", "", "install-hooks", "--settings", str(tmp_path / "s.json"),
-              env_extra={"CLAUDECODE": "1"})
+    out = old_cli(tmp_path / "ws", "", "install-hooks", "--settings", str(tmp_path / "s.json"), env_extra={"CLAUDECODE": "1"})
     assert out.returncode == 3 and not (tmp_path / "s.json").exists()
 
 
-class _Board:
-    """A board that answers each operation from a real workspace."""
-
-    host = "http://127.0.0.1:8770"
-    project_id = "a" * 32
-    cluster_key = ""
-
-    def __init__(self, kit):
-        self.kit = kit
-        self.calls = []
-
-    def token(self, **kwargs):
-        return "capability"
-
-    def call(self, operation, token, *args, **kwargs):
-        self.calls.append(operation)
-        if operation == "whoami":
-            return {"id": "bob", "role": "agent", "can": ["read"], "project": {"key": self.project_id}}
-        assert operation in METHODS
-        return getattr(self.kit.ws, operation)(self.kit.t["bob"], *args, **kwargs)
-
-
-def test_prompt_hook_on_a_board_injects_the_waiting_line(kit, monkeypatch, tmp_path, capsys):
-    from types import SimpleNamespace
-
-    from ml_stack.workspace import cli as ws_cli, project_connection as connection
-    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(nudge.tempfile, "gettempdir", lambda: str(tmp_path))
-    root = tmp_path / "project"
-    root.mkdir()
-    board = _Board(kit)
-    connection.bind(board, root, "bob", "default")
-    monkeypatch.chdir(root)
-    monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: board)
-    kit.ws.send(kit.t["alice"], "bob", "question", "SECRET-BODY which port?")
-    args = SimpleNamespace(cmd="nudge", hook="prompt", agent="", token_file="", json=False)
-    assert ws_cli._nudging(args) == 0
-    shape = json.loads(capsys.readouterr().out)
-    text = shape["hookSpecificOutput"]["additionalContext"]
-    assert shape["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-    assert text.startswith("workspace: 1 waiting for you (1 question; from alice;")
-    assert "SECRET-BODY which port?" in text and shape["systemMessage"] == text
-    assert "waiting_summary" in board.calls
-
-
 def test_the_stamp_file_name_needs_no_posix_uid(monkeypatch):
-    import os
-
-    from ml_stack.workspace import nudge
-
     monkeypatch.delattr(os, "getuid", raising=False)
     assert nudge._stamp("ml-stack-nudge").name.startswith("ml-stack-nudge.")

@@ -20,7 +20,7 @@ from ml_stack.fleet.pool_roster import Pool
 from ml_stack.fleet.projects import ProjectRegistry
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
-from ml_stack.workspace import cli, project_connection, remote as remote_module, tokens
+from ml_stack.workspace import cli, project_connection, remote as remote_module, render, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.remote_host import WorkspaceHost
@@ -65,7 +65,7 @@ def test_agent_connect_selects_explicit_project_instead_of_current_board(tmp_pat
     monkeypatch.setattr(cli, "_context", lambda args, connection: (board_ws, "session")
                         if connection is target else pytest.fail("wrong board"))
     results = []
-    monkeypatch.setattr(cli, "_show", lambda args, result: results.append(result))
+    monkeypatch.setattr(render, "show", lambda args, result: results.append(result))
     args = SimpleNamespace(agent="worker", project=str(requested), no_project=False,
                            one_agent=False, remote=False, code_only=False, name="", json=True)
     assert cli._bare(cli._connect)(args) == (3 if unavailable else 0)
@@ -120,7 +120,7 @@ def test_local_runner_discovers_authority_once(monkeypatch):
     monkeypatch.setattr(cli, "Workspace", LocalWorkspace)
     monkeypatch.setattr(cli, "_local_token", lambda args: "local-session")
     seen = []
-    assert cli._runner(lambda args, ws, token: seen.append((ws, token)))(SimpleNamespace(json=True, cmd="whoami")) == 0
+    assert cli._runner(lambda args, ws, token: seen.append((ws, token)))(SimpleNamespace(json=True, cmd="outbox")) == 0
     assert len(seen) == 1 and isinstance(seen[0][0], LocalWorkspace)
     assert seen[0][1] == "local-session"
     assert discoveries == [True]
@@ -139,7 +139,7 @@ def test_coordinator_runner_keeps_selected_authority(monkeypatch):
     monkeypatch.setattr(cli.coordinator_client, "argv_for", lambda *a: [])
     monkeypatch.setattr(cli, "_coordinator_token", lambda args, selected: "coordinator-session"
                         if selected is remote else pytest.fail("different coordinator"))
-    args = SimpleNamespace(cmd="whoami", json=True, request_id="")
+    args = SimpleNamespace(cmd="outbox", json=True, request_id="")
     assert cli._runner(lambda *a: pytest.fail("local dispatch"))(args) == 0
     assert calls == ["coordinator-session"]
     assert discoveries == [True]

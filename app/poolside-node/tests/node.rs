@@ -26,7 +26,7 @@ fn a_colliding_short_name_extends_by_two_characters() {
     let board_dir = dir.path().join("boards").join("demo");
     std::fs::create_dir_all(&board_dir).unwrap();
     let taken = format!("claude-{}", &full[..6]);
-    std::fs::write(board_dir.join("names.json"), json!({taken: {"digest": "other", "family": "claude", "parent": ""}}).to_string()).unwrap();
+    std::fs::write(board_dir.join("names.json"), json!({taken: {"digest": "other", "family": "claude", "parent": "", "model": "", "model_state": "unknown", "harness": "", "retired": false, "seen_ms": 0}}).to_string()).unwrap();
     let mut n = node(dir.path());
     let (name, _) = session(&mut n, "demo", "sess-1");
     assert_eq!(name, format!("claude-{}", &full[..8]));
@@ -107,13 +107,15 @@ fn claims_conflict_within_a_board_and_release_only_by_the_holder() {
     let dir = tempdir().unwrap();
     let mut n = node(dir.path());
     let ((alice, at), (_, bt)) = (session(&mut n, "demo", "a"), session(&mut n, "demo", "b"));
-    let first = ok(req(&mut n, "claim", "demo", &at, json!({"target": "area/x"})));
-    assert_eq!(first["holder"], alice);
-    assert_eq!(ok(req(&mut n, "claim", "demo", &at, json!({"target": "area/x"})))["changed"], false);
-    assert_eq!(code(&req(&mut n, "claim", "demo", &bt, json!({"target": "area/x"}))), "denied");
-    assert_eq!(code(&req(&mut n, "release", "demo", &bt, json!({"target": "area/x"}))), "denied");
-    ok(req(&mut n, "release", "demo", &at, json!({"target": "area/x"})));
-    assert_eq!(ok(req(&mut n, "claim", "demo", &bt, json!({"target": "area/x"})))["changed"], true);
+    let first = ok(req(&mut n, "claim", "demo", &at, json!({"kind": "branch", "key": "feature"})));
+    assert_eq!(first["claim"]["owner"], alice);
+    assert_eq!(ok(req(&mut n, "claim", "demo", &at, json!({"kind": "branch", "key": "feature"})))["changed"], false);
+    let refused = req(&mut n, "claim", "demo", &bt, json!({"kind": "branch", "key": "feature"}));
+    assert_eq!(code(&refused), "denied");
+    assert!(refused["error"]["message"].as_str().unwrap().contains(&alice), "{refused}");
+    assert_eq!(code(&req(&mut n, "release", "demo", &bt, json!({"kind": "branch", "key": "feature"}))), "denied");
+    assert_eq!(ok(req(&mut n, "release", "demo", &at, json!({"kind": "branch", "key": "feature"})))["released"], true);
+    assert_eq!(ok(req(&mut n, "claim", "demo", &bt, json!({"kind": "branch", "key": "feature"})))["changed"], true);
 }
 
 #[test]
@@ -124,14 +126,16 @@ fn two_boards_on_one_node_are_isolated() {
     assert_eq!(name1, name2, "names are per board: the same session is registered on each");
     assert_ne!(t1, t2);
     ok(post(&mut n, "alpha", &t1, "alpha secret"));
-    ok(req(&mut n, "claim", "alpha", &t1, json!({"target": "t"})));
-    // the other board sees nothing and its claim of the same target does not conflict
+    ok(req(&mut n, "claim", "alpha", &t1, json!({"kind": "branch", "key": "t"})));
+    // the other board sees nothing and its claim of the same name does not conflict
     assert!(texts(&ok(req(&mut n, "read", "beta", &t2, json!({})))["entries"]).is_empty());
-    assert_eq!(ok(req(&mut n, "claim", "beta", &t2, json!({"target": "t"})))["changed"], true);
+    assert_eq!(ok(req(&mut n, "claim", "beta", &t2, json!({"kind": "branch", "key": "t"})))["claim"]["key"], "t");
+    assert_eq!(ok(req(&mut n, "claim", "beta", &t2, json!({"kind": "branch", "key": "t"})))["changed"], false);
+    assert_eq!(ok(req(&mut n, "claims", "beta", &t2, json!({})))["claims"].as_array().unwrap().len(), 1);
     // a token cannot reach the other board without a link, for any method
     assert_eq!(code(&req(&mut n, "read", "alpha", &t2, json!({}))), "denied");
     assert_eq!(code(&post(&mut n, "alpha", &t2, "x")), "denied");
-    assert_eq!(code(&req(&mut n, "claim", "alpha", &t2, json!({"target": "u"}))), "denied");
+    assert_eq!(code(&req(&mut n, "claim", "alpha", &t2, json!({"kind": "server", "key": "u"}))), "denied");
     assert_eq!(code(&req(&mut n, "read", "no-such-board", &t2, json!({}))), "denied");
     // registering a third session on beta leaves alpha's names alone
     session(&mut n, "beta", "someone-else");
@@ -157,7 +161,7 @@ fn a_link_shares_only_what_it_names_and_revoking_it_stops_it() {
     assert_eq!(texts(&seen["entries"]), vec!["public words"]);
     // read-only: no writes, no claims
     assert_eq!(code(&post(&mut n, "alpha", &bt, "x")), "denied");
-    assert_eq!(code(&req(&mut n, "claim", "alpha", &bt, json!({"target": "t"}))), "denied");
+    assert_eq!(code(&req(&mut n, "claim", "alpha", &bt, json!({"kind": "server", "key": "t"}))), "denied");
     // the link does not run backwards
     assert_eq!(code(&req(&mut n, "read", "beta", &at, json!({}))), "denied");
     // it is audited on both boards
@@ -224,7 +228,7 @@ fn foreign_entries_are_built_from_allow_lists_and_checked() {
         mallory.board.append(Kind::Message, actor, body, "").unwrap();
     }
     mallory.board.append(Kind::Message, "mallory", general(json!({}), "mallory"), "").unwrap();
-    mallory.board.append(Kind::Note, "mallory", json!({"nkind": "fact", "title": "t", "body": "b", "author": "mallory", "verify_cmd": "rm -rf /"}), "").unwrap();
+    mallory.board.append(Kind::Note, "mallory", json!({"nkind": "fact", "title": "t", "body": "b", "author": "mallory", "trust": "human"}), "").unwrap();
     exchange_nodes(&mut a, &mut b).unwrap();
     let read = ok(req(&mut b, "read", "demo", &bt, json!({"kind": "message"})));
     let entries = read["entries"].as_array().unwrap();

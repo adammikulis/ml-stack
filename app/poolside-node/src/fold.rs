@@ -13,13 +13,15 @@ use crate::row::{is_line, valid_actor, valid_name, Kind, Row};
 
 pub const GENERAL: &str = "#general";
 pub const ANNOUNCE: &str = "#announcements";
+/// The channel of a message to one session; never shared by a link.
+pub const DIRECT: &str = "#dm";
 const MESSAGE_TYPES: [&str; 9] = ["task", "status", "handoff", "question", "answer", "claim", "release", "note", "file"];
 const ANNOUNCE_TYPES: [&str; 4] = ["joined", "milestone", "done", "blocked"];
 const NOTE_KINDS: [&str; 4] = ["decision", "rule", "fact", "question"];
 const MESSAGE_KEYS: [&str; 7] = ["type", "from", "to", "subject", "body", "reply_id", "thread_id"];
-const NOTE_KEYS: [&str; 6] = ["nkind", "title", "body", "source", "tags", "author"];
-const IDENTITY_KEYS: [&str; 3] = ["name", "parent", "family"];
-const CLAIM_KEYS: [&str; 3] = ["target", "action", "note"];
+const NOTE_KEYS: [&str; 9] = ["nkind", "title", "body", "source", "tags", "author", "supersedes", "verify_cmd", "ttl_days"];
+const IDENTITY_KEYS: [&str; 7] = ["name", "parent", "family", "model", "model_state", "harness", "retired"];
+const VERIFY_KEYS: [&str; 4] = ["note", "exit", "cmd", "out_sha"];
 const LEASE_KEYS: [&str; 3] = ["lease", "action", "resources"];
 const LEASE_ACTIONS: [&str; 5] = ["acquire", "release", "expire", "dead", "abandon"];
 const AUDIT_KEYS: [&str; 3] = ["event", "subject", "detail"];
@@ -40,6 +42,14 @@ pub struct Entry {
     pub fields: Map<String, Value>,
 }
 
+impl Entry {
+    /// Whether ``viewer`` may read this entry: a message to one session is read only by its
+    /// sender and its recipient, whatever channels a link shares.
+    pub fn readable_by(&self, viewer: &str) -> bool {
+        self.channel != DIRECT || self.sender == viewer || self.fields.get("to").and_then(Value::as_str) == Some(viewer)
+    }
+}
+
 /// What a fold needs to know about the device it runs on.
 pub struct Context<'a> {
     pub own_origin: &'a str,
@@ -52,9 +62,11 @@ pub struct Context<'a> {
 /// The channel a kind of entry belongs to, the unit a board link names.
 pub fn channel_of(kind: Kind, fields: &Map<String, Value>) -> String {
     match kind {
-        Kind::Message => fields.get("to").and_then(Value::as_str).unwrap_or(GENERAL).to_string(),
-        Kind::Note => "#notes".into(),
-        Kind::Claim => "#claims".into(),
+        Kind::Message => match fields.get("to").and_then(Value::as_str).unwrap_or(GENERAL) {
+            to @ (GENERAL | ANNOUNCE) => to.to_string(),
+            _ => DIRECT.into(),
+        },
+        Kind::Note | Kind::Verify => "#notes".into(),
         Kind::Lease => "#leases".into(),
         Kind::Identity => "#identity".into(),
         Kind::Audit => "#audit".into(),
@@ -105,8 +117,9 @@ fn message(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<S
     let who = sender(row, map.get("from"), ctx, foreign)?;
     let (to, kind) = (text(&map, "to", 64, true)?.to_string(), text(&map, "type", 32, true)?.to_string());
     let announce = to == ANNOUNCE;
-    if !(to == GENERAL && MESSAGE_TYPES.contains(&kind.as_str()) || announce && ANNOUNCE_TYPES.contains(&kind.as_str())) {
-        return reject("the post is not an announcement or a #general message");
+    let direct = to != GENERAL && !announce && valid_name(&to);
+    if !((to == GENERAL || direct) && MESSAGE_TYPES.contains(&kind.as_str()) || announce && ANNOUNCE_TYPES.contains(&kind.as_str())) {
+        return reject("the post is not an announcement, a #general message or a message to one session");
     }
     line(&map, "subject", 200)?;
     text(&map, "body", BODY_BYTES, true)?;
@@ -131,6 +144,17 @@ fn note(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<Stri
         Some(Value::Array(tags)) if tags.len() <= 10 && tags.iter().all(|t| t.as_str().is_some_and(|s| s.len() <= 40 && is_line(s))) => {}
         _ => return reject("tags are at most ten short words"),
     }
+    match map.get("supersedes") {
+        None => {}
+        Some(Value::Array(ids)) if ids.len() <= 10 && ids.iter().all(|t| t.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 128 && is_line(s))) => {}
+        _ => return reject("supersedes lists at most ten note ids"),
+    }
+    line(&map, "verify_cmd", 300)?;
+    match map.get("ttl_days") {
+        None => {}
+        Some(v) if v.as_u64().is_some_and(|d| d <= 3650) => {}
+        _ => return reject("ttl_days is a whole number of days up to 3650"),
+    }
     map.remove("author");
     Ok((who, map))
 }
@@ -144,16 +168,27 @@ fn identity(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<
     if !line(&map, "parent", 48)?.is_empty() && !valid_name(text(&map, "parent", 48, true)?) {
         return reject("the parent is not a session name");
     }
+    line(&map, "model", 256)?;
+    line(&map, "harness", 64)?;
+    if !["unknown", "claimed", "inherited", "verified"].contains(&text(&map, "model_state", 16, true)?) {
+        return reject("the model state is unknown, claimed, inherited or verified");
+    }
+    if map.get("retired").is_some_and(|r| !r.is_boolean()) {
+        return reject("retired is true or false");
+    }
     Ok((who, map))
 }
 
-fn claim(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
-    let map = only(&row.body, &CLAIM_KEYS)?;
+fn verify(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let map = only(&row.body, &VERIFY_KEYS)?;
     let who = sender(row, None, ctx, foreign)?;
-    if line(&map, "target", 200)?.is_empty() || !matches!(text(&map, "action", 8, true)?, "claim" | "release") {
-        return reject("a claim names a target and claims or releases it");
+    if line(&map, "note", 128)?.is_empty() || !map.get("exit").is_some_and(|e| e.as_i64().is_some()) {
+        return reject("a verification names a note and the exit code of its command");
     }
-    line(&map, "note", 200)?;
+    line(&map, "cmd", 300)?;
+    if text(&map, "out_sha", 64, true)?.len() != 64 {
+        return reject("a verification carries the SHA-256 of the command output");
+    }
     Ok((who, map))
 }
 
@@ -185,7 +220,7 @@ fn entry(row: &Row, ctx: &mut Context) -> Result<Entry> {
         Kind::Message => message(row, ctx, foreign)?,
         Kind::Note => note(row, ctx, foreign)?,
         Kind::Identity => identity(row, ctx, foreign)?,
-        Kind::Claim => claim(row, ctx, foreign)?,
+        Kind::Verify => verify(row, ctx, foreign)?,
         Kind::Audit => audit(row, ctx, foreign)?,
         Kind::Lease => lease(row, ctx, foreign)?,
         _ => return reject("this kind of entry is not accepted yet"),
@@ -223,18 +258,4 @@ pub fn check_local(kind: Kind, actor: &str, body: &Value, own_origin: &str) -> R
     let mut label = |_: &str| "d0".to_string();
     let none = |_: &str| false;
     entry(&row, &mut Context { own_origin, label: &mut label, is_local: &none }).map(|_| ())
-}
-
-/// Who holds each claim target after the entries, first claim in the total order wins.
-pub fn holders(entries: &[Entry]) -> BTreeMap<String, String> {
-    let mut held: BTreeMap<String, String> = BTreeMap::new();
-    for e in entries.iter().filter(|e| e.kind == Kind::Claim) {
-        let target = e.fields.get("target").and_then(Value::as_str).unwrap_or("").to_string();
-        match e.fields.get("action").and_then(Value::as_str) {
-            Some("claim") => { held.entry(target).or_insert_with(|| e.sender.clone()); }
-            Some("release") if held.get(&target) == Some(&e.sender) => { held.remove(&target); }
-            _ => {}
-        }
-    }
-    held
 }
