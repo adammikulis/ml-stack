@@ -26,6 +26,7 @@ FILES = {
     "scripts/runner": "#!/usr/bin/env python3\nprint('run')\n",
     "scripts/hooks/guard": "#!/bin/sh\nexit 0\n",
     "scripts/wrapper.sh": "#!/bin/sh\nexec ./runner \"$@\"\n",
+    "scripts/launcher": "#!/usr/bin/env python3\nimport alpha\n",
     "scripts/orphan.py": "VALUE = 1\n",
     "scripts/data.txt": "nothing reads this\n",
     "tests/kit.py": "import subprocess\nRUNNER = 'scripts/runner'\n\n\ndef go():\n    subprocess.run([RUNNER])\n",
@@ -36,6 +37,7 @@ FILES = {
         "import subprocess\nimport sys\nfrom pathlib import Path\nSCRIPTS = Path('x') / 'scripts'\n\n\n"
         "def test_it():\n    subprocess.run([sys.executable, str(SCRIPTS / 'runner')], check=True)\n"),
     "tests/test_guard.py": "import subprocess\n\n\ndef test_it():\n    subprocess.run(['scripts/hooks/guard'])\n",
+    "tests/test_launcher.py": "def test_it():\n    assert 'scripts/launcher'\n",
     "tests/test_wrapper.py": "def test_it():\n    assert 'scripts/wrapper.sh'\n",
     "tests/test_helper.py": "import kit\n\n\ndef test_it():\n    kit.go()\n",
     "tests/test_chain.py": "import beta\n\n\ndef test_it():\n    assert beta.two()\n",
@@ -88,6 +90,10 @@ def test_a_helper_that_names_the_script_carries_it_to_the_tests_that_use_the_hel
 
 def test_a_script_another_script_imports_reaches_the_tests_of_the_importer(toy) -> None:
     assert "tests/test_chain.py" in chosen(toy, "scripts/alpha.py")
+
+
+def test_an_extensionless_python_script_that_imports_the_changed_one_carries_it_to_its_tests(toy) -> None:
+    assert "tests/test_launcher.py" in chosen(toy, "scripts/alpha.py")
 
 
 def test_a_shell_script_that_runs_the_changed_one_carries_it_to_the_tests_of_the_shell_script(toy) -> None:

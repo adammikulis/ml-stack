@@ -115,7 +115,7 @@ def refers(src: Source, tgt: Target) -> str:
     """Why ``src`` names the target, or an empty string."""
     if src.rel == tgt.rel:
         return ""
-    if tgt.stem and tgt.stem in src.segments and src.rel.endswith(".py"):
+    if tgt.stem and tgt.stem in src.segments and src.parsed:
         return f"imports {tgt.stem}"
     if tgt.path.search(src.blob if src.parsed else src.text):
         return f"names {tgt.rel}"
