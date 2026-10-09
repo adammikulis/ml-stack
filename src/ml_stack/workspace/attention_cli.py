@@ -7,9 +7,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ml_stack import trees, trees_notice
 from ml_stack.command import flag
 from ml_stack.log import say
-from ml_stack.workspace import attention, landing, trees, trees_notice
+from ml_stack.workspace import attention, landing
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.screen import fence
 from ml_stack.workspace.service import Workspace
@@ -43,9 +44,10 @@ def inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 def tree_lines() -> list[str]:
     """The orphan worktrees and the trees over a threshold of the repository this runs in; none outside a repository."""
     try:
-        now = time.time()
-        return [*trees.lines(Path.cwd(), now), *trees_notice.status_lines(Path.cwd(), now)]
-    except (RuntimeError, OSError, ValueError):
+        now, root = time.time(), Path.cwd()
+        found = trees.rows(root, now)
+        return [*trees.lines(root, now, found=found), *trees_notice.status_lines(root, now, found)]
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError):
         return []
 
 

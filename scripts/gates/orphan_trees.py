@@ -9,7 +9,7 @@ from pathlib import Path
 from . import Finding
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from ml_stack.workspace import trees
+from ml_stack import trees
 
 NAME = "orphan-trees"
 OWNER = "scripts/worktrees"
@@ -28,6 +28,6 @@ def find(root: Path) -> list[Finding]:
     try:
         found = trees.rows(root, now)
         late = trees.past_grace(found, trees.current_policy(root), now)
-    except (RuntimeError, OSError, ValueError):
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError):
         return []
-    return [Finding(f"worktrees/{Path(r['path']).name}", 1, trees.line(r, now)) for r in late]
+    return [Finding(f"worktrees/{Path(r['path']).name}", 1, trees.line(r, now) + " -- run: " + trees.suggested(r)) for r in late]

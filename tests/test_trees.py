@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.workspace import trees, trees_notice
+from ml_stack import trees, trees_notice
 
 REPO = Path(__file__).resolve().parent.parent
 HOUR = 3600.0
@@ -30,13 +30,18 @@ def commit(where: Path, name: str) -> None:
     git(where, "commit", "-qm", "c", "--no-verify")
 
 
-@pytest.fixture
-def main(tmp_path):
+def make_repo(tmp_path: Path) -> Path:
+    """A repository on branch dev with one commit."""
     root = tmp_path / "main"
     root.mkdir()
     git(root, "init", "-q", "-b", "dev")
     commit(root, "base")
     return root
+
+
+@pytest.fixture
+def main(tmp_path):
+    return make_repo(tmp_path)
 
 
 def tree(main: Path, name: str, owner: str = "", now: float = 0.0) -> Path:
@@ -64,9 +69,11 @@ def test_a_finished_owner_with_commits_is_an_orphan_and_the_line_names_the_actio
     commit(path, "f1")
     debt = trees.finish(main, "worker-a", 100)
     assert [Path(r["path"]).name for r in debt] == ["work"]
-    row = trees.orphans(trees.rows(main, 200))[0]
-    text = trees.line(row, 200)
-    for word in ("work", "unlanded=1", "dirty=0", "worker-a", "--landed", "--bundle", "--abandon"):
+    assert status(main, 200) == {"work": "waiting"}                 # just finished: waiting to land, not an orphan
+    assert "waiting to land" in trees.lines(main, 200)[0]
+    row = trees.orphans(trees.rows(main, 100 + 3 * HOUR))[0]
+    text = trees.line(row, 100 + 3 * HOUR)
+    for word in ("ORPHAN", "work", "unlanded=1", "dirty=0", "worker-a", "--landed", "--bundle", "--abandon"):
         assert word in text
     assert trees.sweep(main, 200) == []
     assert path.exists()
@@ -143,7 +150,8 @@ def test_scan_claims_trees_made_by_hand_as_unknown_and_they_age_into_orphans(mai
     commit(path, "f1")
     assert trees.rows(main, 0)[0]["owner"] == trees.UNKNOWN
     assert status(main, 10) == {"byhand": "active"}
-    assert status(main, 2 * HOUR) == {"byhand": "orphan"}
+    assert status(main, 2 * HOUR) == {"byhand": "waiting"}
+    assert status(main, 4 * HOUR) == {"byhand": "orphan"}
     claimed = trees.scan(main, 3, ("claimant", path))
     assert claimed["trees"][str(path.resolve())]["owner"] == "claimant"
 
@@ -162,18 +170,18 @@ def test_an_owner_whose_process_has_ended_is_stopped_and_one_whose_process_runs_
     done.wait()
     trees.claim(main, gone, "a", 5, {"pid": done.pid})
     trees.claim(main, running, "b", 5, {"pid": os.getpid()})
-    assert status(main, 6) == {"gone": "orphan", "running": "active"}
+    assert status(main, 6) == {"gone": "waiting", "running": "active"}
 
 
 def test_the_gate_counts_orphans_only_past_the_grace(main):
     path = tree(main, "late", owner="a")
     commit(path, "f1")
-    trees.finish(main, "a", 0)
+    trees.finish(main, "a", 1)
     pol = trees.current_policy(main)
     assert pol["grace_h"] == 2.0
     assert trees.past_grace(trees.rows(main, HOUR), pol, HOUR) == []
-    assert len(trees.orphans(trees.rows(main, HOUR))) == 1
-    assert len(trees.past_grace(trees.rows(main, 2 * HOUR + 1), pol, 2 * HOUR + 1)) == 1
+    assert trees.orphans(trees.rows(main, HOUR)) == [] and len(trees.waiting(trees.rows(main, HOUR))) == 1
+    assert len(trees.past_grace(trees.rows(main, 2 * HOUR + 2), pol, 2 * HOUR + 2)) == 1
 
 
 def test_the_gate_checker_reports_a_late_orphan_and_reads_the_grace_from_the_environment(main, monkeypatch):
@@ -209,7 +217,7 @@ def test_behind_and_age_thresholds_and_policy_overrides(main, monkeypatch):
     for i in range(21):
         commit(main, f"m{i}")
     assert trees_notice.notify(main, start + 60)[0].keys == ["behind"]
-    assert trees_notice.notify(main, start + 5 * HOUR)[0].keys == ["age", "behind"]
+    assert trees_notice.notify(main, start + 5 * HOUR)[0].keys == ["age"]       # behind is unchanged: not told again
     monkeypatch.setenv("ML_STACK_TREES_MAX_BEHIND", "100")
     monkeypatch.setenv("ML_STACK_TREES_MAX_AGE_H", "100")
     later = trees_notice.notify(main, start + 8 * HOUR)       # still inside the owner's 12 hour sign of life
@@ -222,7 +230,10 @@ def test_notices_are_rate_limited_to_one_per_interval(main):
         commit(path, f"f{i}")
     assert len(trees_notice.notify(main, 100)) == 1
     assert trees_notice.notify(main, 100 + 29 * 60) == []
-    assert len(trees_notice.notify(main, 100 + 31 * 60)) == 1
+    commit(path, "more")
+    assert trees_notice.notify(main, 100 + 31 * 60)[0].keys == ["ahead"]       # changed, and the interval passed
+    commit(path, "again")
+    assert trees_notice.notify(main, 100 + 32 * 60) == []                      # changed but inside the interval
 
 
 def test_routing_owner_first_then_the_coordinator_when_silent_or_stopped(main):
@@ -231,18 +242,22 @@ def test_routing_owner_first_then_the_coordinator_when_silent_or_stopped(main):
     for i in range(10):
         commit(path, f"f{i}")
     assert trees_notice.notify(main, 100)[0].to == ["a"]
-    assert trees_notice.notify(main, 100 + 31 * 60)[0].to == ["a", "lead"]
+    assert trees_notice.notify(main, 100 + 31 * 60)[0].to == ["lead"]         # unchanged, owner silent: escalate once
+    assert trees_notice.notify(main, 100 + 90 * 60) == []                      # and then nothing, unchanged
     trees.finish(main, "a", 4000)
     assert trees_notice.notify(main, 4000 + 31 * 60)[0].to == ["lead"]
 
 
-def test_an_orphan_is_told_at_once_with_no_grace(main):
+def test_a_finished_tree_is_told_as_waiting_to_land_at_once_and_as_an_orphan_after_the_grace(main):
     trees.set_lead(main, "lead")
     path = tree(main, "stale", owner="a", now=0)
     commit(path, "f1")
     trees.finish(main, "a", 10)
     notes = trees_notice.notify(main, 11)
-    assert notes[0].keys == ["orphan"] and notes[0].to == ["lead"]
+    assert notes[0].keys == ["waiting"] and notes[0].to == ["lead"]
+    assert "waiting to land" in notes[0].text and "ORPHAN" not in notes[0].text
+    late = trees_notice.notify(main, 10 + 3 * HOUR)
+    assert late[0].keys == ["orphan"] and "ORPHAN" in late[0].text
 
 
 def test_the_report_exits_one_on_an_orphan_and_close_runs_through_the_script(main):

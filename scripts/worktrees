@@ -7,7 +7,7 @@
     worktrees close TREE --abandon WHY    remove it on a recorded reason (dirty diff is saved first)
     worktrees sweep                       close every landed tree whose owner is not active
     worktrees scan [--owner NAME --here]  register unregistered trees (owner unknown); claim this one
-    worktrees claim TREE OWNER PURPOSE    register a tree created by OWNER
+    worktrees claim TREE OWNER [PURPOSE] [--scratch]   register a tree created by OWNER; scratch never counts
     worktrees finish OWNER                mark OWNER's trees finished; prints debt, exits 1 when any
     worktrees notify [--here] [--json]    the threshold and orphan notices due now (rate limited)
     worktrees lead NAME                   record the coordinator that escalations go to
@@ -15,7 +15,7 @@
 The report is the age/ahead/behind view against the development branch (the primary checkout's
 branch). Limits (AGENTS.md, "Branch hygiene and landing"): at most 10 commits, at most 30 ahead
 (split or land part before adding more), at most 20 behind, and a branch that is behind has
-merged the development branch within the last day. An orphan is a tree whose owner stopped and
+merged the development branch within the last day. An orphan is a tree whose owner stopped (past the grace; before that it is "finished, waiting to land") and
 which is not landed, bundled or abandoned; see docs/worktrees.md. Removal by anything but
 ``close`` or ``sweep`` is not a supported path.
 """
@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import land_git as lg
 
-from ml_stack.workspace import trees, trees_notice
+from ml_stack import trees, trees_notice
 
 COMMANDS = ("close", "sweep", "scan", "claim", "finish", "notify", "lead")
 MAX_COMMITS = 10
@@ -86,24 +86,33 @@ def rows(root: Path, target: str, now: float) -> list[Row]:
 
 
 def report(args: argparse.Namespace) -> int:
-    """The age/ahead/behind report, then the orphans, then the notice conditions."""
+    """The age/ahead/behind report, then the trees needing a decision, then the notice conditions.
+
+    A registry that cannot be read or locked is one warning line, not a failure.
+    """
     root = lg.toplevel(Path.cwd())
     now = time.time()
-    target = args.target or trees.development(trees.listing(root)[0][0])
-    trees.scan(root, now)
-    found = rows(root, target, now)
-    state = {r["path"]: r for r in trees.rows(root, now)}
+    try:
+        state = trees.rows(root, now)
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError) as error:
+        print(f"worktrees: registry unavailable ({error}); showing the plain report", file=sys.stderr)
+        state = []
+    if args.target or not state:
+        found = rows(root, args.target or trees.development(trees.listing(root)[0][0]), now)
+    else:
+        found = [Row(r["path"], r["branch"], r["ahead"], r["behind"], r["tip_age_d"],
+                     flags_for(r["ahead"], r["behind"], r["tip_age_d"])) for r in state]
+    seen = {r["path"]: r for r in state}
     for row in found:
         mark = "FLAG" if row.flags else "ok  "
-        seen = state.get(row.path, {})
+        info = seen.get(row.path, {})
         print(f"{mark} {row.branch}  +{row.ahead} -{row.behind}  {row.age_days:.1f}d  {row.path}"
-              f"  [{seen.get('status', '?')} owner={seen.get('owner', '?')} dirty={seen.get('dirty', 0)}]")
+              f"  [{info.get('status', '?')} owner={info.get('owner', '?')} dirty={info.get('dirty', 0)}]")
         for flag in row.flags:
             print(f"       {flag}")
-    orphan = trees.lines(root, now, 50)
-    for text in [*orphan, *trees_notice.status_lines(root, now)]:
+    for text in [*trees.lines(root, now, 50, state), *trees_notice.status_lines(root, now, state)]:
         print(text)
-    return 1 if any(r.flags for r in found) or orphan else 0
+    return 1 if any(r.flags for r in found) or trees.orphans(state) else 0
 
 
 def command(argv: list[str]) -> int:
@@ -125,6 +134,7 @@ def command(argv: list[str]) -> int:
     mine.add_argument("owner")
     mine.add_argument("purpose", nargs="?", default="")
     mine.add_argument("--pid", type=int, default=0)
+    mine.add_argument("--scratch", action="store_true", help="a disposable tree that never counts")
     done = sub.add_parser("finish")
     done.add_argument("owner")
     tell = sub.add_parser("notify")
@@ -156,7 +166,7 @@ def run(args: argparse.Namespace, root: Path, now: float, who: tuple[str, tuple[
     elif args.cmd == "scan":
         trees.rows(root, now, claim)
     elif args.cmd == "claim":
-        trees.claim(root, args.tree, args.owner, now, {"purpose": args.purpose, "pid": args.pid})
+        trees.claim(root, args.tree, args.owner, now, {"purpose": args.purpose, "pid": args.pid, "kind": "scratch" if args.scratch else "work"})
     elif args.cmd == "finish":
         debt = trees.finish(root, args.owner, now)
         for row in debt:
