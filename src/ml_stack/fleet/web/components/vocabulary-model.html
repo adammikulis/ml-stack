@@ -1,0 +1,65 @@
+<!-- vocabulary-model: plain or friendly wording, and the text that follows from it -->
+<script>
+(function () {
+  const M = window.fleetModel;
+  const data = JSON.parse(document.getElementById("vocabulary-data")?.textContent || "{}");
+  const VOCABS = data.vocabularies || ["professional", "friendly"];
+  const CATALOGUE = data.catalogue || {};
+  const KEY = "ml-stack.ui.vocab";
+  const root = document.documentElement;
+
+  /** The first valid value of query, stored, server default; else the fallback. */
+  M.vocabResolve = function (query, stored, server, fallback, allowed) {
+    for (const value of [query, stored, server]) {
+      const word = String(value || "").trim().toLowerCase();
+      if (allowed.includes(word)) return word;
+    }
+    return fallback;
+  };
+
+  function remembered() { try { return localStorage.getItem(KEY); } catch { return null; } }
+  function remember(value) { try { localStorage.setItem(KEY, value); } catch { /* storage may be off */ } }
+  const query = new URLSearchParams(location.search).get("vocab");
+  M.vocab = M.vocabResolve(query, remembered(), data.vocab, VOCABS[0], VOCABS);
+  if (VOCABS.includes(String(query || "").trim().toLowerCase())) remember(M.vocab);
+
+  /** The wording for an id in the current vocabulary; `{name}` slots are filled from vars. */
+  M.t = function (key, vars = {}, vocab = M.vocab) {
+    const row = CATALOGUE[key];
+    if (!row) return key;
+    return row[vocab === "friendly" ? 1 : 0].replace(/\{(\w+)\}/g, (_, name) => (name in vars ? vars[name] : `{${name}}`));
+  };
+  M.plain = (key, vars = {}) => M.t(key, vars, "professional");
+
+  /** Put the current wording on every `data-t` element under node, with the plain word beside friendly text. */
+  M.applyText = function (node = document) {
+    const nodes = [...node.querySelectorAll("[data-t]")];
+    if (node.matches?.("[data-t]")) nodes.unshift(node);
+    for (const item of nodes) {
+      const key = item.dataset.t, plain = M.plain(key);
+      item.textContent = M.t(key);
+      const friendly = M.vocab === "friendly" && plain !== item.textContent;
+      if (friendly && /^H[1-3]$/.test(item.tagName)) item.dataset.plain = plain;
+      else delete item.dataset.plain;
+      if (friendly) item.title = plain;
+      else if (item.dataset.autoTitle) item.removeAttribute("title");
+      item.dataset.autoTitle = friendly ? "1" : "";
+    }
+  };
+
+  function paint() {
+    root.dataset.vocab = M.vocab;
+    M.applyText();
+    window.dispatchEvent(new CustomEvent("vocabulary-change", { detail: { vocab: M.vocab } }));
+  }
+  /** Flip the switch live: no reload, kept in this browser's storage. */
+  M.setVocab = (value) => { if (VOCABS.includes(value)) { M.vocab = value; remember(value); paint(); } };
+
+  new MutationObserver((records) => {
+    for (const record of records) for (const added of record.addedNodes) {
+      if (added.nodeType === Node.ELEMENT_NODE && (added.matches("[data-t]") || added.querySelector("[data-t]"))) M.applyText(added);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  paint();
+})();
+</script>

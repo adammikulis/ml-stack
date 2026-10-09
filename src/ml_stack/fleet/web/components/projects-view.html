@@ -18,15 +18,15 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
 </style>
 <template>
   <main id="projects" class="settingsmain" hidden>
-    <header class="project-heading"><div><h1>Projects</h1></div></header>
+    <header class="project-heading"><div><h1 data-t="projects.title">Projects</h1></div></header>
     <p id="projects-note" role="status"></p>
     <div class="project-layout"><aside><section class="panel"><h2>Share a local project</h2>
       <label for="project-candidate">Project</label><select id="project-candidate"></select>
-      <button id="project-share">Share with pool</button>
+      <button id="project-share" data-t="action.share">Share with pool</button>
       <p class="hint">Sharing publishes the tracked source snapshot. Agent access is a separate step.</p>
     </section>
     <section class="panel"><h2>Shared projects</h2><div id="project-list"></div></section></aside>
-    <div><section class="panel" id="project-empty"><h2>Select a project</h2><p class="hint">Choose a shared project to see its agents, source, and team activity. Share a local project to start working across your pool.</p></section><section class="panel" id="project-board" hidden>
+    <div><section class="panel" id="project-empty"><h2 data-t="projects.pick">Select a project</h2><p class="hint">Choose a shared project to see its agents, source, and team activity. Share a local project to start working across your pool.</p></section><section class="panel" id="project-board" hidden>
       <h2 id="project-title"></h2><p id="project-authority"></p><p id="project-board-state" role="status"></p>
       <p id="project-source"></p>
       <button id="project-checkout">Get source on this device</button>
@@ -80,7 +80,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
       this.loading = true;
       try {
         const result = await M.api('/ui/projects');
-        if (!result.ok) { this.note.textContent = result.error || 'Project sharing is unavailable on this device. Update Poolside to enable it.'; return; }
+        if (!result.ok) { this.note.textContent = result.error || 'Project sharing is unavailable on this device. Update Poolhouse to enable it.'; return; }
         this.projects = result.projects || [];
         const signature = JSON.stringify([this.projects, result.candidates, result.devices]);
         if (signature !== this.signature) {
@@ -94,7 +94,7 @@ projects-view #project-command { white-space:pre-wrap; overflow-wrap:anywhere; }
             el('button', {onclick: () => this.select(p)}, 'Open project'))));
           if (!this.projects.length) this.rows.append(el('p', {class: 'hint'}, 'No shared projects found yet.'));
           for (const d of result.devices || []) if (d.state === 'upgrade_required' || d.error) {
-            this.rows.append(el('p', {class: 'hint'}, `${d.name || d.peer}: ${d.error || 'Update Poolside on this device to share projects.'}`));
+            this.rows.append(el('p', {class: 'hint'}, `${d.name || d.peer}: ${d.error || 'Update Poolhouse on this device to share projects.'}`));
           }
         }
         if (this.selected) await this.loadBoard();

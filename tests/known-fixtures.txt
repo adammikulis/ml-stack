@@ -282,8 +282,11 @@ keys ml-stack
 # not a person: code phrases the recogniser reads as people
 worktree pointer
 Open Models
-Explore Poolside
-Remove Poolside
+Explore Poolhouse
+Remove Poolhouse
+Open Poolhouse
+Install Poolhouse
+Poolhouse UI
 Install MetaDrive
 color .2s
 config pre

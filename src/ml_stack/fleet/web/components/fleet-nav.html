@@ -1,16 +1,19 @@
 <template>
   <aside class="workspace-rail" aria-label="Workspace navigation">
-    <a class="poolside-mark" href="#chat" aria-label="Poolside home" title="Poolside home">
-      <svg viewBox="0 0 40 40" aria-hidden="true">
-        <path d="M8,31V9a4,4,0,0,1,4-4h11a11,11,0,0,1,0,22h-8v4a3.5,3.5,0,0,1-7,0Zm7-19v8h8a4,4,0,0,0,0-8Z" fill="var(--poolside-pink)" fill-rule="evenodd"/>
-        <path d="M23,5a11,11,0,0,1,0,22v-7a4,4,0,0,0,0-8Z" fill="var(--poolside-orange)"/>
-        <path d="M21,33h12" fill="none" stroke="var(--poolside-cyan)" stroke-width="4" stroke-linecap="round"/>
+    <a class="poolside-mark" href="#chat" aria-label="Poolhouse home" title="Poolhouse home">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect x="31" y="35" width="27" height="19" rx="5" fill="var(--poolside-cyan)"/>
+        <path d="M34 42q3-3 6 0t6 0 6 0 4 0M34 48q3-3 6 0t6 0 6 0 4 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <path d="M5 31 19 15l14 16z" fill="var(--poolside-pink)" stroke="var(--poolside-pink)" stroke-width="2" stroke-linejoin="round"/>
+        <rect x="9" y="31" width="20" height="23" rx="2" fill="var(--poolside-yellow)"/>
+        <rect x="16" y="40" width="7" height="14" rx="1.5" fill="var(--poolside-navy)"/>
       </svg>
+      <span class="wordmark">Poolhouse</span>
     </a>
     <div class="rail-main">
       <nav class="primary-navigation" id="nav-tabs" aria-label="Main navigation"></nav>
       <div class="rail-tools" role="group" aria-label="Workspace tools">
-      <button class="rail-link" data-color="yellow" id="nav-guide" type="button" aria-label="Explore Poolside" title="Explore Poolside"></button>
+      <button class="rail-link" data-color="yellow" id="nav-guide" type="button" aria-label="Explore Poolhouse" title="Explore Poolhouse"></button>
       <button class="rail-link" data-color="cyan" id="nav-jobs" type="button" aria-label="Training jobs" title="Training jobs" hidden><span class="jobs-count" hidden></span></button>
       </div>
     </div>
@@ -21,7 +24,7 @@
   </aside>
   <nav class="context-navigation" id="nav-context" aria-label="Workspace pages"></nav>
   <dialog id="nav-demo" aria-labelledby="demo-title">
-    <div class="demo-heading"><div><h1 id="demo-title">Explore Poolside</h1></div>
+    <div class="demo-heading"><div><h1 id="demo-title">Explore Poolhouse</h1></div>
       <button class="ghost small" id="demo-close" type="button" aria-label="Close demo guide">Close</button></div>
     <div class="demo-grid" id="demo-slices"></div>
   </dialog>
@@ -64,6 +67,9 @@
     ["Prepare your workspace", "settings", "Configure preferences, libraries and advanced options."],
   ];
 
+  const LABELS = { Pool: "nav.pool", Devices: "nav.devices", Projects: "nav.projects" };
+  /** The wording of a rail label: the catalogue's when it has one, else the label as written. */
+  const word = (text) => (LABELS[text] ? M.t(LABELS[text]) : text);
   const here = ([, name]) => !!document.querySelector(`${name}-view`);
   class FleetNav extends HTMLElement {
     connectedCallback() {
@@ -73,7 +79,7 @@
       this.guide=this.querySelector("#nav-demo");
       this.querySelector("#nav-guide").append(icon("explore"),el("span",{},"Explore"));
       this.querySelector("#nav-jobs").prepend(icon("jobs"),el("span",{},"Training"));
-      this.querySelector("#nav-settings").append(icon("settings"),el("span",{},"Settings"));
+      this.querySelector("#nav-settings").append(icon("settings"),el("span",{"data-t":"nav.settings"},"Settings"));
       this.querySelector("#nav-signout").append(icon("exit"),el("span",{},"Sign out"));
       this.querySelector("#nav-settings").onclick=e=>{e.preventDefault();M.go("settings");};
       this.querySelector("#nav-signout").onclick=M.signOut;
@@ -90,7 +96,8 @@
       this.jobs=this.querySelector("#nav-jobs");this.jobs.hidden=!document.querySelector("training-view");this.jobs.onclick=()=>M.go("training");
       const skip=document.querySelector(".skip-link");
       if(skip)skip.onclick=e=>{e.preventDefault();document.getElementById("workspace")?.focus();};
-      M.onRoute(route=>{this.paint(route);this.refreshJobs();});
+      M.onRoute(route=>{this.route=route;this.paint(route);this.refreshJobs();});
+      window.addEventListener("vocabulary-change",()=>{if(this.route)this.paint(this.route);});
       this.timer=setInterval(()=>this.refreshJobs(),5000);
     }
     disconnectedCallback() { clearInterval(this.timer); }
@@ -123,15 +130,15 @@
       this.tabs.replaceChildren(...groups.map(g=>{
         const key=this.remembered[g.id]||g.pages.find(here)[1];
         return el("a",{class:`rail-link${active===g?" on":""}`,href:`#${key}`,"data-workspace":g.id,
-          "data-color":g.color,"aria-label":g.title,"aria-current":active===g?"page":null,title:g.title,
-          onclick:e=>{e.preventDefault();M.go(key);}},icon(g.icon),el("span",{},g.id === "conversations" ? "Chats" : g.title));
+          "data-color":g.color,"aria-label":word(g.title),"aria-current":active===g?"page":null,title:word(g.title),
+          onclick:e=>{e.preventDefault();M.go(key);}},icon(g.icon),el("span",{},g.id === "conversations" ? "Chats" : word(g.title)));
       }));
       const settings=this.querySelector("#nav-settings");
       settings.classList.toggle("on",route==="settings");
       if(route==="settings")settings.setAttribute("aria-current","page");else settings.removeAttribute("aria-current");
       this.context.replaceChildren(...(active?.pages.filter(here)||[]).map(([name,key])=>
         el("a",{class:`context-link${key===route?" on":""}`,href:`#${key}`,"aria-current":key===route?"page":null,
-          onclick:e=>{e.preventDefault();M.go(key);}},name)));
+          onclick:e=>{e.preventDefault();M.go(key);}},word(name))));
       this.context.hidden=!active || active.id === "conversations";
     }
   }

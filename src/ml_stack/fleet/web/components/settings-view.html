@@ -31,7 +31,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
 </style>
 <template>
   <main id="settings" hidden>
-    <header class="settings-heading"><span class="settings-icon" aria-hidden="true">⚙</span><div><h1>Settings</h1><p class="sub" id="settings-sub"></p></div></header>
+    <header class="settings-heading"><span class="settings-icon" aria-hidden="true">⚙</span><div><h1 data-t="settings.title">Settings</h1><p class="sub" id="settings-sub"></p></div></header>
     <div class="settings-layout">
       <nav class="settings-sections" aria-label="Settings sections" role="tablist" aria-orientation="vertical">
         <button type="button" role="tab" data-section="appearance" aria-selected="true">Appearance &amp; advanced</button>
@@ -40,6 +40,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
         <button type="button" role="tab" data-section="libraries" aria-selected="false">Libraries &amp; simulators</button>
         <button type="button" role="tab" data-section="credentials" aria-selected="false">Credentials</button>
         <button type="button" role="tab" data-section="maintenance" aria-selected="false">Maintenance</button>
+        <button type="button" role="tab" data-section="developer" aria-selected="false" data-t="dev.heading">Developer</button>
       </nav>
       <div class="settings-content">
         <section class="settings-pane" data-pane="appearance" role="tabpanel"><theme-editor></theme-editor><div class="group" id="settings-interface"></div></section>
@@ -48,6 +49,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
         <section class="settings-pane" data-pane="libraries" role="tabpanel" hidden><header><h2>Libraries &amp; simulators</h2><p class="hint">Add training and simulation capabilities to managed environments.</p></header><div class="group" id="settings-libs"></div></section>
         <section class="settings-pane" data-pane="credentials" role="tabpanel" hidden><header><h2>Provider credentials</h2><p class="hint">Connect services using locally stored tokens and API keys.</p></header><div class="group" id="settings-credentials"></div></section>
         <section class="settings-pane" data-pane="maintenance" role="tabpanel" hidden><header><h2>Maintenance</h2><p class="hint">Updates, device setup, and storage management.</p></header><div class="group" id="settings-updates"></div><div class="group" id="settings-again"></div><details data-advanced><summary>Experimental features</summary><feature-flags></feature-flags></details><details data-advanced><summary>Runtime tools</summary><div class="group" id="settings-agent-runtime"></div></details><div class="group" id="settings-removal"></div></section>
+        <section class="settings-pane" data-pane="developer" role="tabpanel" hidden><vocabulary-settings></vocabulary-settings></section>
         <footer class="settings-footer"><button id="settings-save">Save preferences</button><div id="settings-note" role="status" aria-live="polite"></div></footer>
       </div>
     </div>
@@ -230,7 +232,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
       });
       this.drawUpdates(status).catch(() => { status.textContent = "Could not check for updates right now."; });
       this.drawRemoval().catch(error => {
-        this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove Poolside"),
+        this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove Poolhouse"),
           el("div", {class:"err"}, error.message));
       });
     }
@@ -415,11 +417,11 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
     async drawRemoval() {
       const removal = this.querySelector("#settings-removal");
       removal.replaceChildren(
-        el("h2", {}, "Remove Poolside"),
+        el("h2", {}, "Remove Poolhouse"),
         el("div", { class: "hint" }, "Loading what is on this device…"));
       const u = await api("/ui/uninstall");
       if (u.error) {
-        removal.replaceChildren(el("h2", {}, "Remove Poolside"),
+        removal.replaceChildren(el("h2", {}, "Remove Poolhouse"),
           el("div", { class: "err" }, u.error));
         return;
       }
@@ -457,7 +459,7 @@ settings-view #settings-removal { border-top:1px solid var(--line); padding-top:
             : null));
       };
       removal.replaceChildren(
-        el("h2", {}, "Remove Poolside"),
+        el("h2", {}, "Remove Poolhouse"),
         el("div", { class: "hint" },
           "Ticked items go. Your models and your own files are left unless you say "
           + "otherwise."),
