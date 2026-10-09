@@ -58,20 +58,27 @@ def open_connection(endpoint: str, identity: str | None, attempt: float) -> sock
     return socket.create_connection((host, int(port)), timeout=attempt)
 
 
-def connection(endpoint: str, identity: str | None = None, *, patience: float = PATIENCE,
+class AdmissionUnreachable(TimeoutError):
+    """The admission server accepted no connection within the patience; it is busy or gone."""
+
+
+def connection(endpoint: str, identity: str | None = None, *, patience: float | None = None,
                attempt: float = ATTEMPT) -> socket.socket:
     """Connect to an admission endpoint, waiting for a busy server up to ``patience`` seconds.
 
     Only a connect that times out is retried (a full accept queue); a refusal means nothing is
-    listening and a failed identity check is a refusal of the endpoint, and both fail at once."""
+    listening and a failed identity check is a refusal of the endpoint, and both fail at once.
+    ``DEV_TEST_CONNECT_S`` overrides the default patience."""
+    if patience is None:
+        patience = float(os.environ.get("DEV_TEST_CONNECT_S", PATIENCE))
     deadline = time.monotonic() + patience
     delay = 0.1
     while True:
         try:
-            return open_connection(endpoint, identity, attempt)
+            return open_connection(endpoint, identity, max(0.05, min(attempt, deadline - time.monotonic())))
         except TimeoutError as exc:
             if time.monotonic() + delay >= deadline:
-                raise TimeoutError(f"the test admission endpoint {endpoint} accepted no connection in "
+                raise AdmissionUnreachable(f"the test admission endpoint {endpoint} accepted no connection in "
                                    f"{patience:g} s: the queue of runs ahead is too long") from exc
             time.sleep(delay)
             delay = min(delay * 2, 2.0)

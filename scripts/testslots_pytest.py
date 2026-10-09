@@ -1,12 +1,39 @@
 """Pytest collection handoff and per-test shared CPU admission."""
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 from pathlib import Path
 
 import pytest
 import testslots
 import testslots_rpc
+from test_kernel_endpoint import AdmissionUnreachable
+
+_warned = []
+
+
+@contextlib.contextmanager
+def slot(**fields):
+    """Admission for one stretch of work. Admission only schedules, so a server that cannot be
+    reached means the work runs unscheduled, with one warning; it never aborts the run."""
+    manager = testslots_rpc.request("acquire", **fields)
+    try:
+        manager.__enter__()
+    except AdmissionUnreachable as exc:
+        if not _warned:
+            _warned.append(exc)
+            print(f"testslots: {exc}; running without admission", file=sys.stderr)
+        yield
+        return
+    try:
+        yield
+    except BaseException:
+        if not manager.__exit__(*sys.exc_info()):
+            raise
+    else:
+        manager.__exit__(None, None, None)
 
 
 def _ready(operation: str) -> None:
@@ -16,7 +43,7 @@ def _ready(operation: str) -> None:
 
 def pytest_load_initial_conftests(early_config):
     if os.environ.get("PYTEST_XDIST_WORKER"):
-        context = testslots_rpc.request("acquire", label="pytest worker bootstrap", phase="collection")
+        context = slot(label="pytest worker bootstrap", phase="collection")
         context.__enter__()
         early_config._testslots_bootstrap = context
 
@@ -56,7 +83,7 @@ def pytest_collection(session):
     if getattr(session.config, "_testslots_bootstrap", None) is not None:
         yield
     else:
-        with testslots_rpc.request("acquire", label="pytest collection", phase="collection"):
+        with slot(label="pytest collection", phase="collection"):
             yield
 
 
@@ -70,5 +97,5 @@ def pytest_collection_finish(session):
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
     heavy = Path(str(item.path)).stem in testslots.HEAVY_MODULES
-    with testslots_rpc.request("acquire", label=item.nodeid[-256:], heavy=heavy):
+    with slot(label=item.nodeid[-256:], heavy=heavy):
         yield
