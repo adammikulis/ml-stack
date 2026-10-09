@@ -10,6 +10,10 @@ use ed25519_dalek::SigningKey;
 use serde_json::{json, Map, Value};
 
 use crate::board::Board;
+use crate::cert::{self, Identity as CertIdentity};
+use crate::facts::Facts;
+use crate::grants::{Grants, StubGrants};
+use crate::membership::Pool;
 use crate::device::{fingerprint, load_or_create};
 use crate::error::{Error, Result};
 use crate::fold::{self, check_local, holders, Context, Entry};
@@ -32,6 +36,12 @@ pub struct Node {
     pub dir: PathBuf,
     pub pool: String,
     pub key: SigningKey,
+    /// The device certificate: its hash is the identity peers know this device by.
+    pub cert: CertIdentity,
+    /// The pool this device belongs to and its record of the devices in it.
+    pub members: Pool,
+    pub grants: Box<dyn Grants>,
+    pub facts: Facts,
     pub boards: BTreeMap<String, Hosted>,
     pub tokens: Tokens,
     pub links: Links,
@@ -54,8 +64,11 @@ impl Node {
     pub fn open(dir: &Path) -> Result<Node> {
         private_dir(dir)?;
         let key = load_or_create(dir)?;
+        let cert = cert::load_or_create(dir, &key)?;
+        let members = Pool::open(&dir.join("pool.json"))?;
+        let facts = Facts::open(&dir.join("peers.json"))?;
         let mut node = Node {
-            dir: dir.into(), pool: String::new(), key, boards: BTreeMap::new(),
+            dir: dir.into(), pool: String::new(), cert, members, grants: Box::new(StubGrants), facts, key, boards: BTreeMap::new(),
             tokens: Tokens::open(&dir.join("tokens.json"))?, links: Links::open(&dir.join("links.json"))?,
             projects: Projects::open(&dir.join("projects.json"))?,
             stop: Arc::new(AtomicBool::new(false)), started: Instant::now(),
@@ -69,6 +82,7 @@ impl Node {
                 }
             }
         }
+        node.enrol_self()?;
         Ok(node)
     }
 

@@ -23,7 +23,7 @@ pub struct Report {
     pub refused: BTreeMap<String, String>,
 }
 
-fn seqs(vector: &BTreeMap<String, Tip>) -> BTreeMap<String, u64> {
+pub fn seqs(vector: &BTreeMap<String, Tip>) -> BTreeMap<String, u64> {
     vector.iter().map(|(o, t)| (o.clone(), t.seq)).collect()
 }
 

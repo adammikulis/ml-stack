@@ -12,6 +12,7 @@ use serde_json::json;
 use crate::api::{handle, API_VERSION};
 use crate::error::{Error, Result};
 use crate::fsutil::private_dir;
+use crate::net::Net;
 use crate::node::Node;
 use crate::wire::{my_uid, peer_uid, read_frame, try_lock, write_frame, Lock};
 
@@ -27,6 +28,7 @@ pub struct Server {
     node: Arc<Mutex<Node>>,
     listener: UnixListener,
     allowed_uid: u32,
+    net: Option<Arc<Net>>,
     _instance: Lock,
 }
 
@@ -41,12 +43,18 @@ impl Server {
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
-        Ok(Server { node: Arc::new(Mutex::new(node)), listener, allowed_uid: my_uid(), _instance: instance })
+        Ok(Server { node: Arc::new(Mutex::new(node)), listener, allowed_uid: my_uid(), net: None, _instance: instance })
     }
 
     /// Only this user id may connect (tests use another to see the refusal).
     pub fn allow_only(mut self, uid: u32) -> Server {
         self.allowed_uid = uid;
+        self
+    }
+
+    /// Answer the network methods of the local API through ``net`` (the node must be the one it serves).
+    pub fn attach(mut self, net: Arc<Net>) -> Server {
+        self.net = Some(net);
         self
     }
 
@@ -60,9 +68,9 @@ impl Server {
         while !stop.load(Ordering::SeqCst) {
             match self.listener.accept() {
                 Ok((stream, _)) => {
-                    let (node, uid) = (self.node.clone(), self.allowed_uid);
+                    let (node, uid, net) = (self.node.clone(), self.allowed_uid, self.net.clone());
                     std::thread::spawn(move || {
-                        let _ = connection(stream, &node, uid);
+                        let _ = connection(stream, &node, uid, net.as_deref());
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
@@ -73,7 +81,7 @@ impl Server {
     }
 }
 
-fn connection(mut stream: UnixStream, node: &Mutex<Node>, allowed: u32) -> Result<()> {
+fn connection(mut stream: UnixStream, node: &Mutex<Node>, allowed: u32, net: Option<&Net>) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
     if peer_uid(&stream)? != allowed {
@@ -81,9 +89,12 @@ fn connection(mut stream: UnixStream, node: &Mutex<Node>, allowed: u32) -> Resul
         return write_frame(&mut stream, &refusal);
     }
     while let Some(request) = read_frame(&mut stream)? {
-        let reply = match node.lock() {
-            Ok(mut n) => handle(&mut n, &request),
-            Err(_) => return Err(Error::Damaged("node poisoned".into())),
+        let reply = match net {
+            Some(net) => net.call(&request),
+            None => match node.lock() {
+                Ok(mut n) => handle(&mut n, &request),
+                Err(_) => return Err(Error::Damaged("node poisoned".into())),
+            },
         };
         write_frame(&mut stream, &reply)?;
     }

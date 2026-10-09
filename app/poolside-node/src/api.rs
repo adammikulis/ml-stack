@@ -29,7 +29,7 @@ fn params_for(method: &str) -> Option<&'static [&'static str]> {
         "project_add" | "source_add" => &["id", "kind", "path"],
         "project_list" => &[],
         "project_resolve" => &["path"],
-        _ => return None,
+        _ => return crate::poolapi::params(method),
     })
 }
 
@@ -162,6 +162,7 @@ fn dispatch(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<Str
         "project_add" | "source_add" => project(node, method, token, p),
         "project_list" => Ok(json!(node.projects.all())),
         "project_resolve" => node.projects.resolve(str_of(p, "path")?).map(|p| json!({"board": p.id})),
+        m if crate::poolapi::handles(m) => crate::poolapi::dispatch(node, m, token, p),
         "links" => node.access(token, board, false).map(|_| json!(node.links.all().iter().filter(|l| l.from == board || l.to == board).collect::<Vec<_>>())),
         "shutdown" => node.access(token, board, false).map(|_| {
             node.stop.store(true, Ordering::SeqCst);
@@ -173,14 +174,28 @@ fn dispatch(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<Str
 
 /// Answer one request.
 pub fn handle(node: &mut Node, request: &Value) -> Value {
+    respond(request, run(node, request))
+}
+
+/// The reply to ``request`` carrying ``result``.
+pub fn respond(request: &Value, result: Result<Value>) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
-    match run(node, request) {
+    match result {
         Ok(result) => json!({"v": API_VERSION, "id": id, "ok": true, "result": result}),
         Err(e) => json!({"v": API_VERSION, "id": id, "ok": false, "error": {"code": e.code(), "message": e.to_string()}}),
     }
 }
 
-fn run(node: &mut Node, request: &Value) -> Result<Value> {
+/// A request that passed the envelope checks.
+pub struct Call {
+    pub method: String,
+    pub board: String,
+    pub token: String,
+    pub params: Map<String, Value>,
+}
+
+/// Check the envelope, the version, the method and its params, and refuse any field that names a sender.
+pub fn parse(request: &Value) -> Result<Call> {
     let map = request.as_object().ok_or_else(|| Error::Invalid("a request is an object".into()))?;
     refuse_identity(&map.keys().map(|k| (k.clone(), Value::Null)).collect())?;
     if let Some(k) = map.keys().find(|k| !ENVELOPE.contains(&k.as_str())) {
@@ -197,8 +212,13 @@ fn run(node: &mut Node, request: &Value) -> Result<Value> {
         return Err(Error::Invalid(format!("unknown param {}", k.chars().take(40).collect::<String>())));
     }
     let (board, token) = (str_of(map, "board")?, str_of(map, "token")?);
-    if board.is_empty() && !matches!(method, "hello" | "status" | "project_add" | "source_add" | "project_list" | "project_resolve") {
+    if board.is_empty() && !matches!(method, "hello" | "status" | "project_add" | "source_add" | "project_list" | "project_resolve") && !crate::poolapi::handles(method) {
         return Err(Error::Invalid("this method names a board".into()));
     }
-    dispatch(node, method, board, token, &params)
+    Ok(Call { method: method.into(), board: board.into(), token: token.into(), params })
+}
+
+fn run(node: &mut Node, request: &Value) -> Result<Value> {
+    let c = parse(request)?;
+    dispatch(node, &c.method, &c.board, &c.token, &c.params)
 }

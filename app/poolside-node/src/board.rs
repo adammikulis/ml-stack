@@ -20,7 +20,7 @@ pub const MAX_LOG_ROWS: usize = 200_000;
 const MAX_REJECTED: usize = 200;
 
 /// The sequence number and hash of the last row of a log.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Tip {
     pub seq: u64,
     pub hash: String,
