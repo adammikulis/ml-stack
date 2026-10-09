@@ -90,7 +90,8 @@ def test_the_edit_guard_can_be_switched_off(repo):
 
 
 @pytest.mark.parametrize("command", [
-    "git checkout work", "git switch work", "git reset --hard",
+    "git checkout work", "git switch -c fresh", "git switch main", "git switch --detach work",
+    "git switch -f work", "git switch work -- a.py", "git reset --hard",
     "git restore a.py", "git stash", "git rebase work", "git cherry-pick abc", "git am p.patch",
     "git apply p.patch", "git merge work", "git merge --no-ff work", "git merge --ff-only a b",
     "git merge --ff-only origin/work:x", "cd . && git stash",
@@ -158,8 +159,8 @@ def test_a_redirection_after_a_cd_or_an_install_is_still_read(repo):
     primary, work, _ = repo
     assert bash(f"cd {work} 2>&1 && git commit -m x", primary) == ALLOWED
     assert bash(f"git -C {primary} add a.py 2>&1", work) == ALLOWED
-    assert bash("pip install -e . 2>&1 | tail -1", work) == BLOCKED
-    assert bash("pip install -e . >log", work) == BLOCKED
+    assert bash("pip install -e . 2>&1 | tail -1", work) == ALLOWED
+    assert bash("pip install -e . >log", work) == ALLOWED
     assert bash("pip install requests 2>&1", work) == ALLOWED
 
 
@@ -180,17 +181,17 @@ def test_the_bash_guard_can_be_switched_off(repo):
     "pip install -e .", "pip3 install -e '.[test]'", "uv pip install -e .", "pip install --editable .",
     "python3 -m pip install --editable=.", "FOO=1 pip install -e .",
 ])
-def test_an_editable_install_of_a_worktree_is_refused(repo, command):
-    _, work, inside = repo
-    assert bash(command, work) == BLOCKED
-    assert bash(command, inside) == BLOCKED
+def test_an_editable_install_is_allowed_from_any_checkout(repo, command):
+    primary, work, inside = repo
+    for where in (primary, work, inside):
+        assert bash(command, where) == ALLOWED
 
 
-@pytest.mark.parametrize("command", ["pip install -e .", "pip install -e '.[test]'"])
-def test_an_editable_install_of_the_primary_checkout_is_refused(repo, command):
-    primary, work, _ = repo
-    assert bash(command, primary) == BLOCKED
-    assert bash(f"pip install -e {primary}", work) == BLOCKED
+def test_the_primary_checkout_may_switch_to_an_existing_branch(repo):
+    primary, _, _ = repo
+    assert bash("git switch work", primary) == ALLOWED
+    assert bash("git switch 0.3dev", primary) == ALLOWED
+    assert bash("cd . && git switch work && git status", primary) == ALLOWED
 
 
 @pytest.mark.parametrize("command", ["pip install requests", "pip install -r r.txt"])
