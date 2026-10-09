@@ -115,6 +115,9 @@ repository's common Git directory (shared by every worktree; `scripts/test` pass
 clipped to three times the current value once three exist, so one loaded run barely moves it) and drops
 tests whose file or definition is gone. A test's estimate is its CPU seconds, and at least a quarter of
 its wall seconds. `scripts/test heavy` rewrites `tests/heavy-modules.txt` from this history.
+Only measured durations decide a run's length: the `slow` and `heavy` labels (the marker and
+`tests/heavy-modules.txt`) never enter the estimate or the class and must not bar a test from any
+tier, cache or queue.
 
 Before admission `scripts/test` estimates the run: the recorded seconds of the selected files and nodes,
 summed per file without collecting, plus 30 s for each file with no record, divided by the workers the

@@ -16,8 +16,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import testslots
-from test_kernel_endpoint import connection, private_directory, socket_identity, verify_socket
 import testslots_policy
+from test_kernel_endpoint import connection, private_directory, socket_identity, verify_socket
 
 
 def _read(stream) -> dict:

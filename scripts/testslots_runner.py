@@ -55,6 +55,15 @@ def run_artifact_pytest(command: list[str], want: int, environment: dict[str, st
         ARTIFACT_CONTEXT.reset(token)
 
 
+def open_admission(environment: dict[str, str], label: str, want: int, unix: bool):
+    """The run's class, its admission endpoint and its run record."""
+    run_class = policy.environment_class(environment)
+    admission = testslots_rpc.UnixAdmission(False, run_class) if unix else testslots_rpc.Admission(False, run_class)
+    estimate = environment.get("DEV_TEST_ESTIMATE_S")
+    record = testqueue.RunRecord(testslots.slots_dir(), label, run_class, float(estimate) if estimate else None, want)
+    return run_class, admission, record
+
+
 def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: dict[str, str] | None = None,
                *, container: bool = False) -> int:
     environment = environment_for(env)
@@ -63,11 +72,7 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
     if container:
         from test_container_launch import ContainerRun
         launch = ContainerRun(command, environment)
-    run_class = policy.environment_class(environment)
-    admission = (testslots_rpc.UnixAdmission(False, run_class) if (confining(environment) or launch is not None)
-                 else testslots_rpc.Admission(False, run_class))
-    estimate = environment.get("DEV_TEST_ESTIMATE_S")
-    record = testqueue.RunRecord(testslots.slots_dir(), label, run_class, float(estimate) if estimate else None, want)
+    run_class, admission, record = open_admission(environment, label, want, confining(environment) or launch is not None)
     process = None
     confined = None
     output = None

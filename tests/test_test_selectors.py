@@ -15,6 +15,7 @@ def runner():
     loader = importlib.machinery.SourceFileLoader('tier_runner', str(ROOT / 'scripts' / 'test'))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
 

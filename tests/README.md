@@ -42,7 +42,8 @@ estimates the run from that history before admission, prints the estimate, and c
 at 180 s or more (`DEV_TEST_BACKGROUND_S`), `interactive` below. The broker grants the shortest
 estimated work first, caps long runs to half the budget on weekdays 08:00-21:00
 (`DEV_TEST_NORMAL_HOURS`) and runs them at lower CPU priority (`docs/test-execution.md`, *Scheduling*).
-`--background` forces the class.
+`--background` forces the class. The `slow` and `heavy` labels never enter the estimate or the class;
+only measured durations do.
 
 Use the workers granted by the maintained broker. Coordinate test concurrency with active
 benchmarks; do not reserve a fixed worker pool or bypass shared admission.
