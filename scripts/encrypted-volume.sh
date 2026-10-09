@@ -41,7 +41,10 @@ done
 for field in "$NAME" "$USER" "${ML_STACK_VOLUME_KEYCHAIN:-}"; do
   case $field in *[!A-Za-z0-9._/@+-]*) echo "unsupported character in '$field'" >&2; exit 2 ;; esac
 done
-# KEYCHAIN names a keychain file instead of the login keychain (tests use a throwaway one).
+case ${ML_STACK_VOLUME_KEYCHAIN:-} in -*) echo "ML_STACK_VOLUME_KEYCHAIN must not start with '-'" >&2; exit 2 ;; esac
+# KEYCHAIN names a keychain file instead of the login keychain (tests use a throwaway one). It is
+# expanded unquoted on purpose, so that an empty value adds no argument at all; the check above
+# allows no space or glob character in it, so it cannot split into two.
 KEYCHAIN=${ML_STACK_VOLUME_KEYCHAIN:-}
 password() { security find-generic-password -a "$USER" -s "$SERVICE" -w $KEYCHAIN 2>/dev/null; }
 # The secret goes to `security -i` on stdin, never on argv, where `ps` shows it to every local user.
@@ -59,6 +62,7 @@ setup)
   fi
   mkdir -p "$(dirname "$MOUNT")"
   PW=$(password)
+  [ -n "$PW" ] || { echo "no passphrase found for $SERVICE" >&2; exit 1; }
   printf '%s' "$PW" | hdiutil create -size "$SIZE" -type SPARSEBUNDLE -fs APFS \
       -encryption AES-256 -stdinpass -volname "$SERVICE" "$IMAGE" >/dev/null
   "$0" "$NAME" "$MOUNT" mount
@@ -76,6 +80,7 @@ mount)
   attached && exit 0
   mkdir -p "$MOUNT"
   PW=$(password)
+  [ -n "$PW" ] || { echo "no passphrase found for $SERVICE" >&2; exit 1; }
   printf '%s' "$PW" | hdiutil attach "$IMAGE" -stdinpass -mountpoint "$MOUNT" -nobrowse -quiet
   ;;
 unmount)
