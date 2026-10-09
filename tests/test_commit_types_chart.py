@@ -105,3 +105,30 @@ def test_the_script_writes_a_png(tmp_path):
     data = out.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
     assert len(data) > 1000
+
+
+def white_pixels_in_plot(fig, ax) -> int:
+    """White pixels inside the axes box, not counting a 3-pixel band at each edge."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    fig.canvas.draw()
+    rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
+    height = rgb.shape[0]
+    box = ax.get_window_extent()
+    x0, x1 = int(box.x0) + 3, int(box.x1) - 3
+    top, bottom = height - int(box.y1) + 3, height - int(box.y0) - 3
+    inner = rgb[top:bottom, x0:x1]
+    plt.close(fig)
+    return int((inner.min(axis=2) >= 250).sum())
+
+
+def test_the_areas_fill_the_axes_edge_to_edge(tmp_path):
+    pytest.importorskip("matplotlib")
+    module = chart()
+    dates = ["2026-01-05", "2026-01-20", "2026-02-10", "2026-03-01"]
+    repo = make_repo(tmp_path, list(zip(dates, ["feat: a", "fix: b", "docs: c", "chore: d"], strict=True)))
+    commits = module.read_commits(repo, "main", None)
+    starts, rows = module.build_matrix(commits, "week", 3)
+    fig = module.draw(starts, rows, "t", "week", False)
+    assert white_pixels_in_plot(fig, fig.axes[0]) == 0

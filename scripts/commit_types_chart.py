@@ -27,6 +27,7 @@ COLOURS = {
 }
 PREFIX = re.compile(r"([A-Za-z]+)(?:\([^()]*\))?!?:")
 SHORT_SPAN_DAYS = 60
+BUCKET_LABEL = {"day": "Day", "week": "Week starting", "month": "Month starting"}
 
 
 def commit_type(subject: str) -> str:
@@ -157,8 +158,8 @@ def print_table(commits: list[tuple[dt.date, str]]) -> None:
     print(f"{'total':<10}{len(commits):>8}")
 
 
-def draw(starts: list[dt.date], rows: list[list[float]], title: str, out: Path, show: bool) -> None:
-    """Draw the stacked areas (feat at the bottom, other on top) and save them to `out`."""
+def draw(starts: list[dt.date], rows: list[list[float]], title: str, unit: str, show: bool):
+    """Draw the stacked areas (feat at the bottom, other on top) and return the figure."""
     import matplotlib
 
     if not show:
@@ -171,22 +172,18 @@ def draw(starts: list[dt.date], rows: list[list[float]], title: str, out: Path, 
     columns = [[row[k] for row in rows] for k in range(len(TYPES))]
     fig, ax = plt.subplots(figsize=(12, 6.5), dpi=150)
     ax.stackplot(x, columns, colors=[COLOURS[kind] for kind in TYPES], labels=TYPES, linewidth=0)
-    if len(x) == 1:
-        ax.set_xlim(x[0] - 1, x[0] + 1)
+    ax.set_xlim(x[0], x[-1] if len(x) > 1 else x[0] + 1)
     ax.set_ylim(0, 1)
     ax.yaxis.set_major_formatter(PercentFormatter(1.0))
     locator = AutoDateLocator()
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(ConciseDateFormatter(locator))
-    ax.set_xlabel("Date (start of the day, week or month bucket)")
+    ax.set_xlabel(BUCKET_LABEL[unit])
     ax.set_ylabel("Share of commits in the bucket")
     ax.set_title(title)
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles[::-1], labels[::-1], loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False)
-    fig.savefig(out, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
+    return fig
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -218,11 +215,17 @@ def main(argv: list[str] | None = None, repo: Path = ROOT) -> int:
     if not commits:
         print(f"no commits on {args.branch}", file=sys.stderr)
         return 1
-    starts, rows = build_matrix(commits, pick_bucket(commits, args.bucket), args.smooth)
+    unit = pick_bucket(commits, args.bucket)
+    starts, rows = build_matrix(commits, unit, args.smooth)
     title = f"Commit types on {args.branch}, {commits[0][0]} to {commits[-1][0]}, {len(commits)} commits"
     print_table(commits)
-    draw(starts, rows, title, args.out, args.show)
+    fig = draw(starts, rows, title, unit, args.show)
+    fig.savefig(args.out, bbox_inches="tight")
     print(f"wrote {args.out.resolve()}")
+    if args.show:
+        import matplotlib.pyplot as plt
+
+        plt.show()
     return 0
 
 
