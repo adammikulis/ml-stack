@@ -218,6 +218,7 @@ def script():
     loader = importlib.machinery.SourceFileLoader("runner_under_review", str(SCRIPTS / "test"))
     spec = importlib.util.spec_from_loader("runner_under_review", loader)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # a dataclass in the script looks its own module up by name
     loader.exec_module(module)
     return module
 
