@@ -190,6 +190,22 @@ fn models_are_claimed_listed_and_a_verified_one_is_not_overwritten() {
 }
 
 #[test]
+fn a_subagent_that_names_no_model_inherits_its_parents_and_a_claim_replaces_it() {
+    let dir = tempdir().unwrap();
+    let mut n = node(dir.path());
+    let (_, lt) = session(&mut n, "demo", "lead");
+    let made = ok(req(&mut n, "register", "demo", &lt, json!({"model": "", "harness": "claude-code", "session": "kid"})));
+    assert!(made["name"].as_str().unwrap().starts_with("claude-"), "the family comes from the parent's model: {made}");
+    let kid = made["token"].as_str().unwrap().to_string();
+    let listed = |n: &mut poolside_node::node::Node| ok(req(n, "agents", "demo", &lt, json!({})))["agents"].as_array().unwrap().iter().find(|a| a["parent"] != "").cloned().unwrap();
+    assert_eq!((listed(&mut n)["model"].clone(), listed(&mut n)["model_state"].clone()), (json!("claude-sonnet-5-5"), json!("inherited")));
+    ok(req(&mut n, "whoami", "demo", &kid, json!({"model": "claude-haiku-5-5"})));
+    assert_eq!((listed(&mut n)["model"].clone(), listed(&mut n)["model_state"].clone()), (json!("claude-haiku-5-5"), json!("claimed")));
+    let lone = ok(req(&mut n, "register", "demo", "", json!({"model": "", "harness": "claude-code", "session": "nomodel"})));
+    assert!(lone["name"].as_str().unwrap().starts_with("agent-"), "no parent, no model: {lone}");
+}
+
+#[test]
 fn agents_show_parent_last_seen_and_a_session_lookup_finds_a_name_without_a_token() {
     let dir = tempdir().unwrap();
     let mut n = node(dir.path());

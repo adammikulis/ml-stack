@@ -170,8 +170,8 @@ fn identity(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<
     }
     line(&map, "model", 256)?;
     line(&map, "harness", 64)?;
-    if !["unknown", "claimed", "verified"].contains(&text(&map, "model_state", 16, true)?) {
-        return reject("the model state is unknown, claimed or verified");
+    if !["unknown", "claimed", "inherited", "verified"].contains(&text(&map, "model_state", 16, true)?) {
+        return reject("the model state is unknown, claimed, inherited or verified");
     }
     if map.get("retired").is_some_and(|r| !r.is_boolean()) {
         return reject("retired is true or false");

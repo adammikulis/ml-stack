@@ -13,12 +13,13 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack.board import session as board_session
 from ml_stack.net import git
-from ml_stack.workspace import Workspace, session_name
-from ml_stack.workspace.agent_display import metadata
+from ml_stack.workspace import agent_display, session_name
 from ml_stack.workspace.coordinator_calls import execute
 from ml_stack.workspace.identity import Denied
 
+pytest_plugins = ['node_kit']
 ROOT = Path(__file__).resolve().parents[1]
 NAME = r'claude-[0-9a-f]{6}'
 
@@ -53,7 +54,7 @@ def run_hook(name, event, env):
                           text=True, capture_output=True, timeout=60, check=False, env=env)
 
 
-def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and_subagents(tmp_path, monkeypatch):
+def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and_subagents(tmp_path, monkeypatch, workspace_node):
     shim = tmp_path / 'shim'
     shim.mkdir()
     (shim / 'ml-stack-workspace').write_text(f'#!{sys.executable}\nimport sys\nsys.argv[0] = "ml-stack-workspace"\n'
@@ -63,8 +64,7 @@ def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and
                    if key not in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'ML_STACK_AGENT', 'CLAUDE_ENV_FILE',
                                   'ML_STACK_WORKSPACE_AGENT', 'ML_STACK_SESSION_ID', 'ML_STACK_NONINTERACTIVE')}
     environment.update(PATH=os.pathsep.join([str(shim), str(Path(sys.executable).parent), str(Path(shutil.which('git')).parent)]),
-                       ML_STACK_HOME=str(tmp_path / 'home'), ML_STACK_WORKSPACE_HOME=str(tmp_path / 'ws'),
-                       PYTHONPATH=str(ROOT / 'src'), ML_STACK_RUNTIME_ENSURE='off')
+                       ML_STACK_HOME=str(tmp_path / 'home'), PYTHONPATH=str(ROOT / 'src'), ML_STACK_RUNTIME_ENSURE='off')
     repository = tmp_path / 'project'
     git.run(['init', '-b', 'development', str(repository)])
     git.run(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
@@ -73,24 +73,25 @@ def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and
         done = run_hook('claude-session-start', {'model': 'claude-sonnet-5-5', 'session_id': session, 'cwd': str(repository)},
                         environment)
         assert done.returncode == 0, done.stderr
-    names = [session_name.lookup(tmp_path / 'ws', 'claude-code', session) for session in ('terminal-one', 'terminal-two')]
+    client = workspace_node.client
+    names = [board_session.find('claude-code', session, client=client) for session in ('terminal-one', 'terminal-two')]
     assert all(re.fullmatch(NAME, name) for name in names) and names[0] != names[1]
-    ws = Workspace(tmp_path / 'ws')
-    shown = {row['id']: row['display_name'] for row in ws.registered()}
+    me = workspace_node.session(workspace_node.adopt(names[0]))
+    shown = {agent.name: agent.name for agent in me.agents()}
     assert shown[names[0]] == names[0] and shown[names[1]] == names[1]
-    rows = [row for row in ws.board._rows('#announcements') if row['type'] == 'joined']
-    assert {row['from'] for row in rows} == set(names)
-    # A subagent is its own identity under its own unique name; the display names its parent.
-    one = ws.registry.info(names[0])
-    assert one['harness'] == 'claude-code' and one['model'] == 'claude-sonnet-5-5'
+    rows = [e for e in me.read(channel='#announcements').entries if e.fields['type'] == 'joined']
+    assert {e.sender for e in rows} == set(names)
+    # A subagent is its own identity under its own unique name; the listing names its parent.
+    one = next(a for a in me.agents() if a.name == names[0])
+    assert one.harness == 'claude-code' and one.model == 'claude-sonnet-5-5'
     started = run_hook('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'explore-abc123', 'cwd': str(repository),
                                                 'session_id': 'terminal-one'}, environment)
     assert started.returncode == 0, started.stderr
-    child = session_name.lookup(tmp_path / 'ws', 'claude-code', 'explore-abc123')
+    child = board_session.find('claude-code', 'explore-abc123', client=client)
     assert re.fullmatch(NAME, child) and child not in names
-    assert metadata(ws.registry, child)['display_name'] == child
-    assert metadata(ws.registry, child)['session_kind'] == 'subagent'
-    assert metadata(ws.registry, child)['spawned_by'] == names[0]
+    listed = {a.name: a for a in me.agents()}
+    assert agent_display.describe(listed[child])['session_kind'] == 'subagent'
+    assert agent_display.describe(listed[child])['spawned_by'] == names[0]
     agents = subprocess.run(['ml-stack-workspace', 'agents'], env={**environment, 'ML_STACK_WORKSPACE_AGENT': names[1]},
                             capture_output=True, text=True, timeout=60, cwd=repository, check=False)
     assert agents.returncode == 0, agents.stderr
@@ -129,6 +130,6 @@ def test_a_remote_call_cannot_carry_a_sender_or_an_agent(kit):
         document = {'workspace': 'w', 'request_id': 'a' * 32, 'argv': ['whoami'], key: 'claude-ffffff'}
         with pytest.raises(ValueError, match='contains workspace, request_id and argv'):
             execute(kit.ws, token, document, parser, handlers)
-    for argv in (['whoami', '--agent', 'claude-ffffff'], ['announce', 'milestone', 'x', '--agent', 'claude-ffffff']):
+    for argv in (['status', '--agent', 'claude-ffffff'], ['ack', '1', '--agent', 'claude-ffffff']):
         with pytest.raises(Denied, match='authenticated by its token'):
             execute(kit.ws, token, {'workspace': 'w', 'request_id': 'b' * 32, 'argv': argv}, parser, handlers)

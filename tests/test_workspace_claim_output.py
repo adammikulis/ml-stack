@@ -1,6 +1,6 @@
 """Readable ownership output for shared claims."""
 
-from ml_stack.workspace.cli import _text
+from ml_stack.workspace.render import text as _text
 
 
 def test_unclaimed_owner_is_rendered_without_identity_conversion():

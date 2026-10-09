@@ -18,7 +18,7 @@ use crate::device::{fingerprint, load_or_create};
 use crate::error::{Error, Result};
 use crate::fold::{self, check_local, Context, Entry};
 use crate::fsutil::private_dir;
-use crate::identity::{Holder, Ident, Registry, Tokens};
+use crate::identity::{Holder, Ident, ModelState, Registry, Tokens};
 use crate::lease::Leases;
 use crate::links::Links;
 use crate::registry::Projects;
@@ -139,9 +139,11 @@ impl Node {
                 _ => return Err(Error::Denied("a parent must be a session of this board".into())),
             },
         };
+        let inherited = model.trim().is_empty().then(|| self.boards.get(board).and_then(|h| h.names.get(&parent)).map(|p| p.model.clone())).flatten().unwrap_or_default();
+        let (model, state) = if inherited.is_empty() { (model, ModelState::Claimed) } else { (inherited.as_str(), ModelState::Inherited) };
         let hosted = self.host(board)?;
         let now = hosted.board.now_ms();
-        let (name, created) = hosted.names.assign(model, harness, session, &parent, now)?;
+        let (name, created) = hosted.names.assign(model, state, harness, session, &parent, now)?;
         if created {
             self.write_identity(board, &name)?;
         }

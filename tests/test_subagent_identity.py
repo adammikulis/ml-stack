@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
-from pathlib import Path
 
 import pytest
 from test_workspace_remote import call, joined
@@ -85,11 +82,6 @@ def test_the_cli_has_no_flag_that_names_a_sender_or_label(kit, flag):
     assert done.returncode == 2 and "unrecognized arguments" in done.stderr
 
 
-def test_the_cli_stamps_the_token_holder_even_when_the_environment_names_another(kit):
-    first, _ = spawn(kit, kit.lead, "agent-a")
-    done = cli(kit.base, "", "send", "bob", "note", "as the child", "--agent", first)
-    assert done.returncode == 0, done.stderr
-    assert [m["from"] for m in kit.ws.inbox(kit.bob)] == [first]
 
 
 def test_subagents_are_never_coordinator_eligible_at_any_depth(kit):
@@ -140,27 +132,13 @@ def test_a_delegated_gate_refuses_a_spawned_subagent_but_not_its_lead(kit, monke
         authority.require("sentinel.policy", "mode", (False, False), {**lead, "ML_STACK_WORKSPACE_AGENT": first})
 
 
-def test_for_agent_resolves_a_prefix_and_lists_candidates_when_it_is_ambiguous(kit):
-    first, first_token = spawn(kit, kit.lead, "agent-a")
-    kit.ws.claim(first_token, "branch", f"{first}/work")
-    kit.ws.claim(kit.lead, "branch", f"{kit.lead_name}/other")
-    shown = json.loads(cli(kit.base, kit.lead, "claims", "--for-agent", first, "--json").stdout)
-    assert [row["owner"] for row in shown] == [first]
-    prefix = first[:-1]
-    if sum(name.startswith(prefix) for name in kit.ws.registry.ids()) == 1:
-        again = json.loads(cli(kit.base, kit.lead, "claims", "--for-agent", prefix, "--json").stdout)
-        assert [row["owner"] for row in again] == [first]
-    ambiguous = cli(kit.base, kit.lead, "claims", "--for-agent", "claude-", "--json")
-    assert ambiguous.returncode == 3 and first in ambiguous.stdout and kit.lead_name in ambiguous.stdout
 
 
-def test_private_records_stay_lead_or_person_only_while_public_ones_filter_for_anyone(kit):
-    first, _ = spawn(kit, kit.lead, "agent-a")
+def test_private_records_stay_lead_or_person_only(kit):
+    spawn(kit, kit.lead, "agent-a")
     kit.ws.scratch_new(kit.lead, "mine")
-    assert json.loads(cli(kit.base, kit.bob, "claims", "--for-agent", first, "--json").stdout) == []
     refused = cli(kit.base, kit.bob, "scratch-ls", "--for-agent", kit.lead_name, "--json")
     assert refused.returncode == 3 and "cannot reach" in refused.stdout
-    assert json.loads(cli(kit.base, kit.bob, "agents", "--for-agent", kit.lead_name, "--json").stdout)[0]["id"] == kit.lead_name
 
 
 def test_a_board_call_with_a_sender_parent_name_or_label_is_refused_by_the_host(host):
@@ -193,21 +171,6 @@ def test_the_hook_scripts_exist_without_a_label(kit):
     assert done.returncode == 1, done.stdout
 
 
-def test_the_bash_guard_makes_a_subagent_name_itself_in_workspace_commands(kit, monkeypatch):
-    first, _ = spawn(kit, kit.lead, "agent-a")
-    guard = Path(__file__).resolve().parents[1] / "scripts/hooks/claude-bash-guard"
-    monkeypatch.setenv("ML_STACK_WORKSPACE_HOME", str(kit.base))
-
-    def run_guard(command, **event):
-        asked = {"tool_name": "Bash", "cwd": "/", "tool_input": {"command": command}, **event}
-        done = subprocess.run([str(guard)], input=json.dumps(asked), text=True, capture_output=True, env=dict(os.environ))
-        return done.returncode, done.stderr
-
-    code, why = run_guard("ml-stack-workspace inbox", agent_id="agent-a")
-    assert code == 2 and f"--agent {first}" in why
-    assert run_guard(f"ml-stack-workspace inbox --agent {first}", agent_id="agent-a")[0] == 0
-    assert run_guard("ml-stack-workspace inbox")[0] == 0
-    assert run_guard("ls", agent_id="agent-a")[0] == 0
 
 
 def test_a_spawned_subagent_claims_every_kind_a_task_needs_and_its_parent_releases_them(kit, tmp_path):

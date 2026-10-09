@@ -41,6 +41,8 @@ pub fn digest(harness: &str, session: &str) -> String {
 pub enum ModelState {
     Unknown,
     Claimed,
+    /// A subagent that named no model runs the one its parent runs.
+    Inherited,
     Verified,
 }
 
@@ -108,12 +110,13 @@ impl Registry {
     pub fn claim_model(&mut self, name: &str, model: &str, harness: &str) -> Result<bool> {
         let (model, harness) = (clean(model, 256)?, clean(harness, 64)?);
         let ident = self.names.get_mut(name).ok_or_else(|| Error::Denied("no such session".into()))?;
-        let new = if model.is_empty() { ident.model.clone() } else { model };
         let new_harness = if harness.is_empty() { ident.harness.clone() } else { harness };
-        if ident.model_state == ModelState::Verified && new != ident.model {
-            return Err(Error::Denied("the model of this session was verified; a claim cannot change it".into()));
-        }
-        let state = if new.is_empty() { ModelState::Unknown } else if ident.model == new { ident.model_state } else { ModelState::Claimed };
+        let (new, state) = match (model.is_empty(), ident.model_state) {
+            (true, state) => (ident.model.clone(), state),
+            (false, ModelState::Verified) if model == ident.model => (model, ModelState::Verified),
+            (false, ModelState::Verified) => return Err(Error::Denied("the model of this session was verified; a claim cannot change it".into())),
+            (false, _) => (model, ModelState::Claimed),
+        };
         let changed = (new.as_str(), new_harness.as_str(), state) != (ident.model.as_str(), ident.harness.as_str(), ident.model_state);
         (ident.model, ident.harness, ident.model_state) = (new, new_harness, state);
         if changed {
@@ -176,7 +179,7 @@ impl Registry {
     /// The unique name of this session, recorded so no later session takes the same one. The
     /// same session always gets the same name back (``true`` when it is new); a session whose
     /// short suffix collides with another's gets a longer one.
-    pub fn assign(&mut self, model: &str, harness: &str, session: &str, parent: &str, now_ms: u64) -> Result<(String, bool)> {
+    pub fn assign(&mut self, model: &str, state: ModelState, harness: &str, session: &str, parent: &str, now_ms: u64) -> Result<(String, bool)> {
         if session.is_empty() || harness.is_empty() {
             return Err(Error::Denied("a session name needs the native harness and session id".into()));
         }
@@ -196,7 +199,7 @@ impl Registry {
         }
         let name = (SHORT..=full.len()).step_by(2).map(|w| format!("{word}-{}", &full[..w])).find(|n| !self.names.contains_key(n))
             .ok_or_else(|| Error::Quota("no free name".into()))?;
-        let state = if model.is_empty() { ModelState::Unknown } else { ModelState::Claimed };
+        let state = if model.is_empty() { ModelState::Unknown } else { state };
         self.names.insert(name.clone(), Ident {
             digest: full, family: word.into(), parent: parent.into(), model, model_state: state, harness: clean(harness, 64)?,
             retired: false, seen_ms: now_ms,

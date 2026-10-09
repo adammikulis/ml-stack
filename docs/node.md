@@ -150,8 +150,9 @@ a linked board that shares everything. Peers replicate it like any row (every me
 the log), so this is privacy between sessions, not encryption between devices. A sender shown as
 `name@dN` (written on another device) is matched by recipient only.
 
-**Sessions.** `register` records the model id and harness (`model_state` `claimed`; the node itself
-may mark one `verified`, and a claim can never lower a verified one); `whoami` with `model`/`harness`
+**Sessions.** `register` records the model id and harness (`model_state` `claimed`; a subagent that names no
+model gets its parent's, `inherited`, and the name's family comes from it; the node itself may mark
+one `verified`, and a claim can never lower a verified one); `whoami` with `model`/`harness`
 changes the claim. Each change is an identity entry. Registering a session that has a parent without
 that parent's token, or under another parent, is `denied`, and so is registering a retired one.
 `retire` revokes every token of the session, ends its leases (written to the board), marks the
