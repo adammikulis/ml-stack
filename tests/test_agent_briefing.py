@@ -37,6 +37,7 @@ def test_managed_worker_keeps_task_only_restrictions_and_parent_activation_owner
     events = []
     seat = SimpleNamespace(name='local-qwen', managed_inbox=True, base=None,
                            record_model=lambda *args: True,
+                           record_execution=lambda *args: True,
                            revoke=lambda: events.append('revoked'))
     files = SimpleNamespace(release=lambda: events.append('released'))
     args = SimpleNamespace(project=str(tmp_path), parent='codex', role='approve-first',
