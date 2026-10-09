@@ -37,6 +37,14 @@ background job: `scripts/test submit all tests/<file>.py` prints a job id for `s
 `result`, `cancel` and `subscribe`. Keys, what is never reused and the limits are in
 [docs/test-reuse.md](../docs/test-reuse.md).
 
+Every run records how long each passing test takes (`scripts/testdurations.py`). `scripts/test`
+estimates the run from that history before admission, prints the estimate, and classes it `background`
+at 180 s or more (`DEV_TEST_BACKGROUND_S`), `interactive` below. The broker grants the shortest
+estimated work first, caps long runs to half the budget on weekdays 08:00-21:00
+(`DEV_TEST_NORMAL_HOURS`) and runs them at lower CPU priority (`docs/test-execution.md`, *Scheduling*).
+`--background` forces the class. The `slow` and `heavy` labels never enter the estimate or the class;
+only measured durations do.
+
 Use the workers granted by the maintained broker. Coordinate test concurrency with active
 benchmarks; do not reserve a fixed worker pool or bypass shared admission.
 
@@ -71,7 +79,7 @@ test would have caught (run it in a throwaway worktree).
 ### `heavy`
 
 `tests/heavy-modules.txt` lists the modules that cost the most; `conftest.py` marks them
-`heavy`. `scripts/test heavy --junit j.xml` rewrites the list from a `--junitxml` run.
+`heavy`. `scripts/test heavy` rewrites the list from the recorded test durations.
 
 ## What is slow, and why
 

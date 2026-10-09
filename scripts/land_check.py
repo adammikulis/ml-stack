@@ -180,7 +180,7 @@ def start_full(wt: Path, common: Path) -> dict:
     folder = common / "land"
     folder.mkdir(exist_ok=True)
     log = folder / f"full-{int(time.time())}.log"
-    child = subprocess.Popen([sys.executable, "scripts/test", "full"], cwd=wt, stdin=subprocess.DEVNULL,
+    child = subprocess.Popen([sys.executable, "scripts/test", "full", "--background"], cwd=wt, stdin=subprocess.DEVNULL,
                              stdout=log.open("ab"), stderr=subprocess.STDOUT, start_new_session=True)
     (folder / "full.lock").write_text(f"{child.pid}\n", encoding="utf-8")
     return {"status": "started", "pid": child.pid, "log": str(log), "tree": tree_hash(wt)}

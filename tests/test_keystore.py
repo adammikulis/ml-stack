@@ -401,7 +401,8 @@ def test_what_counts_as_interactive(monkeypatch):
         def isatty(self) -> bool:
             return self.tty
 
-    monkeypatch.delenv(keystore.ENV_NONINTERACTIVE, raising=False)
+    for marker in ("CLAUDECODE", "ML_STACK_AGENT", keystore.ENV_NONINTERACTIVE):
+        monkeypatch.delenv(marker, raising=False)
     monkeypatch.setattr(sys, "stdin", Tty(True))
     assert REAL_INTERACTIVE() is True
     monkeypatch.setenv(keystore.ENV_NONINTERACTIVE, "1")

@@ -299,9 +299,11 @@ development branch first, so no one works on history another device has already 
 local-only commit on the development branch is not left past the end of the task that made it.
 
 **Keep the landing queue short.** Throughput is limited by unlanded work, not typing speed.
-- Branches are cut from current development, stay under ten commits, and land the day they are
-  ready. Land a stack bottom-up, one layer at a time. Past 50 commits or 20 behind development,
-  split a branch into separately landing batches instead of carrying it.
+- Branches are cut from current development, stay under ten commits, and land the moment they are
+  ready and verified: rebase, verify, fast-forward and push straight away, with no other work in
+  between. A ready branch never waits for a day, an hour or another task. Land a stack bottom-up,
+  one layer at a time. Past 50 commits or 20 behind development, split a branch into separately
+  landing batches instead of carrying it.
 - Run `git cherry <dev> <branch>` before porting and drop equivalent patches. Record the tree hash
   a gate ran on; a tree already gated is not gated again.
 - Finish before starting: no new branch while your own ready branches await landing; about ten

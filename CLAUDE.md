@@ -50,6 +50,13 @@ A worker that has delivered its report is stopped at once with TaskStop, and the
 worker that sends a report again. The lead does not wait for it to exit and does not read a
 repeat report as new work. The branch and worktree stay; only the agent ends.
 
+## The heartbeat
+
+A lead keeps a recurring heartbeat prompt, at most 45 minutes apart, for the whole life of its session
+(the prompt cache goes cold at 60), and recreates it at each session start and every seven days. It is a
+standard part of driving this project and is never deleted when the queue empties: each firing does real
+work or ends in one line. The prompt and the rules are in docs/heartbeat.md.
+
 ## Contact comes first
 
 The `SessionStart` hook registers the lead, announces it and puts the inbox in its context. The

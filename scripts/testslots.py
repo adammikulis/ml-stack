@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import datetime
 import json
 import os
 import secrets
@@ -12,6 +13,12 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import testhours
+import testqueue
+import testslots_policy as policy
 
 from ml_stack.lock import release, take
 
@@ -116,7 +123,8 @@ def _valid_record(data: object) -> bool:
     return (data["pid"] > 0 and data["want"] >= 0 and data["minimum"] > 0
             and data["granted"] >= 0 and (not data["want"] or max(data["minimum"], data["granted"]) <= data["want"])
             and isinstance(data.get("label"), str) and isinstance(data.get("token"), str)
-            and type(data.get("backfills", 0)) is int and 0 <= data.get("backfills", 0) <= 2)
+            and type(data.get("backfills", 0)) is int and 0 <= data.get("backfills", 0) <= 2
+            and data.get("class", policy.INTERACTIVE) in policy.CLASSES)
 
 
 def _delete_shared_descriptor(path: Path) -> int:
@@ -178,7 +186,8 @@ def status() -> dict:
         slots = _read(d)
     running = [s for s in slots if s.granted > 0]
     return {"budget": budget(), "base": base_budget(), "in_use": sum(s.granted for s in running),
-            "running": [s.data for s in running], "waiting": [s.data for s in slots if s.granted == 0]}
+            "running": [s.data for s in running], "waiting": [s.data for s in slots if s.granted == 0],
+            "runs": testqueue.read_runs(d)}
 
 
 @dataclass
@@ -222,20 +231,23 @@ def _lease_environment(path: Path, token: str) -> Iterator[None]:
             os.environ["DEV_TEST_LEASE"] = previous
 
 
-def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int, int]) -> int:
+def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int, int], room: int | None = None) -> int:
     path, want, minimum = me.path, me.data["want"], me.data["minimum"]
     cap, used, running = capacity
-    if not waiting or cap - used < minimum:
+    free = cap - used if room is None else min(cap - used, room)
+    if not waiting or free < minimum:
         return 0
     first = waiting[0]
     if first.path != path:
+        if room is not None and policy.run_class(first.data) == policy.INTERACTIVE:
+            return 0
         if cap - used >= first.data["minimum"] or first.data.get("backfills", 0) >= 2:
             return 0
         first.data["backfills"] = first.data.get("backfills", 0) + 1
         first.path.write_text(json.dumps(first.data))
     if not want:
-        return min(cap - used, max(minimum, cap // max(1, len(waiting) + running)))
-    return min(want, cap - used)
+        return min(free, max(minimum, cap // max(1, len(waiting) + running)))
+    return min(want, free)
 
 
 def _restore_inode(path: Path, record: dict, fd: int) -> int:
@@ -256,6 +268,11 @@ def _own_records(directory: Path, path: Path, record: dict) -> list[Slot] | None
     return slots
 
 
+def _env_estimate() -> float | None:
+    raw = os.environ.get("DEV_TEST_ESTIMATE_S", "")
+    return float(raw) if raw.replace(".", "", 1).isdigit() else None
+
+
 def _agent_from_env() -> dict[str, str]:
     """The workspace agent the runner exported for this process, as plain strings."""
     try:
@@ -265,7 +282,7 @@ def _agent_from_env() -> dict[str, str]:
     return {k: str(data[k]) for k in ("id", "parent", "job") if isinstance(data, dict) and data.get(k)}
 
 
-def _request(want: int, minimum: int | None, label: str) -> tuple[int, int, dict]:
+def _request(want: int, minimum: int | None, label: str, run_class: str) -> tuple[int, int, dict]:
     """The clamped worker range of a lease request and the record that publishes it."""
     auto = int(want) <= 0
     want = 0 if auto else max(1, int(want))
@@ -273,15 +290,32 @@ def _request(want: int, minimum: int | None, label: str) -> tuple[int, int, dict
         else max(1, min(int(minimum if minimum is not None else 1), want))
     if minimum > (int(os.environ["DEV_TEST_BUDGET"]) if os.environ.get("DEV_TEST_BUDGET", "").isdigit() else base_budget()):
         raise ValueError("testslots: minimum exceeds the configured CPU budget")
-    return want, minimum, {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "version": 1, "token": secrets.token_hex(24), "agent": _agent_from_env()}
+    record = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(),
+              "version": policy.VERSION, "class": run_class, "estimate": _env_estimate(), "token": secrets.token_hex(24),
+              "agent": _agent_from_env()}
+    return want, minimum, record
+
+
+def _decide(me: dict, path: Path, slots: list[Slot], cap: int) -> tuple[int, int, list]:
+    """The workers granted to the record at ``path`` now, the workers in use and the labels queued ahead of it."""
+    now = time.time()
+    legacy = policy.has_legacy(slots)
+    queue = [s for s in slots if s.granted == 0]
+    waiting = sorted(queue, key=lambda s: s.path) if legacy else policy.order(queue, now)
+    used = sum(s.granted for s in slots)
+    granted = _grant(Slot(path, me), waiting, (cap, used, sum(slot.granted > 0 for slot in slots)),
+                     policy.background_room(Slot(path, me), slots, cap, now,
+                                            testhours.capped_now(os.environ, datetime.datetime.fromtimestamp(now)) and not legacy))
+    place = next((i for i, s in enumerate(waiting) if s.path == path), 0)
+    return granted, used, [s.data.get("label") for s in waiting[:place]]
 
 
 @contextlib.contextmanager
-def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True)
-          ) -> Iterator[Lease]:
-    """Acquire a bounded FIFO CPU lease, released on context exit or process death."""
+def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True),
+          run_class: str = policy.INTERACTIVE) -> Iterator[Lease]:
+    """Acquire a bounded CPU lease (shortest estimated work first, aged requests ahead), released on context exit or process death."""
     _reject_nested()
-    want, minimum, me = _request(want, minimum, label)
+    want, minimum, me = _request(want, minimum, label, run_class)
     d = slots_dir()
     path = d / f"{time.time_ns()}-{os.getpid()}-{secrets.token_hex(8)}.slot"
     t0 = time.monotonic()
@@ -302,14 +336,11 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                     os.close(fd)
                     fd = replacement
                     continue
-                waiting = [s for s in slots if s.granted == 0]
-                used = sum(s.granted for s in slots)
-                granted = _grant(Slot(path, me), waiting, (cap, used, sum(slot.granted > 0 for slot in slots)))
+                granted, used, ahead = _decide(me, path, slots, cap)
                 if granted:
                     me["granted"] = granted
                     path.write_text(json.dumps(me))
                     break
-                ahead = [s.data.get("label") for s in waiting if s.path != path and s.path < path]
             now = time.monotonic()
             if now > deadline:
                 raise TimeoutError(f"testslots: waited {now - t0:.0f}s for {minimum} of {cap} workers "
@@ -383,6 +414,7 @@ def _run_command(argv: list[str], elastic: bool = False) -> int:
     ap.add_argument("--min", dest="minimum", type=int, default=None)
     ap.add_argument("--label", default="command")
     ap.add_argument("--container", action="store_true")
+    ap.add_argument("--class", dest="run_class", choices=policy.CLASSES, default=policy.environment_class(os.environ))
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args(argv)
     cmd = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
@@ -390,8 +422,8 @@ def _run_command(argv: list[str], elastic: bool = False) -> int:
         ap.error("give a command after --")
     if elastic:
         import testslots_runner
-        return testslots_runner.run_pytest(cmd, a.want, a.label, container=a.container)
-    with lease(a.want, a.minimum, label=a.label) as got:
+        return testslots_runner.run_pytest(cmd, a.want, a.label, {**os.environ, "DEV_TEST_CLASS": a.run_class}, container=a.container)
+    with lease(a.want, a.minimum, label=a.label, run_class=a.run_class) as got:
         print(f"testslots: running with {got.workers} worker(s) (waited {got.waited:.0f}s)", file=sys.stderr, flush=True)
         return subprocess.run(cmd, env={**os.environ, "DEV_TEST_WORKERS": str(got.workers)}).returncode
 
@@ -413,9 +445,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"budget {st['budget']} workers (base {st['base']}; load {load} on {_cores()} cores), {st['in_use']} in use, "
           f"{_lane_count()} heavy lane(s)")
     for s in st["running"]:
-        print(f"  running  {s['granted']:>2}  pid {s['pid']:<7} {_who(s)}")
+        print(f"  running  {s['granted']:>2}  pid {s['pid']:<7} {policy.run_class(s):<11} {_who(s)}")
     for s in st["waiting"]:
-        print(f"  waiting  {s['minimum']}-{s['want'] or 'auto'}  pid {s['pid']:<7} {_who(s)}")
+        print(f"  waiting  {s['minimum']}-{s['want'] or 'auto'}  pid {s['pid']:<7} {policy.run_class(s):<11} {_who(s)}")
+    views = testqueue.forecast(st["runs"], st["budget"], time.time())
+    for run in st["runs"]:
+        print(testqueue.describe(run, views[run["id"]]))
     return 0
 
 

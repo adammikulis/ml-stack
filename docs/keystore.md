@@ -40,7 +40,7 @@ authorised, so they are counted in two classes (`rate.json`, a list of times per
 | Creates and deletes per user per hour, plus every read made after an earlier refusal (a retry) | 5 (`WRITE_CEILING`); the next one raises `KeystoreBusy` |
 | After the OS refuses or the person declines | the process stops asking for good; other processes wait 10 minutes (`denied.json`); `KeystoreDenied` with one plain message. A read that succeeds again removes the mark |
 | Processes starting together | one lock (`flight.lock`): each process reads the OS keystore itself, one at a time, polling the lock every 20 ms and backing off to 0.5 s. The master is never written to a file or shared between processes, so a swarm costs one backend read per process, not one per use |
-| Background process (no terminal and no desktop session, or `ML_STACK_NONINTERACTIVE`) | never creates the master; reads it only after `ml-stack-security unlock`; otherwise `KeystoreLocked` naming that command |
+| Background process (no terminal and no desktop session, a Windows session 0, or any agent marker: `ML_STACK_NONINTERACTIVE`, `ML_STACK_AGENT`, `CLAUDECODE`) | never creates the master; reads it only after `ml-stack-security unlock`; otherwise `KeystoreLocked` naming that command |
 
 Why two classes: a swarm of subagents starts dozens of processes in an hour and each reads the
 master once. One shared ceiling of 20 refused the twenty-first process (measured: 40 agents
@@ -53,6 +53,12 @@ the same 5.
 Every backend call is a sentinel event `keystore.read`, `keystore.create` or `keystore.delete`
 (subject `purpose:<label>`, evidence `{"outcome": ...}`), and a refusal is `keystore.denied` or
 `keystore.refused`. No value is ever in an event, a log line or a state file.
+
+| A backend call that does not return | bounded: 300 s for a person, 20 s for a background process (which on macOS also tells the Security framework to fail rather than show a dialog); the timeout latches the same ten-minute refusal |
+| A master that vanished after it was made | not replaced by the next process; `KeystoreMissing`. Only `ml-stack-security unlock` starts over |
+| A plaintext or null keyring backend (`keyrings.alt`) | refused: `KeystoreUnavailable` |
+
+Platform findings and what is unverified: `docs/keystore-platform-audit-2026-10-08.md`.
 
 ## Commands
 

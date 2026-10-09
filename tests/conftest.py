@@ -526,7 +526,7 @@ os.environ[ENV_NO_REAL] = "1"
 """Every process a test starts inherits this: the machine's own keystore reads as absent to it."""
 
 REAL_KEYSTORES = (("macOS", "Keyring"), ("SecretService", "Keyring"), ("Windows", "WinVaultKeyring"),
-                  ("kwallet", "DBusKeyring"))
+                  ("kwallet", "DBusKeyring"), ("libsecret", "Keyring"))
 """The `keyring` backends that talk to the machine's own keystore: (module, class)."""
 
 

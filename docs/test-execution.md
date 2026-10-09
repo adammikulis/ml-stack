@@ -106,6 +106,50 @@ stamp, then copies the manifest into its private control directory before collec
 fresh, private, short invocation namespace supplies TMPDIR and permits Unix bind, inbound and
 outbound operations only inside that namespace. TCP stays denied.
 
+## Scheduling: measured duration, shortest work first
+
+Every run writes a duration history. The `testdurations` pytest plugin records the CPU and wall
+seconds of each passing test, merges them under a file lock into `test-history/durations.json` in the
+repository's common Git directory (shared by every worktree; `scripts/test` passes the path in
+`DEV_TEST_HISTORY`), keeps an exponentially weighted value per test with a sample count (a sample is
+clipped to three times the current value once three exist, so one loaded run barely moves it) and drops
+tests whose file or definition is gone. A test's estimate is its CPU seconds, and at least a quarter of
+its wall seconds. `scripts/test heavy` rewrites `tests/heavy-modules.txt` from this history.
+Only measured durations decide a run's length: the `slow` and `heavy` labels (the marker and
+`tests/heavy-modules.txt`) never enter the estimate or the class and must not bar a test from any
+tier, cache or queue.
+
+Before admission `scripts/test` estimates the run: the recorded seconds of the selected files and nodes,
+summed per file without collecting, plus 30 s for each file with no record, divided by the workers the
+broker would grant. Named files whose pass the test-reuse store would serve (a read-only lookup, no
+claim) cost nothing; a reused file never runs, so the plugin records no duration for it, and a
+selection of directories or nodes is estimated in full. It prints the estimate (`test: estimated 38 s`, or `estimated 42 min from 3,120
+recorded tests`). An estimate of `DEV_TEST_BACKGROUND_S` (default 180) or more classes the run
+`background`, below it `interactive`, whatever the tier name. With fewer than 50 recorded tests the
+command shape decides: tiers `full`, `slow`, `record`, `all` or `fast` with no file or node selector,
+and `--redteam` are background. `--background` forces the class (`scripts/land` passes it to its full
+run); `quick` and `gate` are interactive. A background run prints one line saying why, its pytest
+processes start at `nice` +10 (no change where `os.nice` is absent), and `testslots.py status` shows each
+lease's class.
+
+The estimate travels with the lease (`DEV_TEST_ESTIMATE_S`). Queued requests are granted shortest
+estimated work first: the order key is the estimate minus the seconds waited, so a longer run arriving
+at about the same time as a shorter one goes behind it and a long wait outweighs a large estimate. A
+request that has waited `DEV_TEST_BACKGROUND_WAIT_S` (default 600) is granted ahead of the ordering and
+of the cap. While an interactive run is queued or active, background runs together hold at most half
+the budget (rounded up, at least 1). The cap applies to new grants; running workers are never
+preempted, but each test takes a fresh one-worker lease, so a background run shrinks to the cap at its
+next test. The cap holds inside normal hours, weekdays 08:00-21:00 machine-local, and is lifted outside
+them. `DEV_TEST_NORMAL_HOURS="HH:MM-HH:MM"` changes the window; `off` keeps the cap on at all hours.
+Nothing is held or delayed to a time of day. While a lease written by older code (`version` below 2)
+is live, every lease keeps arrival order and no cap applies.
+
+Each `scripts/test` run keeps a run record in the slots directory (`*.run`: class, estimate, workers
+wanted and granted, enqueue and start time). `testqueue.forecast(runs, budget, now)` (module
+`scripts/testqueue.py`) returns for each run its position among queued runs under the real ordering,
+the count and estimated work ahead, and an estimated start time from the remaining estimate of the
+running runs plus the work ahead; `testslots.py status` prints these per queued run.
+
 ## Landing a batch
 
 `scripts/land` (modules `scripts/land_*.py`) lands several ready branches with one verification.
@@ -137,7 +181,5 @@ Every test and gate runs through `scripts/test`, so the broker admits them like 
 
 The last line of every command is a JSON summary.
 
-Pending: a `background` priority lane in the broker so landing runs yield to interactive selector
-runs. `scripts/testslots.py` needs a `priority` field in the lease record, `_grant` ordering
-interactive waiters before background ones, and `scripts/test` passing a `full:`/`land:` label so
-`other_full_run` in `scripts/land_check.py` can tell a full run from any other pytest coordinator.
+Pending: `scripts/test` passing a `full:`/`land:` label so `other_full_run` in
+`scripts/land_check.py` can tell a full run from any other pytest coordinator.

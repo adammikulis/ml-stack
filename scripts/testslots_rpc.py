@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import testslots
+import testslots_policy
 from test_kernel_endpoint import connection, private_directory, socket_identity, verify_socket
 
 
@@ -86,8 +87,9 @@ class Admission(socketserver.ThreadingTCPServer):
     daemon_threads = False
     block_on_close = False
 
-    def __init__(self, container: bool):
+    def __init__(self, container: bool, run_class: str = testslots_policy.INTERACTIVE):
         self.terminals = None
+        self.run_class = run_class
         self.token = secrets.token_hex(24)
         self.ready = threading.Event()
         self.admitted = threading.Event()
@@ -248,7 +250,8 @@ class Handler(socketserver.StreamRequestHandler):
             cancel = testslots.CHECK_CANCELLED.set(self.check_connection)
             try:
                 lane = testslots.heavy_lane(str(request.get("label"))) if request.get("heavy") else contextlib.nullcontext()
-                with lane, testslots.lease(1, 1, label=str(request.get("label", "pytest")), say=lambda message: None):
+                with lane, testslots.lease(1, 1, label=str(request.get("label", "pytest")), say=lambda message: None,
+                                                   run_class=server.run_class):
                     identifier = secrets.token_hex(24)
                     with server.guard:
                         granted = server.fixture_resources(request["label"], request["phase"]) if server.fixture_resources is not None else frozenset()
