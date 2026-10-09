@@ -532,3 +532,13 @@ def test_why_names_the_rule_that_cleared_each_pair(tmp_path):
     said = io.StringIO()
     hook.main(["--why"], env=wiring(tmp_path), root=where, stdout=said)
     assert "events.py  shape rule off: shapes_off: marker" in said.getvalue()
+
+
+def test_only_the_lines_a_commit_adds_are_judged_not_what_the_file_already_said(tmp_path):
+    where = repo(tmp_path, PEOPLE)
+    commit(where, {"notes.txt": "Ask Wren Halloway about the kiln.\n"}, "old text, accepted then")
+    code, said = check(where, tmp_path, **{"notes.txt": "Ask Wren Halloway about the kiln.\nA clean new line.\n"})
+    assert code == 0, said
+    code, said = check(where, tmp_path, **{"notes.txt": "Ask Wren Halloway about the kiln.\nA clean new line.\n"
+                                                         "And Wren Halloway again.\n"})
+    assert code == 1 and "notes.txt:3" in said and "notes.txt:1" not in said
