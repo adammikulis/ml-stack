@@ -20,7 +20,7 @@ ROOT = REPO / "src" / "ml_stack"
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("activity", "agent_dependency", "agent_hooks", "asking", "authority", "backend", "briefing", "checks", "command", "command_capture", "contracts", "credentials", "data",
               "entities", "extraction", "files", "files_windows", "gate", "geo",
-              "home", "hook_bootstrap", "hook_diagnostics", "hookcheck", "http", "http_cancel", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "keystore_guard", "limits",
+              "home", "hook_bootstrap", "hook_diagnostics", "hookcheck", "http", "http_cancel", "httpguard", "installed", "interventions", "features", "jobs", "jsonl", "keystore", "keystore_guard", "limits",
               "runtime", "runtime_launchers",
               "lock", "log", "macauth", "sealing",
               "markup", "sandbox",
@@ -32,7 +32,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
                "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
-               "surface", "testing", "train", "walk", "web", "workspace", "pi", "node_binary", "node_build", "node_health", "node_launch", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
+               "surface", "testing", "train", "walk", "web", "workspace", "pi", "features_cli", "trees", "trees_notice", "node_binary", "node_build", "node_health", "node_launch", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
     ("dev", ("redteam",)),
 )
 

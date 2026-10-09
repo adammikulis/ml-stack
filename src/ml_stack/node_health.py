@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ml_stack import win32
-from ml_stack.platform import is_windows
+from ml_stack.features import windows_node
 
 SOCKET = "node.sock"
 API_VERSION = 1
@@ -46,7 +46,7 @@ def node_stop_event(state: Path) -> str:
 
 def socket_path(state: Path) -> Path:
     """Where the node of a state directory listens: a socket file, or on Windows a pipe name."""
-    return Path(pipe_name(state)) if is_windows() else state / SOCKET
+    return Path(pipe_name(state)) if windows_node() else state / SOCKET
 
 
 def _read(recv: Callable[[int], bytes], count: int) -> bytes:
@@ -111,7 +111,7 @@ def call(state: Path, method: str, params: dict | None = None, *, board: str = "
     request.update({key: value for key, value in (("board", board), ("token", token)) if value})
     body = json.dumps(request).encode()
     frame = struct.pack(">I", len(body)) + body
-    reply = json.loads((_exchange_pipe if is_windows() else _exchange_socket)(state, frame))
+    reply = json.loads((_exchange_pipe if windows_node() else _exchange_socket)(state, frame))
     if reply.get("ok") is not True:
         raise ValueError(str((reply.get("error") or {}).get("message", "refused")))
     return reply["result"]

@@ -54,6 +54,8 @@ class Settings:
     appearance: dict[str, Any] = field(default_factory=default_appearance)
     context: int = 8192
     """How much of a conversation a model is given to read. Costs memory per token."""
+    features: dict[str, bool] = field(default_factory=dict)
+    """Experimental features this machine turned on or off by name (`ml_stack.features`); off when absent."""
 
     @classmethod
     def load(cls, path: Path | str) -> Settings:
@@ -61,7 +63,11 @@ class Settings:
         return _DOC.read(path)
 
     def save(self, path: Path | str) -> Path:
-        """Written atomically -- a half-written settings file reads as no settings."""
+        """Written atomically -- a half-written settings file reads as no settings.
+
+        The `features` map is the file's own: a daemon's copy of it can be stale, so what is on disk is kept.
+        """
+        self.features = _DOC.read(path).features
         return _DOC.write(self, path, atomic=True)
 
     def public(self) -> dict[str, Any]:
@@ -72,6 +78,10 @@ def _build(raw: dict[str, Any]) -> Settings:
     values = {k: v for k, v in raw.items() if k in Settings.__dataclass_fields__}
     if "appearance" in values:
         values["appearance"] = validate_appearance(values["appearance"])
+    if "features" in values:
+        held = values["features"]
+        values["features"] = {k: v for k, v in held.items() if isinstance(k, str) and isinstance(v, bool)} \
+            if isinstance(held, dict) else {}
     return Settings(**values)
 
 

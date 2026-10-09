@@ -176,6 +176,8 @@ ml-stack-train-decider = "ml_stack.train.decider_cli:main"
 # repositories and working state ml-stack-doctor checks on their own
 ml-stack-setup = "ml_stack.setup:main"
 ml-stack-doctor = "ml_stack.doctor:main"
+# experimental features: list them, turn one on or off (audited)
+ml-stack-features = "ml_stack.features_cli:main"
 # tokens and keys: set, list, unset; read from a prompt or stdin, kept in a 0600 file or the keychain
 ml-stack-credentials = "ml_stack.credentials.cli:command"
 # what this machine can hear and say: transcribe a file, say a line, find the speech in it

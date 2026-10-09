@@ -1,10 +1,10 @@
 {
- "surfaces": 848,
+ "surfaces": 851,
  "by_status": {
-  "covered": 523,
+  "covered": 525,
   "partial": 197,
   "uncovered": 53,
-  "n/a": 75,
+  "n/a": 76,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 7,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 26,
+   "n/a": 27,
    "unmapped": 0
   },
   "context": {
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 96,
+   "covered": 97,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 69,
+   "covered": 70,
    "partial": 60,
    "uncovered": 0,
    "n/a": 2,
@@ -626,6 +626,16 @@
    "id": "cli:ml-stack-draft",
    "kind": "cli",
    "source": "ml_stack.draft:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
+   "id": "cli:ml-stack-features",
+   "kind": "cli",
+   "source": "ml_stack.features_cli:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -8653,6 +8663,20 @@
    "note": "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
   },
   {
+   "id": "route:fleet/features_routes.py:/ui/features",
+   "kind": "route",
+   "source": "fleet/features_routes.py:FeatureRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_features.py::test_the_route_takes_no_name_and_changes_nothing",
+    "tests/test_redteam_features.py::test_the_route_needs_the_page_header",
+    "tests/test_redteam_features.py::test_a_settings_file_naming_other_things_turns_nothing_on"
+   ],
+   "note": "the settings list is read-only and takes no name; a hostile name, a hostile settings file or a safety floor turns nothing on"
+  },
+  {
    "id": "route:fleet/framing.py:handle_error",
    "kind": "route",
    "source": "fleet/framing.py:handle_error",
@@ -12240,6 +12264,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:trees.py:git",
+   "kind": "spawn",
+   "source": "trees.py:git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_trees.py::test_a_hostile_root_is_only_a_path_and_runs_nothing",
+    "tests/test_redteam_trees.py::test_a_stalled_git_is_an_error_not_a_hang"
+   ],
+   "note": "git is run with an argument list; a root made of shell text or an option is only a path and a stall is an error"
   },
   {
    "id": "spawn:workspace/backlog.py:fetch",

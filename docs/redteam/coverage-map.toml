@@ -619,9 +619,30 @@ tests = [
 ]
 note = "raising the GPU wiring limit is person-only: agent processes, tokens, foreign pages, hostile numbers and model names are refused and the privileged call is never reached"
 
+# -- the worktree registry's git call -------------------------------------------------------
+[[group]]
+match = ["spawn:trees.py:git"]
+status = "covered"
+tests = [
+  "tests/test_redteam_trees.py::test_a_hostile_root_is_only_a_path_and_runs_nothing",
+  "tests/test_redteam_trees.py::test_a_stalled_git_is_an_error_not_a_hang",
+]
+note = "git is run with an argument list; a root made of shell text or an option is only a path and a stall is an error"
+
+# -- experimental features ------------------------------------------------------------------
+[[group]]
+match = ["route:fleet/features_routes.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_features.py::test_the_route_takes_no_name_and_changes_nothing",
+  "tests/test_redteam_features.py::test_the_route_needs_the_page_header",
+  "tests/test_redteam_features.py::test_a_settings_file_naming_other_things_turns_nothing_on",
+]
+note = "the settings list is read-only and takes no name; a hostile name, a hostile settings file or a safety floor turns nothing on"
+
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
-match = ["parser:workspace/boardroute.py", "route:workspace/fleet_routes.py:/ui/board/*"]
+match = ["parser:workspace/boardroute.py","route:workspace/fleet_routes.py:/ui/board/*"]
 status = "covered"
 count = 2
 tests = [

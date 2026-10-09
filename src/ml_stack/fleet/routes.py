@@ -29,6 +29,7 @@ from .discovery import (
     require_name,
 )
 from .extension_routes import ExtensionRoutes
+from .features_routes import FeatureRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
 from .initial_setup_routes import InitialSetupRoutes
@@ -842,7 +843,7 @@ class JobRoutes:
 
 
 class Router(InitialSetupRoutes, RuntimeRepairRoutes, PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
-             ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
+             ProjectBoardRoutes, RoomRoutes, FeatureRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
              KnowledgeRoutes, WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
