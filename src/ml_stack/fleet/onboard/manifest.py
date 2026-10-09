@@ -138,7 +138,7 @@ def _ssh_string(raw: bytes) -> bytes:
     return len(raw).to_bytes(4, "big") + raw
 
 
-def _canonical(body: dict[str, Any]) -> bytes:
+def _encoded(body: dict[str, Any]) -> bytes:
     return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
@@ -242,7 +242,7 @@ class Signer:
         statement = {"v": 1, "old": self.key_id, "new": base64.b64encode(new.public).decode(),
                      "issued": time.time() if now is None else now}
         return {"statement": statement,
-                "signature": base64.b64encode(self._private.sign(_canonical(statement))).decode()}
+                "signature": base64.b64encode(self._private.sign(_encoded(statement))).decode()}
 
     @staticmethod
     def entry_for(path: Path, *, chunk_size: int = DEFAULT_CHUNK, **terms: Any) -> Entry:
@@ -267,7 +267,7 @@ class Signer:
         body["public_key"] = base64.b64encode(self.public).decode()
         body["rotations"] = list(carried.rotations)
         body["revoked_keys"] = sorted(set(carried.revoked))
-        signature = self._private.sign(_canonical(body))
+        signature = self._private.sign(_encoded(body))
         return json.dumps({"manifest": body, "signature": base64.b64encode(signature).decode()},
                           sort_keys=True).encode()
 
@@ -295,7 +295,7 @@ def _follow(pinned: bytes, rotations: Any) -> bytes:
                                                                       validate=True)
             if statement["old"] != key_fingerprint(current):
                 continue
-            Ed25519PublicKey.from_public_bytes(current).verify(signature, _canonical(statement))
+            Ed25519PublicKey.from_public_bytes(current).verify(signature, _encoded(statement))
             current = base64.b64decode(statement["new"], validate=True)
         except (InvalidSignature, ValueError, KeyError, TypeError):
             continue
@@ -323,12 +323,12 @@ def verify(raw: bytes, pinned: bytes, *, now: float | None = None, min_serial: i
     if key_fingerprint(pinned) in set(revoked_keys):
         raise ManifestError("the pinned signing key was revoked")
     try:
-        Ed25519PublicKey.from_public_bytes(pinned).verify(signature, _canonical(body))
+        Ed25519PublicKey.from_public_bytes(pinned).verify(signature, _encoded(body))
     except (InvalidSignature, ValueError):
         successor = _follow(pinned, body.get("rotations"))
         if successor != pinned:
             try:
-                Ed25519PublicKey.from_public_bytes(successor).verify(signature, _canonical(body))
+                Ed25519PublicKey.from_public_bytes(successor).verify(signature, _encoded(body))
             except (InvalidSignature, ValueError):
                 pass
             else:

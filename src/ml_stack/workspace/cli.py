@@ -156,7 +156,7 @@ def _context(args: argparse.Namespace, connection=_CONNECTION_UNSET):
     if not connection.get("agent"):
         who = remote.call("whoami", token)
         project_connection.bind(remote, Path(connection["root"]), who["id"], connection.get("cluster", ""))
-    return project_connection.CanonicalWorkspace(remote, token), token
+    return project_connection.BoardWorkspace(remote, token), token
 
 
 def _block(lines: list[str], what: str) -> str:
@@ -339,9 +339,9 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
             raise Denied("agent connect takes --agent and --project; invite options need a person")
         connection = _project_connection(Path(args.project) if args.project else None)
         if connection is not None:
-            canonical, token = _context(args, connection)
-            who = canonical.auth(token)
-            info = canonical.registry.info(who.id)
+            workspace_board, token = _context(args, connection)
+            who = workspace_board.auth(token)
+            info = workspace_board.registry.info(who.id)
             if info.get("project", {}).get("key") != connection["project_id"]:
                 raise Denied("this identity is not authorized for the selected project")
             _show(args, {"id": who.id, "project": connection["project_id"], "state": "connected"})
@@ -764,9 +764,9 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
             ws, token = _context(args, connection)
             if isinstance(ws, Workspace) and handler is not _init:
                 ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
-            if isinstance(ws, project_connection.CanonicalWorkspace) and args.cmd.startswith('task'):
+            if isinstance(ws, project_connection.BoardWorkspace) and args.cmd.startswith('task'):
                 result = remote_task_client.command(ws.remote, token, args)
-            elif isinstance(ws, project_connection.CanonicalWorkspace) and (
+            elif isinstance(ws, project_connection.BoardWorkspace) and (
                     args.cmd in ('claim', 'release', 'heartbeat', 'who', 'worktrees')
                     or (args.cmd == 'announce' and args.kind == 'done')
                     or (args.cmd == 'send' and args.type == 'done')):

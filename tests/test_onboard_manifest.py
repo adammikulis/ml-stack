@@ -141,7 +141,7 @@ def test_a_manifest_naming_another_key_than_the_one_that_signed_it_is_refused(tm
     outer = json.loads(signer.sign(entries(tmp_path, signer), serial=1))
     outer["manifest"]["key_id"] = "0" * 64
     outer["signature"] = base64.b64encode(
-        signer._private.sign(mf._canonical(outer["manifest"]))).decode()
+        signer._private.sign(mf._encoded(outer["manifest"]))).decode()
     with pytest.raises(mf.ManifestError, match="different key"):
         mf.verify(json.dumps(outer).encode(), signer.public)
 

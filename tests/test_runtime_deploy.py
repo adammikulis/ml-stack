@@ -655,7 +655,7 @@ def test_the_acting_identity_is_the_physical_owner_and_needs_the_claim_capabilit
     remote = SimpleNamespace(host="h", project_id="pk", call=lambda name, token: info)
     monkeypatch.setattr(runtime_deploy.cli, "_project_connection", lambda cwd=None: {"host": "h"})
     monkeypatch.setattr(runtime_deploy.cli, "_context",
-                        lambda args, connection: (project_connection.CanonicalWorkspace(remote, "t"), "t"))
+                        lambda args, connection: (project_connection.BoardWorkspace(remote, "t"), "t"))
     got = runtime_deploy.acting(plan_for(repo, launchers))
     assert got.id == harness_remote.physical_owner(remote, Identity("runtime-agent", AGENT)).id
     info["can"] = ["send"]

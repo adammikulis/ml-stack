@@ -9,32 +9,32 @@ def edge(source, rel, target, weight, said):
 
 
 def test_the_same_word_typed_twice_folds_into_the_heavier_spelling():
-    canonical, folds = fold_names({"works_at": 4, "worksat": 1, "mentors": 2})
-    assert canonical == {"works_at": "works_at", "worksat": "works_at", "mentors": "mentors"}
+    chosen, folds = fold_names({"works_at": 4, "worksat": 1, "mentors": 2})
+    assert chosen == {"works_at": "works_at", "worksat": "works_at", "mentors": "mentors"}
     assert folds == [{"from": "worksat", "into": "works_at", "written": False}]
 
 
 def test_a_written_map_settles_two_genuinely_different_words():
     """"mentors" and "advises" share no spelling; only a decision can join them."""
-    canonical, folds = fold_names({"mentors": 2, "advises": 1}, {"mentors": "advises"})
-    assert canonical["mentors"] == "advises"
+    chosen, folds = fold_names({"mentors": 2, "advises": 1}, {"mentors": "advises"})
+    assert chosen["mentors"] == "advises"
     assert folds == [{"from": "mentors", "into": "advises", "written": True}]
 
 
 def test_two_established_names_refuse_to_fold_and_say_so():
     lines: list[str] = []
-    canonical, folds = fold_names({"works_at": ESTABLISHED + 1, "worksat": ESTABLISHED},
+    chosen, folds = fold_names({"works_at": ESTABLISHED + 1, "worksat": ESTABLISHED},
                                   log=lines.append, label="relations",
                                   settles="write it down")
     assert folds == []
-    assert canonical == {"works_at": "works_at", "worksat": "worksat"}
+    assert chosen == {"works_at": "works_at", "worksat": "worksat"}
     assert lines == ["relations: 'worksat' (3) and 'works_at' (4) are both established, "
                      "so neither folds; write it down"]
 
     # a written entry is a decision, not a guess, and folds regardless of the floor
-    canonical, folds = fold_names({"works_at": ESTABLISHED + 1, "worksat": ESTABLISHED},
+    chosen, folds = fold_names({"works_at": ESTABLISHED + 1, "worksat": ESTABLISHED},
                                   {"worksat": "works_at"})
-    assert canonical["worksat"] == "works_at" and folds[0]["written"] is True
+    assert chosen["worksat"] == "works_at" and folds[0]["written"] is True
 
 
 def test_a_fold_is_logged_rather_than_silent():

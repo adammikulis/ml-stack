@@ -100,7 +100,7 @@ def test_rules_reject_junction_parent(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows file permissions")
-def test_rules_read_saved_schema_version_and_save_canonical_version(tmp_path):
+def test_rules_read_saved_schema_version_and_save_current_version(tmp_path):
     from ml_stack import windows_private
 
     path = tmp_path / "rules.json"

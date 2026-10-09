@@ -9,10 +9,29 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-__all__ = ["BAD_AT", "BAD_FLOOR", "CLEAN_GAP_S", "ESTABLISHED_AGE_S", "ESTABLISHED_CLEAN", "EVENTS",
-           "KINDS", "LONG_HALF_LIFE_S", "RECOVER_CLEAN", "SHORT_WINDOW_S", "TRAIT_EVENTS",
-           "WATCH_AT", "WATCH_FLOOR", "Rec", "State", "canonical", "clean_run", "decay",
-           "misbehaved", "observe_trait", "short_score"]
+__all__ = [
+    "BAD_AT",
+    "BAD_FLOOR",
+    "CLEAN_GAP_S",
+    "ESTABLISHED_AGE_S",
+    "ESTABLISHED_CLEAN",
+    "EVENTS",
+    "KINDS",
+    "LONG_HALF_LIFE_S",
+    "RECOVER_CLEAN",
+    "SHORT_WINDOW_S",
+    "TRAIT_EVENTS",
+    "WATCH_AT",
+    "WATCH_FLOOR",
+    "Rec",
+    "State",
+    "clean_run",
+    "decay",
+    "misbehaved",
+    "normal",
+    "observe_trait",
+    "short_score",
+]
 
 KINDS = ("ip", "host", "url", "peer", "repo", "hash", "connector")
 EVENTS = {"denial": 1.0, "scan_hit": 3.0, "injection_flagged": 1.0, "cert_or_key_change": 3.0,
@@ -51,7 +70,7 @@ _REPO = re.compile(r"[a-z0-9][a-z0-9_.-]{0,60}(/[a-z0-9_.-]{1,80}){0,2}")
 _HEX = re.compile(r"[0-9a-f]{64}")
 
 
-def canonical(kind: str, key: str) -> str:
+def normal(kind: str, key: str) -> str:
     """``key`` in the one spelling ``kind`` has; ``ValueError`` when it is not a valid one."""
     text = str(key).strip()
     if kind == "host":

@@ -161,7 +161,7 @@ def test_cli_main_session_uses_mutation_rpc(host, monkeypatch, capsys):
         assert code == 200, result
         return result['result']
 
-    workspace = project_connection.CanonicalWorkspace(SimpleNamespace(call=invoke), agent['token'])
+    workspace = project_connection.BoardWorkspace(SimpleNamespace(call=invoke), agent['token'])
     monkeypatch.setattr(cli, '_project_connection', lambda: {'host': 'board'})
     monkeypatch.setattr(cli, '_context', lambda args, connection: (workspace, agent['token']))
     handler = next(entry[3] for entry in cli.TABLE if entry[0] == 'main-session')

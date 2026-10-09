@@ -28,7 +28,7 @@ What it does, in order:
 2. **Relation spellings** folded to the vocabulary the store uses most (`fold_edges`), so
    ``has_part`` and ``haspart`` are one relationship.
 3. **Inverse pairs**: ``X part_of Y`` beside ``Y has_part X`` is one fact stored twice. The
-   canonical direction (`ml_stack.graph.relations`) is kept and the other's weight and
+   standard direction (`ml_stack.graph.relations`) is kept and the other's weight and
    provenance fold into it.
 4. **Suspect labels**: a clause rather than a name, an over-generic word, a number, a
    single letter. Without a judge they are flagged and left (``attrs.suspect`` says why);
@@ -67,7 +67,7 @@ from ml_stack.graph.hygiene import (
 )
 from ml_stack.graph.merging import merge_nodes, resolve_conflict, resolve_suspect
 from ml_stack.graph.names import plurals, same_name, suspect
-from ml_stack.graph.relations import HIERARCHY, canonical_direction, cycles
+from ml_stack.graph.relations import HIERARCHY, cycles, standard_direction
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.verdicts import (
     decisions_in,
@@ -236,11 +236,11 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     by_triple = {(e["source"], e["rel"], e["target"]): e for e in edges}
     for triple, edge in list(by_triple.items()):
         source, rel, target = triple
-        keep_rel, flipped = canonical_direction(rel)
+        keep_rel, flipped = standard_direction(rel)
         if not flipped:
             continue
-        canonical_triple = (target, keep_rel, source)
-        other = by_triple.get(canonical_triple)
+        standard_triple = (target, keep_rel, source)
+        other = by_triple.get(standard_triple)
         merged = {"source": target, "rel": keep_rel, "target": source,
                   "weight": int(edge.get("weight") or 0) + int((other or {}).get("weight") or 0),
                   "provenance": union((other or {}).get("provenance"), edge.get("provenance"))}
@@ -252,7 +252,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             store.remove_edge(source, rel, target)
             store.upsert_edge(merged)
         by_triple.pop(triple)
-        by_triple[canonical_triple] = merged
+        by_triple[standard_triple] = merged
     edges = list(by_triple.values())
 
     # 4. suspect labels

@@ -66,7 +66,7 @@ class Recovering:
             raise Cancelled('worker stopped during Board reconnection')
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise Unavailable('canonical Board did not recover within the bounded reconnect window')
+            raise Unavailable('Board did not recover within the bounded reconnect window')
         self.status.update(state='reconnecting', detail='Waiting for the authenticated project Board')
         time.sleep(min(POLL_S, remaining))
 
@@ -79,7 +79,7 @@ class Recovering:
             if self.stopped() and operation != 'ack':
                 raise Cancelled('worker stopped during Board reconnection')
             if time.monotonic() >= deadline:
-                raise Unavailable('canonical Board did not recover within the bounded reconnect window')
+                raise Unavailable('Board did not recover within the bounded reconnect window')
             try:
                 return self.transport.call(operation, token, *args, **kwargs)
             except (Denied, OSError, RuntimeError) as error:

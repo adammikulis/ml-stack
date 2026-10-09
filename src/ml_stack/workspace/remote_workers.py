@@ -31,7 +31,7 @@ from ml_stack.workspace import (
 )
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, valid_id
-from ml_stack.workspace.project_connection import CanonicalWorkspace, selected
+from ml_stack.workspace.project_connection import BoardWorkspace, selected
 from ml_stack.workspace.remote import RemoteWorkspace
 from ml_stack.workspace.service import Workspace
 
@@ -174,12 +174,12 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                                        selection=localmodel.Selection(context=body.get('ctx', 0)))
             if not chosen.ok:
                 raise localstart.Unavailable(chosen.problem, chosen.hint)
-            canonical_name = 'lan-' + projects.machine[:12] + '-' + name[:20]
-            canonical_token = credential(remote, canonical_name, localmodel.model_identity(chosen.name))
-            canonical_identity = remote.call('whoami', canonical_token)['id']
+            lan_name = 'lan-' + projects.machine[:12] + '-' + name[:20]
+            lan_token = credential(remote, lan_name, localmodel.model_identity(chosen.name))
+            lan_identity = remote.call('whoami', lan_token)['id']
             record = {'host': remote.host, 'project_id': project_id, 'cluster': cluster,
                       'cluster_key': str(cluster_key) if cluster_key else '',
-                      'identity': canonical_identity, 'requested_by': caller['id'],
+                      'identity': lan_identity, 'requested_by': caller['id'],
                       'name': name, 'cluster_id': cluster_id,
                       'requested_context': body.get('ctx', 0) or 'auto',
                       'device_cert': remote.device_cert}
@@ -194,8 +194,8 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             got = localstart.start(ws, ask, pick=chosen, spawn=spawn,
                                    authority=localstart.Authority(parent_token=localstart.launch_parent(ws, root)))
             ws.audit('remote-worker.start', caller['id'], agent=name, project_id=project_id,
-                     canonical_identity=canonical_identity)
-            return 200, {'name': got.name, 'identity': canonical_identity, 'pid': got.pid,
+                     lan_identity=lan_identity)
+            return 200, {'name': got.name, 'identity': lan_identity, 'pid': got.pid,
                          'model': got.model, 'project_id': project_id, 'state': 'starting', 'already': got.already,
                          'requested_by': caller['id'], 'requested_context': record['requested_context'],
                          'effective_limits': _effective_limits(la.load(ws, got.name))}
@@ -254,7 +254,7 @@ class WorkerRemote:
         return self.current.call(operation, token, *args, **kwargs)
 
 
-class BoardWorker(CanonicalWorkspace):
+class BoardWorker(BoardWorkspace):
     """Keep runtime files local while using the selected agent capability."""
 
     def __init__(self, local, record, name=""):

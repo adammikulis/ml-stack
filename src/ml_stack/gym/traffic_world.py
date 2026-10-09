@@ -73,7 +73,7 @@ def xml(path, expected):
     return node
 
 
-def canonical_xml(path, expected):
+def normalised_xml(path, expected):
     ElementTree.ElementTree(xml(path, expected)).write(path, encoding='utf-8', xml_declaration=True)
 
 
@@ -90,5 +90,5 @@ def generate(path, definition):
                         '-o', str(path / 'trips.xml'), '--seed', str(definition['seed']), '--end', str(definition['demand_seconds']),
                         '--period', str(definition['vehicle_period']), '--fringe-factor', '10', '--validate'],
                        check=True, capture_output=True, text=True, timeout=120)
-        canonical_xml(path / 'network.net.xml', 'net')
-        canonical_xml(path / 'routes.rou.xml', 'routes')
+        normalised_xml(path / 'network.net.xml', 'net')
+        normalised_xml(path / 'routes.rou.xml', 'routes')

@@ -32,7 +32,7 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page(viewport={'width': 390, 'height': 844})
             project_id = 'b' * 32
-            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [{'id': project_id, 'name': 'Demo workspace', 'local_authority': True, 'board_host': 'http://canonical'}]}))
+            page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [{'id': project_id, 'name': 'Demo workspace', 'local_authority': True, 'board_host': 'http://board'}]}))
             page.route(f'**/ui/projects/{project_id}/tasks', respond)
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
             viewer = page.locator('tasks-view')
@@ -87,7 +87,7 @@ def test_unavailable_tasks_hide_unknown_lanes_and_recover(tmp_path, playwright, 
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page()
             page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
-                {'id': project_id, 'name': 'Test workspace', 'local_authority': True, 'board_host': 'http://canonical'}]}))
+                {'id': project_id, 'name': 'Test workspace', 'local_authority': True, 'board_host': 'http://board'}]}))
             page.route(f'**/ui/projects/{project_id}/tasks', respond)
             page.goto(f'http://127.0.0.1:{server.port}/ui/#tasks')
             viewer = page.locator('tasks-view')
@@ -121,7 +121,7 @@ def test_failed_previous_project_does_not_replace_current_project_status(tmp_pat
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page()
             page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
-                {'id': key, 'name': name, 'local_authority': True, 'board_host': 'http://canonical'}
+                {'id': key, 'name': name, 'local_authority': True, 'board_host': 'http://board'}
                 for key, name in [(first, 'Previous project'), (second, 'Current project')]]}))
             page.route(f'**/ui/projects/{first}/tasks', lambda route: pending.append(route))
             page.route(f'**/ui/projects/{second}/tasks', lambda route: route.fulfill(json={
@@ -218,7 +218,7 @@ def test_task_join_completion_does_not_reload_another_selected_project(tmp_path,
         with playwright.chromium.launch(headless=True) as browser:
             page = browser.new_page()
             page.route('**/ui/projects', lambda route: route.fulfill(json={'workspaces': [
-                {'id': key, 'name': name, 'local_authority': True, 'board_host': 'http://canonical'}
+                {'id': key, 'name': name, 'local_authority': True, 'board_host': 'http://board'}
                 for key, name in [(first, 'Join this project'), (second, 'Other project')]]}))
             page.route(f'**/ui/projects/{first}/tasks', lambda route: route.fulfill(status=503, json={
                 'error': 'Join this workspace as person to use conversations and tasks.', 'person_setup_required': True}))

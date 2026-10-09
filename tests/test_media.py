@@ -41,8 +41,8 @@ class TestWav:
         fixed 44 bytes turns those chunk bytes into a burst of noise at the start of the
         audio -- audible, but easy to blame on the microphone."""
         pcm = b"\xAB\xCD" * 100
-        canonical = encode(pcm, sample_rate=16000)
-        head, tail = canonical[:36], canonical[36:]  # split at the `data` chunk
+        standard = encode(pcm, sample_rate=16000)
+        head, tail = standard[:36], standard[36:]  # split at the `data` chunk
 
         software = b"ml_stack\x00\x00"  # NUL-terminated, word-aligned
         info_body = b"INFOISFT" + struct.pack("<I", len(software)) + software

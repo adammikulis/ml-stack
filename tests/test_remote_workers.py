@@ -306,7 +306,7 @@ def test_malformed_worker_alias_cannot_probe_paths_outside_session_storage(devic
 def test_generic_adapter_does_not_supply_a_worker_token_hook(devices):
     devices.target._request('worker', devices.body)
     agent = localagent.load(devices.local, 'local-qwen')
-    adapter = remote_workers.CanonicalWorkspace(devices.caller, devices.token)
+    adapter = remote_workers.BoardWorkspace(devices.caller, devices.token)
     adapter.base = devices.local.base
     loop = localloop.Loop(adapter, agent, localloop.Held(None, {'id': 'test-lease'}),
                          localloop.Settings(), (lambda: False, localagent.Status(devices.local, agent.name)))

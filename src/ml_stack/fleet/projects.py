@@ -178,20 +178,20 @@ class ProjectRegistry:
         source.project_id(expected_project)
         root = local_root(str(root))
         try:
-            canonical = Path(git.run(["rev-parse", "--show-toplevel"], cwd=root).stdout.strip()).resolve()
-            identifier = identity(canonical)
+            top = Path(git.run(["rev-parse", "--show-toplevel"], cwd=root).stdout.strip()).resolve()
+            identifier = identity(top)
             if identifier != expected_project:
                 raise source.ProjectError("Local project identity does not match the requested project")
-            authority = attached_authority(canonical)
+            authority = attached_authority(top)
         except (OSError, git.GitFailed) as exc:
             raise source.ProjectError("Choose an available local Git project") from exc
         with self.lock:
             project = self._projects.get(identifier)
             if project is None:
-                project = Project(id=identifier, name=canonical.name, root=str(canonical),
+                project = Project(id=identifier, name=top.name, root=str(top),
                                   source_machine=self.machine, board_host=authority.get("host", ""))
                 self._projects[identifier] = project
-            self._candidates[identifier] = canonical
+            self._candidates[identifier] = top
             self._save()
             return self._board(project)
 

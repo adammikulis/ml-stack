@@ -151,7 +151,7 @@ def _reader_run(command, **kwargs):
     return subprocess.CompletedProcess(command, process.returncode, output, errors)
 
 
-def nudge(agent: str, rail: Rail | None = None, *, canonical=None) -> str:
+def nudge(agent: str, rail: Rail | None = None, *, board=None) -> str:
     """Return unread metadata and redacted advisory failure references."""
     try:
         timeout = min(NUDGE_S, max(0.05, hook_bootstrap.remaining() - CLEANUP_RESERVE_S))
@@ -192,9 +192,9 @@ def post(agent: str, rail: Rail | None = None) -> dict[str, Any]:
 def stop(rail: Rail) -> dict[str, Any]:
     """Block an authenticated harness completion until its recorded checkouts are cleaned."""
     try:
-        canonical = harness_remote.context(rail.agent, rail.roots[0], rail.roots, require_claim=False)
-        if canonical:
-            harness_remote.require_clean(*canonical)
+        board = harness_remote.context(rail.agent, rail.roots[0], rail.roots, require_claim=False)
+        if board:
+            harness_remote.require_clean(*board)
             return {}
         ws = Workspace()
         who = ws.auth(tokens.load(ws.base, rail.agent))

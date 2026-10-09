@@ -119,7 +119,7 @@ def acting(plan: Plan) -> Identity | None:
     args = argparse.Namespace(agent=name, token_file="")
     try:
         ws, token = cli._context(args, cli._project_connection(plan.checkout))
-        if isinstance(ws, project_connection.CanonicalWorkspace):
+        if isinstance(ws, project_connection.BoardWorkspace):
             info = ws.remote.call("whoami", token)
             if (info.get("id") != name or info.get("role") != AGENT or "claim" not in info.get("can", ())
                     or info.get("project", {}).get("key") != ws.remote.project_id):

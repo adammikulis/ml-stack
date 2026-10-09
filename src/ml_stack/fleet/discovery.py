@@ -243,7 +243,7 @@ def derive_token(key: bytes) -> str:
 
 
 # -- the wire ------------------------------------------------------------
-def _canonical(payload: dict[str, Any]) -> bytes:
+def _encoded(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
@@ -254,7 +254,7 @@ def fit_beacon(body: dict[str, Any], budget: int = BEACON_BUDGET) -> dict[str, A
     the beacon is shorter; a peer reads the rest from the daemon's ``/models``.
     """
     def over(device: dict[str, Any]) -> bool:
-        return len(_canonical({**body, "device": device})) > budget
+        return len(_encoded({**body, "device": device})) > budget
 
     device = dict(body.get("device") or {})
     if not over(device):
@@ -277,7 +277,7 @@ def _box_key(key: bytes) -> bytes:
 def _pack(key: bytes, payload: dict[str, Any]) -> bytes:
     """``payload`` as a datagram: sealed under the key derived from the cluster key, with the
     kind as associated data."""
-    return MAGIC + sealing.seal(_box_key(key), _canonical(payload),
+    return MAGIC + sealing.seal(_box_key(key), _encoded(payload),
                                 _data(str(payload.get("kind", ""))))
 
 
@@ -612,7 +612,7 @@ class Advertiser:
     def _tell_join(self, sock: socket.socket | wsl_network.DiscoverySocket,
                    nonce: str, addr: tuple[str, int]) -> None:
         """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
-        reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
+        reply = _encoded({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
                             "name": self.beacon.name, "port": self.beacon.port, "tls": bool(self.beacon.cert),
                             "method": "automatic" if self.mode == "dev" else "passphrase" if self.joinable else "recovery",
                             "mode": self.mode, "cluster_id": hashlib.sha256(self.key).hexdigest(),

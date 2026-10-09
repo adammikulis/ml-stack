@@ -203,7 +203,7 @@ class Operations:
         return lambda token, *args, **kwargs: self.parent.remote.call(operation, token, *args, **kwargs)
 
 
-class CanonicalWorkspace(Operations):
+class BoardWorkspace(Operations):
     """The supported local CLI operations backed by one remote project board."""
 
     def __init__(self, remote: RemoteWorkspace, token: str):

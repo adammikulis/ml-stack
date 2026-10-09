@@ -112,7 +112,7 @@ class Module:
                 for alias in node.names:
                     self.aliases[alias.asname or alias.name] = namespace + '.' + alias.name
             elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                value = self.canonical(node.value)
+                value = self.dotted_name(node.value)
                 if value:
                     self.aliases[node.targets[0].id] = value
 
@@ -123,12 +123,12 @@ class Module:
                 values = node.value.elts if isinstance(node.value, (ast.List, ast.Tuple)) else [node.value]
                 for value in values:
                     call = value.func if isinstance(value, ast.Call) else value
-                    if not self.canonical(call).startswith('pytest.mark.'):
+                    if not self.dotted_name(call).startswith('pytest.mark.'):
                         raise RuntimeError('fixture plan: dynamic module fixture marks')
                 result.extend(values)
         return tuple(result)
 
-    def canonical(self, node) -> str:
+    def dotted_name(self, node) -> str:
         value = spelling(node)
         base, _, rest = value.partition('.')
         return self.aliases.get(base, base) + ('.' + rest if rest else '')
@@ -138,8 +138,8 @@ class Module:
         kinds, requested, parameters = set(), [], set()
         for decorator in decorators:
             call = decorator if isinstance(decorator, ast.Call) else None
-            canonical = self.canonical(call.func if call else decorator)
-            if canonical == 'pytest.fixture':
+            dotted_name = self.dotted_name(call.func if call else decorator)
+            if dotted_name == 'pytest.fixture':
                 fixture = True
                 values = {item.arg: literal(item.value) for item in call.keywords
                           if item.arg in {'autouse', 'name', 'scope', None}} if call else {}
@@ -148,21 +148,21 @@ class Module:
                 autouse, name = values.get('autouse', False), values.get('name')
                 if name is not None and not isinstance(name, str):
                     raise RuntimeError('fixture plan: dynamic fixture name')
-            elif canonical == 'test_fixture_plan.resources':
+            elif dotted_name == 'test_fixture_plan.resources':
                 if call is None or call.keywords:
                     raise RuntimeError('fixture plan: resource declaration must be literal')
                 values = [literal(item) for item in call.args]
                 if not values or any(not isinstance(item, str) or item not in KINDS for item in values):
                     raise RuntimeError('fixture plan: unknown resource declaration')
                 kinds.update(values)
-            elif canonical == 'resources' or canonical.endswith('.resources'):
+            elif dotted_name == 'resources' or dotted_name.endswith('.resources'):
                 raise RuntimeError('fixture plan: unresolved resource decorator')
-            elif canonical == 'pytest.mark.usefixtures':
+            elif dotted_name == 'pytest.mark.usefixtures':
                 values = [literal(item) for item in call.args]
                 if any(not isinstance(item, str) for item in values):
                     raise RuntimeError('fixture plan: dynamic usefixtures')
                 requested.extend(values)
-            elif canonical == 'pytest.mark.parametrize':
+            elif dotted_name == 'pytest.mark.parametrize':
                 names = literal(call.args[0])
                 names = names.split(',') if isinstance(names, str) else names
                 if not isinstance(names, (list, tuple)) or any(not isinstance(item, str) for item in names):
@@ -178,7 +178,7 @@ class Module:
             if isinstance(node, ast.ClassDef):
                 relevant = node.name.startswith('Test') or any(
                     isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and any(self.canonical(decorator.func if isinstance(decorator, ast.Call) else decorator) == 'pytest.fixture'
+                    and any(self.dotted_name(decorator.func if isinstance(decorator, ast.Call) else decorator) == 'pytest.fixture'
                             for decorator in item.decorator_list) for item in node.body)
                 if not relevant:
                     continue

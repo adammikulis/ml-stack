@@ -139,7 +139,7 @@ def test_catalogue_uses_real_modelinfo_paths_and_coding_profile(monkeypatch, tmp
     from ml_stack.hub.discover import ModelInfo
     from ml_stack.workspace import coding_routes, localmodel
 
-    installed = ModelInfo(id="canonical", name="Qwen3.8-27B-Q4_K_XL.gguf", path=tmp_path / "model.gguf",
+    installed = ModelInfo(id="model", name="Qwen3.8-27B-Q4_K_XL.gguf", path=tmp_path / "model.gguf",
                           format="gguf", size_bytes=1234, source="local")
     monkeypatch.setattr(coding_routes.hub, "discover", lambda **kwargs: [installed])
     calls = []

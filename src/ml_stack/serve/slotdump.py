@@ -103,7 +103,7 @@ def restore_slot(base_url: str, slot: int, filename: str, *,
 
 def save_all(base_url: str, slots: Mapping[str, int], *, model: str = "",
              directory: str | Path | None = None, timeout: float = 120.0) -> list[SlotDump]:
-    """Save every slot in ``slots`` (``{name: slot id}``) under its canonical dump name."""
+    """Save every slot in ``slots`` (``{name: slot id}``) under its dump name."""
     label = model or current_guard(base_url)["model"]
     return [save_slot(base_url, sid, dump_name(label, sid, name),
                       directory=directory, timeout=timeout) for name, sid in slots.items()]
