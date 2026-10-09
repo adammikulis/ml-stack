@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ml_stack.features import windows_node
+from ml_stack.platform import is_windows
 from ml_stack.files import read_json, write_json, writing
 from ml_stack.runtime_store import MARK
 
@@ -26,8 +26,8 @@ class NodeBinaryError(OSError):
 
 
 def name() -> str:
-    """The binary's file name: ``.exe`` on Windows when the `windows-node` feature is on."""
-    return "poolside-node.exe" if windows_node() else "poolside-node"
+    """The binary's file name: ``.exe`` on Windows."""
+    return "poolside-node.exe" if is_windows() else "poolside-node"
 
 
 def target() -> str:

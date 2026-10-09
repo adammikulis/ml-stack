@@ -72,7 +72,7 @@ def framed(value: dict) -> bytes:
 def test_a_hello_over_a_pipe_is_framed_like_the_socket(monkeypatch, tmp_path):
     request, opened = [], []
     reply = framed({"ok": True, "result": {"node": "poolside-node", "pid": 7, "version": "0.2.2"}})
-    monkeypatch.setattr(node_health, "windows_node", lambda: True)
+    monkeypatch.setattr(node_health, "is_windows", lambda: True)
     monkeypatch.setattr(win32, "open_pipe", lambda name: opened.append(name) or reply_over_socketpair(reply, request))
     said = node_health.node_health(tmp_path)
     assert said and said["pid"] == 7 and said["socket"] == node_health.pipe_name(tmp_path)
@@ -83,7 +83,7 @@ def test_a_hello_over_a_pipe_is_framed_like_the_socket(monkeypatch, tmp_path):
 def test_a_pipe_nobody_serves_is_a_dead_node(monkeypatch, tmp_path):
     def missing(name):
         raise FileNotFoundError(name)
-    monkeypatch.setattr(node_health, "windows_node", lambda: True)
+    monkeypatch.setattr(node_health, "is_windows", lambda: True)
     monkeypatch.setattr(win32, "open_pipe", missing)
     assert node_health.node_health(tmp_path) is None
 
@@ -98,7 +98,7 @@ def test_a_busy_pipe_is_retried_until_it_opens(monkeypatch, tmp_path):
             busy.winerror = win32.ERROR_PIPE_BUSY  # type: ignore[attr-defined]  # set by the OS on Windows only
             raise busy
         return reply_over_socketpair(framed({"ok": True, "result": {"pid": 1}}), [])
-    monkeypatch.setattr(node_health, "windows_node", lambda: True)
+    monkeypatch.setattr(node_health, "is_windows", lambda: True)
     monkeypatch.setattr(win32, "open_pipe", busy_then_open)
     assert node_health.node_health(tmp_path)["pid"] == 1 and len(tries) == 3
 
@@ -110,7 +110,7 @@ def test_the_supervisor_stops_on_its_event_and_on_ctrl_break(monkeypatch, tmp_pa
         events[name] = threading.Event()
         events[name].close = lambda: closed.append(name)
         return events[name]
-    monkeypatch.setattr(node_supervise, "windows_node", lambda: True)
+    monkeypatch.setattr(node_supervise, "is_windows", lambda: True)
     monkeypatch.setattr(win32, "Event", event_named)
     monkeypatch.setattr(signal, "SIGBREAK", 21, raising=False)
     monkeypatch.setattr(signal, "signal", lambda number, handler: handlers.update({number: handler}))
@@ -128,7 +128,7 @@ def test_the_supervisor_stops_on_its_event_and_on_ctrl_break(monkeypatch, tmp_pa
 
 def test_a_stop_on_windows_signals_the_supervisor_and_the_node_by_event(monkeypatch, tmp_path):
     sent = []
-    monkeypatch.setattr(node_launch, "windows_node", lambda: True)
+    monkeypatch.setattr(node_launch, "is_windows", lambda: True)
     monkeypatch.setattr(win32, "signal_event", lambda name: sent.append(name) or True)
     monkeypatch.setattr(node_launch, "node_health", lambda state: None)
     assert node_launch.stop_node(tmp_path, wait_s=2)
@@ -148,7 +148,6 @@ def test_a_process_probe_on_windows_never_sends_a_signal(monkeypatch):
 def built() -> Path:
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("ML_STACK_HOME", tempfile.mkdtemp(prefix="mlf"))
-        features.switch("windows-node", True)
         return node_binary.build(ROOT)
 
 
@@ -156,7 +155,6 @@ def built() -> Path:
 def home(monkeypatch):
     root = Path(tempfile.mkdtemp(prefix="mln"))
     monkeypatch.setenv("ML_STACK_HOME", str(root))
-    features.switch("windows-node", True)
     monkeypatch.setenv("PYTHONPATH", str(ROOT / "src"))
     yield root
     node_launch.stop_node(root / "node", wait_s=5)

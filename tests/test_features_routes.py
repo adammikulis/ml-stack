@@ -31,19 +31,19 @@ def test_the_route_lists_every_feature_with_stage_risk_and_state(daemon):
     assert status == 200
     by_name = {row["name"]: row for row in body["features"]}
     assert set(by_name) == set(features.FEATURES)
-    assert by_name["windows-node"]["stage"] == "experimental" and by_name["windows-node"]["risk"]
+    assert by_name["test-runner-extras"]["stage"] == "experimental" and by_name["test-runner-extras"]["risk"]
     assert not any(row["enabled"] for row in body["features"])
 
 
 def test_the_route_reads_the_daemons_own_settings_file(daemon):
-    features.switch("windows-node", True, root=str(daemon.ui.settings_path.parent))
+    features.switch("test-runner-extras", True, root=str(daemon.ui.settings_path.parent))
     _, body, _ = daemon.call("/ui/features")
-    assert {row["name"] for row in body["features"] if row["enabled"]} == {"windows-node"}
+    assert {row["name"] for row in body["features"] if row["enabled"]} == {"test-runner-extras"}
 
 
 def test_the_route_changes_nothing(daemon):
-    status, _, _ = daemon.call("/ui/features", method="POST", body={"name": "windows-node", "enabled": True})
-    assert status != 200 and not features.enabled("windows-node", str(daemon.ui.settings_path.parent))
+    status, _, _ = daemon.call("/ui/features", method="POST", body={"name": "test-runner-extras", "enabled": True})
+    assert status != 200 and not features.enabled("test-runner-extras", str(daemon.ui.settings_path.parent))
 
 
 def test_the_page_carries_the_component_on_the_settings_screen(daemon):
