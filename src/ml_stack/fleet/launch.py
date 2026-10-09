@@ -47,6 +47,30 @@ def _health(port: int, timeout: float = HEALTH_TIMEOUT_S) -> dict[str, Any] | No
     return said if isinstance(said, dict) else {}
 
 
+SLOW_HEALTH_TIMEOUT_S = 30.0
+SLOW_HEALTH_TRIES = 4
+"""How a held port is asked again after one missed answer: patiently, since a loaded daemon is slow, not absent."""
+
+
+def port_held(port: int, timeout: float = 2.0) -> bool:
+    """Whether something owns the port. Only a refused connection says it is free; a slow or odd answer does not."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except ConnectionRefusedError:
+        return False
+    except OSError:
+        return True
+
+
+def _held_health(port: int) -> dict[str, Any] | None:
+    for _ in range(SLOW_HEALTH_TRIES):
+        said = _health(port, SLOW_HEALTH_TIMEOUT_S)
+        if said is not None:
+            return said
+    return None
+
+
 def already_running(port: int = HTTP_PORT) -> dict[str, Any] | None:
     """A healthy daemon already on this port, or None."""
     return _health(port)
@@ -100,13 +124,8 @@ def _root(arguments: list[str]) -> Path:
 def _wait_for_exit(port: int, seconds: float = 20.0) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                pass
-        except ConnectionRefusedError:
+        if not port_held(port, 0.5):
             return True
-        except OSError:
-            pass
         time.sleep(0.15)
     return False
 
@@ -138,15 +157,28 @@ def _arguments(argv):
     return ap.parse_known_args(argv)
 
 
+def _reuse(running: dict[str, Any], known: argparse.Namespace, rest: list[str]) -> int:
+    groups = memberships()
+    say(notice(running.get("cluster_mode") or (groups[0].mode if groups else "dev")))
+    say(f"ml-stack is already running as '{running.get('name', '?')}'.")
+    if not known.no_browser:
+        webbrowser.open(launch_open.page_url(known.port, _root(rest)))
+    say(f"  http://127.0.0.1:{known.port}/ui/")
+    return 0
+
+
 def main(argv: list[str] | None = None, *,
          daemon_main: Callable[[list[str]], int] | None = None) -> int:
     daemon_main is None and runtime.forward("ml_stack.fleet.launch", list(sys.argv[1:] if argv is None else argv))
     known, rest = _arguments(argv)
 
-    url = f"http://127.0.0.1:{known.port}/ui/"
-
     linux_executable = None
     running = already_running(known.port)
+    if running is None and port_held(known.port):
+        running = _held_health(known.port)
+        if running is None:
+            warn(f"Something holds port {known.port} and did not answer /health; not starting a second daemon. Retry shortly.")
+            return 1
     expected = str(state().get("commit") or "")
     if running is not None and (known.restart or not same_commit(str(running.get("commit") or ""), expected)):
         try:
@@ -163,13 +195,7 @@ def main(argv: list[str] | None = None, *,
             warn(str(exc))
             return 1
     if running is not None:
-        groups = memberships()
-        say(notice(running.get("cluster_mode") or (groups[0].mode if groups else "dev")))
-        say(f"ml-stack is already running as '{running.get('name', '?')}'.")
-        if not known.no_browser:
-            webbrowser.open(launch_open.page_url(known.port, _root(rest)))
-        say(f"  {url}")
-        return 0
+        return _reuse(running, known, rest)
 
     if sys.platform == "win32" and linux_executable is None:
         try:

@@ -61,7 +61,7 @@ class World:
 
     def env(self, **extra) -> dict:
         env = {key: value for key, value in os.environ.items()
-               if key not in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "PYTEST_CURRENT_TEST")}
+               if key not in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE", "PYTEST_CURRENT_TEST", "ML_STACK_AUTHORITY_FLOOR")}
         return {**env, "PYTHONPATH": os.pathsep.join([SRC, str(ROOT)]), "ML_STACK_HOME": str(self.home), "HOME": str(self.user),
                 "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
                 "ML_STACK_TEST_KEYRING": str(self.keyring), "PIP_NO_INDEX": "1", **extra}

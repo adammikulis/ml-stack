@@ -1095,7 +1095,7 @@ tests = ["tests/test_daemon_control.py::test_owned_idle_replacement_retains_admi
 note = "owned private records bind a fixed loopback instance; redirects cannot move launcher authentication to another endpoint and forged replacement acknowledgments refuse"
 
 [[group]]
-match = ["egress:fleet/launch.py:_wait_for_exit"]
+match = ["egress:fleet/launch.py:port_held"]
 status = "covered"
 tests = ["tests/test_fleet_launch.py::test_launcher_waits_for_tcp_close_when_health_is_unavailable"]
 note = "a fixed loopback TCP probe treats timeouts and unhealthy listeners as live; only connection refusal authorizes starting the replacement"
