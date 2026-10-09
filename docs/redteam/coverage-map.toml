@@ -1085,7 +1085,7 @@ note = "binds only to probe whether a port is free, to serve a local fit page on
 
 # -- network egress ------------------------------------------------------------------------
 [[group]]
-match = ["egress:fleet/daemon_control.py:request_replacement"]
+match = ["egress:fleet/daemon_control.py:_acknowledge"]
 status = "covered"
 tests = ["tests/test_daemon_control.py::test_owned_idle_replacement_retains_admission_and_rejects_new_work",
          "tests/test_daemon_control.py::test_other_control_instance_never_requests_shutdown",

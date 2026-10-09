@@ -1829,9 +1829,9 @@
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
-   "id": "egress:fleet/daemon_control.py:request_replacement",
+   "id": "egress:fleet/daemon_control.py:_acknowledge",
    "kind": "egress",
-   "source": "fleet/daemon_control.py:request_replacement",
+   "source": "fleet/daemon_control.py:_acknowledge",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
    "status": "covered",
