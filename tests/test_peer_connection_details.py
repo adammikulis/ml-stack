@@ -103,7 +103,7 @@ def test_copied_invitation_uses_current_network_before_creating_code(monkeypatch
         client_ip, cookie, host_header, method = "127.0.0.1", "session", "localhost:8770", "POST"
         ui = SimpleNamespace(projects=SimpleNamespace(machine="device", hosts=lambda host: host == "https://127.0.0.1:8770", get=lambda _: project),
                              workspaces=SimpleNamespace(invite=invite),
-                             peer_port=8770, cluster_key_path=None, authed=lambda _: True, host_ok=lambda _: True)
+                             peer_port=8770, cluster_key_path=None, authed=lambda _: True, credentialed=lambda _: True, host_ok=lambda _: True)
         def header(self, key, default=""):
             return "http://localhost:8770" if key == "Origin" else default
         def body(self):

@@ -206,7 +206,9 @@ def test_recovery_refuses_unsafe_credential_storage(tmp_path, monkeypatch, unsaf
     remote.base, remote.project_id = tmp_path / "sessions", PROJECT
     credential = tokens.store(remote.base, "worker", "mlws1.worker.saved")
     original = private_path.problem
-    monkeypatch.setattr(private_path, "problem", lambda path: unsafe if path == credential else original(path))
+    judge = lambda path: unsafe if path == credential else original(path)  # noqa: E731
+    monkeypatch.setattr(private_path, "problem", judge)
+    monkeypatch.setattr(tokens, "problem", judge)
     monkeypatch.setattr(remote, "_device_transport", lambda: None)
     monkeypatch.setattr(remote, "_request", lambda *a: pytest.fail("unsafe storage recovery"))
     from ml_stack.workspace.identity import Denied
