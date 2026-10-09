@@ -202,7 +202,7 @@ def test_installed_cli_on_second_device_reads_shared_state_without_local_fallbac
     remote = coordinator_client.client(shared.device)
     agent = remote.ensure(shared.device, 'second-device', project=shared.project_scope)
     sent = shared.remote.command(['send', agent, 'task', 'Shared CLI task'], shared.bob)
-    environment = {**os.environ, 'ML_STACK_WORKSPACE_HOME': str(shared.device),
+    environment = {**{k: v for k, v in os.environ.items() if k != 'ML_STACK_CLUSTER_KEY'}, 'ML_STACK_WORKSPACE_HOME': str(shared.device),
                    'PYTHONPATH': str(installed_metadata), 'ML_STACK_WORKSPACE_AGENT': agent}
     result = subprocess.run([sys.executable, '-m', 'ml_stack.workspace.cli', 'inbox', '--json'],
                             cwd=shared.project_dir, env=environment, capture_output=True, text=True, timeout=15)
