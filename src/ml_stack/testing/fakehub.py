@@ -75,7 +75,7 @@ class FakeHub:
         return rows
 
     def search(self, query: str) -> list[dict[str, Any]]:
-        return [{"id": name, "downloads": 1000 - 100 * n, "likes": n,
+        return [{"id": name, "downloads": 1000 - n * 100, "likes": n,
                  "gated": name in self.gated}
                 for n, name in enumerate(sorted(self.repos)) if query.lower() in name.lower()]
 

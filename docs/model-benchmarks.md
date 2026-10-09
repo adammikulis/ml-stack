@@ -114,8 +114,8 @@ FrontierCode 1.1 (Main), vendor tables:
 | Humanity's Last Exam, with tools | 57.4% | 64.5% | 67.7% | 65.6% | n/a | Astra 57.2% |
 | Humanity's Last Exam, no tools | 45.9% | 56.9% | n/a | n/a | n/a | n/a |
 | OSWorld 2.1 (partial or offline subset) | 72.4% | 83.9% (80.1% on Sonnet page) | 81.8% | 80.7% | 48.9% | n/a |
-| GDPval-AA v2.1 (Elo) | 1620 | 1840 (1844 on Sonnet page) | 1846 | 1735 | 1437 | Astra 1542, Sol 1487 |
-| AA-Briefcase v1.1 (Elo) | 1578 | 1824 (1811 on Sonnet page) | 1822 | n/a | 1336 | Sol 1483 |
+| GDPval-AA v2.1 (Elo) | 1620 | 1840, 1844 on the Sonnet page | 1846 | 1735 | 1437 | Astra 1542, Sol 1487 |
+| AA-Briefcase v1.1 (Elo) | 1578 | 1824, 1811 on the Sonnet page | 1822 | n/a | 1336 | Sol 1483 |
 | Terminal-Bench-Science 0.1 | n/a | n/a | 58.7% | 52.6% | n/a | Astra 64.6% |
 
 Sources: Haiku 5.5 page (2026-10-07), Sonnet 5.5 page (2026-09-28), Opus 5.5 page (2026-09-22). Pages disagree
