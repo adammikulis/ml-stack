@@ -728,6 +728,13 @@ tests = ["tests/test_project_ui_access.py", "tests/test_project_source.py", "tes
 note = "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
 
 [[group]]
+match = ["spawn:devbranch.py:development_branch"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_devbranch.py"]
+note = "the argv is fixed and the checkout path is one argument; the environment value is returned as text, never run, and a protected branch name is refused"
+
+[[group]]
 match = ["spawn:net/git.py:blobs", "spawn:net/git.py:source_index"]
 status = "covered"
 tests = ["tests/test_project_source.py"]

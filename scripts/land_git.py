@@ -6,7 +6,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-TARGET = "0.2dev"
 PROTECTED = ("main", "master")
 
 
@@ -77,7 +76,9 @@ def tree_of(root: Path | str, branch: str) -> Tree | None:
 
 
 def dirty(path: Path | str) -> bool:
-    """Whether the worktree at ``path`` has uncommitted or untracked files."""
+    """Whether the worktree at ``path`` has uncommitted or untracked files; a missing directory has none."""
+    if not Path(path).is_dir():
+        return False
     return bool(git(path, "status", "--porcelain").stdout.strip())
 
 

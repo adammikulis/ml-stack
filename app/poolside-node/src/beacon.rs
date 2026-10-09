@@ -6,10 +6,14 @@
 //! sender is a member. A member's beacon is further checked against the certificate in the
 //! pool record (the key must be that certificate's), and the connection it leads to is pinned
 //! to the fingerprint it names. Loopback, unspecified and multicast addresses are never advertised.
+//!
+//! It goes out on every real interface (`netif`), to the multicast group and to the broadcast
+//! address of each network, because either may be dropped by a given network, and it advertises
+//! the address of the interface it leaves by.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -18,6 +22,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::error::{Error, Result};
 use crate::fsutil::{hex, unhex};
+use crate::netif::{self, Iface};
 
 /// The multicast group beacons go to unless told otherwise (administratively scoped).
 pub const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 116, 1);
@@ -102,21 +107,50 @@ pub struct BeaconConfig {
     pub bind: SocketAddr,
     /// Where each beacon is sent: the multicast group by default; tests give unicast peers.
     pub send_to: Vec<SocketAddr>,
-    /// The address advertised; found from the route to the network when None.
+    /// The address advertised; the address of the interface a beacon leaves by when None.
     pub advertise: Option<IpAddr>,
     pub interval: Duration,
     /// Tests on one machine advertise loopback; a real node never does.
     pub allow_loopback: bool,
+    /// Send and hear on this one interface only (its address), not on every real one.
+    pub interface: Option<Ipv4Addr>,
+    /// Also send to the broadcast address of each network, for the ones that drop multicast.
+    pub broadcast: bool,
 }
 
 impl BeaconConfig {
-    /// Multicast on ``port``.
+    /// Multicast and broadcast on ``port``, on every real interface.
     pub fn multicast(port: u16) -> BeaconConfig {
         BeaconConfig {
             bind: SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)), send_to: vec![SocketAddr::from((GROUP, port))],
-            advertise: None, interval: Duration::from_secs(5), allow_loopback: false,
+            advertise: None, interval: Duration::from_secs(5), allow_loopback: false, interface: None, broadcast: true,
         }
     }
+
+    fn multicasts(&self) -> bool {
+        self.bind.is_ipv4() && self.send_to.iter().any(|a| a.ip().is_multicast())
+    }
+
+    /// The interfaces this node sends and listens on; none when it should leave that to the system.
+    fn interfaces(&self) -> Vec<Iface> {
+        match self.interface {
+            Some(addr) => vec![Iface { addr, mask: Ipv4Addr::BROADCAST }],
+            None => netif::interfaces(),
+        }
+    }
+}
+
+/// What the beacon has done so far; a node that sends but never hears its own beacon is not
+/// receiving (a firewall, a privacy setting, a network that drops multicast).
+#[derive(Debug, Default)]
+pub struct BeaconStats {
+    pub sent: AtomicU64,
+    pub send_errors: AtomicU64,
+    pub heard: AtomicU64,
+    pub own: AtomicU64,
+    pub rejected: AtomicU64,
+    pub last_send_error: Mutex<String>,
+    pub last_reject: Mutex<String>,
 }
 
 /// The address of this machine on the network its default route uses, or None.
@@ -126,19 +160,39 @@ pub fn local_address() -> Option<IpAddr> {
     s.local_addr().ok().map(|a| a.ip()).filter(|ip| advertisable(*ip))
 }
 
-/// A socket listening for beacons on ``bind``, joined to the group when ``bind`` is for multicast.
-pub fn listener(bind: SocketAddr, join: Option<Ipv4Addr>) -> Result<UdpSocket> {
+/// A socket listening for beacons on ``bind``, joined to the group ``join`` on each of ``on``
+/// (the system's choice of interface when ``on`` is empty).
+pub fn listener(bind: SocketAddr, join: Option<Ipv4Addr>, on: &[Iface]) -> Result<UdpSocket> {
     let socket = Socket::new(Domain::for_address(bind), Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
     #[cfg(unix)]
     socket.set_reuse_port(true)?;
     socket.bind(&bind.into())?;
     if let Some(group) = join {
-        socket.join_multicast_v4(&group, &Ipv4Addr::UNSPECIFIED)?;
+        join_all(&socket, group, on)?;
     }
     let socket: UdpSocket = socket.into();
     socket.set_read_timeout(Some(Duration::from_millis(200)))?;
     Ok(socket)
+}
+
+/// Join ``group`` on every interface that will take it; an error only when none does.
+fn join_all(socket: &Socket, group: Ipv4Addr, on: &[Iface]) -> Result<()> {
+    if on.is_empty() {
+        return Ok(socket.join_multicast_v4(&group, &Ipv4Addr::UNSPECIFIED)?);
+    }
+    let mut last = None;
+    let mut joined = false;
+    for i in on {
+        match socket.join_multicast_v4(&group, &i.addr) {
+            Ok(()) => joined = true,
+            Err(e) => last = Some(e),
+        }
+    }
+    match (joined, last) {
+        (false, Some(e)) => Err(Error::Io(e)),
+        _ => Ok(()),
+    }
 }
 
 /// What a node says of itself in a beacon, asked afresh each time. An empty ``pool`` says nothing
@@ -158,38 +212,83 @@ pub struct Hooks {
     pub on_beacon: Box<dyn Fn(Beacon) + Send + Sync>,
 }
 
+fn note(slot: &Mutex<String>, text: String) {
+    if let Ok(mut s) = slot.lock() {
+        *s = text;
+    }
+}
+
+fn hear(inbound: &UdpSocket, cfg: &BeaconConfig, hooks: &Hooks, stats: &BeaconStats, now: fn() -> u64, buf: &mut [u8]) {
+    let Ok(n) = inbound.recv(buf) else { return };
+    match decode(&buf[..n], now(), cfg.allow_loopback) {
+        Ok(b) if b.fingerprint == (hooks.identity)().fingerprint => {
+            stats.own.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(b) => {
+            stats.heard.fetch_add(1, Ordering::Relaxed);
+            (hooks.on_beacon)(b);
+        }
+        Err(e) => {
+            stats.rejected.fetch_add(1, Ordering::Relaxed);
+            note(&stats.last_reject, e.to_string());
+        }
+    }
+}
+
+/// One beacon for each way out: each interface (advertising its own address) to the group, to
+/// the broadcast address of its network, and to the explicit targets.
+fn send_round(out: &UdpSocket, cfg: &BeaconConfig, ifaces: &[Iface], key: &SigningKey, hooks: &Hooks, stats: &BeaconStats, now: fn() -> u64) {
+    let Advert { pool, fingerprint, port, project, lone } = (hooks.identity)();
+    if pool.is_empty() {
+        return;
+    }
+    let public = key.verifying_key().to_bytes();
+    let route = local_address();
+    let ways: Vec<Option<Iface>> = if ifaces.is_empty() { vec![None] } else { ifaces.iter().copied().map(Some).collect() };
+    for way in ways {
+        let from = cfg.advertise.or(way.map(|i| IpAddr::V4(i.addr))).or(route);
+        let Some(addr) = from.filter(|a| advertisable(*a) || cfg.allow_loopback) else { continue };
+        let datagram = encode(&Beacon { pool: pool.clone(), fingerprint: fingerprint.clone(), public, addr, port, ts: now(), project: project.clone(), lone }, key);
+        if let Some(i) = way {
+            let _ = socket2::SockRef::from(out).set_multicast_if_v4(&i.addr);
+        }
+        let mut to: Vec<SocketAddr> = cfg.send_to.clone();
+        if cfg.broadcast {
+            to.extend(way.map(|i| SocketAddr::from((i.broadcast(), cfg.bind.port()))));
+            to.push(SocketAddr::from((Ipv4Addr::BROADCAST, cfg.bind.port())));
+        }
+        for target in to {
+            match out.send_to(&datagram, target) {
+                Ok(_) => stats.sent.fetch_add(1, Ordering::Relaxed),
+                Err(e) => {
+                    note(&stats.last_send_error, format!("{target}: {e}"));
+                    stats.send_errors.fetch_add(1, Ordering::Relaxed)
+                }
+            };
+        }
+    }
+}
+
 /// Send a beacon every interval and hand every valid one heard to ``hooks.on_beacon``, until ``stop``.
-pub fn start(cfg: BeaconConfig, key: SigningKey, hooks: Hooks, stop: Arc<AtomicBool>, now: fn() -> u64) -> Result<()> {
-    let join = match cfg.bind.ip() {
-        IpAddr::V4(_) if cfg.send_to.iter().any(|a| a.ip().is_multicast()) => Some(GROUP),
-        _ => None,
-    };
-    let inbound = listener(cfg.bind, join)?;
+pub fn start(cfg: BeaconConfig, key: SigningKey, hooks: Hooks, stop: Arc<AtomicBool>, now: fn() -> u64) -> Result<Arc<BeaconStats>> {
+    let ifaces = cfg.interfaces();
+    let inbound = listener(cfg.bind, cfg.multicasts().then_some(GROUP), &ifaces)?;
     let hooks = Arc::new(hooks);
-    let (h, s, c) = (hooks.clone(), stop.clone(), cfg.clone());
+    let stats = Arc::new(BeaconStats::default());
+    let (h, s, c, st) = (hooks.clone(), stop.clone(), cfg.clone(), stats.clone());
     std::thread::spawn(move || {
         let mut buf = [0u8; MAX_DATAGRAM + 1];
         while !s.load(Ordering::SeqCst) {
-            if let Ok(n) = inbound.recv(&mut buf) {
-                if let Ok(b) = decode(&buf[..n], now(), c.allow_loopback) {
-                    (h.on_beacon)(b);
-                }
-            }
+            hear(&inbound, &c, &h, &st, now, &mut buf);
         }
     });
-    let public = key.verifying_key().to_bytes();
+    let st = stats.clone();
     std::thread::spawn(move || {
         let Ok(out) = UdpSocket::bind("0.0.0.0:0") else { return };
         let _ = out.set_multicast_loop_v4(true);
+        let _ = out.set_broadcast(true);
         while !stop.load(Ordering::SeqCst) {
-            let Advert { pool, fingerprint, port, project, lone } = (hooks.identity)();
-            let addr = cfg.advertise.or_else(local_address).filter(|_| !pool.is_empty());
-            if let Some(addr) = addr.filter(|a| advertisable(*a) || cfg.allow_loopback) {
-                let datagram = encode(&Beacon { pool, fingerprint, public, addr, port, ts: now(), project, lone }, &key);
-                for to in &cfg.send_to {
-                    let _ = out.send_to(&datagram, to);
-                }
-            }
+            send_round(&out, &cfg, &ifaces, &key, &hooks, &st, now);
             let mut waited = Duration::ZERO;
             while waited < cfg.interval && !stop.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(50));
@@ -197,5 +296,5 @@ pub fn start(cfg: BeaconConfig, key: SigningKey, hooks: Hooks, stop: Arc<AtomicB
             }
         }
     });
-    Ok(())
+    Ok(stats)
 }

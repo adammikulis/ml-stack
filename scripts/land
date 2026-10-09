@@ -5,6 +5,9 @@
     scripts/land run [--dry-run] BRANCH...    merge in an integration worktree, verify once, eject failures
     scripts/land finish [--apply]             fast-forward the target from the verified batch, clean up
     scripts/land serve [--once]               the board-fed runner: lands reviewed land-requests, pushes only the target
+    scripts/land up                           start the runner under a restart-on-crash supervisor, detached; safe to repeat
+    scripts/land down                         stop the supervisor and the runner cleanly
+    scripts/land status                       whether the supervisor is alive, its restarts and its log
 
 run and plan also take --entries FILE (JSON list of {branch, tip}) and refuse a branch whose tip moved.
 
@@ -29,6 +32,9 @@ import land_finish
 import land_git as lg
 import land_plan
 import land_run
+import land_supervise
+
+from ml_stack.devbranch import development_branch
 
 
 def show_plan(plan: land_plan.Plan) -> dict:
@@ -54,28 +60,49 @@ def show_plan(plan: land_plan.Plan) -> dict:
             "covered": [e.branch for e in plan.covered], "empty": plan.empty, "dirty": plan.dirty}
 
 
+def supervise_command(args: argparse.Namespace, root: Path) -> int:
+    """The supervisor commands; they act on this workspace's runner, not on a branch."""
+    from ml_stack.workspace import Workspace
+
+    base = Workspace().base
+    flags = {"interval": args.interval, "stall_minutes": args.stall_minutes, "remote": args.remote,
+             "target": args.target, "request_minutes": args.request_minutes, "batch_minutes": args.batch_minutes}
+    if args.command == "supervise":
+        return land_supervise.supervise(base, land_supervise.serve_argv(root, flags))
+    done = {"up": lambda: land_supervise.up(base, root, flags), "down": lambda: land_supervise.down(base),
+            "status": lambda: land_supervise.status(base)}[args.command]()
+    print(land_check.summary_json({"command": args.command, **done}))
+    return 0 if args.command == "status" or done.get("alive") == (args.command == "up") else 1
+
+
 def main() -> int:
     """Parse the command and run it."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["plan", "run", "finish", "serve"])
+    parser.add_argument("command", choices=["plan", "run", "finish", "serve", "up", "down", "status", "supervise"])
     parser.add_argument("branches", nargs="*")
     parser.add_argument("--cover", action="store_true", help="plan: every local branch with a worktree")
     parser.add_argument("--dry-run", action="store_true", help="run: plan and predict, change nothing")
     parser.add_argument("--apply", action="store_true", help="finish: do it (default is a dry run)")
     parser.add_argument("--entries", type=Path, help="plan/run: JSON list of {branch, tip}; a moved tip is refused")
-    parser.add_argument("--target", default=lg.TARGET, help="branch to land on")
+    parser.add_argument("--target", default="", help="branch to land on (default: the development branch)")
     parser.add_argument("--conflicts", choices=["eject", "stop"], default="eject")
     parser.add_argument("-n", "--workers", type=int, default=0, help="affected-test worker ceiling (default 0: what the broker grants)")
     parser.add_argument("--once", action="store_true", help="serve: one pass, then exit")
     parser.add_argument("--interval", type=float, default=30.0, help="serve: seconds between passes")
     parser.add_argument("--stall-minutes", type=float, default=20.0, help="serve: abort a gate silent this long")
+    parser.add_argument("--request-minutes", type=float, default=60.0, help="serve: longest a one-request gate may run")
+    parser.add_argument("--batch-minutes", type=float, default=120.0, help="serve: longest a batch gate may run")
     parser.add_argument("--remote", default="origin", help="serve: remote the development branch is pushed to")
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="a checkout of the repository")
     args = parser.parse_args()
     root = lg.toplevel(args.repo)
+    args.target = args.target or development_branch(root)
+    if args.command in ("up", "down", "status", "supervise"):
+        return supervise_command(args, root)
     if args.command == "serve":
         flags = {"once": args.once, "interval": args.interval, "remote": args.remote,
-                 "stall_minutes": args.stall_minutes}
+                 "stall_minutes": args.stall_minutes, "request_minutes": args.request_minutes,
+                 "batch_minutes": args.batch_minutes}
         try:
             lg.refuse_protected(args.target)
             return land_board.serve(root, args.target, flags)

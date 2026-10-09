@@ -19,6 +19,10 @@ from itertools import pairwise
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from ml_stack.devbranch import development_branch  # noqa: E402
+
 TYPES = ("feat", "fix", "perf", "refactor", "docs", "test", "chore", "merge", "other")
 KNOWN = set(TYPES) - {"other"}
 COLOURS = {
@@ -189,7 +193,7 @@ def draw(starts: list[dt.date], rows: list[list[float]], title: str, unit: str, 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     """The command line."""
     parser = argparse.ArgumentParser(description="Plot commit types over time as a 100%% stacked area chart.")
-    parser.add_argument("--branch", default="0.2dev", help="branch to read (default 0.2dev)")
+    parser.add_argument("--branch", default="", help="branch to read (default: the development branch)")
     parser.add_argument("--since", help="only commits after this git date, e.g. 2026-01-01")
     parser.add_argument("--bucket", choices=("day", "week", "month"), help="default: week, or day under 60 days")
     parser.add_argument("--smooth", type=int, default=3, help="centred rolling mean over N buckets; 1 is off")
@@ -204,6 +208,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None, repo: Path = ROOT) -> int:
     """Read the branch's history under `repo`, print the totals and write the chart."""
     args = parse_args(argv)
+    args.branch = args.branch or development_branch(repo)
     if importlib.util.find_spec("matplotlib") is None:
         print("matplotlib is missing: install it with pip install 'ml-stack[plot]'", file=sys.stderr)
         return 1

@@ -1,7 +1,7 @@
 {
- "surfaces": 850,
+ "surfaces": 852,
  "by_status": {
-  "covered": 526,
+  "covered": 528,
   "partial": 196,
   "uncovered": 53,
   "n/a": 75,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 82,
+   "covered": 83,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 71,
+   "covered": 72,
    "partial": 59,
    "uncovered": 0,
    "n/a": 2,
@@ -7900,6 +7900,19 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/landing.py",
+   "kind": "parser",
+   "source": "workspace/landing.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/localroute.py",
    "kind": "parser",
    "source": "workspace/localroute.py",
@@ -10834,6 +10847,18 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:devbranch.py:development_branch",
+   "kind": "spawn",
+   "source": "devbranch.py:development_branch",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_devbranch.py"
+   ],
+   "note": "the argv is fixed and the checkout path is one argument; the environment value is returned as text, never run, and a protected branch name is refused"
   },
   {
    "id": "spawn:doctor.py:_answers_help",

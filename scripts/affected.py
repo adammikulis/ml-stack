@@ -212,7 +212,7 @@ def add_script_tests(out: Selection, root: Path, rel: str, reverse: dict[str, se
 
 
 def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset(),
-           depth: int = DEPTH, base: str = "0.2dev") -> Selection:
+           depth: int = DEPTH, base: str = "HEAD") -> Selection:
     """The test files within ``depth`` imports of ``changed``; ``unmapped`` non-empty means run all."""
     out = Selection()
     known = index(root)

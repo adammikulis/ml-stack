@@ -26,7 +26,7 @@ TABLE = [
       flag("--test", dest="selectors", action="append", default=[], metavar="SELECTOR",
            help="an affected test file or selector you ran (repeat for each)"),
       flag("--replaces", default="", help="one line: what this change replaces or supersedes"),
-      flag("--target", default="", help="development branch (default 0.2dev; never main)")],
+      flag("--target", default="", help="development branch (default: the branch the primary checkout is on; never main)")],
      lambda a, w, t: landing.request(w, t, {"branch": a.branch, "sha": a.sha, "selectors": a.selectors,
                                             "replaces": a.replaces, "target": a.target})),
     ("land-review",
