@@ -124,11 +124,18 @@ def merge_all(batch: Batch, conflicts: str) -> bool:
     gone = {e["branch"] for e in batch.ejected}
     batch.merged = []
     for name in [n for n in batch.order if n not in gone]:
-        ok, files = merge_one(batch.wt, name)
+        before = lg.out(batch.wt, "rev-parse", "HEAD")
+        try:
+            ok, files = merge_one(batch.wt, name)
+            why = "conflicts: " + ", ".join(files[:6])
+        except (RuntimeError, OSError) as error:
+            lg.git(batch.wt, "merge", "--abort", check=False)
+            lg.git(batch.wt, "reset", "--hard", "-q", before, check=False)
+            ok, why = False, f"the merge step crashed: {str(error)[:200]}"
         if ok:
             batch.merged.append((name, lg.out(batch.wt, "rev-parse", "HEAD")))
             continue
-        eject(batch, name, "merge", "conflicts: " + ", ".join(files[:6]))
+        eject(batch, name, "merge", why)
         if conflicts == "stop":
             return False
     return True

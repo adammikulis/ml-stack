@@ -104,7 +104,9 @@ def _apply(queue: Queue, row: dict[str, Any]) -> None:
     elif kind == "beat":
         queue.beat = {"by": by, "ts": row["ts"], "what": row.get("what", "")}
     req = queue.requests.get(row.get("req", ""))
-    if req is None or (req["status"] in TERMINAL and kind != "review"):
+    pushed_late = req is not None and req["status"] == "landed-unpushed" and kind == "state" \
+        and row.get("status") == "landed"
+    if req is None or (req["status"] in TERMINAL and kind != "review" and not pushed_late):
         return
     if kind == "review":
         req["reviews"][by] = {"verdict": row["verdict"], "ts": row["ts"]}

@@ -18,8 +18,13 @@ log = os.environ.get("LAND_FAKE_LOG")
 if log:
     with open(log, "a") as f:
         f.write(" ".join(sys.argv[1:]) + "\\n")
+here = pathlib.Path(".")
+if list(here.glob("HANG_GATE*")):
+    import time
+    time.sleep(120)
 if sys.argv[1] == "gate":
-    sys.exit(1 if list(pathlib.Path(".").glob("BAD_GATE*")) else 0)
+    both = (here / "COMBO_A").exists() and (here / "COMBO_B").exists()
+    sys.exit(1 if list(here.glob("BAD_GATE*")) or both else 0)
 bad = 0
 for a in sys.argv[2:]:
     p = pathlib.Path(a)

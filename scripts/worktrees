@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import land_git as lg  # noqa: E402
 
-from ml_stack.devbranch import development_branch  # noqa: E402
+from ml_stack.devbranch import development_branch
 
 MAX_COMMITS = 10
 MAX_AHEAD = 30
