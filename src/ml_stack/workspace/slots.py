@@ -31,8 +31,7 @@ def _agent(data: object, known: Callable[[str], object] | None) -> dict[str, Any
     """The workspace agent a lease names, cleaned, and whether the workspace has that identity."""
     if not isinstance(data, dict) or not isinstance(data.get("id"), str):
         return None
-    return {"id": clean_label(data["id"]), "label": clean_label(data.get("label", "")),
-            "parent": clean_label(data.get("parent", "")), "job": clean_label(data.get("job", "")),
+    return {"id": clean_label(data["id"]), "parent": clean_label(data.get("parent", "")), "job": clean_label(data.get("job", "")),
             "registered": bool(known and known(data["id"]))}
 
 
@@ -57,6 +56,6 @@ def testslots(known: Callable[[str], object] | None = None) -> dict[str, list[di
                 "minimum": _number(data.get("minimum")), "agent": _agent(data.get("agent"), known)}
         if item["agent"]:
             who = item["agent"]
-            item["label"] = f"{who['id']}{'/' + who['label'] if who['label'] else ''} ({item['label']})"
+            item["label"] = f"{who['id']} ({item['label']})"
         (running if item["granted"] > 0 else waiting).append(item)
     return {"running": running, "waiting": waiting}

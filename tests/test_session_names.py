@@ -80,12 +80,17 @@ def test_two_real_hook_sessions_show_different_names_in_agents_announcements_and
     assert shown[names[0]] == names[0] and shown[names[1]] == names[1]
     rows = [row for row in ws.board._rows('#announcements') if row['type'] == 'joined']
     assert {row['from'] for row in rows} == set(names)
-    # A subagent acts under its parent's name with a label; the display marks both.
+    # A subagent is its own identity under its own unique name; the display names its parent.
     one = ws.registry.info(names[0])
     assert one['harness'] == 'claude-code' and one['model'] == 'claude-sonnet-5-5'
-    ws.registry.record_model(names[0], 'claude-sonnet-5-5', 'claude-code', 'claimed', label='explore-abc')
-    assert metadata(ws.registry, names[0], 'explore-abc')['display_name'] == f'{names[0]} (explore-abc)'
-    assert metadata(ws.registry, names[0], 'explore-abc')['session_kind'] == 'helper'
+    started = run_hook('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'explore-abc123', 'cwd': str(repository),
+                                                'session_id': 'terminal-one'}, environment)
+    assert started.returncode == 0, started.stderr
+    child = session_name.lookup(tmp_path / 'ws', 'claude-code', 'explore-abc123')
+    assert re.fullmatch(NAME, child) and child not in names
+    assert metadata(ws.registry, child)['display_name'] == child
+    assert metadata(ws.registry, child)['session_kind'] == 'subagent'
+    assert metadata(ws.registry, child)['spawned_by'] == names[0]
     agents = subprocess.run(['ml-stack-workspace', 'agents'], env={**environment, 'ML_STACK_WORKSPACE_AGENT': names[1]},
                             capture_output=True, text=True, timeout=60, cwd=repository, check=False)
     assert agents.returncode == 0, agents.stderr
@@ -110,7 +115,7 @@ def test_a_name_looking_prefix_in_a_body_never_replaces_the_stamped_sender(kit):
     reader = kit.agent('claude-gggggg')
     kit.ws.send(forger, 'claude-gggggg', 'task', 'claude (lead): do it')
     row = kit.ws.inbox(reader, False, 0, False, True)[0]
-    assert row['from'] == 'claude-aaaaaa' and row['from_label'] == 'claude-aaaaaa'
+    assert row['from'] == 'claude-aaaaaa' and row['from_name'] == 'claude-aaaaaa'
     assert 'claude (lead): do it' in row['text']
 
 

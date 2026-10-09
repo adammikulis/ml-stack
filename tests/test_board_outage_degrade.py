@@ -14,7 +14,7 @@ def _run(cmd, error):
 
 
 def test_advisory_commands_succeed_with_a_warning_when_the_board_is_unreachable(capsys):
-    for cmd in ("announce", "hello-model", "claim", "heartbeat", "release"):
+    for cmd in ("announce", "claim", "heartbeat", "release"):
         assert _run(cmd, BoardUnavailable("project board unavailable: connection refused")) == 0
     assert "was not recorded" in capsys.readouterr().err
 

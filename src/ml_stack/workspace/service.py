@@ -17,6 +17,7 @@ from ml_stack.workspace import (
     limits as limits_mod,
     mesh_fold,
     reports,
+    spawn,
     tokens,
     wake,
     worktree_lifecycle,
@@ -27,10 +28,10 @@ from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.claims import Claims, Conflict
 from ml_stack.workspace.files import FileApi
-from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry, valid_name
+from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry
 from ml_stack.workspace.invites import Invites
 from ml_stack.workspace.mesh import Mesh
-from ml_stack.workspace.modelid import CLAIMED, VERIFIED, clean_harness, clean_model, describe
+from ml_stack.workspace.modelid import CLAIMED, VERIFIED, clean_model, describe
 from ml_stack.workspace.notes import KINDS, Notes
 from ml_stack.workspace.nudge import Waiting
 from ml_stack.workspace.quarantine import PLACEHOLDER, Quarantine
@@ -50,7 +51,6 @@ class SendOptions(TypedDict, total=False):
     subject: str
     reply_to: int
     ttl_s: float
-    label: str
     file: dict[str, Any]
 
 
@@ -92,7 +92,6 @@ class ClaimOptions(TypedDict, total=False):
     ttl_s: float
     pid: int
     note: str
-    label: str
 
 
 def _only(given: dict[str, Any], allowed: type) -> dict[str, Any]:
@@ -259,9 +258,9 @@ class Workspace:
         return name == BROADCAST or bool(self.registry.role_of(name))
 
     # -- models --------------------------------------------------------------------------
-    def model_of(self, name: str, label: str = "") -> tuple[str, str]:
-        """``(model, state)`` recorded for ``name`` (or its helper ``label``); empty when unknown."""
-        return self.registry.model_of(name, label)
+    def model_of(self, name: str) -> tuple[str, str]:
+        """``(model, state)`` recorded for ``name``; empty when unknown."""
+        return self.registry.model_of(name)
 
     def set_model(self, name: str, model: str, harness: str = "", *, verified: bool = True,
                   **process: Unpack[ProcessOptions]) -> None:
@@ -292,23 +291,28 @@ class Workspace:
         """Return the authenticated actor's execution observations."""
         return execution_profile.read(self, token)
 
-    def claim_model(self, token: str, model: str, harness: str = "", label: str = "") -> dict[str, Any]:
-        """The caller's own model as the caller says it (``claimed``); with ``label`` the model of
-        that helper. Refused where a launcher recorded a different model."""
+    def spawn(self, token: str, harness: str, session: str, model: str = "") -> dict[str, str]:
+        """Register a native subagent session as the caller's child, named by the board; its
+        token goes to its own private file. Returns its id and parent."""
+        made = spawn.spawn(self, token, harness, session, model)
+        spawn.store(self, made)
+        return {"id": made["id"], "parent": made["parent"]}
+
+    def retire(self, token: str) -> dict[str, str]:
+        """End the calling subagent's identity and release its claims."""
+        return spawn.retire(self, token)
+
+    def claim_model(self, token: str, model: str, harness: str = "") -> dict[str, Any]:
+        """The caller's own model as the caller says it (``claimed``). Refused where a launcher
+        recorded a different model."""
         who = self.auth(token)
         clean_model(model)
-        if label:
-            if not valid_name(label):
-                raise ValueError(f"{label!r} is not a usable label")
-            self.registry.record_model(who.id, model, clean_harness(harness), CLAIMED, label=label)
-            self.audit("model.label", who.id, label=label, model=clean_model(model))
-        else:
-            now, state = self.registry.model_of(who.id)
-            if state == VERIFIED and now != model:
-                self.audit("auth.denied", who.id, reason="model verified by launcher")
-                raise Denied(f"{who.id}'s model was recorded by the launcher; only a person changes it")
-            self._record_model(who.id, model, "" if state == VERIFIED else harness,
-                               VERIFIED if state == VERIFIED else CLAIMED)
+        now, state = self.registry.model_of(who.id)
+        if state == VERIFIED and now != model:
+            self.audit("auth.denied", who.id, reason="model verified by launcher")
+            raise Denied(f"{who.id}'s model was recorded by the launcher; only a person changes it")
+        self._record_model(who.id, model, "" if state == VERIFIED else harness,
+                           VERIFIED if state == VERIFIED else CLAIMED)
         return self.whoami_model(who.id)
 
     def whoami_model(self, name: str) -> dict[str, Any]:
@@ -335,11 +339,11 @@ class Workspace:
             raise Refused("a file message is made by `attach`")
         return self.post(self.auth(token), to, kind, body, **opts)
 
-    def announce(self, token: str, kind: str, text: str, label: str = "") -> dict[str, Any]:
+    def announce(self, token: str, kind: str, text: str) -> dict[str, Any]:
         """Post one terse line to `#announcements`, which everyone receives as a roll-up."""
-        return self._announce(self.auth(token), kind, text, label)
+        return self._announce(self.auth(token), kind, text)
 
-    def _announce(self, who: Identity, kind: str, text: str, label: str = "") -> dict[str, Any]:
+    def _announce(self, who: Identity, kind: str, text: str) -> dict[str, Any]:
         self._may(who, "send")
         lim = self.limits
         if kind not in ANNOUNCE_KINDS:
@@ -349,7 +353,7 @@ class Workspace:
             raise Refused(f"an announcement is one line of at most {lim.announce_chars} "
                           f"characters ({len(text)} given); put the detail in a note or a thread "
                           f"and link it by sequence number, such as 'done: see note 12'")
-        return self.post(who, ANNOUNCE, kind, text, subject=kind, label=label, announce=True)
+        return self.post(who, ANNOUNCE, kind, text, subject=kind, announce=True)
 
     def _announcement_quota(self, who: Identity) -> None:
         lim = self.limits
@@ -366,15 +370,13 @@ class Workspace:
         """Append a message from ``who``, an identity the caller has already established."""
         self._may(who, "send")
         given = _only(dict(opts), SendOptions)
-        label, file = str(given.get("label", "")), given.get("file")
-        if label and not valid_name(label):
-            raise ValueError(f"{label!r} is not a usable label")
+        file = given.get("file")
         if to == BROADCAST:
             if kind not in ANNOUNCE_KINDS:
                 raise Refused(f"`*` is the announcements board and takes only "
                               f"{', '.join(ANNOUNCE_KINDS)} (`announce KIND TEXT`); send anything "
                               f"else to the one agent who needs it")
-            return self._announce(who, kind, body, label)
+            return self._announce(who, kind, body)
         subject, reply_to, ttl_s = (given.get("subject", ""), int(given.get("reply_to", 0)),
                                     float(given.get("ttl_s", 0.0)))
         if kind == "file" and file is None:
@@ -382,7 +384,7 @@ class Workspace:
         if kind not in TYPES and not announce:
             raise ValueError(f"type must be one of {', '.join(TYPES)}")
         row = {'type': kind, 'from': who.id, 'role': who.role, 'to': to, 'reply_to': reply_to,
-               'thread': 0, 'subject': subject, 'body': body, 'label': label,
+               'thread': 0, 'subject': subject, 'body': body,
                'mentions': [], **({'file': file} if file else {})}
         return reports.emit(self, who, row, announce=announce, ttl_s=ttl_s)
 
@@ -436,7 +438,7 @@ class Workspace:
         wake.signal(self.base / 'wake', self.board.wake_names(made))
         self.audit('message', who.id, msg=made['seq'], to=to, type=row['type'], held=qid,
                    size=len(made['body']), thread=made.get('thread', 0),
-                   label=row['label'], model=row['model'], verified=row['model_state'] == VERIFIED)
+                   model=row['model'], verified=row['model_state'] == VERIFIED)
         return self.deliver(made, raw=True)
 
     def deliver(self, row: dict[str, Any], raw: bool = False, cap: int = 0,
@@ -455,13 +457,13 @@ class Workspace:
             text = f"subject: {row['subject']}\n{row['body']}" if row["subject"] else row["body"]
         if reader is not None and not qid:
             text = self.files.render(reader, text)
-        sender = agent_display.metadata(self.registry, row["from"], row.get("label", ""))["display_name"]
+        sender = agent_display.spoken(agent_display.metadata(self.registry, row["from"]))
         model, model_state = row.get("model", ""), row.get("model_state", "")
         shown_model = "" if row["role"] == HUMAN else f" ({describe(model, model_state)})"
         screened = fence(text, f"workspace:{row['from']}#{row['seq']}",
                          f"{row['role']} {sender}{shown_model}, {row['type']}")
         shown_text = text if state == "quarantined" else screened.text
-        out = {"seq": row["seq"], "type": row["type"], "from": row["from"], "from_label": sender,
+        out = {"seq": row["seq"], "type": row["type"], "from": row["from"], "from_name": sender,
                "project": self.registry.info(row["from"]).get("project", {}).get("name", ""),
                "from_role": row["role"], "from_model": model, "from_model_state": model_state, "to": row["to"], "ts": row["ts"],
                "thread": row.get("thread") or row["seq"], "reply_to": row.get("reply_to", 0),
@@ -531,7 +533,7 @@ class Workspace:
         sent = [r for r in waiting.rows if not r["held"] and not r.get("flags") and self.registry.role_of(r["from"])
                 and self.registry.info(r["from"]).get("project", {}).get("key", "") == mine]
         texts = [{"seq": r["seq"], "type": r["type"], "from": r["from"],
-                  "from_label": agent_display.metadata(self.registry, r["from"], r.get("label", ""))["display_name"],
+                  "from_name": agent_display.spoken(agent_display.metadata(self.registry, r["from"])),
                   "text": f"{r['subject']}: {r['body'][:600]}" if r["subject"] else r["body"][:600]}
                  for r in sent[:50]]
         return {**waiting.summary(), "messages": texts}
@@ -759,7 +761,7 @@ class Workspace:
             self.audit("claim.conflict", who.id, kind=kind, key=key)
             raise
         if kind == "worktree":
-            worktree_lifecycle.remember(self.base, who.id, str(given.get("label", "")), made["key"])
+            worktree_lifecycle.remember(self.base, who.id, made["key"])
         self.audit("claim", who.id, kind=kind, key=made["key"])
         return made
 

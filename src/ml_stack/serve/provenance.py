@@ -13,11 +13,21 @@ import psutil
 
 from ml_stack.sentinel.redaction import MASK, redact, redact_value
 
-__all__ = ["ENV_FOR", "ENV_LABEL", "NO_REASON", "asked", "describe", "lines", "observe",
-           "program", "record_from", "told"]
+__all__ = [
+    "ENV_AGENT",
+    "ENV_FOR",
+    "NO_REASON",
+    "asked",
+    "describe",
+    "lines",
+    "observe",
+    "program",
+    "record_from",
+    "told",
+]
 
 ENV_FOR = "ML_STACK_LEASE_FOR"
-ENV_LABEL = "ML_STACK_WORKSPACE_LABEL"
+ENV_AGENT = "ML_STACK_WORKSPACE_AGENT"
 NO_REASON = "(no reason given)"
 CHAIN_DEPTH = 4
 MAX_TEXT = 200
@@ -109,7 +119,7 @@ def asked(reason: str = "", requester: str = "") -> dict[str, Any]:
     name, said = program(), os.environ.get(ENV_FOR, "")
     why = f"{said} ({reason})" if said and reason and said != reason else reason or said
     return {"reason": _line(why),
-            "requester": _line(requester or os.environ.get(ENV_LABEL) or name),
+            "requester": _line(requester or os.environ.get(ENV_AGENT) or name),
             "program": _line(name), "origin": describe(os.getpid())}
 
 

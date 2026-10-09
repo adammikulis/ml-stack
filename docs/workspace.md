@@ -107,17 +107,40 @@ worktree and merged branch, prune, and verify the path is absent from `git workt
 The parent checks its subagents' cleanup. A retained worktree needs a handoff naming its path,
 branch, pending work and responsible agent; it is not a completed task.
 Exact clear agent `status`, `done`, `milestone` and `blocked` reports reuse their existing
-journal sequence for 60 seconds. Sender, helper label, destination, kind, subject, thread,
+journal sequence for 60 seconds. Sender, destination, kind, subject, thread,
 body, lifetime and model provenance must all match. A reused report does not wake readers
 again or consume another send/announcement quota. Live authority, board membership, thread
 access and body checks still run first. Human messages, changed reports and quarantined
 content remain distinct; there is no separate deduplication index or hidden-body hash.
 
-The person never pastes anything for a subagent. A subagent acts as its parent: `ml-stack-workspace
-brief NAME` prints a three-line brief to paste into the subagent's prompt. The subagent runs
-every command with `--agent ME --label NAME` (or `ML_STACK_WORKSPACE_LABEL`); messages show as
-`ME (NAME)` (`from_label`), claims carry the label in their note, events record it. The subagent
-holds exactly its parent's rights. A label is only a note for display and audit, never an authority.
+The person never pastes anything for a subagent. Every subagent is its own identity with one
+board-assigned unique name (family plus six characters cut from its session identity, as for a main
+session). The SubagentStart hook runs `ml-stack-workspace spawn --session AGENT_ID` as the session
+that started it: the board derives the name from the subagent's native agent id, records the
+authenticated caller as its `parent` (for a nested subagent, the subagent that spawned it, not the
+lead), mints its token into its own private file and records its model as claimed. Claude Code gives
+a subagent no environment channel, so the hook delivers the name in its `additionalContext` and the
+subagent runs every command with `--agent NAME`; `--agent` only picks which of your own token files to
+use, the token decides who is sending. `inbox`, `brief`, `claim` and `announce` all run as the
+subagent. A message shows as `NAME (spawned by PARENT)` (`from_name`); `from` is always the sender's own
+name. The SubagentStop hook announces `done` as the subagent and then `retire`s it (token revoked,
+claims released); a refused `done` leaves the identity live. A subagent holds at most its parent's
+rights, cannot invite or use scratch folders, may claim only branches and servers named `NAME/...`,
+and is never coordinator-eligible. Without a hook, a parent runs `spawn --session UNIQUE-ID` and
+`brief --agent NAME` itself. There is no label: no flag, header or body field names a sender, parent,
+name or label, and the host refuses a call that carries one.
+
+### Reading one agent's records: `--for-agent NAME`
+
+`claims`, `tasks`, `agents`, `inbox`, `outbox`, `board` (read, threads, mentions) and `digest` take
+`--for-agent NAME`, which narrows what they show to the records that name that agent (as owner, sender,
+recipient, worker or reviewer). NAME is the agent's unique name or a prefix of it that fits exactly
+one agent; a prefix that fits several is refused with the candidates listed. The filter only selects
+records you may already read: it never sets a sender, never acts as that agent and cannot widen what
+the command shows. Public board records (claims, tasks, announcements, the agent list) are
+filterable by anyone. Private ones stay lead-or-person-only on the server: `scratch-ls`,
+`scratch-path` and `scratch-rm` accept `--for-agent` for a lead or a person and refuse an ordinary
+agent, and no command shows another agent's inbox.
 
 ### Agents inviting agents
 
@@ -598,7 +621,7 @@ field reads as `model unknown`.
 |---|---|
 | `verified` | ml-stack launched the agent and knows the served model (`agent start`, `ml-stack-claude`, `ml-stack-codex`, the lease alias); recorded by `Workspace.set_model(name, model, harness, verified=True)`, which refuses any process an agent started or one without a terminal |
 | `claimed` | the agent said so: `join CODE --name ID --model MODEL [--harness H]` or `whoami --model MODEL` |
-| `inherited` | a helper (`--label`, or a delegated `parent/child`) with no model of its own shows its parent's; `hello-model LABEL MODEL` records the label's own, once |
+| `inherited` | a subagent (or a delegated `parent/child`) with no model of its own shows its parent's; `spawn --model` or `whoami --model` records its own |
 
 A model id is 1 to 80 characters from `A-Z a-z 0-9 . _ - : / + @` and starts with a letter or digit;
 anything else (a newline, a bidi mark, markup, a space, a long string) is refused before anything is
@@ -683,9 +706,9 @@ Left out: see "The agent workspace" in `HANDOFF.md`.
 ### Mutation ownership
 
 Coding checkout ownership survives claim expiry and release in a durable lifecycle graph.
-`ml-stack-workspace worktrees --agent NAME --label HELPER` lists unfinished scopes without
-removing files. A labeled `announce done` checks that helper's scopes and the identity's
-unlabeled native scopes; a lead's unlabeled `done` checks all its own scopes. Completion
+`ml-stack-workspace worktrees --agent NAME` lists the unfinished scopes of the identity NAME
+without removing files. `announce done` checks the scopes of the identity that announces it: a
+subagent's own, a lead's own. Completion
 requires the checkout, Git registration and recorded branches to be absent, and recorded
 source commits to be landed on development. Unique, dirty and ignored files remain intact.
 
@@ -926,7 +949,7 @@ Every main session has its own name: the model family plus six hex characters cu
 its harness and native session id (`claude-6e1a2f`), lengthened by two characters while another
 session holds the short form. The SessionStart hook assigns it (`workspace/session_name.py`), keeps
 it in `session-names.json` under the workspace state directory, registers the session under it and
-exports `ML_STACK_WORKSPACE_AGENT`, so commands need no `--agent`. A subagent is its parent's name
-plus its label (`claude-6e1a2f (explore-abc)`). The exact model id and the harness stay separate
+exports `ML_STACK_WORKSPACE_AGENT`, so commands need no `--agent`. A subagent has its own name of the same
+shape and shows as `claude-9b41c2 (spawned by claude-6e1a2f)`. The exact model id and the harness stay separate
 registry fields; the suffix is presentation, never authority. `--agent claude` (or `codex`,
 `chatgpt`, `qwen`, `claude-code`) fails with a message naming the session's own id.

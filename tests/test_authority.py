@@ -23,8 +23,7 @@ LEAD = {"CLAUDECODE": "1", "ML_STACK_WORKSPACE_AGENT": "claude-code"}
 @pytest.fixture(autouse=True)
 def registry(monkeypatch, tmp_path):
     monkeypatch.delenv(authority.FLOOR_ENV, raising=False)
-    for name in (*authority.DELEGATING, "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_AGENT",
-                 "ML_STACK_WORKSPACE_LABEL"):
+    for name in (*authority.DELEGATING, "ML_STACK_NONINTERACTIVE", "ML_STACK_WORKSPACE_AGENT"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
 
@@ -93,8 +92,7 @@ def test_a_delegated_gate_passes_a_lead_agent_and_audits_each_use():
 
 
 def test_a_delegated_gate_refuses_helpers_and_unattended_processes():
-    for env in ({**LEAD, "ML_STACK_WORKSPACE_LABEL": "reader"},
-                {**LEAD, "ML_STACK_WORKSPACE_AGENT": "claude-code/reader"}):
+    for env in ({**LEAD, "ML_STACK_WORKSPACE_AGENT": "claude-code/reader"},):
         with pytest.raises(HumanRequired, match="not a helper"):
             authority.require("sentinel.policy", "mode", (False, False), env)
     for env in ({}, {"ML_STACK_NONINTERACTIVE": "1"}):

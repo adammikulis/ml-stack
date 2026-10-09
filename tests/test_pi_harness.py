@@ -76,7 +76,7 @@ def test_pi_extension_denies_writes_and_reports_exhausted_turns(tmp_path):
         pytest.skip("Node is required by Pi")
     hook = tmp_path / "policy.mjs"
     hook.write_text(pi.extension({"python": sys.executable, "role": "read-only",
-        "label": "isolated-pi", "root": str(tmp_path), "protected": [], "maxTurns": 1}))
+        "agent": "isolated-pi", "root": str(tmp_path), "protected": [], "maxTurns": 1}))
     driver = tmp_path / "driver.mjs"
     driver.write_text(
         'import extension from "./policy.mjs";\n'
@@ -97,7 +97,6 @@ def test_pi_post_checkpoint_failure_stops_the_session(tmp_path):
     import json
     import shutil
     import subprocess
-    import sys
 
     import pytest
 
@@ -105,8 +104,8 @@ def test_pi_post_checkpoint_failure_stops_the_session(tmp_path):
     if not node:
         pytest.skip("Node is required by Pi")
     hook = tmp_path / "policy.mjs"
-    hook.write_text(pi.extension({"python": sys.executable, "role": "plan-and-go",
-        "label": "missing-checkpoint-identity", "root": str(tmp_path), "protected": []}))
+    hook.write_text(pi.extension({"python": "/usr/bin/false", "role": "plan-and-go",
+        "agent": "missing-checkpoint-identity", "root": str(tmp_path), "protected": []}))
     driver = tmp_path / "driver.mjs"
     driver.write_text(
         'import extension from "./policy.mjs";\n'

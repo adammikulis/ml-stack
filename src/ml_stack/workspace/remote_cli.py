@@ -17,7 +17,7 @@ OPTIONS = [option("json"), flag("action", choices=("connect", "connection", "joi
            flag("--cluster", default=""),
            flag("--name", default=""), flag("--agent", default=""),
            flag("--token-file", default=""), flag("--model", default=""),
-           flag("--harness", default=""), flag("--label", default=""),
+           flag("--harness", default=""), flag("--note", default="", help="claim: a short note shown beside the claim"),
            flag("--project-root", default="."), flag("--ttl", type=float, default=0.0),
            flag("--limit", type=int, default=20), flag("--ack", action="store_true")]
 
@@ -56,7 +56,7 @@ def run(args):
         if kind in ('area', 'file', 'worktree'):
             key = str((Path(args.project_root) / key).resolve())
         request = Namespace(cmd=action, agent=args.agent, kind=kind, key=key,
-                            ttl=args.ttl, pid=0, note=args.label, label=args.label)
+                            ttl=args.ttl, pid=0, note=args.note)
         return harness_remote.cli_command(remote, token, request)
     if action in {"whoami", "agents", "claims", "history"}:
         return remote.call(action, token)
@@ -67,13 +67,13 @@ def run(args):
     if action == "read" and len(values) == 1:
         return remote.call("board.read", token, values[0], limit=min(max(args.limit, 1), 100))
     if action == "post" and len(values) >= 2:
-        return remote.call("send", token, values[0], "note", " ".join(values[1:]), label=args.label)
+        return remote.call("send", token, values[0], "note", " ".join(values[1:]))
     if action == "send" and len(values) >= 3:
         if values[1] == 'done':
             harness_remote.cli_command(remote, token, Namespace(cmd='send', agent=args.agent))
-        return remote.call("send", token, values[0], values[1], " ".join(values[2:]), label=args.label)
+        return remote.call("send", token, values[0], values[1], " ".join(values[2:]))
     if action == "announce" and len(values) >= 2:
         if values[0] == 'done':
             harness_remote.cli_command(remote, token, Namespace(cmd='announce', agent=args.agent))
-        return remote.call("announce", token, values[0], " ".join(values[1:]), args.label)
+        return remote.call("announce", token, values[0], " ".join(values[1:]))
     raise ValueError(f"invalid arguments for remote {action}")

@@ -51,7 +51,7 @@ def acting() -> Acting | None:
     named = os.environ.get(tokens.AGENT_ENV, "")
     if not named and not os.environ.get(TOKEN_ENV):
         return None
-    args = argparse.Namespace(agent=named, label="", token_file="")
+    args = argparse.Namespace(agent=named, token_file="")
     try:
         opened = guarded("session", lambda: cli._context(args))
     except SystemExit:
@@ -59,7 +59,7 @@ def acting() -> Acting | None:
     who = guarded("session", lambda: opened[0].auth(opened[1])) if opened else None
     if who is None:
         return None
-    return Acting(opened[0], opened[1], {"id": who.id, "label": "", "parent": who.parent or "",
+    return Acting(opened[0], opened[1], {"id": who.id, "parent": who.parent or "",
                                           "source": "workspace-session"})
 
 

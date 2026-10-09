@@ -182,26 +182,18 @@ def test_a_message_keeps_the_model_it_was_sent_under_and_a_swap_is_announced_wit
     assert not any("alice now runs claude-sonnet-5-5" in t for t in news)
 
 
-def test_a_helper_label_has_its_own_model_or_inherits_the_parents(kit):
+def test_a_subagent_has_its_own_model_or_inherits_the_parents(kit):
     ws = kit.ws
     ws.claim_model(kit.tokens["alice"], "claude-sonnet-5-5")
-    inherited = ws.send(kit.tokens["alice"], "bob", "note", "x", label="speed")
+    plain = ws.spawn(kit.tokens["alice"], "claude-code", "speed-1")["id"]
+    inherited = ws.send(tokens.load(kit.base, plain), "bob", "note", "x")
     assert (inherited["from_model"], inherited["from_model_state"]) == ("claude-sonnet-5-5", "inherited")
-    assert cli(kit.base, kit.tokens["alice"], "hello-model", "speed", "claude-haiku-5").returncode == 0
-    own = ws.send(kit.tokens["alice"], "bob", "note", "y", label="speed")
+    own_name = ws.spawn(kit.tokens["alice"], "claude-code", "speed-2", "claude-haiku-5")["id"]
+    own = ws.send(tokens.load(kit.base, own_name), "bob", "note", "y")
     assert (own["from_model"], own["from_model_state"]) == ("claude-haiku-5", "claimed")
     assert ws.model_of("alice") == ("claude-sonnet-5-5", "claimed")
     child = ws.delegate(kit.tokens["alice"], "kid")["id"]
     assert ws.model_of(child) == ("claude-sonnet-5-5", "inherited")
-
-
-def test_a_twenty_first_helper_evicts_the_oldest_instead_of_failing(kit):
-    ws, token = kit.ws, kit.tokens["alice"]
-    for i in range(25):
-        ws.claim_model(token, "claude-haiku-5", label=f"h{i}")
-    assert ws.model_of("alice", "h24")[0] == "claude-haiku-5"
-    assert ws.model_of("alice", "h4") == ("", "") or ws.model_of("alice", "h4")[1] == "inherited"
-    assert ws.model_of("alice", "h5")[1] == "claimed"
 
 
 def test_the_output_is_byte_stable(kit):

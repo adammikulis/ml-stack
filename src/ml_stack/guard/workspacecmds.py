@@ -15,10 +15,10 @@ def effect(args: list[str]) -> list[Finding]:
     command, words = args[0], []
     rest = iter(args[1:])
     for word in rest:
-        if word in ("--agent", "--label"):
+        if word == "--agent":
             if not next(rest, ""):
                 return [Finding("unsure", "workspace identity flag has no value")]
-        elif word.startswith(("--agent=", "--label=")) or word == "--json" or (word == "--peek" and command == "inbox"):
+        elif word.startswith("--agent=") or word == "--json" or (word == "--peek" and command == "inbox"):
             continue
         elif word.startswith("-"):
             return [Finding("unsure", "workspace flag is not in the bounded command profile")]

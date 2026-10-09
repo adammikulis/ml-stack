@@ -116,7 +116,7 @@ def acting(plan: Plan) -> Identity | None:
     name = plan.agent or os.environ.get(tokens.AGENT_ENV, "")
     if not name:
         return None
-    args = argparse.Namespace(agent=name, token_file="", label="")
+    args = argparse.Namespace(agent=name, token_file="")
     try:
         ws, token = cli._context(args, cli._project_connection(plan.checkout))
         if isinstance(ws, project_connection.CanonicalWorkspace):

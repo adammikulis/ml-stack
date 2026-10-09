@@ -19,10 +19,9 @@ PROFILE_TIMEOUT = 2.0
 @dataclass(slots=True)
 class Seat:
     """How a session appears on the workspace: ``name`` is the identity, ``minted`` says whether
-    the launcher created it (and so revokes it), ``parent`` the agent it acts for otherwise."""
+    the launcher created it (and so revokes it)."""
 
     name: str
-    parent: str = ""
     minted: bool = False
     base: Path | None = None
     issuer: Identity | None = None
@@ -34,7 +33,7 @@ class Seat:
 
     def flags(self) -> list[str]:
         """The workspace command flags this session's messages carry."""
-        return ["--agent", self.parent, "--label", self.name] if self.parent else ["--agent", self.name]
+        return ["--agent", self.name]
 
     def record_model(self, alias: str, harness: str, server: str = "") -> bool:
         """Record a connected agent's model as claimed; False on an inactive seat or refusal."""
@@ -109,14 +108,13 @@ class Seat:
 
     def pending_worktrees(self) -> list[dict]:
         """Return this session identity's unfinished coding scopes."""
-        return worktree_lifecycle.pending(self.base, self.parent or self.name) if self.base else []
+        return worktree_lifecycle.pending(self.base, self.name) if self.base else []
 
     def require_clean(self) -> None:
         """Refuse a successful session exit with unfinished attributed checkouts."""
         if self.base:
             try:
-                worktree_lifecycle.require_clean(self.base, self.parent or self.name,
-                                                self.name if self.parent else '')
+                worktree_lifecycle.require_clean(self.base, self.name)
             except Denied as error:
                 raise ValueError(str(error)) from error
 

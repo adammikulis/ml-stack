@@ -62,7 +62,7 @@ export default function (pi) {{
     if (input.path && !input.file_path) input.file_path = input.path;
     if (input.oldText !== undefined) input.old_string = input.oldText;
     if (input.newText !== undefined) input.new_string = input.newText;
-    const result = call(["pre","--role",cfg.role,"--label",cfg.label,"--root",cfg.root,
+    const result = call(["pre","--role",cfg.role,"--agent",cfg.agent,"--root",cfg.root,
       ...cfg.protected.flatMap(path => ["--protect",path]),"--wait","300"],
       {{tool_name:mapped,tool_input:input,cwd:cfg.root}});
     if (result.failed) return {{block:true,reason:"ml-stack: tool policy failed; blocked"}};
@@ -70,7 +70,7 @@ export default function (pi) {{
     if (answer.permissionDecision === "deny") return {{block:true,reason:"ml-stack: " + (answer.permissionDecisionReason || "blocked by policy")}};
   }});
   pi.on("tool_result", (_event, ctx) => {{
-    const result = call(["post","--label",cfg.label,"--root",cfg.root],{{}});
+    const result = call(["post","--agent",cfg.agent,"--root",cfg.root],{{}});
     if (result.failed) {{
       console.log(JSON.stringify({{type:"error",message:"Pi mutation checkpoint failed"}}));
       ctx.abort(); ctx.shutdown();
@@ -145,7 +145,7 @@ def _run(args, command, served, say, runner):
             (config_dir / "models.json").write_text(models(base_url,alias,window,args.max_output_tokens),encoding="utf-8")
             protected = harnessing.protected_paths(run.files)
             hook = run.files.write("ml-stack.ts", extension({"python": sys.executable,
-                "role": args.role, "label": run.seat.name, "root": str(run.cwd),
+                "role": args.role, "agent": run.seat.name, "root": str(run.cwd),
                 "protected": protected, "maxTurns": args.max_turns, "maxOutputTokens": args.max_output_tokens,
                 "thinking": families.for_model_id(alias).think_kwargs(args.effort != "off")}))
             env = {**os.environ,"PI_CODING_AGENT_DIR":str(config_dir),"PI_OFFLINE":"1",

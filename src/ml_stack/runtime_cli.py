@@ -84,7 +84,7 @@ SETTLE = "settle.lock"
 def _again(args: argparse.Namespace) -> list[str]:
     """The ensure command line that repeats this one without --background."""
     words = ["ensure", "--ref", args.ref, "--timeout", str(args.timeout), "--wait", str(args.wait)]
-    for name in ("checkout", "launchers", "agent", "label"):
+    for name in ("checkout", "launchers", "agent"):
         if getattr(args, name):
             words += [f"--{name}", getattr(args, name)]
     return words + [f"--{name.replace('_', '-')}" for name in ("force", "force_build") if getattr(args, name)] \
@@ -124,7 +124,7 @@ def _run(args: argparse.Namespace, plan: runtime_deploy.Plan) -> runtime_deploy.
     previous = str(runtime_store.selection().get("commit", ""))
     outcome = runtime_deploy.ensure(plan, force=args.force, force_build=args.force_build)
     _audited(args, "ensure", plan, outcome.action, outcome.detail)
-    runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent, label=args.label)
+    runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return outcome
 
@@ -144,7 +144,7 @@ def _rollback(args: argparse.Namespace) -> int:
     plan = plan_from(args)
     outcome = runtime_deploy.rollback(plan, args.to)
     _audited(args, "rollback", plan, outcome.action, outcome.detail)
-    runtime_board.announce(outcome, previous, verb="rollback to", agent=args.agent, label=args.label)
+    runtime_board.announce(outcome, previous, verb="rollback to", agent=args.agent)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return 0 if outcome.ok else 1
 
@@ -223,7 +223,6 @@ COMMON = [
     flag("--timeout", type=float, default=runtime_deploy.BUILD_TIMEOUT),
     flag("--wait", type=float, default=runtime_deploy.CLAIM_WAIT_S, help="seconds to wait for another owner's install claim"),
     flag("--agent", default="", help="workspace agent that holds the claims and posts the outcome (default: the environment's)"),
-    flag("--label", default="", help="helper label shown beside the agent"),
 ]
 
 GROUP = Group("ml-stack runtime", "Build, verify and select the installed runtime from the source checkout; status; rollback.")

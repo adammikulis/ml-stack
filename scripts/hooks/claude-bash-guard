@@ -152,6 +152,21 @@ HARD = (PUSH_FLAGS, PUSH_MAIN, MINT, PERSON_STORE)
 MESSAGE = re.compile(r"(-m|--message)(\s+|=)('[^']*'|\"[^\"]*\")")
 
 
+WORKSPACE = RUN + r"(\S*/)?ml-stack-workspace\b"
+
+
+def subagent_without_its_name(event: dict, command: str) -> str:
+    """The board name a subagent must pass as `--agent` when its workspace command omits it, else an empty string.
+
+    A subagent's shell inherits its lead's environment, so a command without `--agent` would act as
+    the lead; the SubagentStart hook gave the subagent its own name and token."""
+    agent = str(event.get("agent_id") or "")
+    if not agent or not re.search(WORKSPACE, command, re.M) or re.search(r"--agent[ =]", command):
+        return ""
+    import workspace_hook
+    return workspace_hook.agent_name(agent)
+
+
 def release_approved(cwd: str) -> bool:
     """Whether this session holds a live release-main approval for the repository at ``cwd``."""
     try:
@@ -176,6 +191,13 @@ def main() -> int:
     if why:
         print(f"blocked: {why}\n\n(ml-stack scripts/hooks/claude-bash-guard. Set "
               f"MLSTACK_GUARD=off for a person's own session.)", file=sys.stderr)
+        return 2
+    named = "" if switched else subagent_without_its_name(event, command)
+    if named:
+        print(f"blocked: you are the subagent {named}. Run workspace commands as yourself with "
+              f"`--agent {named}`; without it the command acts as the session that started you.\n\n"
+              f"(ml-stack scripts/hooks/claude-bash-guard. Set MLSTACK_GUARD=off for a person's own session.)",
+              file=sys.stderr)
         return 2
     command = MESSAGE.sub(r"\1 ''", without_search_patterns(command))
     for pattern, instead in REFUSE:

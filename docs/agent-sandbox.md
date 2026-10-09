@@ -218,7 +218,7 @@ Do these at your own terminal, in order. Steps 1 to 3 run no sandbox.
    `echo x >> .git/hooks/x`. Expect the commit to work and the hook write to fail. This tests
    whether `denyWrite` beats the parent allow.
 9. Ask for `env | grep -c CLAUDE_CODE_MESSAGING`. Expect `0`.
-10. Ask for `ml-stack-workspace announce joined 'sandbox acceptance' --agent claude-code --label acceptance`.
+10. Ask for `ml-stack-workspace announce joined 'sandbox acceptance' --agent claude-code`.
     Expect the announcement to be recorded. Failure here means the token read or the `workspace`
     write is blocked.
 11. Ask for `scripts/test all -n 1 tests/test_agent_sandbox.py`. Expect `22 passed`. On Linux a

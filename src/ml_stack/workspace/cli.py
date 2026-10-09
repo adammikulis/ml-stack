@@ -73,22 +73,20 @@ from ml_stack.workspace.taskboard import TaskBoard
 __all__ = ["COMMANDS", "main"]
 
 CANCELLED = threading.Event()
-LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
 CODES = ((ServerError, 3), (Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
          (HumanRequired, 3), (EOFError, 2), (ValueError, 2), (OSError, 2))
 Handler = Callable[[argparse.Namespace, Workspace, str], Any]
 # Commands an agent runs on the way to local work: with the project board out of reach they warn
 # and succeed, never stopping the agent (what they would have recorded is simply not recorded).
-DEGRADE = frozenset({"announce", "hello-model", "claim", "release", "heartbeat", "nudge", "join"})
+DEGRADE = frozenset({"announce", "claim", "release", "heartbeat", "nudge", "join"})
 
 COMMON = [option("json"),
           flag("--request-id", default="", help="reuse an exact remote mutation request after a lost response"),
           flag("--token-file", default="", help=f"a file holding the sender's token "
                                                 f"(else --agent, else ${TOKEN_ENV}, "
                                                 f"else ${tokens.AGENT_ENV})"),
-          flag("--agent", default="", help="act as this agent: its token file from `join`"),
-          flag("--label", default="", help=f"a note of which helper is acting, shown as "
-                                           f"NAME/LABEL (else ${LABEL_ENV}); not an authority")]
+          flag("--agent", default="", help="which of your own token files to use, by agent name (else "
+                                           f"${tokens.AGENT_ENV}); the token, not this name, decides who is sending")]
 WIDEN = [flag("--limit", type=int, default=0,
               help="show this many (default: a few, each cut short; the rest is counted)"),
          flag("--all", action="store_true", help="show everything, uncut")]
@@ -99,10 +97,6 @@ FOR_AGENT = flag("--for-agent", default="", metavar="NAME",
                  help="show only this agent's records, by its unique name or an unambiguous start of it; "
                       "it selects what to read and never sets who is sending (for scratch folders, which "
                       "are private, only a lead or person may name another agent)")
-
-
-def _label(args: argparse.Namespace) -> str:
-    return args.label or os.environ.get(LABEL_ENV, "")
 
 
 def _token(args: argparse.Namespace) -> str:
@@ -185,7 +179,7 @@ def _text(value: Any) -> str:
         where = f" on {value['board']}" if value.get("board") else ""
         model = ("" if value.get("from_role") == "human"
                  else f" ({describe(value.get('from_model', ''), value.get('from_model_state', ''))})")
-        return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])}"
+        return (f"[{value['seq']}] {value['type']} from {value.get('from_name', value['from'])}"
                 f"{model}{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
     if isinstance(value, dict) and {"block", "uses"} <= value.keys():
         return str(value["block"]).rstrip("\n")
@@ -281,8 +275,8 @@ def _invite(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
                                      (made["uses"], int(made["ttl_s"] // 60))), "uses": made["uses"]}
 
 
-def _hello_model(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.claim_model(token, args.model, "", args.label_name)
+def _spawn(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    return ws.spawn(token, args.harness, args.session, args.model)
 
 
 def _agents(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -292,11 +286,11 @@ def _agents(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 def _send(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     return ws.send(token, args.to, args.type, _body(args.body), subject=args.subject,
-                   reply_to=args.reply_to, ttl_s=args.ttl, label=_label(args))
+                   reply_to=args.reply_to, ttl_s=args.ttl)
 
 
 def _inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return attention_cli.inbox(args, ws, token, _label(args))
+    return attention_cli.inbox(args, ws, token)
 
 
 def _wait(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -304,7 +298,7 @@ def _wait(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _announce(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.announce(token, args.kind, _body(args.text), _label(args))
+    return ws.announce(token, args.kind, _body(args.text))
 
 
 def _note_add(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -315,8 +309,7 @@ def _note_add(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _claim(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    note = f"[{_label(args)}] {args.note}".strip() if _label(args) else args.note
-    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=note, label=_label(args))
+    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=args.note)
 
 
 def _worktrees(args, ws, token):
@@ -324,7 +317,7 @@ def _worktrees(args, ws, token):
         who = ws.auth(token)
         ws._may(who, 'claim')
         return worktree_lifecycle.cleanup(ws.base, who.id, args.cleanup, ws.claims)
-    return worktree_lifecycle.pending(ws.base, ws.auth(token).id, _label(args))
+    return worktree_lifecycle.pending(ws.base, ws.auth(token).id)
 
 
 def _released(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -400,9 +393,12 @@ def _chat(args: argparse.Namespace, ws: Workspace) -> int:
 def _brief(args: argparse.Namespace, ws: Workspace) -> int:
     args.token_file = getattr(args, "token_file", "")
     context, token = _context(args)
-    me = context.auth(token).id
-    say(onboard.brief(args.name, me, args.registered), end="")
-    attention_cli.helper_brief(context, me, args.name, context.auth(token))
+    who = context.auth(token)
+    parent = context.registry.info(who.id)["parent"] if isinstance(context, Workspace) else who.parent
+    if not parent:
+        raise ValueError(f"{who.id} was not spawned by another agent; run `spawn` as the parent, then brief --agent NAME")
+    say(onboard.brief(who.id, parent, args.registered), end="")
+    attention_cli.helper_brief(context, token)
     return 0
 
 
@@ -433,7 +429,7 @@ def _board(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     if args.action == "add":
         return b.add(token, name, rest[0])
     return ws.send(token, name, args.type, _body(" ".join(rest)), subject=args.subject,
-                   reply_to=args.reply_to, label=_label(args))
+                   reply_to=args.reply_to)
 
 
 def _dm(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -441,7 +437,7 @@ def _dm(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
         return ws.board.dm_list(token)
     if args.body:
         ws.send(token, args.name, args.type, _body(args.body), subject=args.subject,
-                reply_to=args.reply_to, label=_label(args))
+                reply_to=args.reply_to)
     return ws.board.dm(token, args.name, args.between, args.limit)
 
 
@@ -503,17 +499,16 @@ LIVE = [flag("--no-live", action="store_true", help="skip the live check"),
         flag("--wait-seconds", type=float, default=600.0, help="how long to wait for a join")]
 BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace], int]], ...] = (
     ("connect", "initialize or reconnect --agent ID; without an agent, share a person-approved invite",
-     [flag("--name", default="", help="a suggested id for the agent; it may pick its own"),
+     [flag("--name", default="", help="the id to ask for when connecting an agent; the board checks it and adds a suffix when it is taken"),
       flag("--project", default="", help="the project folder (default: the git root you are in)"),
       flag("--no-project", action="store_true", help="connect without naming a project"),
       flag("--one-agent", action="store_true",
            help="a single-use code (default: one paste for up to 10 agents, one hour)"),
       flag("--remote", action="store_true", help="require an active shared host and include its authority"),
       flag("--code-only", action="store_true", help="print and copy the invite, then exit without waiting"),
-      flag("--label", default="", help="the helper label under this agent identity"),
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
-        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
+        flag("code"), flag("--name", default="", help="the id you ask for (for example codex); the board refuses reserved ids and adds a suffix when it is taken"),
         flag("--coordinator", default="", help="select this enrolled cluster coordinator before redeeming the invite"),
         flag("--workspace", default="", help="expected coordinator workspace ID; refuses local redemption"),
         flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
@@ -544,8 +539,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
      hooks_cli.SNIPPET, hooks_cli.snippet),
     ("install-hooks", "write the nudge hooks (post tool, prompt, stop) into Claude Code's and Codex's settings",
      hooks_cli.INSTALL, hooks_cli.install),
-    ("brief", "print the short brief a parent pastes into a subagent's prompt",
-     [flag("name"), flag("--registered", action="store_true", help="the parent's hooks register and announce the subagent")],
+    ("brief", "print the short brief for the spawned subagent you run as (--agent NAME), to paste into its prompt",
+     [flag("--registered", action="store_true", help="hooks registered the subagent and record its joined and done")],
      _brief),
 )
 
@@ -558,7 +553,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("revoke", "stop an agent's token working, with its outstanding invites; --tree also revokes every agent below it",
      [flag("name"), flag("--tree", action="store_true", help="revoke every descendant too")], _revoke),
     ("invite", "a joined agent makes a one-time paste block for a new agent it starts; the new agent joins as its child", [
-        flag("--name", default="", help="a suggested id for the new agent"),
+        flag("--name", default="", help="an id to suggest in the paste block for the new agent; the board checks it again when the agent joins"),
         flag("--ttl", default="10m", help="how long the code works, e.g. 10m (at most 30m)"),
         flag("--uses", type=int, default=1, help="how many agents may join with it (at most 3)")], _invite),
     ("whoami", "who the token says you are and your project's enforcement mode; --model records your own model id as claimed",
@@ -567,11 +562,16 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      enforcement_cli.OPTIONS, enforcement_cli.run),
     ("authority", "show, set or preset which gates a lead agent may pass instead of a person (preset dev|prod)",
      authority_cli.OPTIONS, authority_cli.run),
+    ("spawn", "register a subagent's native session as your child: the board names it and records you as its parent; "
+              "run by a harness hook for the session that started the subagent",
+     [flag("--session", help="the subagent's native session id (its agent id)"),
+      flag("--harness", default="claude-code", help="the harness the subagent runs in"),
+      flag("--model", default="", help="the subagent's model id, recorded as claimed")], _spawn),
+    ("retire", "end the subagent you run as: its token stops working and its claims are released; run by its stop hook",
+     [], lambda a, w, t: w.retire(t)),
     ("main-session", "register main-session presentation; grants no rights", [flag("--harness", default="")],
      lambda args, ws, token: ws.register_session(token, onboard.device_metadata.current(), args.harness)),
-    ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
-        flag("label_name", metavar="LABEL"), flag("model", metavar="MODEL")], _hello_model),
-    ("agents", "every live identity with its role, model and whether the model is verified", [FOR_AGENT],
+    ("agents", "every live identity with its role, model and whether the model is verified; --for-agent shows one", [FOR_AGENT],
      _agents),
     ("send", "send a message (BODY - reads stdin)", [
         flag("to", help="an agent id, or * for the announcements board (joined, milestone, "
@@ -742,8 +742,7 @@ def _narrowed(args: argparse.Namespace, ws: Any, result: Any) -> Any:
 
 
 def _agent_named(ws: Any, text: str) -> str:
-    registry = getattr(ws, "registry", None)
-    return agent_filter.resolve(registry.ids(), text) if text and registry else text
+    return agent_filter.resolve(ws.registry.ids(), text) if text and isinstance(ws, Workspace) else text
 
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
@@ -833,7 +832,7 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
 
 for _name, _help, _options, _handler in BARE:
     COMMANDS.add(_name, _bare(_handler), help=_help,
-                 options=[option("json"), flag("--agent", default="", help="the parent agent"),
+                 options=[option("json"), flag("--agent", default="", help="the existing agent whose token file to use (connect: the one to reconnect)"),
                           *_options])
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
@@ -866,7 +865,8 @@ def _coordinator(args):
 COMMANDS.add("coordinator", _guarded(_coordinator),
              help="inspect, host or select one authenticated shared workspace coordinator",
              options=[*COMMON, flag("action", choices=('status', 'list', 'host', 'connect')),
-                      flag("name", nargs='?', default='')])
+                      flag("name", nargs='?', default='',
+                           help="connect: the coordinator to select, by the name `coordinator list` shows")])
 COMMANDS.add("nudge", _guarded(_nudging),
              help="print one line summarising what waits for you (nothing when nothing does); for hooks",
              options=[*COMMON, flag("--hook", default="", choices=("", *nudge.EVENTS),

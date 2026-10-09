@@ -1,10 +1,10 @@
 """The PreToolUse and PostToolUse hook a launcher installs in a Claude Code or Codex session.
 
-``python -m ml_stack.harnesshook pre --role ROLE --label LABEL --root DIR --protect PATH`` reads
+``python -m ml_stack.harnesshook pre --role ROLE --agent AGENT --root DIR --protect PATH`` reads
 one hook event on stdin and writes the decision as JSON: the destructive-action classifier and
 the role decide, and a call that asks is raised in the Requests inbox and waits for the person.
 ``post`` runs ``ml-stack-workspace nudge`` and passes what it prints on as context. The role,
-label and paths are on the command line the launcher wrote, never read from the environment or
+agent and paths are on the command line the launcher wrote, never read from the environment or
 from the call. Admission hook failures block calls; notification failures produce diagnostics.
 """
 
@@ -69,10 +69,10 @@ def _summary(args: object) -> str:
         return "arguments that could not be read"
 
 
-def _ask(payload: dict[str, Any], decision: Decision, label: str, wait_s: float,
+def _ask(payload: dict[str, Any], decision: Decision, agent: str, wait_s: float,
          inbox: requests.Inbox | None) -> tuple[bool, str]:
     name = str(payload.get("tool_name", ""))
-    origin = requests.Origin(label, Path(str(payload.get("cwd", ""))).name, str(payload.get("session_id", "")))
+    origin = requests.Origin(agent, Path(str(payload.get("cwd", ""))).name, str(payload.get("session_id", "")))
     ask = requests.Ask(decision.kind, f"{name} {_summary(payload.get('tool_input'))}",
                        decision.reason, ("allow-once", "deny"), origin, ttl=wait_s)
     outcome = requests.raise_request(ask, inbox=inbox).wait(timeout=wait_s)
@@ -81,11 +81,11 @@ def _ask(payload: dict[str, Any], decision: Decision, label: str, wait_s: float,
 
 @dataclass(frozen=True, slots=True)
 class Rail:
-    """What a launcher fixes for a session: the ``role``, the workspace ``label``, the directories
+    """What a launcher fixes for a session: the ``role``, the workspace ``agent``, the directories
     writes may go to, the ``protected`` paths no call may name and how long a request waits."""
 
     role: str
-    label: str
+    agent: str
     roots: Sequence[str] = ()
     protected: Sequence[str] = ()
     wait_s: float = WAIT_S
@@ -94,7 +94,7 @@ class Rail:
 
 def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None) -> dict[str, Any]:
     """The PreToolUse answer for ``payload``: allow, deny, or the person's answer to a request."""
-    role, label, roots, protected, wait_s = rail.role, rail.label, rail.roots, rail.protected, rail.wait_s
+    role, agent, roots, protected, wait_s = rail.role, rail.agent, rail.roots, rail.protected, rail.wait_s
     event = HOOK_EVENTS["pre"]
     args = payload.get("tool_input")
     warning = ""
@@ -102,12 +102,12 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
         name = str(payload.get("tool_name", ""))
         inputs = args if isinstance(args, dict) else None
         try:
-            ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), label, roots)
+            ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), agent, roots)
         except BoardUnavailable as error:  # no board to ask: local work goes on, with a warning
             ownership = ""
             warning = f" (ownership not checked: {hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())})"
         decision = (Decision('deny', 'destructive', ownership) if ownership else None) or (primary_decision(name, inputs, str(payload.get("cwd", "")))
-                    or workspace_authority(_shell_line(name, inputs), label)
+                    or workspace_authority(_shell_line(name, inputs), agent)
                     or decide(role, name, inputs, roots=roots, protected=protected))
     except Denied as error:
         decision = Decision('deny', 'destructive', hook_diagnostics.record(error, 'pre', 'classification', metadata=hook_bootstrap.timings()))
@@ -117,7 +117,7 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
         return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}{warning}")
     if decision.action == "deny":
         return _answer(event, "deny", f"ml-stack: {decision.reason}")
-    approved, state = _ask(payload, decision, label, wait_s, inbox)
+    approved, state = _ask(payload, decision, agent, wait_s, inbox)
     if approved:
         return _owned_answer(payload, rail, event, "ml-stack: the person allowed this call")
     return _answer(event, "deny", f"ml-stack: the person did not allow this call ({state})")
@@ -127,7 +127,7 @@ def _owned_answer(payload, rail, event, reason):
     try:
         harness_claims.reserve(str(payload.get('tool_name', '')), payload.get('tool_input'),
                                str(payload.get('cwd') or (rail.roots[0] if rail.roots else Path.cwd())),
-                               rail.label, rail.roots)
+                               rail.agent, rail.roots)
     except BoardUnavailable as error:
         note = hook_diagnostics.record(error, 'pre', 'claim', metadata=hook_bootstrap.timings())
         return _answer(event, 'allow', f"{reason} (ownership not recorded: {note})")
@@ -151,11 +151,11 @@ def _reader_run(command, **kwargs):
     return subprocess.CompletedProcess(command, process.returncode, output, errors)
 
 
-def nudge(label: str, rail: Rail | None = None, *, canonical=None) -> str:
+def nudge(agent: str, rail: Rail | None = None, *, canonical=None) -> str:
     """Return unread metadata and redacted advisory failure references."""
     try:
         timeout = min(NUDGE_S, max(0.05, hook_bootstrap.remaining() - CLEANUP_RESERVE_S))
-        done = _reader_run([sys.executable, "-m", notification_reader.__name__, label,
+        done = _reader_run([sys.executable, "-m", notification_reader.__name__, agent,
                             str(rail.roots[0] if rail and rail.roots else Path.cwd()),
                             rail.session_id if rail else ""], capture_output=True, text=True,
                            timeout=timeout, check=False, stdin=subprocess.DEVNULL)
@@ -179,10 +179,10 @@ def nudge(label: str, rail: Rail | None = None, *, canonical=None) -> str:
     return text
 
 
-def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
+def post(agent: str, rail: Rail | None = None) -> dict[str, Any]:
     """Return bounded unread-message metadata and checkpoint diagnostics."""
     hook_bootstrap.stage("notification-reader")
-    text = nudge(label, rail)
+    text = nudge(agent, rail)
     if not text:
         return {}
     return {"hookSpecificOutput": {"hookEventName": HOOK_EVENTS["post"],
@@ -192,13 +192,13 @@ def post(label: str, rail: Rail | None = None) -> dict[str, Any]:
 def stop(rail: Rail) -> dict[str, Any]:
     """Block an authenticated harness completion until its recorded checkouts are cleaned."""
     try:
-        canonical = harness_remote.context(rail.label, rail.roots[0], rail.roots, require_claim=False)
+        canonical = harness_remote.context(rail.agent, rail.roots[0], rail.roots, require_claim=False)
         if canonical:
             harness_remote.require_clean(*canonical)
             return {}
         ws = Workspace()
-        who = ws.auth(tokens.load(ws.base, rail.label))
-        if who.id != rail.label:
+        who = ws.auth(tokens.load(ws.base, rail.agent))
+        if who.id != rail.agent:
             raise Denied('completion requires the launcher-bound identity')
         worktree_lifecycle.require_clean(ws.base, who.id, within=tuple(rail.roots))
     except BoardUnavailable as error:  # nothing to check completion against: record it, never block
@@ -212,10 +212,10 @@ def stop(rail: Rail) -> dict[str, Any]:
 def _options(words: Sequence[str]) -> tuple[str, dict[str, list[str]]]:
     """The event and the ``--name value`` pairs the launcher wrote; ``ValueError`` for anything else."""
     if not words or words[0] not in HOOK_EVENTS or len(words) % 2 == 0:
-        raise ValueError("usage: harnesshook pre|post|stop [--role R] [--label L] [--root D] [--protect P] [--wait S]")
+        raise ValueError("usage: harnesshook pre|post|stop [--role R] [--agent A] [--root D] [--protect P] [--wait S]")
     found: dict[str, list[str]] = {}
     for key, value in zip(words[1::2], words[2::2], strict=True):
-        if key not in ("--role", "--label", "--root", "--protect", "--wait"):
+        if key not in ("--role", "--agent", "--root", "--protect", "--wait"):
             raise ValueError(f"no option {key}")
         found.setdefault(key[2:], []).append(value)
     return words[0], found
@@ -235,13 +235,13 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         payload = json.loads((stdin or sys.stdin).read() or "{}")
         payload = payload if isinstance(payload, dict) else {}
         hook_bootstrap.metadata(payload)
-        label = opts.get("label", ["harness"])[-1]
-        rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
+        agent = opts.get("agent", ["harness"])[-1]
+        rail = Rail(opts.get("role", ["read-only"])[-1], agent, opts.get("root") or [str(payload.get("cwd", ""))],
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]),
                     str(payload.get("session_id", "")) if event == "post" else "")
         stage = event
         hook_bootstrap.stage(stage)
-        out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label, rail)
+        out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(agent, rail)
     except FAILURES as exc:
         return hook_bootstrap.failure(exc, words[0] if words else "pre", stage, stdout)
     if out:

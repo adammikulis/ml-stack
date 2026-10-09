@@ -4,6 +4,7 @@ import re
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack.workspace import tokens
 from ml_stack.workspace.agent_display import metadata
 from ml_stack.workspace.identity import Denied
 
@@ -38,7 +39,7 @@ def test_unknown_sessions_are_distinct_and_ordinals_survive_revoke_and_device_la
     assert metadata(registry, 'owner')['display_name'] == 'owner'
 
 
-def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(kit):
+def test_authenticated_child_cannot_promote_and_has_its_own_name_and_a_recorded_parent(kit):
     token = kit.agent('codex-main')
     registry = kit.ws.registry
     kit.ws.register_session(token)
@@ -46,16 +47,11 @@ def test_authenticated_child_cannot_promote_and_labels_do_not_grant_main_status(
     with pytest.raises(Denied, match='top-level'):
         registry.register_session(child)
     shown = metadata(registry, 'codex-main/task')
-    assert re.fullmatch(r'agent-[0-9a-f]{6} \(task\)', shown['display_name'])
+    assert re.fullmatch(r'agent-[0-9a-f]{6}', shown['display_name'])
+    assert shown['spawned_by'] == 'codex-main' and shown['session_kind'] == 'subagent'
     assert not shown['coordinator_eligible']
-    activity = metadata(registry, 'codex-main', 'integration')
-    assert activity['session_kind'] == 'main'
-    assert activity['display_name'].endswith(' (integration)')
-    assert not activity['coordinator_eligible']
-    kit.ws.claim_model(token, 'gpt-6', label='helper')
-    helper = metadata(registry, 'codex-main', 'helper')
-    assert helper['session_kind'] == 'helper'
-    assert re.fullmatch(r'agent-[0-9a-f]{6} \(helper\)', helper['display_name'])
+    assert metadata(registry, 'codex-main')['session_kind'] == 'main'
+    assert metadata(registry, 'codex-main')['spawned_by'] == ''
 
 
 def test_revoked_main_is_ineligible(kit):
@@ -108,17 +104,18 @@ def test_registration_preserves_model_and_rights_and_refuses_child(host):
     assert 'main-session' in WRITES and 'main-session' not in READS
 
 
-def test_brief_uses_authenticated_parent_instead_of_codex_alias(kit, monkeypatch, capsys):
+def test_brief_names_the_spawned_subagent_and_its_registered_parent(kit, monkeypatch, capsys):
     from types import SimpleNamespace
 
     from ml_stack.workspace import cli
 
     token = kit.agent('codex-session')
-    monkeypatch.setattr(cli, '_context', lambda args: (kit.ws, token))
-    cli._brief(SimpleNamespace(agent='codex', name='review', registered=False), None)
+    made = kit.ws.spawn(token, 'codex', 'review-thread')
+    child = tokens.load(kit.base, made['id'])
+    monkeypatch.setattr(cli, '_context', lambda args: (kit.ws, child))
+    cli._brief(SimpleNamespace(agent=made['id'], registered=False), None)
     output = capsys.readouterr().out
-    assert '--agent codex-session --label review' in output
-    assert '--agent codex --label' not in output
+    assert f"subagent {made['id']}, spawned by codex-session" in output and '--label' not in output
     assert 'do not elect yourself coordinator' in output
 
 

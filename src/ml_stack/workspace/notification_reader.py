@@ -107,7 +107,7 @@ def checkpoint(base: Path, actor: str) -> None:
         commit = repo.git(path, 'rev-parse', 'HEAD')
         branch = repo.git(path, 'branch', '--show-current')
         if commit not in scope.get('commits', ()) or branch not in scope.get('branches', ()):
-            worktree_lifecycle.remember(base, actor, scope['label'], str(path))
+            worktree_lifecycle.remember(base, actor, str(path))
 
 
 def notify(label: str, cwd: Path, session: str) -> None:

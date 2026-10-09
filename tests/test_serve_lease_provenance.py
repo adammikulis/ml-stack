@@ -270,9 +270,9 @@ def test_the_environment_supplies_the_reason_when_none_is_given(monkeypatch):
 
 
 def test_the_workspace_label_names_the_requester(monkeypatch):
-    monkeypatch.setenv(provenance.ENV_LABEL, "coder-7")
+    monkeypatch.setenv(provenance.ENV_AGENT, "coder-7")
     assert provenance.asked("x")["requester"] == "coder-7"
-    monkeypatch.delenv(provenance.ENV_LABEL)
+    monkeypatch.delenv(provenance.ENV_AGENT)
     assert provenance.asked("x")["requester"] == provenance.program()
 
 

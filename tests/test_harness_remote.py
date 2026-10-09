@@ -244,7 +244,7 @@ def test_shell_targets_must_be_fixed(command):
 
 
 def cli_args(**changes):
-    return SimpleNamespace(**{'cmd': 'claim', 'agent': 'worker', 'label': '', 'kind': 'file',
+    return SimpleNamespace(**{'cmd': 'claim', 'agent': 'worker', 'kind': 'file',
                               'key': '', 'ttl': 0, 'pid': 0, 'note': '', **changes})
 
 
@@ -329,7 +329,7 @@ def direct_cli(tmp_path, monkeypatch):
     monkeypatch.setattr(harness_remote.limits, 'root', lambda: tmp_path / 'physical')
     args = SimpleNamespace(action='claim', arguments=['branch', 'worker/change'], host=remote.host,
                            project_id=remote.project_id, cluster_key='', cluster='', name='', agent='worker',
-                           token_file='', model='', harness='', label='lifecycle', project_root=str(tmp_path), ttl=0)
+                           token_file='', model='', harness='', project_root=str(tmp_path), ttl=0)
     return args, calls
 
 
@@ -371,7 +371,7 @@ def test_direct_completion_blocks_retained_checkout_before_publication(setup, di
     args.action = action
     args.arguments = ['receiver', 'done', 'Complete'] if action == 'send' else ['done', 'Complete']
     remote = remote_cli.RemoteWorkspace(args.host, args.project_id)
-    worktree_lifecycle.remember(remote.base, 'worker', '', str(setup.checkout))
+    worktree_lifecycle.remember(remote.base, 'worker', str(setup.checkout))
     with pytest.raises(Denied, match='checkout'):
         remote_cli.run(args)
     assert calls == [('whoami', {})]

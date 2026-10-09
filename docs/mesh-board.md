@@ -224,7 +224,7 @@ candidate (the device coordinator), so the answer is the minimum over N candidat
 
 | Decision | Needs | Rule |
 |---|---|---|
-| Message, announce, note, ack, hello-model | none | grow-only rows |
+| Message, announce, note, ack | none | grow-only rows |
 | Claim of branch or area, release, renew | none | CAS in the merged log (below) |
 | Worktree, port, test slot, job, a local session's holdings | device coordinator | device-local, no network, pid+start check |
 | Recover a dead session's holdings | none | idempotent sweep (below) |

@@ -209,7 +209,7 @@ class DevelopmentIntegration:
                 raise Denied('cleanup requires the live worktree claim of this integration owner')
             for scope in worktree_lifecycle.scopes(self.ws.base, self.record['owner']):
                 if scope['path'] == str(path) and path.exists():
-                    worktree_lifecycle.remember(self.ws.base, scope['owner'], scope['label'], str(path))
+                    worktree_lifecycle.remember(self.ws.base, scope['owner'], str(path))
             commit = repo.git(path, 'rev-parse', 'HEAD') if path.exists() else ''
             repo.remove_merged(self.primary, path, branch, tip, lock_reason=self.record['id'])
             if commit:
