@@ -185,7 +185,16 @@ impl Net {
         if hello["policy"] != "open" {
             return Err(Error::Denied("that pool does not take a device without a code".into()));
         }
-        let reply = c.call(&json!({"op": "join_open", "name": name, "port": self.port}))?;
+        let reply = if hello["member"] == true {
+            // That device already lists this one (another member let it in): swap records instead.
+            let ask = {
+                let n = locked(&self.node)?;
+                json!({"op": "members", "pool": n.members.id, "rows": n.members.export(), "policy": peer::policy_json(&n)})
+            };
+            c.call(&ask)?
+        } else {
+            c.call(&json!({"op": "join_open", "name": name, "port": self.port}))?
+        };
         self.adopt(&c, &reply, addr, "open")
     }
 

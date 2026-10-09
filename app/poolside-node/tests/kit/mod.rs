@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod netkit;
+
 use ed25519_dalek::SigningKey;
 use poolside_node::board::Board;
 use poolside_node::node::Node;

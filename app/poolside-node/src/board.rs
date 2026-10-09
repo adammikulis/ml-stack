@@ -18,6 +18,9 @@ use crate::state::{Pin, State};
 pub const MAX_ORIGINS: usize = 64;
 pub const MAX_LOG_ROWS: usize = 200_000;
 const MAX_REJECTED: usize = 200;
+/// A head is written after this many rows, or this many bytes of rows, without one.
+pub const HEAD_EVERY_ROWS: usize = 64;
+pub const HEAD_EVERY_BYTES: usize = 512 * 1024;
 
 /// The sequence number and hash of the last row of a log.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -147,7 +150,24 @@ impl Board {
         if let Some(found) = self.rows(&origin).iter().find(|r| !idem.is_empty() && r.actor == actor && r.idem == idem) {
             return Ok(found.clone());
         }
-        self.add(kind, actor, idem, body)
+        let row = self.add(kind, actor, idem, body)?;
+        self.seal_when_due()?;
+        Ok(row)
+    }
+
+    /// Sign the tip once enough rows have gone unsigned that a batch of a peer's request could
+    /// hold none of the head that covers them: rows are stored only through a verified head, so
+    /// a run longer than a batch would otherwise never arrive.
+    fn seal_when_due(&mut self) -> Result<()> {
+        let (mut rows, mut bytes) = (0, 0);
+        for r in self.rows(&self.origin).iter().rev().take_while(|r| r.kind != Kind::Head) {
+            rows += 1;
+            bytes += r.size();
+        }
+        if rows >= HEAD_EVERY_ROWS || bytes >= HEAD_EVERY_BYTES {
+            self.seal()?;
+        }
+        Ok(())
     }
 
     fn add(&mut self, kind: Kind, actor: &str, idem: &str, body: Value) -> Result<Row> {
