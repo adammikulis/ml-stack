@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
-PURPOSES = ("runtime", "dev", "gate", "build")
+PURPOSES = ("runtime", "dev", "gate", "commit", "build", "base")
 ENTRY_FILES = {
     "dev": ("tests/conftest.py", "scripts/test"),
     "gate": ("scripts/budgets", "scripts/redteam_coverage.py", "scripts/reference"),
@@ -228,6 +228,35 @@ def import_gaps(purpose: str, root: Path = ROOT) -> list[Gap]:
             if not importable(name)]
 
 
+def model_gaps() -> list[Gap]:
+    """The spaCy English model presidio reads names with; pip cannot resolve it, spaCy downloads it."""
+    if importable("en_core_web_sm"):
+        return []
+    return [Gap("the spaCy model en_core_web_sm is not installed", fix=f"{sys.executable} -m spacy download en_core_web_sm")]
+
+
+def git_out(root: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def base_gaps(root: Path = ROOT) -> list[Gap]:
+    """This branch lacks commits the development branch has: a worker cut from an old tip tests code that has since moved.
+
+    The development branch is the one the primary checkout (first in `git worktree list`) has out.
+    Compares with the remote-tracking ref as last fetched; run `git fetch origin` first to see origin's own tip.
+    """
+    primary = next((line.split(" ", 1)[1] for line in git_out(root, "worktree", "list", "--porcelain").splitlines()
+                    if line.startswith("worktree ")), "")
+    dev = git_out(Path(primary), "branch", "--show-current") if primary else ""
+    if not dev or not git_out(root, "rev-parse", "--verify", "-q", f"origin/{dev}") or git_out(root, "branch", "--show-current") == dev:
+        return []
+    behind = git_out(root, "rev-list", "--count", f"HEAD..origin/{dev}")
+    if behind in ("", "0"):
+        return []
+    return [Gap(f"this branch is {behind} commit(s) behind origin/{dev}", fix=f"git fetch origin && git merge origin/{dev}")]
+
+
 def rust_gaps(root: Path = ROOT) -> list[Gap]:
     """cargo at or above the rust-version the workspace declares."""
     if shutil.which("cargo") is None:
@@ -252,6 +281,10 @@ def gaps(purpose: str, root: Path = ROOT) -> list[Gap]:
         out += requirement_gaps(extra_requirements("test", root)) + import_gaps(purpose, root) + tool_gaps(("git",))
     elif purpose == "gate":
         out += import_gaps(purpose, root) + pinned_tool_gaps(root) + tool_gaps(("git",))
+    elif purpose == "commit":  # the pre-commit name check reads text with presidio over a spaCy model
+        out += requirement_gaps(extra_requirements("privacy", root)) + model_gaps()
+    elif purpose == "base":
+        out = base_gaps(root)
     elif purpose == "build":
         out += requirement_gaps(["build", "hatchling"]) + import_gaps(purpose, root) + rust_gaps(root)
     return out

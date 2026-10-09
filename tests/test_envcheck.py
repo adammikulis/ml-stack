@@ -134,6 +134,25 @@ def test_scripts_test_stops_with_the_fix_before_importing_what_is_missing() -> N
     assert "numpy" in done.stderr and "pip install" in done.stderr and "Traceback" not in done.stderr
 
 
+def run_in(cwd: Path, *argv: str) -> None:
+    subprocess.run(argv, cwd=cwd, check=True, capture_output=True, text=True,
+                   env={"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": str(cwd)})
+
+
+def test_a_branch_cut_from_an_old_tip_is_told_how_far_behind_it_is(tmp_path: Path) -> None:
+    ident = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m"]
+    origin, primary, worker = tmp_path / "origin", tmp_path / "primary", tmp_path / "worker"
+    run_in(tmp_path, "git", "init", "-q", "-b", "devline", str(origin))
+    run_in(origin, "git", *ident, "one")
+    run_in(tmp_path, "git", "clone", "-q", str(origin), str(primary))
+    run_in(primary, "git", "worktree", "add", "-q", "-b", "work", str(worker))
+    assert envcheck.base_gaps(worker) == []
+    run_in(origin, "git", *ident, "two")
+    run_in(primary, "git", "fetch", "-q", "origin")
+    (gap,) = envcheck.base_gaps(worker)
+    assert "1 commit(s) behind origin/devline" in gap.what and "git merge origin/devline" in gap.fix
+
+
 @pytest.mark.parametrize("purpose", envcheck.PURPOSES)
 def test_every_purpose_is_known_to_gaps(purpose: str) -> None:
     assert isinstance(envcheck.gaps(purpose, REPO), list)

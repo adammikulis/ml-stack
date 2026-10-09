@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Clone the committed tree into a temp directory, install it into a fresh venv, and run what a new machine would run.
+
+    scripts/cold-start-check                         bare install, then '.[test]' with the pinned ruff/pyright
+    scripts/cold-start-check --python 3.12 --python 3.13
+    scripts/cold-start-check --extras test --pins --steps preflight,gate,hooks
+    scripts/cold-start-check --source /path/to/checkout --keep
+
+Each combination is a Python version and a set of extras. Every step runs in the clone with a
+throwaway HOME and ML_STACK_HOME, so nothing under ~/.ml-stack or the real site-packages is
+touched, with the agent markers removed so a hook or guard sees a person's terminal, and with a
+PATH of the venv, git, cargo and the system directories only: a ruff or pyright that happens to
+be installed in the machine's own pyenv does not make a bare install look ready.
+
+A step ends as one of
+    ok       exit 0
+    needs    exit 1 with a message naming the pip install command: the failure the
+             owner wants (fast, with the fix); a bare install is expected to end here for the
+             steps that need the test extra
+    BROKEN   anything else: a traceback, or a failure that never said what to install
+Exit 1 when any step is BROKEN, or with --require-ready when any step is not ok. Only the
+committed tree is cloned: a fix not yet committed is not tested.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import NamedTuple
+
+SCRIPTS = Path(__file__).resolve().parent
+ROOT = SCRIPTS.parent
+SCRUB = ("CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_ENTRYPOINT", "VIRTUAL_ENV", "PYTHONPATH", "PYENV_VERSION")
+STEPS = {
+    "preflight": ["scripts/preflight", "dev", "gate"],
+    "budgets": ["scripts/budgets"],
+    "redteam": ["scripts/redteam_coverage.py", "--check"],
+    "reference": ["scripts/reference", "--check"],
+    "gate": ["scripts/test", "gate"],
+    "notices": ["scripts/notices.py", "--check"],
+    "wheel": ["-m", "pip", "wheel", ".", "--no-deps", "--wheel-dir", "{tmp}/wheels"],
+    "hooks": [],
+    "rust": [],
+}
+DEFAULT_STEPS = ("preflight", "budgets", "redteam", "reference", "gate", "wheel", "hooks", "rust")
+TAIL = 6
+
+
+class Outcome(NamedTuple):
+    step: str
+    verdict: str
+    seconds: float
+    detail: str
+
+
+def interpreter(version: str) -> str | None:
+    """A python of this version: pyenv's, else ``python<version>`` on PATH; None when the machine has none."""
+    if not version:
+        return sys.executable
+    if shutil.which("pyenv"):
+        done = subprocess.run(["pyenv", "prefix", version], capture_output=True, text=True, check=False)
+        if done.returncode == 0 and (Path(done.stdout.strip()) / "bin" / "python").exists():
+            return str(Path(done.stdout.strip()) / "bin" / "python")
+    return shutil.which(f"python{version}")
+
+
+def scrubbed(tmp: Path, venv: Path) -> dict[str, str]:
+    """The environment of a person at a terminal with an empty home: no agent markers, nothing of ours inherited."""
+    env = {k: v for k, v in os.environ.items() if k not in SCRUB and not k.startswith(("ML_STACK_", "MLSTACK_", "DEV_TEST_"))}
+    home = tmp / "home"
+    home.mkdir(exist_ok=True)
+    env.pop("PYENV_ROOT", None)
+    tools = {str(Path(found).parent) for name in ("git", "cargo", "rustc", "sh") if (found := shutil.which(name))}
+    path = os.pathsep.join([str(venv / "bin"), *sorted(tools), "/usr/bin", "/bin"])
+    for name, folder in (("RUSTUP_HOME", ".rustup"), ("CARGO_HOME", ".cargo")):  # the toolchain, which a new home would not have
+        env.setdefault(name, str(Path.home() / folder))
+    env.update(HOME=str(home), ML_STACK_HOME=str(home / ".ml-stack"), PATH=path)
+    return env
+
+
+def run(argv: list[str], cwd: Path, env: dict[str, str], timeout: float) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def classify(done: subprocess.CompletedProcess[str]) -> tuple[str, str]:
+    text = (done.stdout + done.stderr).strip()
+    tail = " | ".join(text.splitlines()[-TAIL:])
+    if done.returncode == 0:
+        return "ok", ""
+    if "Traceback (most recent call last)" not in text and "pip install" in text:
+        return "needs", tail
+    return "BROKEN", tail
+
+
+def hooks_step(repo: Path, env: dict[str, str], timeout: float) -> subprocess.CompletedProcess[str]:
+    """Install the hooks into the clone and commit a one-line document change through the whole pre-commit chain."""
+    installed = run(["sh", "scripts/install-hooks.sh"], repo, env, timeout)
+    if installed.returncode:
+        return installed
+    with (repo / "CONTRIBUTING.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n")
+    run(["git", "add", "CONTRIBUTING.md"], repo, env, timeout)
+    identity = ["-c", "user.name=cold start", "-c", "user.email=cold-start@example.invalid"]
+    return run(["git", *identity, "commit", "-m", "chore: touch a document", "--", "CONTRIBUTING.md"], repo, env, timeout)
+
+
+def rust_step(repo: Path, env: dict[str, str], timeout: float) -> subprocess.CompletedProcess[str]:
+    """`cargo check` of the app crate from the locked dependencies, as a machine with no sidecar file yet would."""
+    if shutil.which("cargo") is None:
+        return subprocess.CompletedProcess([], 0, "no cargo on PATH: skipped", "")
+    env = {**env, "CARGO_TARGET_DIR": str(repo.parent / "cargo-target")}
+    return run(["cargo", "check", "--locked", "-p", "ml-stack-app"], repo / "app", env, timeout)
+
+
+SPECIAL = {"hooks": hooks_step, "rust": rust_step}
+
+
+def one_step(step: str, repo: Path, venv: Path, tmp: Path, timeout: float) -> Outcome:
+    started = time.monotonic()
+    try:
+        env = scrubbed(tmp, venv)
+        if step in SPECIAL:
+            done = SPECIAL[step](repo, env, timeout)
+        else:
+            parts = [part.replace("{tmp}", str(tmp)) for part in STEPS[step]]
+            done = run([str(venv / "bin" / "python"), *parts], repo, env, timeout)
+        verdict, detail = classify(done)
+    except subprocess.TimeoutExpired:
+        verdict, detail = "BROKEN", f"no answer after {timeout:.0f}s"
+    return Outcome(step, verdict, time.monotonic() - started, detail)
+
+
+def build(version: str, extras: str, pins: bool, source: Path, tmp: Path, find_links: str) -> tuple[Path, Path] | str:
+    """The clone and the venv with the project installed, or why that could not be made."""
+    python = interpreter(version)
+    if python is None:
+        return f"no python {version} here (pyenv install {version})"
+    repo, venv = tmp / "repo", tmp / "venv"
+    if not repo.exists():
+        cloned = subprocess.run(["git", "clone", "-q", "--no-hardlinks", str(source), str(repo)], capture_output=True, text=True, check=False)
+        if cloned.returncode:
+            return f"clone failed: {cloned.stderr.strip()}"
+    subprocess.run([python, "-m", "venv", str(venv)], check=True)
+    index = ["--no-index", "--find-links", find_links] if find_links else []
+    pip = [str(venv / "bin" / "python"), "-m", "pip", "install", "-q", "--disable-pip-version-check", *index]
+    target = f"{repo}[{extras}]" if extras else str(repo)
+    for argv in ([*pip, target], [*pip, "-r", str(repo / "scripts" / "gates" / "pinned.txt")] if pins else []):
+        if argv and (done := subprocess.run(argv, capture_output=True, text=True, check=False)).returncode:
+            return f"install failed: {' '.join(done.stderr.strip().splitlines()[-3:])}"
+    return repo, venv
+
+
+def combination(version: str, extras: str, pins: bool, steps: list[str], args: argparse.Namespace) -> list[Outcome]:
+    with tempfile.TemporaryDirectory(prefix="ml-stack-cold-") as raw:
+        tmp = Path(raw)
+        made = build(version, extras, pins, Path(args.source), tmp, args.find_links)
+        if isinstance(made, str):
+            return [Outcome("install", "BROKEN" if "failed" in made else "skipped", 0.0, made)]
+        outcomes = [one_step(step, *made, tmp, args.timeout) for step in steps]
+        if args.keep:
+            kept = Path(tempfile.mkdtemp(prefix="ml-stack-cold-kept-"))
+            shutil.copytree(tmp, kept, dirs_exist_ok=True, symlinks=True)
+            print(f"  kept {kept}")
+        return outcomes
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--python", action="append", default=[], help="a version such as 3.12 (repeat for several); default: this interpreter")
+    parser.add_argument("--extras", action="append", help="extras to install, comma separated (repeat); '' is a bare install")
+    parser.add_argument("--pins", action="store_true", help="also install scripts/gates/pinned.txt (ruff, pyright); on for the default test combination")
+    parser.add_argument("--steps", default=",".join(DEFAULT_STEPS), help="of " + ", ".join(STEPS))
+    parser.add_argument("--source", default=str(ROOT), help="the checkout to clone (committed state only)")
+    parser.add_argument("--find-links", default="", help="a wheelhouse: install with no network from it")
+    parser.add_argument("--timeout", type=float, default=900.0, help="seconds per step")
+    parser.add_argument("--keep", action="store_true", help="leave a copy of the clone and venv for inspection")
+    parser.add_argument("--require-ready", action="store_true", help="fail on a step that needs an install, not only on a broken one")
+    args = parser.parse_args(argv)
+    steps = [s for s in args.steps.split(",") if s]
+    unknown = [s for s in steps if s not in STEPS]
+    if unknown:
+        parser.error(f"unknown step {', '.join(unknown)}; one of {', '.join(STEPS)}")
+    combos = [(v, e, e != "" or args.pins) for v in args.python or [""] for e in (args.extras if args.extras is not None else ["", "test"])]
+    bad = 0
+    for version, extras, pins in combos:
+        print(f"python {version or sys.version_info[0:2]}  extras [{extras}]  pins {pins}")
+        for out in combination(version, extras, pins, steps, args):
+            bad += out.verdict == "BROKEN" or (args.require_ready and out.verdict != "ok")
+            print(f"  {out.verdict:7} {out.step:10} {out.seconds:6.1f}s  {out.detail}")
+    print("cold start:", "BROKEN" if bad else "no step broke")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from packaging.requirements import Requirement
 from packaging.tags import parse_tag, sys_tags
+from wheel_support import fresh_wheel
 
 from ml_stack import runtime
 from ml_stack.fleet import runtime_wheel
@@ -123,10 +124,9 @@ def _dependency_wheels(wheel, target):
 @pytest.mark.slow
 def test_built_wheel_imports_from_an_immutable_install(tmp_path):
     root = Path(__file__).resolve().parents[1]
-    wheels = list((root / "dist").glob("ml_stack-*.whl"))
-    assert wheels, "run python packaging/build.py before packaging tests"
-    wheel = tmp_path / wheels[0].name
-    shutil.copy2(wheels[0], wheel)
+    built = fresh_wheel(root)
+    wheel = tmp_path / built.name
+    shutil.copy2(built, wheel)
     runtime_wheel.stamp(wheel, COMMIT, root)
     target = tmp_path / "installed"
     subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-index",

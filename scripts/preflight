@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--all", action="store_true", help="check every purpose")
     args = parser.parse_args(argv)
     try:
-        status, text = envcheck.report(list(envcheck.PURPOSES) if args.all else args.purposes or ["dev"])
+        status, text = envcheck.report([p for p in envcheck.PURPOSES if p != "base"] if args.all else args.purposes or ["dev"])
     except ValueError as exc:
         parser.error(str(exc))
     print(text, file=sys.stderr if status else sys.stdout)

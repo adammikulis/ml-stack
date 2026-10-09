@@ -97,6 +97,9 @@ login.
 
 ## Testing
 
+`scripts/preflight` says what a machine still lacks for a job and the command that installs it
+(`scripts/test` runs it first); [environment.md](environment.md) is the table.
+
 ```
 python scripts/test all tests/<affected-file>.py -n 1
 ```
