@@ -288,7 +288,8 @@ def lookup(root: Path, rel: str, arguments: list[str]) -> Lookup:
     texts = {p: text_of(root / p) for p in [rel, *conftests(root, rel)]}
     barred = ""
     if marks_in(texts[rel]) & NEVER_MARKS:
-        barred = "carries a live, redteam, gpu or model marker"
+        mark = sorted(marks_in(texts[rel]) & NEVER_MARKS)[0]
+        barred = f"carries marker {mark}, which {facts.needs(mark)} to run"
     elif NEVER_WORDS.search(texts[rel]):
         barred = "uses a model or GPU lease"
     names = set(ENV_FIXED).union(*(set(ENV_NAME.findall(t)) for t in texts.values())) - ENV_SKIP

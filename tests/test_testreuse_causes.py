@@ -191,3 +191,39 @@ def test_a_real_run_twice_reports_zero_then_all_reused_and_a_second_worktree_reu
     finally:
         for tree in (first, second):
             git(ROOT, "worktree", "remove", "--force", str(tree))
+
+
+# -- (5) a named file with nothing runnable is reported as not run, and does not turn a green run red -----------------
+def deselected(project) -> str:
+    rel = "tests/test_red.py"
+    (project / rel).write_text("import pytest\n\n\n" + "@" + "pytest.mark.redteam\ndef test_r():\n    assert True\n")
+    return rel
+
+
+def test_a_file_whose_tests_are_all_deselected_does_not_fail_a_run_that_passed(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    report, _ = attempt(project, store, FILE, deselected(project), extra=["-m", "not redteam"])
+    assert report.status == 0
+    details = {o.file: o.detail for o in report.outcomes}
+    assert "not run" in details["tests/test_red.py"] and "marker redteam" in details["tests/test_red.py"]
+    assert "needs --redteam" in details["tests/test_red.py"]
+
+
+def test_a_run_of_only_a_deselected_file_still_exits_non_zero(project, tmp_path):
+    store = storage.Store(tmp_path / "store")
+    report, _ = attempt(project, store, deselected(project), extra=["-m", "not redteam"])
+    assert report.status == 5 and "not run" in report.outcomes[0].detail
+
+
+# -- (6) a process exiting while its command line is read must not fail the test that happened to be running ------
+def test_a_process_that_exits_while_its_command_line_is_read_is_skipped(monkeypatch):
+    import foreign_writers
+
+    class Vanishing:
+        pid = 1
+
+        def cmdline(self):
+            raise SystemError("<built-in function proc_cmdline> returned a result with an exception set")
+
+    monkeypatch.setattr(foreign_writers.psutil, "process_iter", lambda: iter([Vanishing()]))
+    assert foreign_writers._served_roots() == []

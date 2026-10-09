@@ -18,7 +18,7 @@ def _served_roots() -> list[tuple[str, int]]:
                 argv = process.cmdline()
                 if "--root" in argv[:-1]:
                     found.append((argv[argv.index("--root") + 1], process.pid))
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError, SystemError):  # SystemError: macOS, a process exiting mid-read
                 continue
     except (AttributeError, TypeError):  # a test replaced psutil's process type
         return []
@@ -48,7 +48,7 @@ def held_by_foreign(root: Path, rels: list[Path]) -> set[Path]:
                 if process.pid in mine:
                     continue
                 held.update(wanted[f.path] for f in process.open_files() if f.path in wanted)
-            except (psutil.Error, OSError):
+            except (psutil.Error, OSError, SystemError):  # SystemError: macOS, a process exiting mid-read
                 continue
     except (AttributeError, TypeError):  # a test replaced psutil's process type
         return held

@@ -66,6 +66,7 @@ class Outcome:
     passed: bool = False
     stored: str = ""
     key: str = ""
+    not_run: bool = False
 
 
 @dataclass
@@ -259,7 +260,7 @@ class Session:
         if again:
             self.execute(Plan(run=again, claimed=again), launch)
         self.report.outcomes = [self.outcome(f) for f in (self.files or sorted(self.outcomes))]
-        failed = any(not o.passed for o in self.report.outcomes)
+        failed = any(not o.passed and not o.not_run for o in self.report.outcomes)
         self.report.status = self.report.status or (1 if failed else 0)
         return self.report
 
@@ -356,7 +357,8 @@ class Session:
         outcome, look, count, hit = self.outcome(file), self.lookup(file), ran.count, ran.hit
         outcome.passed = bool(count) and not count["failed"]
         if count is None and not ran.problem:
-            outcome.detail = f"{outcome.detail} (no tests ran)".strip()
+            outcome.not_run = True
+            outcome.detail = f"{outcome.detail} (not run: none of its tests was selected)".strip()
             return
         if ran.problem:
             outcome.passed = outcome.passed and not ran.problem.startswith(("the tree", "pytest exited"))

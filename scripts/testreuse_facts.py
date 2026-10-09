@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from importlib import metadata
 
+SWITCHES = {"redteam": "--redteam", "slow": "--slow", "live_api": "ML_STACK_LIVE_API=1", "live_net": "ML_STACK_LIVE_NET=1",
+            "gpu": "a model or GPU lease on the serving machine", "model": "a model or GPU lease on the serving machine"}
+
+
+def needs(mark: str) -> str:
+    """What a run must be given for tests carrying ``mark`` to run, in words."""
+    return f"needs {SWITCHES[mark]}" if mark in SWITCHES else f"marker {mark}"
+
 
 def installed_pins(pins: list[str]) -> list[str]:
     """The ``name==version`` each pinned name resolves to now; a name that is not installed reads ``name==missing``.
