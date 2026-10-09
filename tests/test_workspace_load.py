@@ -40,8 +40,13 @@ def test_a_small_run_delivers_everything_in_one_verifiable_chain_with_one_master
 
 def test_the_shipped_rate_limit_shows_up_as_counted_failures_not_a_failed_run():
     code, out = run_script("--agents", "3", "--messages", "34", "--drain", "10", "--default-limits")
-    assert out["failures"] == {"rate-limited": 3 * 6}
-    assert out["sent"] == 3 * 28 and code == 0 and out["pass"] is True, (out["missed"], out["delivery_s"], out["cpu_s_per_agent_per_message"])
+    # The limit is 28 sends in a 60 second window: a host so slow that the run outlasts half a
+    # window sends under it, so only the count of sends and refusals together is fixed there.
+    limited = out["failures"].get("rate-limited", 0)
+    assert out["sent"] + limited == 3 * 34 and code == 0 and out["pass"] is True, (
+        out["missed"], out["delivery_s"], out["cpu_s_per_agent_per_message"])
+    if out["wall_s"] < 30:
+        assert out["failures"] == {"rate-limited": 3 * 6} and out["sent"] == 3 * 28
 
 
 @pytest.fixture

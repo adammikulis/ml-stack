@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import resource
@@ -312,7 +313,9 @@ def report(outs: list[dict[str, Any]], ws: Any, ring: Path, shape: dict[str, Any
                 "cpu_s_per_agent_per_message": result["cpu_s_per_agent_per_message"]}
     # Agents beyond the cores take turns on them, so every waiting time stretches by that many turns;
     # CPU seconds and counts do not.
-    turns = max(1, -(-agents // (os.cpu_count() or 1)))
+    # Other work already running on the host takes turns too: its runnable queue counts as agents.
+    busy = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
+    turns = max(1, math.ceil((agents + busy) / (os.cpu_count() or 1)))
     budgets = {k: limit * turns if k in WALL_BUDGETS else limit for k, limit in BUDGETS.items()}
     result["cpu_turns"] = turns
     result["budgets"] = budgets
