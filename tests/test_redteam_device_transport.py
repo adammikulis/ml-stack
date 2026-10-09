@@ -41,9 +41,9 @@ def test_daemon_project_dispatch_refuses_invalid_device_requests(enrolled, tmp_p
     _kit, device, projects, document = enrolled
     calls = []
     host = SimpleNamespace(answer=lambda *args, **kwargs: calls.append((args, kwargs)))
-    runner = JobRunner(tmp_path / "runner")
+    jobs = JobRunner(tmp_path / "jobs")
     server = Server(("127.0.0.1", 0), make_handler(Daemon(
-        runner, tmp_path / "files", "cluster-token", projects=projects,
+        jobs, tmp_path / "files", "cluster-token", projects=projects,
         workspaces=host, devices=lambda: [device])))
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
@@ -79,5 +79,5 @@ def test_daemon_project_dispatch_refuses_invalid_device_requests(enrolled, tmp_p
     finally:
         server.shutdown()
         server.server_close()
-        runner.shutdown()
+        jobs.shutdown()
         worker.join(timeout=2)
