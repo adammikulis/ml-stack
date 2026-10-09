@@ -16,6 +16,10 @@
         {
           "type": "generic",
           "path": "app/src-tauri/Cargo.toml"
+        },
+        {
+          "type": "generic",
+          "path": "app/poolside-node/Cargo.toml"
         }
       ]
     }

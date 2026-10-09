@@ -81,9 +81,9 @@ def launched(args, harness, served):
 
 def send(document, agent, root, base=None):
     """Send metadata through the launcher's saved authenticated workspace identity."""
-    canonical = harness_remote.context(agent, root, [root], require_claim=False)
-    if canonical:
-        remote, who = canonical
+    board = harness_remote.context(agent, root, [root], require_claim=False)
+    if board:
+        remote, who = board
         return remote.call('record_execution_profile', remote.token(agent=who.id), document)
     ws = Workspace(base)
     token = tokens.load(ws.base, agent)

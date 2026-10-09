@@ -28,7 +28,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "records", "requests", "person", "private_path", "safetext", "serverkeys",
               "subscribers", "taint", "tar_libraries", "telemetry", "tool_schema", "ui", "units", "windows_private", "worktreerules")),
     ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
-    ("graph", ("graph", "ingest", "sources", "world")),
+    ("graph", ("board_names", "graph", "ingest", "sources", "world")),
     ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
                "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",

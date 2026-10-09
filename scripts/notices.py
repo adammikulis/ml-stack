@@ -1,7 +1,7 @@
 """Write THIRD_PARTY_NOTICES.md, or with --check fail on a disallowed licence.
 
 The Python side is the installed closure of the extras a bundle ships (`ml_stack.installed.extras`);
-the Rust side is `cargo metadata` over a copy of app/src-tauri, when cargo is on PATH.
+the Rust side is `cargo metadata` over a copy of app, when cargo is on PATH.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
         "License'; only the legacy License: field is the literal 'UNKNOWN'",
     ),
 }
-"""Packages whose metadata does not state a licence, keyed by (canonical name, exact version).
+"""Packages whose metadata does not state a licence, keyed by (normalised name, exact version).
 
 Each entry names the licence and where the claim was verified. The exact version is part of the key so an upgrade
 has to be looked at again; this is not an allow-list of licences.
@@ -87,8 +87,8 @@ def rust_crates() -> list[tuple[str, str, str]]:
     if shutil.which("cargo") is None:
         return []
     with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp) / "src-tauri"
-        shutil.copytree(ROOT / "app" / "src-tauri", work, ignore=shutil.ignore_patterns("target"))
+        work = Path(tmp) / "app"
+        shutil.copytree(ROOT / "app", work, ignore=shutil.ignore_patterns("target", "node_modules", "android"))
         done = subprocess.run(
             ["cargo", "metadata", "--format-version", "1"], cwd=work, capture_output=True, text=True, check=False
         )

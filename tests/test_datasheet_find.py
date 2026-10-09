@@ -3,6 +3,8 @@ local server, with the search engine a stand-in."""
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from ml_stack import web
@@ -30,7 +32,7 @@ def test_a_manufacturers_pdf_outranks_a_distributor_and_an_aggregator():
 def test_a_known_maker_name_maps_to_its_domains():
     [first, second] = rank(rows(("a", "https://www.ti.com/lit/ds/x.pdf"),
                                 ("b", "https://example.org/x.pdf")), "X1234", "Texas Instruments")
-    assert first.url.startswith("https://www.ti.com")
+    assert urlsplit(first.url).hostname == "www.ti.com"
     assert first.score > second.score
 
 

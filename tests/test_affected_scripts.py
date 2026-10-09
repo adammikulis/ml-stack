@@ -228,6 +228,7 @@ def plain_oracle(script: str) -> set[str]:
     return out
 
 
+@pytest.mark.gate
 def test_every_test_a_plain_search_finds_for_a_recently_changed_script_is_selected() -> None:
     scripts = recent_scripts(30)
     assert len(scripts) >= 5

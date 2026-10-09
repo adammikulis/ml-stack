@@ -95,7 +95,7 @@ def test_corrupt_connection_record_disables_local_fallback(project):
 
 
 def test_unsupported_privileged_operation_is_explicitly_refused():
-    ws = connection.CanonicalWorkspace(Remote(), "project-agent-capability")
+    ws = connection.BoardWorkspace(Remote(), "project-agent-capability")
     with pytest.raises(Denied, match="local fallback is disabled"):
         ws.mint("project-agent-capability", "lead", "lead")
 

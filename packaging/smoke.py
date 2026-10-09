@@ -3,37 +3,73 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
 TABS = ["Chat", "Cluster", "Fit", "Models", "Settings"]
 
 
-def continue_(page: Page, heading: str) -> None:
-    """Waits for the wizard step titled ``heading`` and presses its Continue."""
-    page.wait_for_selector(f"#first-run h1:has-text('{heading}')")
-    page.click("#first-run button:text-is('Continue')")
+def launch_url(page: Page, base: str) -> str:
+    """The page URL carrying a one-use sign-in ticket.
+
+    A page opened by hand is refused ("Open from its own window"); the daemon's own window and
+    the owner's terminal ask for a ticket with the secret the daemon wrote under its root.
+    """
+    record = json.loads((Path.home() / ".ml-stack" / "traind" / "launch" / "secret.json")
+                        .read_text(encoding="utf-8"))
+    answer = page.request.post(
+        f"{base}/ui/launch/ticket", data="{}",
+        headers={"X-ML-Stack-UI": "1", "X-ML-Stack-Launch": record["secret"],
+                 "Content-Type": "application/json"})
+    ticket = answer.json()["ticket"]
+    return f"{base}/ui/?launch_ticket={ticket}"
+
+
+def press(page: Page, label: str) -> None:
+    """Presses the wizard button with exactly this label."""
+    page.click(f"#first-run button:text-is('{label}')")
 
 
 def first_run(page: Page, name: str, passphrase: str, group: str) -> None:
-    """Walks the setup wizard from the first screen to the joined cluster."""
-    page.wait_for_selector("#first-run:not([hidden]) h1:text-is('Set up this machine')")
-    page.fill("#n", name)
-    page.click("#first-run button:text-is('Continue')")
-    page.wait_for_selector("#first-run h1:text-is('Clusters')")
-    page.fill("#p1", passphrase)
-    page.fill("#g", group)
-    page.click("#first-run button:text-is('Join')")
-    page.wait_for_selector(f"#first-run .row b:text-is('{group}')")
-    page.click("#first-run button:text-is('Continue')")
-    continue_(page, "What should this machine do?")
-    continue_(page, "When should it start?")
-    page.wait_for_selector("#first-run h1:has-text('What should it be able to do?')")
-    page.click("#first-run button:text-is('Not now')")
-    continue_(page, "When you are not using it")
-    page.wait_for_selector(f"#first-run h1:has-text('{group}')")
-    page.click("#first-run button:text-is('Open the cluster')")
+    """Walks the setup wizard, whatever steps it has, until it offers to open the cluster.
+
+    Each step is answered by its heading, so a step added or reordered in the wizard is one
+    more entry here and not a silent timeout.
+    """
+    page.wait_for_selector("#first-run:not([hidden]) h1")
+    for _ in range(20):
+        heading = page.locator("#first-run h1").first.inner_text()
+        if heading == "Set up this machine":
+            page.fill("#n", name)
+            press(page, "Continue")
+        elif heading == "Clusters":
+            page.fill("#p1", passphrase)
+            page.fill("#g", group)
+            press(page, "Join")
+            page.wait_for_selector(f"#first-run .row b:text-is('{group}')")
+            press(page, "Continue")
+        elif heading in ("What should this machine do?", "When you are not using it"):
+            press(page, "Continue")
+        elif heading == "When should it start?":
+            page.check("#autostart-manual")
+            press(page, "Continue")
+        elif heading == "Where should downloads come from?":
+            page.check("#source-internet")
+            press(page, "Save and continue")
+        elif heading == "What should it be able to do?":
+            press(page, "Not now")
+        elif heading == "Give models more memory?":
+            press(page, "Skip")
+        elif heading.startswith("Joined") or heading.endswith("is ready"):
+            page.click("#first-run button:text-matches('^Open ')")
+            return
+        else:
+            raise SystemExit(f"the setup wizard showed a step this smoke test does not know: {heading!r}")
+        page.wait_for_function(
+            "h => document.querySelector('#first-run h1')?.innerText !== h", arg=heading)
 
 
 def sign_in(page: Page, passphrase: str) -> None:
@@ -74,7 +110,7 @@ def main() -> int:
         page.on("response", lambda r: errors.append(f"{r.status} {r.url}")
                 if r.status >= 400 and r.status != 501 else None)
         try:
-            page.goto(f"{args.base}/ui/")
+            page.goto(launch_url(page, args.base))
             first_run(page, "ci-runner", args.passphrase, args.group)
             sign_in(page, args.passphrase)
             every_tab(page)

@@ -112,7 +112,7 @@ def test_expired_child_cannot_record_observations(kit, monkeypatch):
     assert not (kit.ws.base / 'coordination.db').exists()
 
 
-def test_observations_share_canonical_graph_without_replacing_agent_or_work_records(kit):
+def test_observations_share_one_graph_without_replacing_agent_or_work_records(kit):
     from ml_stack.graph.store import GraphStore
     from ml_stack.workspace.coordination import workspace_id
 

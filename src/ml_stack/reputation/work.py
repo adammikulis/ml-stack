@@ -160,7 +160,7 @@ def _details(graph, ident, agent_id, evidence):
         graph.upsert_edge({'source': key, 'target': ident, 'rel': 'supported_by'})
     for field, kind, relation in (('review', 'work_rating', 'assesses'),
                                    ('usage', 'work_usage', 'measures')):
-        if evidence.get(field) is not None and evidence.get('source') != 'canonical-taskboard':
+        if evidence.get(field) is not None and evidence.get('source') != 'taskboard':
             key = ident + ':' + field
             graph.upsert_node({'id': key, 'kind': kind, 'label': str(evidence['task']),
                                'attrs': {**evidence[field], 'reviewer': evidence['verifier']}})

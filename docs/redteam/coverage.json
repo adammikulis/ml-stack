@@ -1,10 +1,10 @@
 {
- "surfaces": 840,
+ "surfaces": 841,
  "by_status": {
   "covered": 516,
   "partial": 197,
   "uncovered": 53,
-  "n/a": 74,
+  "n/a": 75,
   "unmapped": 0
  },
  "by_kind": {
@@ -68,7 +68,7 @@
    "covered": 3,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 19,
+   "n/a": 20,
    "unmapped": 0
   },
   "mcp-tool": {
@@ -5311,6 +5311,16 @@
     "tests/test_onboard_tailnet.py"
    ],
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
+  },
+  {
+   "id": "listener:fleet/launch.py:_can_bind",
+   "kind": "listener",
+   "source": "fleet/launch.py:_can_bind",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
   },
   {
    "id": "listener:fleet/onboard/nearby.py:UdpTransport.__init__",
@@ -11847,7 +11857,7 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_linux_runner.py",
-    "tests/test_running_on_linux.py::test_the_runner_says_which_command_told_it_docker_is_missing"
+    "tests/test_running_on_linux.py::test_a_machine_without_docker_is_refused_before_anything_starts"
    ],
    "note": "hostile pytest text remains literal argv; source mount is read-only, no privileged or host-network flags, temporary config and staging are removed"
   },

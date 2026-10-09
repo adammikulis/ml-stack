@@ -103,7 +103,7 @@ def cli_connection(args, connection, local_token, workspace):
     """Resolve this command's authenticated local agent on its Dev Board."""
     if getattr(args, "token_file", ""):
         return connection
-    args._canonical_dev = _active_dev(connection)
+    args._board_dev = _active_dev(connection)
     requested = args.agent or os.environ.get(tokens.AGENT_ENV, "") or project_session.harness()
     if requested and not args.agent and not os.environ.get(tokens.AGENT_ENV):
         args.agent = requested
@@ -139,10 +139,10 @@ def cli_connection(args, connection, local_token, workspace):
                 if actor.id != requested:
                     raise Denied("the local agent does not match this project's saved identity")
                 args.agent = connection["agent"]
-        elif (args._canonical_dev and valid_name(requested)
+        elif (args._board_dev and valid_name(requested)
               and requested != connection.get("agent")):
             connection = _other_local_actor(args, connection, local_token, workspace, requested)
-    elif (args._canonical_dev and valid_name(requested)
+    elif (args._board_dev and valid_name(requested)
           and requested != connection.get("agent")):
         connection = _other_local_actor(args, connection, local_token, workspace, requested)
     return refresh(connection, args.agent or os.environ.get(tokens.AGENT_ENV, ""))

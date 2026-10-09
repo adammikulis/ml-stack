@@ -33,28 +33,30 @@ jobs:
             printf 'branch=%s\n' "$(printf '%s' "$PR" | jq -r .headBranchName)" >> "$GITHUB_OUTPUT"
           fi
 
-  # The version bump is the one change on the release pull request that a test covers
-  # (tests/test_packaging.py reads version.txt against pyproject.toml), and a run on that
-  # pull request waits for approval, so the branch is tested from here.
+  # A run on the release pull request waits for approval (the action opens it with its own
+  # token), and the version bump is the one change that a test covers
+  # (tests/test_packaging.py reads version.txt against pyproject.toml). So the branch is tested
+  # by dispatching ci.yml and the bundle build (release-dry-run.yml) on it: a workflow_dispatch
+  # by GITHUB_TOKEN is the one event that starts a run. Neither workflow checks out a ref named
+  # by an input, so nothing here runs a caller-chosen ref in the default branch's cache scope.
+  # release-dry-run.yml builds and smoke-checks every bundle; nothing is uploaded.
   release-pr:
     needs: propose
     if: needs.propose.outputs.pr_branch != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
+      actions: write
       contents: read
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: ${{ needs.propose.outputs.pr_branch }}
-
-  # release-build.yml only builds and smoke-checks every bundle; nothing is uploaded to an
-  # index or a release.
-  release-pr-bundles:
-    needs: propose
-    if: needs.propose.outputs.pr_branch != ''
-    permissions:
-      contents: read
-    uses: ./.github/workflows/release-build.yml
-    with:
-      ref: ${{ needs.propose.outputs.pr_branch }}
+    steps:
+      - name: dispatch the tests and the bundle build on the release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ needs.propose.outputs.pr_branch }}
+        run: |
+          gh workflow run ci.yml --ref "$BRANCH"
+          gh workflow run release-dry-run.yml --ref "$BRANCH"
 
   # A tag pushed by the action's own token starts no workflow, so the build is
   # called from here rather than waiting for refs/tags to fire release.yml.

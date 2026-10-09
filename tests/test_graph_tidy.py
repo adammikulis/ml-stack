@@ -3,7 +3,7 @@ flagged, the rest reported -- dry by default, idempotent, never a hidden node.""
 
 from ml_stack.graph.hygiene import Report
 from ml_stack.graph.names import suspect
-from ml_stack.graph.relations import canonical_direction
+from ml_stack.graph.relations import standard_direction
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.tidy import tidy
 
@@ -96,7 +96,7 @@ def test_figures_sources_and_runs_are_never_folded(tmp_path):
     assert len(_ids(path)[0]) == 4
 
 
-def test_an_inverse_pair_folds_to_the_canonical_direction(tmp_path):
+def test_an_inverse_pair_folds_to_the_standard_direction(tmp_path):
     path = _store(tmp_path, [_node("concept:cell", "cell"), _node("concept:nucleus", "nucleus"),
                              _node("concept:vault", "vault"), _node("concept:current", "current")],
                   [_edge("concept:nucleus", "part_of", "concept:cell", 2),
@@ -108,7 +108,7 @@ def test_an_inverse_pair_folds_to_the_canonical_direction(tmp_path):
     assert edges[("concept:nucleus", "part_of", "concept:cell")]["weight"] == 3
     assert ("concept:cell", "has_part", "concept:nucleus") not in edges
     assert ("concept:current", "part_of", "concept:vault") in edges, "rewritten, no partner"
-    assert canonical_direction("part_of") == ("part_of", False)
+    assert standard_direction("part_of") == ("part_of", False)
 
 
 def test_a_verb_the_inverses_do_not_name_is_left_where_it_was_read(tmp_path):
@@ -123,7 +123,7 @@ def test_a_verb_the_inverses_do_not_name_is_left_where_it_was_read(tmp_path):
     _nodes, edges = _ids(path)
     assert edges[("concept:spindrel", "sits_inside", "concept:grellin")]["weight"] == 2
     assert ("concept:spindrel", "part_of", "concept:grellin") in edges
-    assert canonical_direction("sits_inside") == ("sits_inside", False)
+    assert standard_direction("sits_inside") == ("sits_inside", False)
 
 
 def test_the_pass_recounts_the_stats_document_after_its_writes(tmp_path):

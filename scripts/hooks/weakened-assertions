@@ -16,6 +16,7 @@ import fnmatch
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 NAMES = ("test_redteam_*", "test_*guard*", "test_*auth*")
@@ -76,25 +77,27 @@ def run(*args: str) -> str:
 
 
 def merge_own(diff: str) -> str:
-    """The part of a staged merge diff that the merge itself wrote. A file whose staged content is
-    exactly the other parent's was taken whole from that side, so whatever it lost relative to
-    this side was lost there, in a commit that was judged on its own; only a file that matches
-    neither parent (a conflict resolved by hand) is judged here."""
+    """The part of a staged merge diff that the merge itself wrote, as ``git diff --cc`` would show
+    it. A file whose staged content is exactly the other parent's was taken whole from that side,
+    so whatever it lost relative to this side was lost there, in a commit that was judged on its
+    own. A file that matches neither parent (a conflict resolved by hand) is judged only on the
+    lines it changed against both parents: a line the other side removed, or added, is not this
+    merge's doing."""
     if not run("rev-parse", "-q", "--verify", "MERGE_HEAD").strip():
         return diff
-    keep, chunk, take = [], [], False
-    for line in diff.splitlines(keepends=True):
-        if line.startswith("diff --git "):
-            if chunk and not take:
-                keep.extend(chunk)
-            path = line.rstrip("\n").rpartition(" b/")[2]
-            theirs = run("rev-parse", "-q", "--verify", f"MERGE_HEAD:{path}").strip()
-            take = bool(theirs) and theirs == run("rev-parse", f":{path}").strip()
-            chunk = []
-        chunk.append(line)
-    if chunk and not take:
-        keep.extend(chunk)
-    return "".join(keep)
+    theirs_diff = split(run("diff", "--cached", "-U0", "--no-renames", "MERGE_HEAD", "--", "tests"))
+    out = []
+    for path, (removed, added) in split(diff).items():
+        theirs = run("rev-parse", "-q", "--verify", f"MERGE_HEAD:{path}").strip()
+        if theirs and theirs == run("rev-parse", f":{path}").strip():
+            continue
+        if path in theirs_diff:
+            removed = list((Counter(removed) & Counter(theirs_diff[path][0])).elements())
+            added = list((Counter(added) & Counter(theirs_diff[path][1])).elements())
+        out.append(f"diff --git a/{path} b/{path}\n")
+        out.extend(f"-{x}\n" for x in removed)
+        out.extend(f"+{x}\n" for x in added)
+    return "".join(out)
 
 
 def weakened(diff: str, read) -> list[str]:

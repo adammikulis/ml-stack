@@ -106,7 +106,10 @@ def write(handler: Any, code: int, raw: bytes, content_type: str,
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(raw)))
     for key, value in (extra or {}).items():
-        handler.send_header(key, value)
+        clean = value.replace("\r", "").replace("\n", "")
+        if clean != value or "\r" in key or "\n" in key:
+            raise ValueError(f"header {key!r} carries a line break")
+        handler.send_header(key, clean)
     handler.end_headers()
     if handler.command != "HEAD":
         handler.wfile.write(raw)

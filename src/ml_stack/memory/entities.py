@@ -1,5 +1,5 @@
 """The things a fact is about: models, builds, settings, tasks and topics, checked and given
-one canonical identity so two spellings of a name are one node."""
+one plain identity so two spellings of a name are one node."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class Entity:
         return f"{self.kind}:{self.name}"
 
 
-def _canonical(kind: str, name: str) -> str:
+def _normal(kind: str, name: str) -> str:
     if kind == "model":
         return " ".join(pretty_name(name).split())
     if kind == "build":
@@ -58,14 +58,14 @@ def _one(raw: Any) -> Entity:
     name = check(name, person=False)
     if len(name) > MAX_NAME_CHARS:
         raise Refused(f"an entity name is at most {MAX_NAME_CHARS} characters")
-    name = _canonical(kind, name)
+    name = _normal(kind, name)
     if not name or len(name) > MAX_NAME_CHARS:
         raise Refused("an entity needs a name")
     return Entity(kind, name)
 
 
 def parse(raw: Iterable[Any] | str | None) -> list[Entity]:
-    """The checked, canonical, de-duplicated entities in ``raw`` (``kind:name`` strings or
+    """The checked, normal, de-duplicated entities in ``raw`` (``kind:name`` strings or
     ``{"kind", "name"}`` mappings); ``Refused`` for a bad kind or name or more than
     ``MAX_ENTITIES``."""
     if raw is None or raw == "":

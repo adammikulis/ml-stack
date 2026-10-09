@@ -173,7 +173,7 @@ memory encryption or hardware isolation of the workload [whitepaper, comparison 
   one search summary says 0% fee during alpha, which I could not confirm [secondary source,
   https://wavect.io/blog/darkbloom-ai-private-inference-mac/, 2026-08-25, search snippet only]. Base
   rewards (a floor per epoch) now need macOS 27 and a current app attest authorization; they dedupe
-  on a canonical machine id, which "do[es] not prove physical uniqueness" across reinstalls or new
+  on a single machine id, which "do[es] not prove physical uniqueness" across reinstalls or new
   accounts [repo doc: reference/provider-authorization.md].
 
 ## 6. Openly stated limits and independent review
@@ -262,7 +262,7 @@ How Darkbloom closes or leaves the gap: code identity moves from APNs to the App
 CodeDirectory hash plus an exact-build allowlist; posture moves from MDM SecurityInfo to the key's
 ACL; the endpoint is bound by putting `K`, the session and the account into the assertion's
 `clientHash`; hardware facts (chip, memory, SIP value, binary hash) go into that same transcript as
-app-origin claims, "not independent Apple hardware measurements"; dedup uses the canonical machine
+app-origin claims, "not independent Apple hardware measurements"; dedup uses the single machine
 and the fraud receipt. Left open: serial and RAM assurance (so reward tiers cannot rest on them),
 SIP-downgrade-and-restore behaviour (to be qualified), and everything that attestation never covered
 [repo doc: identity-binding.md]; [repo doc: design/app attest-migration.md].

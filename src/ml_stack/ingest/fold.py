@@ -229,10 +229,10 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
         settles="the schema's vocabulary settles which is right")
     weight = {node["label"]: int(node["mentions"]) for node in nodes.values()
               if node["kind"] != "figure"}
-    canonical, name_folds = fold_names(weight, plurals(weight), log=log, label="concepts",
+    chosen, name_folds = fold_names(weight, plurals(weight), log=log, label="concepts",
                                        settles="both spellings stay, and the source is right")
     moved = {f"concept:{_slug(name)}": f"concept:{_slug(into)}"
-             for name, into in canonical.items() if into != name}
+             for name, into in chosen.items() if into != name}
     if moved:
         nodes, edges = _apply(nodes, edges, moved)
     marked(nodes.values(), edges.values())

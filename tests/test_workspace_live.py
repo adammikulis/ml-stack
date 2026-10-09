@@ -83,7 +83,7 @@ def latencies(kit, count: int, board: bool) -> list[float]:
             p.wait()
 
 
-@pytest.mark.parametrize("count", [1, 10, 40])
+@pytest.mark.parametrize("count", [1, 10, pytest.param(40, marks=pytest.mark.slow)])
 @pytest.mark.parametrize("board", [False, True], ids=["dm", "board"])
 def test_a_waiting_agent_wakes_within_milliseconds_of_a_send(kit, count, board, record_property):
     ms = latencies(kit, count, board)

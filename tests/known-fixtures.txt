@@ -290,3 +290,5 @@ config pre
 Poolside Light
 Install Vision
 Hub Qwen
+mod node
+mod kit

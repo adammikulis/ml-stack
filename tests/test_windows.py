@@ -568,7 +568,7 @@ class TestDiscoveryAndTheFirewall:
             monkeypatch.setattr(discovery, "_destinations",
                                 lambda group, port: [(("127.0.0.1", heard_on), "")])
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.bind(("", 0))
+                s.bind(("127.0.0.1", 0))
                 serve_on = s.getsockname()[1]
             adv = Advertiser(Beacon(name="fixture-box", port=8770), key,
                              port=serve_on, interval_s=60.0).start()

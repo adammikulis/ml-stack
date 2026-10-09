@@ -78,7 +78,7 @@ class Window:
         return (when.weekday() - 1) % 7 in self.days and minute < self.end_min
 
     def spec(self) -> str:
-        """The canonical text form, which ``parse_window`` reads back exactly."""
+        """The plain text form, which ``parse_window`` reads back exactly."""
         days = "daily" if len(self.days) == 7 else ",".join(DAYS[d] for d in self.days)
         out = (f"{days} {self.start_min // 60:02d}:{self.start_min % 60:02d}"
                f"-{self.end_min // 60:02d}:{self.end_min % 60:02d}")

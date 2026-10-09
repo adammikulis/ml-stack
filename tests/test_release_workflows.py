@@ -78,14 +78,12 @@ def test_the_name_hooks_run_from_the_base_not_the_pull_request():
         assert at > overlay
 
 
-def test_ci_can_be_called_by_another_workflow():
-    assert "workflow_call" in CI["on"], "release-please.yml cannot call an uncallable workflow"
-
-
-def test_ci_takes_the_ref_to_check_out():
-    ref = CI["on"]["workflow_call"]["inputs"]["ref"]
-    assert ref["type"] == "string"
-    assert ref["default"] == "", "an empty default is the caller's own ref"
+def test_ci_names_no_caller_ref():
+    """CodeQL's cache-poisoning rule: a job that runs under workflow_dispatch or schedule
+    and checks out a ref an input names runs that ref in the default branch's cache scope.
+    ci.yml is dispatched on a branch instead (`gh workflow run ci.yml --ref`)."""
+    assert "workflow_call" not in CI["on"]
+    assert "inputs.ref" not in yaml.safe_dump(CI)
 
 
 def test_there_is_a_checkout_to_check():
@@ -93,22 +91,23 @@ def test_there_is_a_checkout_to_check():
 
 
 @pytest.mark.parametrize("step", checkouts(), ids=lambda s: s.get("uses", "?"))
-def test_every_checkout_honours_the_ref_it_was_given(step):
-    """A called run that checks out its caller's ref tests the wrong commit and says green."""
-    assert (step.get("with") or {}).get("ref") == "${{ inputs.ref }}"
+def test_no_checkout_takes_its_ref_from_an_input(step):
+    assert "inputs." not in str((step.get("with") or {}).get("ref", ""))
 
 
-def test_a_called_run_does_not_cancel_the_run_that_called_it():
-    """Both would sit in group ci-refs/heads/main, and cancel-in-progress kills one."""
-    assert CI["concurrency"]["group"] == "ci-${{ github.ref }}-${{ inputs.ref }}"
+def test_concurrent_runs_of_one_ref_cancel_each_other():
+    assert CI["concurrency"]["group"] == "ci-${{ github.ref }}"
     assert CI["concurrency"]["cancel-in-progress"] is True
 
 
 def test_release_please_tests_the_branch_it_opened():
     job = PLEASE["jobs"]["release-pr"]
-    assert job["uses"] == "./.github/workflows/ci.yml"
-    assert job["with"]["ref"] == "${{ needs.propose.outputs.pr_branch }}"
     assert job["if"] == "needs.propose.outputs.pr_branch != ''", "no pull request, no run"
+    assert job["permissions"] == {"actions": "write", "contents": "read"}
+    script = "\n".join(str(step.get("run", "")) for step in job["steps"])
+    assert 'gh workflow run ci.yml --ref "$BRANCH"' in script
+    assert 'gh workflow run release-dry-run.yml --ref "$BRANCH"' in script
+    assert job["steps"][0]["env"]["BRANCH"] == "${{ needs.propose.outputs.pr_branch }}"
 
 
 def test_the_release_branch_is_read_from_the_action_and_not_guessed():
@@ -187,8 +186,6 @@ def test_the_signing_key_is_read_only_by_a_job_in_the_release_environment():
 def test_the_build_and_the_dry_run_hold_no_write_grant():
     called = {
         "release-dry-run.yml": list(DRY_RUN["jobs"].values()),
-        "release-please.yml": [PLEASE["jobs"]["release-pr-bundles"],
-                               PLEASE["jobs"]["release-pr"]],
     }
     for name, jobs in called.items():
         for job in jobs:
@@ -261,11 +258,17 @@ def setups() -> list[dict[str, Any]]:
 
 @pytest.mark.parametrize("step", setups(), ids=lambda s: str(s.get("with", {}).get(
     "python-version", "?")))
-def test_every_job_caches_the_packages_it_installs(step):
-    """Every job installs the same set; without a cache each one downloads torch again."""
+def test_no_job_that_checks_out_a_caller_ref_shares_a_package_cache(step):
+    """CodeQL's cache-poisoning rule: ``ref: inputs.ref`` on a dispatch runs untrusted code in
+    the default branch's context, and a cache it saved would be restored by trusted jobs."""
     with_ = step.get("with") or {}
-    assert with_.get("cache") == "pip"
-    assert with_.get("cache-dependency-path") == "pyproject.toml"
+    assert "cache" not in with_
+    assert "cache-dependency-path" not in with_
+
+
+def test_the_bundle_job_keeps_no_rust_cache():
+    uses = [str(s.get("uses", "")) for s in BUILD["jobs"]["bundle"]["steps"]]
+    assert not any(u.startswith("Swatinem/rust-cache@") for u in uses)
 
 
 def bundle_runs() -> list[str]:
@@ -305,21 +308,19 @@ def test_release_can_be_called_by_another_workflow():
     assert "workflow_call" in RELEASE["on"], "release-please.yml cannot call an uncallable workflow"
 
 
-def test_release_takes_the_ref_to_check_out():
-    ref = RELEASE["on"]["workflow_call"]["inputs"]["ref"]
-    assert ref["type"] == "string"
-    assert ref["default"] == "", "an empty default is the caller's own ref"
+def test_release_and_build_take_no_ref_input():
+    for workflow in (RELEASE, BUILD):
+        assert "ref" not in workflow["on"]["workflow_call"]["inputs"]
+        assert "inputs.ref" not in yaml.safe_dump(workflow)
 
 
 @pytest.mark.parametrize("step", release_checkouts(), ids=lambda s: s.get("uses", "?"))
-def test_every_release_checkout_honours_the_ref_it_was_given(step):
-    assert (step.get("with") or {}).get("ref") == "${{ inputs.ref }}"
+def test_every_release_checkout_uses_the_callers_own_ref(step):
+    assert "ref" not in (step.get("with") or {}) or "inputs." not in step["with"]["ref"]
 
 
-def test_a_called_release_run_does_not_cancel_the_run_that_called_it():
-    """Two calls sharing github.ref (release-please's own push, and a bare CI run) must
-    not sit in the same concurrency group."""
-    assert RELEASE["concurrency"]["group"] == "release-${{ github.ref }}-${{ inputs.ref }}"
+def test_concurrent_release_runs_of_one_ref_cancel_each_other():
+    assert RELEASE["concurrency"]["group"] == "release-${{ github.ref }}"
     assert RELEASE["concurrency"]["cancel-in-progress"] is True
 
 
@@ -333,14 +334,11 @@ def test_pypi_only_runs_once_the_project_is_registered():
     assert "vars.PYPI_ENABLED == 'true'" in RELEASE["jobs"]["pypi"]["if"]
 
 
-def test_release_please_builds_the_pr_branch_without_publishing():
-    """The release pull request is green only once every bundle builds and passes the
-    smoke check, which release.yml alone runs."""
-    job = PLEASE["jobs"]["release-pr-bundles"]
-    assert job["uses"] == f"./.github/workflows/{BUILD_FILE}"
-    assert job["if"] == "needs.propose.outputs.pr_branch != ''"
-    assert job["with"]["ref"] == "${{ needs.propose.outputs.pr_branch }}"
-    assert "tag" not in job["with"], "a tag here would try to publish the PR branch"
+def test_the_dry_run_can_be_dispatched_on_the_release_branch():
+    """The release pull request is green only once every bundle builds and passes the smoke
+    check; release-please.yml dispatches this on the branch, with no tag, so nothing publishes."""
+    assert "workflow_dispatch" in DRY_RUN["on"]
+    assert "tag" not in (DRY_RUN["jobs"]["build"].get("with") or {})
 
 
 def test_the_dry_run_watches_the_development_branches():

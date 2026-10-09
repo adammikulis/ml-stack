@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files, home, lock
+from ml_stack import board_names, files, home, lock
 from ml_stack.graph.store import GraphStore
 from ml_stack.memory import vault
 
@@ -94,6 +94,8 @@ class SealedGraph:
         g = GraphStore(":memory:")
         g.write({"nodes": snap.get("nodes", []), "edges": snap.get("edges", [])})
         g.put_doc("rep", snap.get("rep", {}))
+        if not board_names.marker(self.path).exists():
+            board_names.rewrite_graph(g)
         self._g, self._stamp = g, stamp
         return g
 
@@ -127,11 +129,12 @@ class SealedGraph:
         main, prev = self._bytes(self.path), self._bytes(self.prev)
         self._stamp = (hashlib.sha256(main or b"").hexdigest(), hashlib.sha256(prev or b"").hexdigest())
         self.status = "ok"
+        board_names.marker(self.path).write_text(str(board_names.VERSION))
 
     def delete(self) -> None:
         """Remove the sealed file and its previous copy."""
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with lock.only_one(self.path.parent / "store.lock", timeout=10, announce=lambda _: None):
-            for each in (self.path, self.prev):
+            for each in (self.path, self.prev, board_names.marker(self.path)):
                 each.unlink(missing_ok=True)
         self.close()

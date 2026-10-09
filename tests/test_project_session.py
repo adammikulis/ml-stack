@@ -57,7 +57,7 @@ def sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(automatic_connection, "discover", lambda root: choice)
     monkeypatch.setattr(automatic_connection, "RemoteWorkspace", Remote)
     monkeypatch.setattr(project_connection, "RemoteWorkspace", Remote)
-    monkeypatch.setattr(project_connection, "CanonicalWorkspace", lambda remote, token: (remote, token))
+    monkeypatch.setattr(project_connection, "BoardWorkspace", lambda remote, token: (remote, token))
     return root, choice, enrolled, revoked
 
 
@@ -192,7 +192,7 @@ def test_session_identifier_precedence_and_manual_names(monkeypatch):
 
 
 def test_claim_owner_is_readable_and_json_is_unchanged(capsys):
-    owner = "canonical:" + "a" * 32 + ":codex-fixture"
+    owner = "board:" + "a" * 32 + ":codex-fixture"
     row = {"kind": "file", "key": "source.py", "owner": owner}
     cli._show(SimpleNamespace(json=False), row)
     assert "codex-fixture on shared project Board" in capsys.readouterr().out

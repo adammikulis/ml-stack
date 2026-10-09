@@ -77,11 +77,11 @@ def test_authenticated_context_reuses_reader_without_discovery_or_reauthenticati
     monkeypatch.setattr(reader.project_connection, 'RemoteWorkspace',
                         lambda *a, **kw: pytest.fail('repeated discovery'))
     monkeypatch.setattr(reader.tokens, 'load', lambda base, actor: 'existing-fixture')
-    assert reader.read('codex', root, 'root-one', canonical=(remote, who)) == 'one unread'
+    assert reader.read('codex', root, 'root-one', board=(remote, who)) == 'one unread'
     assert calls == ['nudge']
     who.id = 'foreign-actor'
     with pytest.raises(Denied, match='does not match'):
-        reader.read('codex', root, 'root-one', canonical=(remote, who))
+        reader.read('codex', root, 'root-one', board=(remote, who))
 
 
 def test_saved_slot_authority_tampering_is_refused(saved):

@@ -12,7 +12,7 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: cargo
-    directory: /app/src-tauri
+    directory: /app
     target-branch: 0.2dev
     schedule:
       interval: weekly

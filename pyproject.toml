@@ -123,7 +123,9 @@ telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
 mcp = ["mcp>=2.3,<3"]
 # NVIDIA NeMo Guardrails as one more rail over the built-in ones (`ml_stack.guard.nemo`); its
 # rails call the llama.cpp server a configuration names. The built-in rails need no extra.
-guardrails = ["nemoguardrails>=0.24.1,<0.25"]
+# nemoguardrails ships no release for Python 3.14 or later (Requires-Python <3.14), so the
+# extra is empty there and the NeMo rail reports itself unavailable.
+guardrails = ["nemoguardrails>=0.24.1,<0.25; python_version < '3.14'"]
 # a prompt-injection classifier run on the CPU through onnxruntime (`ml_stack.guard.classifier`);
 # the ONNX export of protectai/deberta-v3-base-prompt-injection-v2 is fetched once
 guard-model = ["onnxruntime>=1.20", "tokenizers>=0.21", "numpy>=1.24", "huggingface_hub>=1.32"]
@@ -254,6 +256,7 @@ markers = [
     "live_api: calls a paid or quota-limited remote API; runs only when ML_STACK_LIVE_API=1",
     "live_net: reaches a public endpoint; runs only when ML_STACK_LIVE_NET=1",
     "seatbelt: runs sandbox-exec itself, so it cannot run under the real-state write denial; listed in tests/seatbelt-modules.txt",
+    "gate: a scan of the whole tracked tree, the same one `scripts/test gate` makes; left out of fast and full unless --gate or --slow is given",
     "heavy: runs in the default tier and costs seconds a test; `scripts/test fast` leaves it out",
 ]
 

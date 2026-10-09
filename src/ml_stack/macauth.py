@@ -68,7 +68,7 @@ class Stamp:
         return cls(time.time(), secrets.token_hex(12))
 
 
-def _canonical(method: str, url: str, body: bytes | None, stamp: Stamp) -> bytes:
+def _encoded(method: str, url: str, body: bytes | None, stamp: Stamp) -> bytes:
     host, target = parts(url)
     body_hash = hashlib.sha256(body).hexdigest() if body else EMPTY
     return "\n".join((SCHEME, method.upper(), target, host, body_hash, f"{stamp.at:.0f}",
@@ -79,7 +79,7 @@ def sign(secret: str, method: str, url: str, body: bytes | None,
          stamp: Stamp | None = None) -> dict[str, str]:
     """The ``Authorization`` header that signs this request."""
     stamp = stamp or Stamp.now()
-    mac = hmac.new(secret.encode(), _canonical(method, url, body, stamp),
+    mac = hmac.new(secret.encode(), _encoded(method, url, body, stamp),
                    hashlib.sha256).hexdigest()
     return {"Authorization":
             f"{SCHEME} k={key_id(secret)},t={stamp.at:.0f},n={stamp.nonce},s={mac}"}
@@ -177,7 +177,7 @@ class Authenticator:
         if abs(self.clock() - int(stamp)) > self.window_s:
             return Verdict(False, "request time is outside the window; check the clocks")
         _, target = parts(url)
-        wanted = _canonical(method, f"//{headers.get('Host', '')}{target}", body,
+        wanted = _encoded(method, f"//{headers.get('Host', '')}{target}", body,
                             Stamp(float(stamp), nonce))
         match = ""
         for secret in self.secrets():

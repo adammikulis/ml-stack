@@ -97,7 +97,7 @@ class Ledger:
     def standing(self, kind: str, key: str) -> Standing | None:
         """The source ``key`` of ``kind``, or None when it has never been seen."""
         g = self.sealed.graph()
-        rec = self._load(g, kind, model.canonical(kind, key)) if g is not None else None
+        rec = self._load(g, kind, model.normal(kind, key)) if g is not None else None
         return self._standing(rec, self.clock()) if rec else None
 
     def sources(self) -> list[Standing]:
@@ -193,7 +193,7 @@ class Ledger:
 
     def clean(self, kind: str, key: str) -> None:
         """Note one clean interaction; written with the next flush."""
-        self._pending[(kind, model.canonical(kind, key))] = self.clock()
+        self._pending[(kind, model.normal(kind, key))] = self.clock()
         if self.clock() - self._flushed >= self.flush_s:
             self.flush()
 
@@ -206,7 +206,7 @@ class Ledger:
 
     def observe(self, kind: str, key: str, event: str, *, scale: float = 1.0) -> Standing:
         """Note one bad ``event`` that the system itself saw, and return where the source stands."""
-        name = model.canonical(kind, key)
+        name = model.normal(kind, key)
         self._edit([*self._pending_steps(),
                     (kind, name, lambda r, g: self._bad(r, g, event, scale))])
         held = self.standing(kind, name)
@@ -224,21 +224,21 @@ class Ledger:
             event = model.observe_trait(rec, name, value)
             return self._bad(rec, g, event, 1.0) if event else False
 
-        self._edit([*self._pending_steps(), (kind, model.canonical(kind, key), note)])
+        self._edit([*self._pending_steps(), (kind, model.normal(kind, key), note)])
 
     def block(self, kind: str, key: str) -> None:
         """Put a source in bad now (the dialog's Block button)."""
         def to_bad(rec: Rec, _g: GraphStore) -> None:
             rec.state, rec.since, rec.notice, rec.streak = State.BAD, self.clock(), "done", 0
 
-        self._edit([(kind, model.canonical(kind, key), to_bad)])
+        self._edit([(kind, model.normal(kind, key), to_bad)])
 
     def settle_notice(self, kind: str, key: str, notice: str) -> None:
         """Set where a source's notice stands (``queued``, ``shown`` or ``done``)."""
         def mark(rec: Rec, _g: GraphStore) -> None:
             rec.notice = notice
 
-        self._edit([(kind, model.canonical(kind, key), mark)])
+        self._edit([(kind, model.normal(kind, key), mark)])
 
     def queued(self) -> list[Standing]:
         """The sources with a divergence notice waiting, oldest first."""
@@ -247,7 +247,7 @@ class Ledger:
     # -- the person's ------------------------------------------------------------------
     def forget(self, kind: str, key: str) -> bool:
         """Delete one source and the events tied to it; true when it was held."""
-        name = model.canonical(kind, key)
+        name = model.normal(kind, key)
         if self.standing(kind, name) is None:
             return False
 

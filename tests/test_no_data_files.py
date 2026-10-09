@@ -48,6 +48,7 @@ def test_code_and_package_resources_pass(staging):
     assert staging("src/ml_stack/data/fit.json", b"{}").returncode == 0
 
 
+@pytest.mark.gate
 def test_the_tracked_tree_passes():
     done = run(REPO, "--tracked")
     assert done.returncode == 0, done.stderr

@@ -266,7 +266,7 @@ resolve.
 ### Supply chain gates
 
 `audit.yml` fails on a known vulnerability in the Python extras (pip-audit), `app/package-lock.json` (npm audit) and
-`app/src-tauri/Cargo.lock` (cargo audit), through `scripts/audit_gate.py` and the expiring allow-list
+`app/Cargo.lock` (cargo audit), through `scripts/audit_gate.py` and the expiring allow-list
 `.github/pip-audit-allow.json`; nothing in the workflow is `continue-on-error`, a report the tool did not produce fails
 the job, and `tests/test_supply_chain_audit.py` parses the workflow YAML and runs the gate on recorded reports of all
 three formats. `release.yml` builds `sbom.cdx.json` (CycloneDX 1.5, `scripts/sbom.py`, offline: the installed extras and the

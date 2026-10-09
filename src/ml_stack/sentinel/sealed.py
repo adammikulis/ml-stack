@@ -28,7 +28,7 @@ class Loaded:
     status: str
 
 
-def _canonical(payload: dict[str, Any]) -> bytes:
+def _encoded(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=True).encode()
 
@@ -63,7 +63,7 @@ class SealedFile:
         return hmac.new(self._key(), data, hashlib.sha256).hexdigest()
 
     def _seal(self, payload: dict[str, Any]) -> str:
-        return hmac.new(self._key(), _canonical(payload), hashlib.sha256).hexdigest()
+        return hmac.new(self._key(), _encoded(payload), hashlib.sha256).hexdigest()
 
     def _valid(self, path: Path) -> dict[str, Any] | None:
         try:

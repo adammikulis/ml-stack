@@ -1,4 +1,4 @@
-"""Immutable allocation-backed attribution for canonical worker proposals."""
+"""Immutable allocation-backed attribution for worker proposals."""
 
 from copy import deepcopy
 

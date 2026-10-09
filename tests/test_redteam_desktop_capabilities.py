@@ -23,7 +23,7 @@ def test_desktop_grants_only_window_and_close_commands():
     assert capability["remote"]["urls"] == ["http://127.0.0.1:8770/*"]
     assert capability["local"] is False
     assert set(capability["permissions"]) == {
-        "core:default", "window-state:default", "allow-close-choice", "allow-on-closing",
+        "core:default", "window-state:default", "allow-close-choice", "allow-on-closing", "allow-reopen-page",
     }
 
 
@@ -35,18 +35,18 @@ def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_pa
     cargo = shutil.which("cargo")
     assert cargo, "Cargo is required to verify desktop capabilities"
     project = tmp_path / "desktop"
-    shutil.copytree(ROOT / "app/src-tauri", project,
-                    ignore=shutil.ignore_patterns("target", "binaries", "gen"))
+    shutil.copytree(ROOT / "app", project,
+                    ignore=shutil.ignore_patterns("target", "binaries", "gen", "node_modules", "android"))
     native_env = {**os.environ, "RUSTUP_HOME": RUSTUP_HOME, "CARGO_HOME": CARGO_HOME}
     host = subprocess.run(["rustc", "-vV"], env=native_env,
                           capture_output=True, text=True, check=True)
     target = next(line.removeprefix("host: ") for line in host.stdout.splitlines()
                   if line.startswith("host: "))
-    binaries = project / "binaries"
+    binaries = project / "src-tauri" / "binaries"
     binaries.mkdir()
     (binaries / f"ml-stack-headless-{target}").write_bytes(b"")
     done = subprocess.run(
-        [cargo, "test", "--manifest-path", str(project / "Cargo.toml"),
+        [cargo, "test", "--manifest-path", str(project / "src-tauri" / "Cargo.toml"),
          "--offline", selector, "--", "--nocapture"],
         env={**native_env, "CARGO_TARGET_DIR": os.environ.get(
             "ML_STACK_TAURI_TEST_TARGET", str(tmp_path / "target"))},

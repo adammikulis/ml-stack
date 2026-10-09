@@ -5,7 +5,11 @@ Every fixture is invented; nothing reads a real graph or talks to a model.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
+from artifact_cache import cached, expand
 
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.store import GraphStore
@@ -21,6 +25,7 @@ from ml_stack.graph.thread import (
     turn_of,
 )
 
+GRAPH_SOURCES = Path(__file__).resolve().parents[1] / "src" / "ml_stack" / "graph"
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
                "attrs": {}, "messages": []},
@@ -257,15 +262,8 @@ def notes(turns):
     return f"{established} Rests on: {', '.join(ids)}."
 
 
-@pytest.fixture(scope="module")
-def long_thread(tmp_path_factory):
-    """Two hundred turns: the first states a fact, the rest are noise about other entries,
-    and the two hundredth asks about the fact. Built once; every test reads it read-only.
-
-    ``prefixes`` is the summary the ask path would have sent at each of turns 193-200,
-    taken as each turn was about to be asked -- the state at the time, not reconstructed.
-    """
-    where = tmp_path_factory.mktemp("long") / "graph.ladybug"
+def _build_long_thread(into: Path) -> None:
+    where = into / "graph.ladybug"
     prefixes = []
     with GraphStore(where) as store:
         store.write(LONG_GRAPH)
@@ -287,7 +285,19 @@ def long_thread(tmp_path_factory):
             remember_turn(store, thread="long", role="user" if n % 2 else "assistant",
                           text=text, drew=drew, embedder=bag)
             summarise(store, "long", notes)
-    return where, prefixes
+    (into / "prefixes.json").write_text(json.dumps(prefixes), encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def long_thread():
+    """Two hundred turns: the first states a fact, the rest are noise about other entries,
+    and the two hundredth asks about the fact. Built once; every test reads it read-only.
+
+    ``prefixes`` is the summary the ask path would have sent at each of turns 193-200,
+    taken as each turn was about to be asked -- the state at the time, not reconstructed.
+    """
+    built = cached("long-thread", expand(Path(__file__), GRAPH_SOURCES), _build_long_thread)
+    return built / "graph.ladybug", json.loads((built / "prefixes.json").read_text(encoding="utf-8"))
 
 
 def test_recall_finds_the_fact_from_turn_one_two_hundred_turns_later(long_thread):

@@ -9,18 +9,13 @@ on:
         required: false
         type: string
         default: ""
-      ref:
-        description: what to check out; the caller's own ref when empty
-        type: string
-        required: false
-        default: ""
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,7 +23,6 @@ jobs:
     uses: ./.github/workflows/release-build.yml
     with:
       tag: ${{ inputs.tag }}
-      ref: ${{ inputs.ref }}
 
   # The tag must name the checked-out commit, and that commit must be reachable from main.
   guard:
@@ -39,7 +33,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - name: the tagged commit is on main
         env:
@@ -105,7 +98,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
           path: repo
           fetch-depth: 0
       - name: leave the smoke screenshots out
@@ -193,7 +185,7 @@ jobs:
               case "$file" in
                 "") ;;
                 *.md|docs/*) ;;
-                pyproject.toml|app/src-tauri/Cargo.toml) ;;
+                pyproject.toml|app/src-tauri/Cargo.toml|app/poolside-node/Cargo.toml) ;;
                 *) return 0 ;;
               esac
             done < <(git show --name-only --pretty=format: "$1")
