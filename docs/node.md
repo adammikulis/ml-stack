@@ -5,8 +5,9 @@ session one unique name per board, stamps every write from the session's token, 
 local API on a Unix socket. It is the Rust crate `app/poolside-node` (lib and bin) in the cargo
 workspace `app/`; the Tauri app (`app/src-tauri`) is the other member and depends on the lib.
 
-This is slice A of the node refactor: the crate, built and tested alone. Nothing in Python calls it
-yet, and there is no network transport yet (see "What is left").
+This is slices A and B1 of the node refactor: the crate (boards, identity, local socket, in-process
+sync) and its network side (peer transport, membership, board sync over it, discovery, pairing),
+built and tested alone. Nothing in Python calls it yet (see "What is left").
 
 ## Boards, projects, links
 
@@ -116,6 +117,17 @@ Request `{"v":1, "id":…, "method":…, "board":…, "token":…, "params":{…
 | `project_list`, `project_resolve` | | `path` | projects / `{board}` |
 | `status` | (board, token for detail) | | counts; with a token, the board's detail |
 | `shutdown` | board, token | | `{stopping}` |
+| `pool_status` | | | the pool id, join policy, this device, `listen`, `pairing_open`, and each member with `status`, `by`, `connected`, `addr`, `last_seen_ms`, `last_sync_ms`, `last_error` |
+| `member_revoke` | token with the grant | `fingerprint` | `{fingerprint, status}` |
+| `set_join_policy` | token with the grant | `policy` (`open` or `secure`) | `{policy, changed}` |
+| `pair_accept` | token with the grant | `passphrase` (else a six-digit code is made), `ttl_s` | `{code, expires_in_s, port, fingerprint}` |
+| `pair_start` | token with the grant | `host, port, passphrase`; without a passphrase `fingerprint` (join under `open`) | `{pool, peer}` |
+| `sync_now` | token with the grant | | `{reached}` |
+
+The grant check is `grants::Grants` (the standing-grant system comes later); the stub lets any
+registered local session act, and a node can be given a stricter one. The network methods
+(`pair_accept`, `pair_start`, `sync_now`) run without the node's lock held, so a slow peer blocks no
+other request.
 
 `read` cursors are a map origin to last seq returned, so a read returns each entry once even when a
 sync later brings entries with older clocks, and a `limit` never skips anything. Claims: the first
@@ -135,6 +147,56 @@ request, every row through `ingest` (chain, hashes, heads, pinned key, size, ori
 a third device through a relay and stay verifiable. `sync::exchange_nodes` does every board both
 nodes host and leaves the rest alone. Two devices converge after a partition.
 
+A peer stores rows only through a verified head, so a log signs its own tip after 64 rows or 512 KiB
+without one (`board::HEAD_EVERY_ROWS`, `HEAD_EVERY_BYTES`); otherwise a run longer than one batch
+would never arrive.
+
+## The pool and its peers
+
+The network is off unless the node is started with `--listen ADDR` (`net::Net`, `NetConfig`). One
+listener is the one network port.
+
+- **Device identity.** Each device has one self-signed Ed25519 certificate made from its device key
+  (`cert.rs`, `device.cert`, valid ten years). Its fingerprint is the SHA-256 of the DER and is the
+  device's identity in the pool; the board fingerprint (hash of the public key, used for acks and
+  origin binding) is read back out of the certificate a peer showed.
+- **Transport** (`tls.rs`, rustls with the ring provider). TLS 1.3 only; a TLS 1.2 client is refused. Both
+  sides show a certificate. A client pins the one fingerprint it expects (a changed digit is a refused
+  handshake) or, when pairing, takes any certificate and lets the exchange authenticate it. A server
+  completes the handshake for an unknown certificate (it may pair or join, nothing else) and refuses
+  one the pool has revoked. No certificate, no connection.
+- **Membership** (`membership.rs`, `pool.json`; semantics of `fleet/membership.py`). Per device: fingerprint,
+  certificate, status `active` or `revoked`, who recorded it. A row whose fingerprint is not the hash of
+  its certificate is dropped; revoked wins every merge and is never undone; a revoked certificate cannot
+  be enrolled again. Members swap records with the `members` op; only an active member's rows are merged.
+  Every request is checked against the record when it arrives, so a device revoked after it connected is
+  refused at its next request on the same connection. Changes are written to the board `pool` as audit
+  entries; the record is the authority.
+- **Join policy**: one pool attribute, `open` or `secure` (default `secure`), newest change wins, set by
+  `set_join_policy` and carried by the `members` op.
+- **Peer ops** (`peer.rs`, frames up to 4 MiB): `hello`, `join_open`, `pair_exchange`, `pair_confirm` for
+  a non-member; `members`, `boards`, `vector`, `pull`, `push` for a member. A device syncs only the boards
+  both hold, through `sync::rows_since` and `sync::take`, so a wire row meets the checks an in-process row
+  does and the same quotas (400 rows, 2 MiB, 16 origins per request). A relay's copy never marks an origin
+  damaged; only the device that owns the origin can, by sending a forged copy of it.
+- **Discovery** (`beacon.rs`). One UDP datagram with the pool id, the device fingerprint, an address and
+  a port, signed with the device key and valid for a minute; sent to the multicast group on a configurable
+  port. Never matched by name. Loopback, unspecified and multicast addresses are never advertised (a
+  test on one machine passes `allow_loopback`). A member's beacon updates its address (its key must be the
+  one in its certificate). A non-member's is ignored unless this pool's policy is `open`, and then only
+  when it names this pool, or this device is alone and the beacon's pool id sorts before its own (so two
+  lone devices never join each other at once); the dial is pinned to the fingerprint in the beacon.
+- **Pairing** (`pairing.rs`). `secure`: `pair_accept` opens a window (a six-digit code or a passphrase,
+  three tries, a time limit), `pair_start` on the other device runs SPAKE2 (`spake2`) with both certificate
+  fingerprints as its identities and HMAC-SHA256 confirmations, as in `fleet/onboard/pake.py`; the pool
+  record then arrives sealed under the exchange. `open`: the device is enrolled on its first contact from
+  the same segment and the enrolment is recorded with the certificate fingerprint (`by: open`). A device
+  joins only if it is alone in its pool.
+
+`poolside-node run --state DIR --listen 127.0.0.1:0 --beacon-bind ADDR --beacon-send ADDR
+--advertise IP --sync-ms N` starts the network; tests use real sockets on loopback with injected
+addresses and an unused UDP port for the beacon.
+
 ## Run and test
 
 ```
@@ -142,19 +204,27 @@ cd app
 cargo build -p poolside-node
 target/debug/poolside-node run --state ~/.poolside/node     # serve
 target/debug/poolside-node status --state ~/.poolside/node
-cargo test -p poolside-node                                  # 44 tests
+cargo test -p poolside-node                                  # 76 tests; crash.rs starts two node processes and SIGKILLs one
 cargo test -p ml-stack-app                                   # the window; needs the sidecar binary in src-tauri/binaries
 ```
 
 The workspace Cargo.lock is `app/Cargo.lock`, the build output `app/target/`. Crypto is
-`ed25519-dalek` and `sha2` only; nothing is hand-rolled.
+`ed25519-dalek`, `sha2`, `hmac`, `rustls` (ring), `rcgen`, `x509-parser` and `spake2`; nothing is hand-rolled.
 
-## What is left (slice B)
+## What is left
 
-Peer transport over TLS 1.3 with pinned per-device certificates; membership and revocation from
-the pool-encryption work (which decides the roster, the `authoritative` binding, and who may
-exchange); discovery and pairing; the lease service; the Python client replacing the workspace
-calls; packaging the binary in the wheel; a Windows named pipe; the rest of the entry kinds
-(`task`, `landing_request`, `reputation_event`); content screening and quarantine of foreign text
-(still in Python); owner-only grants for links and project sources; rebuilding the graph index from
-entries.
+- Windows: a named pipe for the local API (the crate is Unix only; file modes and `flock` are Unix calls).
+- Packaging the binary in the wheel (`packaging/build.py`), starting it on a default port and the
+  multicast group (`NetConfig::standard`), and a default sync interval; today the network starts only
+  with flags.
+- The Python client (`ml_stack.board`) replacing the workspace calls.
+- The lease service (another worker), the rest of the entry kinds (`task`, `landing_request`,
+  `reputation_event`), content screening and quarantine of foreign text (still in Python), owner-only
+  grants (the `Grants` stub allows every registered session; links and project sources have the same
+  gap), rebuilding the graph index from entries.
+- Pools of two or more members do not merge: a device that already has members refuses to join another
+  pool (`Pool::adopt`).
+- The head signature still uses an empty pool id as its domain (`Node.pool`); the pool id lives in
+  `pool.json` and the beacon. Moving it into the head would need a re-sign when a device joins.
+- Addresses of members come from the beacon, from pairing (the caller's address and announced port) and
+  `peers.json`; a member that moves between pairings is found again by its beacon only.

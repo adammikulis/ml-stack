@@ -86,15 +86,20 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `alloc-stdlib` | 0.2.4 | BSD-3-Clause |
 | `android_system_properties` | 0.1.6 | MIT OR Apache-2.0 |
 | `anyhow` | 1.0.104 | MIT OR Apache-2.0 |
+| `asn1-rs` | 0.7.2 | MIT OR Apache-2.0 |
+| `asn1-rs-derive` | 0.6.0 | MIT OR Apache-2.0 |
+| `asn1-rs-impl` | 0.2.0 | MIT/Apache-2.0 |
 | `atk` | 0.18.2 | MIT |
 | `atk-sys` | 0.18.2 | MIT |
 | `atomic-waker` | 1.1.2 | Apache-2.0 OR MIT |
 | `autocfg` | 1.5.1 | Apache-2.0 OR MIT |
 | `base64` | 0.21.7 | MIT OR Apache-2.0 |
 | `base64` | 0.22.1 | MIT OR Apache-2.0 |
+| `base64` | 0.23.1 | MIT OR Apache-2.0 |
 | `base64ct` | 1.8.3 | Apache-2.0 OR MIT |
 | `bit-set` | 0.8.0 | Apache-2.0 OR MIT |
 | `bit-vec` | 0.8.0 | Apache-2.0 OR MIT |
+| `bit-vec` | 0.9.1 | Apache-2.0 OR MIT |
 | `bitflags` | 1.3.2 | MIT/Apache-2.0 |
 | `bitflags` | 2.13.1 | MIT OR Apache-2.0 |
 | `block-buffer` | 0.10.4 | MIT OR Apache-2.0 |
@@ -139,11 +144,13 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `darling` | 0.23.0 | MIT |
 | `darling_core` | 0.23.0 | MIT |
 | `darling_macro` | 0.23.0 | MIT |
+| `data-encoding` | 2.11.1 | MIT |
 | `dbus` | 0.9.12 | Apache-2.0/MIT |
 | `defmt` | 1.1.1 | MIT OR Apache-2.0 |
 | `defmt-macros` | 1.1.1 | MIT OR Apache-2.0 |
 | `defmt-parser` | 1.0.0 | MIT OR Apache-2.0 |
 | `der` | 0.7.10 | Apache-2.0 OR MIT |
+| `der-parser` | 10.0.0 | MIT OR Apache-2.0 |
 | `deranged` | 0.5.8 | MIT OR Apache-2.0 |
 | `derive_more` | 2.1.1 | MIT |
 | `derive_more-impl` | 2.1.1 | MIT |
@@ -216,6 +223,8 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `heck` | 0.4.1 | MIT OR Apache-2.0 |
 | `heck` | 0.5.0 | MIT OR Apache-2.0 |
 | `hex` | 0.4.3 | MIT OR Apache-2.0 |
+| `hkdf` | 0.12.4 | MIT OR Apache-2.0 |
+| `hmac` | 0.12.1 | MIT OR Apache-2.0 |
 | `html5ever` | 0.38.0 | MIT OR Apache-2.0 |
 | `http` | 1.5.0 | MIT OR Apache-2.0 |
 | `http-body` | 1.1.0 | MIT |
@@ -258,6 +267,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `json-patch` | 3.0.1 | MIT/Apache-2.0 |
 | `jsonptr` | 0.6.3 | MIT OR Apache-2.0 |
 | `keyboard-types` | 0.7.0 | MIT OR Apache-2.0 |
+| `lazy_static` | 1.5.1 | MIT OR Apache-2.0 |
 | `libappindicator` | 0.9.0 | Apache-2.0 OR MIT |
 | `libappindicator-sys` | 0.9.0 | Apache-2.0 OR MIT |
 | `libc` | 0.2.189 | MIT OR Apache-2.0 |
@@ -272,6 +282,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `memchr` | 2.8.3 | Unlicense OR MIT |
 | `memoffset` | 0.9.1 | MIT |
 | `mime` | 0.3.17 | MIT OR Apache-2.0 |
+| `minimal-lexical` | 0.2.1 | MIT/Apache-2.0 |
 | `miniz_oxide` | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | `miniz_oxide` | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | `mio` | 1.2.3 | MIT |
@@ -279,7 +290,10 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `ndk` | 0.9.0 | MIT OR Apache-2.0 |
 | `ndk-sys` | 0.6.0+11769913 | MIT OR Apache-2.0 |
 | `new_debug_unreachable` | 1.0.6 | MIT |
+| `nom` | 7.1.3 | MIT |
+| `num-bigint` | 0.4.8 | MIT OR Apache-2.0 |
 | `num-conv` | 0.2.2 | MIT OR Apache-2.0 |
+| `num-integer` | 0.1.47 | MIT OR Apache-2.0 |
 | `num-traits` | 0.2.19 | MIT OR Apache-2.0 |
 | `num_enum` | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 |
 | `num_enum_derive` | 0.7.6 | BSD-3-Clause OR MIT OR Apache-2.0 |
@@ -300,6 +314,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `objc2-ui-kit` | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | `objc2-user-notifications` | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | `objc2-web-kit` | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
+| `oid-registry` | 0.8.1 | MIT OR Apache-2.0 |
 | `once_cell` | 1.21.4 | MIT OR Apache-2.0 |
 | `open` | 5.4.3 | MIT |
 | `option-ext` | 0.2.0 | MPL-2.0 |
@@ -308,6 +323,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `pango-sys` | 0.18.0 | MIT |
 | `parking_lot` | 0.12.5 | MIT OR Apache-2.0 |
 | `parking_lot_core` | 0.9.12 | MIT OR Apache-2.0 |
+| `pem` | 4.0.0 | MIT |
 | `percent-encoding` | 2.3.2 | MIT OR Apache-2.0 |
 | `phf` | 0.13.1 | MIT |
 | `phf_codegen` | 0.13.1 | MIT |
@@ -344,6 +360,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `rand_core` | 0.9.5 | MIT OR Apache-2.0 |
 | `rand_xorshift` | 0.4.0 | MIT OR Apache-2.0 |
 | `raw-window-handle` | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
+| `rcgen` | 0.14.10 | MIT OR Apache-2.0 |
 | `redox_syscall` | 0.5.18 | MIT |
 | `redox_users` | 0.5.2 | MIT |
 | `ref-cast` | 1.0.27 | MIT OR Apache-2.0 |
@@ -352,9 +369,14 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `regex-automata` | 0.4.18 | MIT OR Apache-2.0 |
 | `regex-syntax` | 0.8.11 | MIT OR Apache-2.0 |
 | `reqwest` | 0.13.4 | MIT OR Apache-2.0 |
+| `ring` | 0.17.14 | Apache-2.0 AND ISC |
 | `rustc-hash` | 2.1.3 | Apache-2.0 OR MIT |
 | `rustc_version` | 0.4.1 | MIT OR Apache-2.0 |
+| `rusticata-macros` | 4.1.0 | MIT/Apache-2.0 |
 | `rustix` | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| `rustls` | 0.23.45 | Apache-2.0 OR ISC OR MIT |
+| `rustls-pki-types` | 1.15.1 | MIT OR Apache-2.0 |
+| `rustls-webpki` | 0.103.15 | ISC |
 | `rustversion` | 1.0.23 | MIT OR Apache-2.0 |
 | `rusty-fork` | 0.3.1 | MIT/Apache-2.0 |
 | `same-file` | 1.0.6 | Unlicense/MIT |
@@ -394,6 +416,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `softbuffer` | 0.4.8 | MIT OR Apache-2.0 |
 | `soup3` | 0.5.0 | MIT |
 | `soup3-sys` | 0.5.0 | MIT |
+| `spake2` | 0.4.0 | MIT OR Apache-2.0 |
 | `spki` | 0.7.3 | Apache-2.0 OR MIT |
 | `stable_deref_trait` | 1.2.1 | MIT OR Apache-2.0 |
 | `string_cache` | 0.9.0 | MIT OR Apache-2.0 |
@@ -464,6 +487,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `unic-ucd-version` | 0.9.0 | MIT/Apache-2.0 |
 | `unicode-ident` | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | `unicode-segmentation` | 1.13.3 | MIT OR Apache-2.0 |
+| `untrusted` | 0.9.0 | ISC |
 | `url` | 2.5.8 | MIT OR Apache-2.0 |
 | `urlpattern` | 0.3.0 | MIT |
 | `utf8_iter` | 1.0.4 | Apache-2.0 OR MIT |
@@ -510,6 +534,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `windows-strings` | 0.4.2 | MIT OR Apache-2.0 |
 | `windows-strings` | 0.5.1 | MIT OR Apache-2.0 |
 | `windows-sys` | 0.45.0 | MIT OR Apache-2.0 |
+| `windows-sys` | 0.52.0 | MIT OR Apache-2.0 |
 | `windows-sys` | 0.59.0 | MIT OR Apache-2.0 |
 | `windows-sys` | 0.61.2 | MIT OR Apache-2.0 |
 | `windows-targets` | 0.42.2 | MIT OR Apache-2.0 |
@@ -540,6 +565,8 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `wry` | 0.55.1 | Apache-2.0 OR MIT |
 | `x11` | 2.21.0 | MIT |
 | `x11-dl` | 2.21.0 | MIT |
+| `x509-parser` | 0.18.1 | MIT OR Apache-2.0 |
+| `yasna` | 0.6.0 | MIT OR Apache-2.0 |
 | `yoke` | 0.8.3 | Unicode-3.0 |
 | `yoke-derive` | 0.8.2 | Unicode-3.0 |
 | `zerocopy` | 0.8.62 | BSD-2-Clause OR Apache-2.0 OR MIT |
