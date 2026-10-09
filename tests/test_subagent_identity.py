@@ -208,3 +208,30 @@ def test_the_bash_guard_makes_a_subagent_name_itself_in_workspace_commands(kit, 
     assert run_guard(f"ml-stack-workspace inbox --agent {first}", agent_id="agent-a")[0] == 0
     assert run_guard("ml-stack-workspace inbox")[0] == 0
     assert run_guard("ls", agent_id="agent-a")[0] == 0
+
+
+def test_a_spawned_subagent_claims_every_kind_a_task_needs_and_its_parent_releases_them(kit, tmp_path):
+    first, first_token = spawn(kit, kit.lead, "agent-a")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    subprocess.run(["git", "init", "-q", str(tree)], check=True)
+    for kind, key in (("worktree", str(tree)), ("area", str(tree / "src")), ("branch", "feature/x"),
+                      ("port", "9411"), ("server", "model-a")):
+        assert kit.ws.claim(first_token, kind, key)["owner"] == first
+    held = [row for row in kit.ws.claims.listing() if row["owner"] == first]
+    assert len(held) == 5 and {row["parent"] for row in held} == {kit.lead_name}
+    with pytest.raises(Exception, match="held by"):
+        kit.ws.claim(kit.bob, "branch", "feature/x")
+    with pytest.raises(Denied, match="belongs to"):
+        kit.ws.release(kit.bob, "port", "9411")
+    kit.ws.release(kit.lead, "port", "9411")
+    assert kit.ws.who_owns("port", "9411") is None
+    kit.ws.retire(first_token)
+    assert [row for row in kit.ws.claims.listing() if row["owner"] == first] == []
+    kit.ws.claim(kit.bob, "branch", "feature/x")
+
+
+def test_a_spawned_subagent_still_cannot_invite_or_make_identities(kit):
+    _, first_token = spawn(kit, kit.lead, "agent-a")
+    with pytest.raises(Denied):
+        kit.ws.delegate(first_token, "kid")

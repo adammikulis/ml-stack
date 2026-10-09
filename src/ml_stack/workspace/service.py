@@ -752,7 +752,7 @@ class Workspace:
         given = _only(dict(opts), ClaimOptions)
         who = self.auth(token)
         self._may(who, "claim")
-        if who.parent and not (kind in ("branch", "server") and key.startswith(who.id + "/")):
+        if "/" in who.id and not (kind in ("branch", "server") and key.startswith(who.id + "/")):
             raise Denied(f"{who.id} may claim only a branch or server named {who.id}/...")
         self._check(who, "the claim", 1024, str(given.get("note", "")))
         try:
