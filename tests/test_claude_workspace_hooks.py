@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -13,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack.net import git
-from ml_stack.workspace import Workspace, guide, project
+from ml_stack.workspace import Workspace, session_name
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = ROOT / 'scripts/hooks'
@@ -29,7 +30,7 @@ import json, os, sys
 from pathlib import Path
 path = Path(os.environ['HOOK_CALLS'])
 calls = json.loads(path.read_text()) if path.exists() else []
-calls.append(dict(argv=sys.argv[1:], session=os.environ.get('ML_STACK_SESSION_ID'), harness=os.environ.get('ML_STACK_SESSION_HARNESS')))
+calls.append(dict(argv=sys.argv[1:], session=os.environ.get('ML_STACK_SESSION_ID'), agent=os.environ.get('ML_STACK_WORKSPACE_AGENT'), harness=os.environ.get('ML_STACK_SESSION_HARNESS')))
 path.write_text(json.dumps(calls))
 if os.environ.get('HOOK_FAILURE'):
     print(os.environ['HOOK_FAILURE'], file=sys.stderr)
@@ -47,6 +48,7 @@ print('Authenticated parent brief: hello-model; claims and independent review re
     monkeypatch.setitem(globals(), 'HOOKS', tree / 'scripts/hooks')
     monkeypatch.setenv('PATH', str(directory))
     monkeypatch.setenv('HOOK_CALLS', str(calls))
+    monkeypatch.setenv('ML_STACK_WORKSPACE_HOME', str(tmp_path / 'names'))
     monkeypatch.delenv('ANTHROPIC_MODEL', raising=False)
     return directory, calls
 
@@ -63,12 +65,13 @@ def test_session_event_forwards_exact_model_as_a_claim(commands, model):
     assert done.returncode == 0 and not done.stderr
     records = json.loads(calls.read_text())
     assert records[0]['session'] == 'native-main-1' and records[0]['harness'] == 'claude-code'
-    assert records[1]['argv'] == ['main-session', '--agent', 'claude', '--harness', 'claude-code']
+    assert records[1]['argv'] == ['main-session', '--harness', 'claude-code']
+    assert {r['agent'] for r in records} == {records[0]['agent']} and records[0]['agent'].endswith(records[0]['agent'][-6:])
     assert [r['argv'][0] for r in records[2:]] == ['announce', 'inbox']
     assert records[2]['argv'][1] == 'joined'
     context = json.loads(done.stdout)['hookSpecificOutput']
     assert context['hookEventName'] == 'SessionStart' and 'Authenticated parent brief' in context['additionalContext']
-    assert records[0]['argv'] == ['whoami', '--agent', 'claude', '--model',
+    assert records[0]['argv'] == ['whoami', '--model',
                                            model['id'] if isinstance(model, dict) else model,
                                            '--harness', 'claude-code']
 
@@ -76,8 +79,8 @@ def test_session_event_forwards_exact_model_as_a_claim(commands, model):
 def test_session_uses_reported_environment_model_when_event_omits_it(commands, monkeypatch):
     monkeypatch.setenv('ANTHROPIC_MODEL', 'claude-haiku-4-5')
     _, calls = commands
-    assert invoke('claude-session-start', {}).returncode == 0
-    assert json.loads(calls.read_text())[0]['argv'][4] == 'claude-haiku-4-5'
+    assert invoke('claude-session-start', {'session_id': 'native-env-model'}).returncode == 0
+    assert json.loads(calls.read_text())[0]['argv'][2] == 'claude-haiku-4-5'
 
 
 def test_missing_model_registers_session_without_guessing_and_explains_it(commands):
@@ -85,9 +88,9 @@ def test_missing_model_registers_session_without_guessing_and_explains_it(comman
     done = invoke('claude-session-start', {'session_id': 'native-with-unknown-model'})
     assert done.returncode == 0
     records = json.loads(calls.read_text())
-    assert records[0] == {'argv': ['whoami', '--agent', 'claude', '--harness', 'claude-code'],
-                          'session': 'native-with-unknown-model', 'harness': 'claude-code'}
-    assert records[1]['argv'] == ['main-session', '--agent', 'claude', '--harness', 'claude-code']
+    assert records[0]['argv'] == ['whoami', '--harness', 'claude-code']
+    assert records[0]['session'] == 'native-with-unknown-model' and records[0]['agent'].startswith('agent-')
+    assert records[1]['argv'] == ['main-session', '--harness', 'claude-code']
     assert 'model unavailable' in done.stderr and 'no model claim recorded' in done.stderr
 
 
@@ -105,7 +108,7 @@ def test_unavailable_workspace_is_nonblocking_with_redacted_reason(commands, mon
 def test_missing_workspace_executable_is_nonblocking_and_explained(commands, name, tmp_path):
     directory, _ = commands
     (directory / 'ml-stack-workspace').unlink()
-    done = invoke(name, {'model': 'claude-sonnet-4-6', 'cwd': str(tmp_path)})
+    done = invoke(name, {'model': 'claude-sonnet-4-6', 'cwd': str(tmp_path), 'session_id': 'native-missing-cli'})
     assert done.returncode == 0 and 'ml-stack-workspace' in done.stderr and 'No such file' in done.stderr
 
 
@@ -122,8 +125,8 @@ def test_subagent_event_includes_brief_and_actual_primary_branch_rules(commands,
     assert 'Acquire authenticated claims before mutation' in context and 'separate sibling worktrees' in context
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['announce', 'joined', 'explore-abcdef: Explore', '--agent', 'claude', '--label', 'explore-abcdef'],
-        ['brief', 'explore-abcdef', '--agent', 'claude', '--registered']]
+        ['announce', 'joined', 'explore-abcdef: Explore', '--label', 'explore-abcdef'],
+        ['brief', 'explore-abcdef', '--registered']]
     assert all(record['session'] == 'native-parent' and record['harness'] == 'claude-code' for record in records)
 
 
@@ -179,22 +182,25 @@ def test_actual_hooks_record_claimed_metadata_and_authenticated_subagent_brief(t
     git.run(['-c', 'user.name=Hook fixture', '-c', 'user.email=fixture@example.invalid',
              'commit', '--allow-empty', '-m', 'fixture project'], cwd=repository)
     ws = Workspace(tmp_path / 'ws')
-    guide.agent_connect(ws, 'claude', project.describe(str(repository)))
     monkeypatch.chdir(repository)
-    done = invoke('claude-session-start', {'model': 'claude-sonnet-4-6'})
+    done = invoke('claude-session-start', {'model': 'claude-sonnet-4-6', 'session_id': 'native-real-1'})
     assert done.returncode == 0 and not done.stderr
-    info = ws.registry.info('claude')
+    me = session_name.lookup(tmp_path / 'ws', 'claude-code', 'native-real-1')
+    assert re.fullmatch(r'claude-[0-9a-f]{6}', me)
+    info = ws.registry.info(me)
     assert info['model'] == 'claude-sonnet-4-6' and info['model_state'] == 'claimed'
     assert info['harness'] == 'claude-code'
-    brief = invoke('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'abcdef12345', 'cwd': str(repository)})
+    brief = invoke('claude-subagent-start', {'agent_type': 'Explore', 'agent_id': 'abcdef12345', 'cwd': str(repository),
+                                              'session_id': 'native-real-1'})
     assert brief.returncode == 0 and not brief.stderr
     context = json.loads(brief.stdout)['hookSpecificOutput']['additionalContext']
-    assert '--agent claude --label explore-abcdef' in context
+    assert f'--agent {me} --label explore-abcdef' in context
+    assert '--agent claude ' not in context
     assert 'Your registration, model and the joined and done announcements are recorded for you' in context
-    assert 'Keep the main session claude as central coordinator' in context
+    assert 'Keep the main session ' + me + ' as central coordinator' in context
     assert 'Labels never grant rights' in context
-    assert ws.model_of('claude', 'explore-abcdef') == ('claude-sonnet-4-6', 'inherited')
-    assert not ws.registry.role_of('claude/explore-abcdef')
+    assert ws.model_of(me, 'explore-abcdef') == ('claude-sonnet-4-6', 'inherited')
+    assert not ws.registry.role_of(me + '/explore-abcdef')
     assert 'Acquire authenticated claims before mutation' in context
 
 
@@ -214,7 +220,7 @@ def test_session_exports_preserve_native_context_without_global_configuration(co
     assert 'export ML_STACK_SESSION_ID=native-main-1' in text
     assert 'export ML_STACK_SESSION_HARNESS=claude-code' in text
     assert [item['argv'][0] for item in json.loads(commands[1].read_text())] == ['whoami', 'main-session', 'announce', 'inbox']
-    shell = subprocess.run(['/bin/sh', '-c', '. "$1"; ml-stack-workspace whoami --agent claude',
+    shell = subprocess.run(['/bin/sh', '-c', '. "$1"; ml-stack-workspace whoami',
                             'hook-test', str(target)], capture_output=True, text=True, check=False)
     assert shell.returncode == 0
     recorded = json.loads(commands[1].read_text())[-1]
@@ -267,5 +273,5 @@ def test_subagent_stop_records_transcript_model_and_announces_done(commands, tmp
     assert done.returncode == 0 and not done.stderr
     records = json.loads(commands[1].read_text())
     assert [record['argv'] for record in records] == [
-        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5', '--agent', 'claude'],
-        ['announce', 'done', 'explore-abcdef: finished', '--agent', 'claude', '--label', 'explore-abcdef']]
+        ['hello-model', 'explore-abcdef', 'claude-haiku-4-5'],
+        ['announce', 'done', 'explore-abcdef: finished', '--label', 'explore-abcdef']]

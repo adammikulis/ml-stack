@@ -79,7 +79,7 @@ def refresh_runtime(stage: str, checkout: Path | None = None, agent: str = '') -
 
 def session_environment(value: dict, stage: str) -> dict | None:
     environment = dict(os.environ)
-    for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS'):
+    for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS', 'ML_STACK_WORKSPACE_AGENT'):
         environment.pop(name, None)
     session = value.get('session_id')
     if session is None:
@@ -88,7 +88,30 @@ def session_environment(value: dict, stage: str) -> dict | None:
         warning(stage, 'invalid native session_id; no session context recorded')
         return None
     environment.update(ML_STACK_SESSION_ID=session, ML_STACK_SESSION_HARNESS='claude-code')
+    try:
+        from ml_stack.workspace import limits, session_name
+        known = session_name.lookup(limits.root(), 'claude-code', session)
+    except (ImportError, OSError, ValueError, RuntimeError):
+        known = ''
+    if known:
+        environment['ML_STACK_WORKSPACE_AGENT'] = known
     return environment
+
+
+def name_session(environment: dict, model: str) -> str:
+    """Give the session its unique name and put it in `environment`; empty (with a warning) when it has no native session."""
+    session = environment.get('ML_STACK_SESSION_ID', '')
+    if not session:
+        warning('SessionStart', 'no native session id; the session cannot be given its own name')
+        return ''
+    try:
+        from ml_stack.workspace import limits, session_name
+        name = session_name.assign(limits.root(), model, 'claude-code', session)
+    except (ImportError, OSError, ValueError, RuntimeError) as error:
+        warning('SessionStart', error)
+        return ''
+    environment['ML_STACK_WORKSPACE_AGENT'] = name
+    return name
 
 
 def persist_session(environment: dict) -> None:
@@ -114,8 +137,9 @@ def persist_session(environment: dict) -> None:
                 info = os.fstat(output.fileno())
                 if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
                     raise ValueError('native session exports must be a private owned regular file')
-                for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS'):
-                    output.write(f'export {name}={shlex.quote(environment[name])}\n')
+                for name in ('ML_STACK_SESSION_ID', 'ML_STACK_SESSION_HARNESS', 'ML_STACK_WORKSPACE_AGENT'):
+                    if name in environment:
+                        output.write(f'export {name}={shlex.quote(environment[name])}\n')
         finally:
             os.close(descriptor)
     except (OSError, ValueError, AttributeError) as error:
@@ -146,7 +170,7 @@ def hook_notice(environment: dict, source: Path | None = None) -> str:
         fingerprint = hookcheck.digest(problems)
         if fingerprint != hookcheck.remembered(repo):
             if problems:
-                run(['ml-stack-workspace', 'announce', 'blocked', hookcheck.line(repo, problems), '--agent', 'claude'],
+                run(['ml-stack-workspace', 'announce', 'blocked', hookcheck.line(repo, problems)],
                     'SessionStart', environment=environment)
             hookcheck.remember(repo, fingerprint)
     except (OSError, ValueError, subprocess.SubprocessError) as error:

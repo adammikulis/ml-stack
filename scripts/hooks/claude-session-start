@@ -17,13 +17,15 @@ def main() -> int:
     environment = workspace_hook.session_environment(event, "SessionStart")
     if environment is None:
         return 0
-    workspace_hook.persist_session(environment)
-    if not event.get("agent_id"):
-        workspace_hook.refresh_runtime("SessionStart", agent="claude")
     model = event.get("model") or os.environ.get("ANTHROPIC_MODEL", "")
     if isinstance(model, dict):
         model = model.get("id", "")
-    command = ["ml-stack-workspace", "whoami", "--agent", "claude"]
+    if not event.get("agent_id") and not workspace_hook.name_session(environment, model if isinstance(model, str) else ""):
+        return 0
+    workspace_hook.persist_session(environment)
+    if not event.get("agent_id"):
+        workspace_hook.refresh_runtime("SessionStart", agent=environment["ML_STACK_WORKSPACE_AGENT"])
+    command = ["ml-stack-workspace", "whoami"]
     if isinstance(model, str) and model and len(model) <= 256 and model.isprintable():
         command.extend(["--model", model])
     else:
@@ -32,7 +34,7 @@ def main() -> int:
     registered = workspace_hook.run(command, "SessionStart", environment=environment)
     parts = []
     if registered and not event.get("agent_id"):
-        workspace_hook.run(["ml-stack-workspace", "main-session", "--agent", "claude", "--harness", "claude-code"],
+        workspace_hook.run(["ml-stack-workspace", "main-session", "--harness", "claude-code"],
                            "SessionStart", environment=environment)
         parts.append(print_board(environment))
     parts.append(workspace_hook.hook_notice(environment))
@@ -47,7 +49,7 @@ def print_board(environment: dict) -> str:
     if os.environ.get("ML_STACK_NONINTERACTIVE"):
         return ""
     base = ["ml-stack-workspace"]
-    tail = ["--agent", "claude"]
+    tail: list[str] = []
     workspace_hook.run([*base, "announce", "joined", "main session started", *tail], "SessionStart",
                        environment=environment)
     inbox = workspace_hook.run([*base, "inbox", *tail], "SessionStart", environment=environment)
