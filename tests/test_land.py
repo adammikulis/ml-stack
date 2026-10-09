@@ -102,9 +102,12 @@ def test_infrastructure_diff_starts_one_background_full_run(proj):
     code, _, summary = proj.land("run", "i")
     assert code == 0 and summary["full"]["status"] == "started"
     deadline = time.time() + 20
-    while "full" not in proj.calls() and time.time() < deadline:
+    def started():
+        return [c for c in proj.calls() if c.split()[0] == "full"]
+
+    while not started() and time.time() < deadline:
         time.sleep(0.1)
-    assert "full" in proj.calls()
+    assert started() == ["full --background"]
 
 
 def test_second_full_run_is_refused_while_one_is_in_flight(proj):
