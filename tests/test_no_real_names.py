@@ -319,6 +319,23 @@ def test_a_compact_date_time_stamp_is_not_a_phone_number(tmp_path):
     assert code == 0, said
 
 
+def test_digits_inside_an_identifier_are_not_a_phone_number(tmp_path):
+    """A bundle named for a hash that ends in digits, a dash and a date holds a digit run at a phone
+    number's length. A phone number stands alone; a run glued to letters on either side is part of a name."""
+    where = repo(tmp_path, graph={"nodes": []})
+    for text in ("".join(("land-old-cd6da", "681", "-", "20261008", ".bundle")), "sha-9f3c1204-5551234567x", "run_20261008-123456-7890ab"):
+        code, said = check(where, tmp_path, **{"t.py": f'NAME = "{text}"\n'})
+        assert code == 0, (text, said)
+
+
+def test_a_phone_number_beside_words_is_still_refused(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    number = "-".join(("415", "555", "0134"))
+    for text in (f"call {number} today", f"tel:+1 (415) {number[4:]}."):
+        code, said = check(where, tmp_path, **{"t.py": f'NOTE = "{text}"\n'})
+        assert code == 1 and "phone number" in said, (text, said)
+
+
 def test_a_job_title_is_not_shaped_like_a_person(tmp_path):
     """A role catalogue is a page of "Software Engineer", "Account Manager", "Site Reliability
     Engineer". Mutation: drop the `is_role` clause."""

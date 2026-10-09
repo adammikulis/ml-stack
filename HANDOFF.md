@@ -8,6 +8,19 @@
 - Triage the remaining failures from the October 6 macOS background full red-team run at `920cf217`: 130 failed, 30 errors, 13,729 passed, 364 skipped. Re-run the remaining Board latency, serving, training, gym and fixture failures after scoped setup, pairing and installer repairs. Evidence: `/private/tmp/dev-final-background-full.log`, `/private/tmp/dev-full-failures.txt` and `/private/tmp/ml-stack-full-lifecycle-project-diagnosis.md`. Linux testing remains owner-paused.
 - Verify an authenticated connection and a Board message/reply with the other physical device after separate Dev profile activation. Local discovery and browser checks do not establish this roundtrip.
 
+## Overnight landing run (2026-10-08 to 2026-10-09, lead claude-828605)
+
+Landed on origin/0.2dev, each after a run that exited 0 with a pass count and a green gate: gate made read-only and incremental (`173e52f1`), reranker (`efaccdfe`), measuring scheduler (`d92d5634`), keystore audit F-1..F-7 (`4fa7686d`), admission queue of 128 and the keystore_guard layer (`e3761c51`), admission failure runs unscheduled (`f405f6b3`), result-cache fix (`3bb493a0`), selector precision (`80e3c389`), ccache (`7c0ffdb3`), restart idle-retry and the recovery test (`d80d7621`), UI publication stack with chat capabilities (`ae9dcca0`).
+
+- **Not landed, ready:** farm-out prototype `5ac77886` on `worktree-agent-ae0631fa365cf413f` (`docs/test-farm.md`; loopback only, the real RTX 3090 Ti device was never contacted; needs a security review before it lands; its checklist "Bringing a real device in" waits for the Windows-side Claude and the owner). Fixed-cost guards on `worktree-agent-ad0e8f850ab97fff6` (far behind, overlaps the baseline in `scripts/test`). Baseline `test-agent-shell-baseline` (agent-marker plugin; `tests/test_running_on_linux.py` has 3 failures from the Linux-runner rewrite).
+- **The gate fails inside an agent session** (4 `tests/test_redteam_human_floor.py` cases and 13 `tests/test_worker_completion.py` tests see the session's own agent markers). Run it with `env -u CLAUDECODE -u AI_AGENT -u ML_STACK_WORKSPACE_AGENT -u ML_STACK_SESSION_HARNESS -u ML_STACK_SESSION_ID -u CLAUDE_CODE_ENTRYPOINT` until the baseline branch lands.
+- **The installed `ml_stack` in the pyenv site-packages is a 0.2.1 wheel from 2026-10-07**; the `ml-stack*` launchers follow `~/.ml-stack/runtimes` but the library import does not. Owner order: use our latest code continuously. A `.pth` or editable install of the primary checkout is needed (`editables` is missing; the auto-mode classifier refused the write to the shared pyenv). The old install is saved in the `pyenv-ml-stack` tarball in `~/.ml-stack/bundles`.
+- **The Board is unreachable from this checkout** (`ml-stack-workspace inbox`: "the project host was not authenticated by cluster discovery", later "this project already names another Board"), so no contact from the Windows-side Claude was read.
+- **Tests that fail on a clean tip:** four `tests/test_testslots.py` timing tests under heavy load (`test_invalid_rpc_token_cannot_acquire_capacity`, `test_idle_tail_workers_release_capacity_for_another_suite`, `test_short_tests_do_not_wait_for_a_polling_tail_between_batches`, `test_disconnected_rpc_waiter_releases_its_queue_entry`); the launch-ticket browser tests in `tests/test_conversations_workspace.py`; the `FakeDaemon` fixture in `tests/test_fleet_join.py` (no `device` argument); `tests/test_redteam_human_floor.py` depends on the session environment; the `scripts/test` broker still has no queue position or calibration run for agents.
+- **Restart audit issues not fixed:** capacity held for an uncertain launch has no person-gated release (`src/ml_stack/fleet/jobs.py:263`); a verification receipt is trusted from a file the run wrote (`src/ml_stack/runtime_store.py:55,62`); the chat repair path cannot register a candidate runtime (`src/ml_stack/fleet/runtime_repair.py:115-146`).
+- **Owner decisions pending:** stored `canonical:` field migration (graph kinds `canonical-task-ref` and `canonical-task`, evidence source `canonical-taskboard`, claim-owner and session prefix `canonical:`); 3.9 GB of unmanaged runtime trees under `~/.ml-stack/runtimes`; write-deny sandbox for the real-state check; keystore decisions D-1..D-8 (`docs/keystore-platform-audit-2026-10-08.md`).
+- **Parked Codex work:** about 450 distinct unlanded patches, of which 8 NATS-stack branches are in `~/.ml-stack/bundles/codex-parked-20261008.bundle` and the old land branch in the `land-old` bundle beside it (restore: `git fetch <bundle> <branch>:<branch>`, branch names from `git bundle list-heads`). Still unlanded: `integrate/dev-cpu`, the workspace reputation and attribution commits `133dd374` and `7f31bc29`, Studio (`feat/poolside-studio-mlx`), board-history rebuild-conversations, coordination batch.
+
 ## Open from the claude session (2026-10-08)
 
 - **Broker branches 2-5 of the one-thing-computing rule are not started** (branch 1, the device field, is landed). `broker-purpose-not-exclusive`: `Broker._decide` in `src/ml_stack/serve/broker.py` still serialises same-purpose asks behind a held server (`busy`, `_first_for_purpose`); a different model under one purpose must get its own resident server when memory admits. Then `gate-compute-lease-per-device` (`serve/gate.py`), `workspace-allocation-device`, and `rule-docs-and-bench-profiles` (measure a CPU model beside a GPU one for memory-bandwidth cost; per-platform setting, default allowed). Rule: `AGENTS.md`, "One thing computing on the GPU at a time".
@@ -42,12 +55,7 @@
   - `POST /ui/setup/join` on a machine with no cluster still opens an uncredentialed session.
   - The Windows and WSL window is not handled.
   - Packaged-app acceptance for the owner: (1) fresh install, first run; (2) quit and reopen; (3) a stale window and Reopen; (4) a typed URL, then `ml-stack peers open` once; (5) an agent's `peers open` is refused and a curl with a forged `X-ML-Stack-Launch` header gets 403; (6) Production asks for the passphrase.
-- **Restart and durable jobs.**
-  - Capacity held on an uncertain launch is released only by a person-gated step that is not built.
-  - A verification receipt is trusted from a file the verified run itself wrote.
-  - The chat repair path cannot register a candidate runtime.
-  - `job_exit` is untested on Windows.
-  - `integrate/dev-cpu` is still unlanded.
+- **Restart and durable jobs.** `job_exit` is untested on Windows; the other restart gaps are in the overnight section above.
 - **Unblock.**
   - Three `project_connection` / remote failures still need tracing (see the baseline list in the batch 2 report).
   - Hook diagnostics `post.reader-timeout` and `host not authenticated by cluster discovery` entries are untouched.
@@ -58,7 +66,7 @@
 - **UI publication stack.**
   - `GET /ui/board/agents` takes 4-8 s for 43 agents because `registered()` opens a store per agent; board routes are still O(N) in the verified log read.
   - The python launcher `_health` accepts any JSON dict.
-  - `fix/poolside-chat-capabilities` was not brought in.
+  - `fix/poolside-chat-capabilities` landed with the UI publication batch (`ae9dcca0`), with its `RecursionError` fix.
   - Not driven for real: the Tauri window, an MLX run in Studio, runtime repair.
   - The Development pool sign-in (the `local-session` route, its screen and pool scoping) was dropped because launch tickets replaced it; a pool choice after sign-out needs a new design on the ticket model.
   - About 22 older UI browser tests drift from the current page (credentials, invites, model_tasks, pool_browser, sdk_chat, simple_controls, workspace_browser, startup_model_page, tasks_ui, agent_controls, workspace_board_ui).
