@@ -13,13 +13,22 @@ from ml_stack.fleet.launch import HTTP_PORT
 from ml_stack.fleet.project_client import catalogue, register_local
 from ml_stack.fleet.project_source import ProjectError
 from ml_stack.fleet.projects import identity
-from ml_stack.fleet.remote import Peer, device_address
+from ml_stack.fleet.remote import Peer, device_address, same_machine_host
 from ml_stack.workspace import device_agent, project_session, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT, CAPS, Denied, valid_name
 from ml_stack.workspace.project_connection import bind, selected
 from ml_stack.workspace.remote import RemoteWorkspace
+
+
+def same_board(first, second):
+    """Whether two connection records name one project Board: the same project, and the same host
+    or two names (loopback and LAN address) for this machine."""
+    if first["project_id"] != second["project_id"]:
+        return False
+    return first["host"] == second["host"] or same_machine_host(first["host"], second["host"])
+
 
 MAX_PEERS = 8
 DISCOVERY_SECONDS = 10.0
@@ -81,7 +90,7 @@ def _other_local_actor(args, connection, local_token, workspace, requested):
         choice = discover(root)
         if choice is None:
             raise Denied('this Dev cluster does not advertise the shared project Board')
-        if (choice['host'], choice['project_id']) != (connection['host'], connection['project_id']):
+        if not same_board(choice, connection):
             raise Denied('this project already names another Board')
         attached = attach(root, actor.id, choice,
                           claim=(getattr(args, 'model', '') or metadata['model'],
@@ -186,6 +195,16 @@ def _register(root, member, project_id):
         raise Denied(str(exc)) from exc
 
 
+def _recorded_name(root: Path, host: str, project_id: str) -> str:
+    """The host name this project already records for a Board on this machine, else ``host``: a
+    token is kept under the name it was issued for, so the loopback name and the LAN name of one
+    daemon must not be two Boards."""
+    prior = selected(root)
+    if prior and prior["project_id"] == project_id and same_machine_host(prior["host"], host):
+        return prior["host"]
+    return host
+
+
 def discover(root: Path, *, cluster_key=None, cluster="", port=None):
     """Select one authenticated host for this local Git project."""
     project_id = identity(root.resolve())
@@ -231,7 +250,7 @@ def discover(root: Path, *, cluster_key=None, cluster="", port=None):
         peer, row = min(found, key=lambda item: (item[1]["machine"], item[0].base_url))
         if sum(candidate["machine"] == row["machine"] for _, candidate in found) != 1:
             raise Denied("the selected Board device is ambiguous")
-    return {"host": peer.base_url, "project_id": project_id,
+    return {"host": _recorded_name(root, peer.base_url, project_id), "project_id": project_id,
             "cluster": member.group,
             "cluster_key": str(cluster_key) if cluster_key else ""}
 
@@ -262,7 +281,7 @@ def attach(root: Path, name: str, choice: dict, *, claim=("", "")):
 
 def _attach(root: Path, name: str, choice: dict, *, claim):
     prior = selected(root)
-    if prior and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
+    if prior and not same_board(prior, choice):
         raise Denied("this project already names another Board")
     remote = RemoteWorkspace(choice["host"], choice["project_id"],
                              cluster_key=Path(choice["cluster_key"]) if choice.get("cluster_key") else None,
@@ -292,7 +311,7 @@ def startup(root: Path, name: str, parent: str = "", *, claim=("", "")) -> Seat 
         return None
     if prior and prior["project_id"] != identity(root):
         raise Denied("this checkout does not match its Board project")
-    if prior and choice and (prior["host"], prior["project_id"]) != (choice["host"], choice["project_id"]):
+    if prior and choice and not same_board(prior, choice):
         raise Denied("this project already names another Board")
     configuration = prior or choice
     remote = RemoteWorkspace(configuration["host"], configuration["project_id"],

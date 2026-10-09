@@ -7,6 +7,7 @@ from pathlib import Path
 from ml_stack import home, worktreerules
 from ml_stack.files import read_json, writing
 from ml_stack.fleet import discovery, project_client, projects, remote
+from ml_stack.fleet.remote import same_machine_host
 from ml_stack.http import ServerError
 from ml_stack.net import git
 from ml_stack.windows_private import restrict
@@ -66,7 +67,8 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
     authority = metadata.get("authority", {})
     if metadata.get("kind") == "project-checkout" and (
             metadata.get("project_id") != remote.project_id
-            or (authority.get("host") and authority["host"] != remote.host)):
+            or (authority.get("host") and authority["host"] != remote.host
+                and not same_machine_host(authority["host"], remote.host))):
         raise Denied("this checkout already names another board")
     made = {"host": remote.host, "project_id": remote.project_id, "agent": agent,
             "cluster": cluster, "cluster_key": remote.cluster_key}
@@ -84,6 +86,8 @@ def bind(remote: RemoteWorkspace, root: Path, agent: str, cluster: str = "", **o
         connections = _saved()
         before = json.dumps(connections)
         existing = connections.get(str(root))
+        if existing and existing["host"] != made["host"] and same_machine_host(existing["host"], made["host"]):
+            made["host"] = existing["host"]  # the recorded name for this machine stays the name
         if existing and (existing["host"], existing["project_id"]) != (made["host"], made["project_id"]):
             raise Denied("this project already uses another board")
         if session:

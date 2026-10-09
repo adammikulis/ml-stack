@@ -23,7 +23,15 @@ from ml_stack.http import (
     request_bytes,
 )
 
-from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key, primary_ip
+from .discovery import (
+    Beacon,
+    DiscoveryError,
+    derive_token,
+    discover,
+    key_path,
+    load_cluster_key,
+    primary_ip,
+)
 
 if TYPE_CHECKING:
     from ml_stack.speech.protocols import Transcript
@@ -50,8 +58,20 @@ def device_address(peer, declared: str) -> bool:
             return True
         if beacon.machine != home.machine_id():
             return False
-        return (ipaddress.ip_address(observed.hostname).is_loopback
-                and named.hostname == primary_ip())
+        return same_machine_host(peer.base_url, declared)  # this machine's beacon under loopback or LAN name
+    except ValueError:
+        return False
+
+
+def same_machine_host(first: str, second: str) -> bool:
+    """Whether two origins on one port name this machine, by loopback or by its LAN address."""
+    try:
+        one, two = urllib.parse.urlsplit(first), urllib.parse.urlsplit(second)
+        if one.port != two.port:
+            return False
+        here = {primary_ip(), *(h for h in (one.hostname, two.hostname)
+                                if ipaddress.ip_address(h).is_loopback)}
+        return one.hostname in here and two.hostname in here
     except ValueError:
         return False
 

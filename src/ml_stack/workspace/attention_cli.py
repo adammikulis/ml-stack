@@ -8,6 +8,7 @@ from typing import Any
 from ml_stack.command import flag
 from ml_stack.log import say
 from ml_stack.workspace import attention, landing
+from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.screen import fence
 from ml_stack.workspace.service import Workspace
 
@@ -15,7 +16,10 @@ from ml_stack.workspace.service import Workspace
 def owed_text(ws: Workspace, token: str, announcements: bool = True) -> str:
     """Unanswered requests and, when asked, the count of announcements not yet seen; nothing is marked read."""
     roll = ws.board.rollup(token, False) if announcements else None
-    return attention.attention(ws, ws.auth(token).id, roll["messages"] if roll else 0)
+    try:
+        return attention.attention(ws, ws.auth(token).id, roll["messages"] if roll else 0)
+    except Denied:  # a project Board serves no raw bus log; its inbox still answers without the owed list
+        return ""
 
 
 def inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
