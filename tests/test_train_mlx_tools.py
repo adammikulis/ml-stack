@@ -8,6 +8,8 @@ import pytest
 
 @pytest.fixture
 def cpu():
+    pytest.importorskip('mlx.core', reason='ml-stack[train-mlx]')
+    pytest.importorskip('mlx_lm', reason='ml-stack[train-mlx]')
     import mlx.core as mx
 
     previous = mx.default_device()
