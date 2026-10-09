@@ -31,6 +31,7 @@ def test_the_walk_creates_the_pool_and_reaches_the_end_of_setup(daemon, open_pag
     page, errors = open_page(daemon)
     page.wait_for_selector("#first-run:not([hidden])")
     _smoke().first_run(page, "ci-runner", fleet_page.WORDS, "ci")
+    _smoke().sign_in(page, fleet_page.WORDS)
     assert "ci" in [m.group for m in memberships(daemon.keyfile)]
     assert not errors
 
