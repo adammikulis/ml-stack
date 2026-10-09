@@ -268,7 +268,18 @@ listener is the one network port.
 
 `poolside-node run --state DIR --listen 127.0.0.1:0 --beacon-bind ADDR --beacon-send ADDR
 --advertise IP --sync-ms N` starts the network; tests use real sockets on loopback with injected
-addresses and an unused UDP port for the beacon.
+addresses and an unused UDP port for the beacon. No default test listens beyond loopback or uses multicast
+(`tests/loopback_only.rs` and `tests/test_node_pool.py` enforce it): that makes macOS ask the person for Local
+Network permission. The LAN tests are `#[ignore]`d / need `ML_STACK_LAN_TESTS=1` and are run by a person at the machine.
+
+`poolside-node run --state DIR --network [--port 47321] [--beacon-port 47322]` is the real network: every interface,
+the multicast group and each network's broadcast address (`netif.rs` reads the interfaces; a VPN or loopback is not
+a segment), each beacon advertising the address of the interface it leaves by. Open join is accepted from, and dialled
+to, an address inside a subnet of this machine only. `pool_status` adds `beacon_sent|heard|own|rejected`, the last send
+error and `last_join`: a node that sends but never hears its own beacon is blocked by the system (macOS Local Network,
+a firewall, WSL2 NAT). `python -m ml_stack.node_pool join --policy open|secure` starts it that way after showing what
+it does and getting a yes (`--yes` for a script), and `scripts/pool-join-check` walks every step on one device and prints
+the fix for the first that fails.
 
 ## Shipping and keeping it up
 
