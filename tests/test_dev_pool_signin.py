@@ -84,6 +84,36 @@ def test_dev_pool_signin_remote_listener_cannot_list_or_signin(development):
     assert len(development.ui.sessions) == 0
 
 
+def names(body):
+    return sorted(row['name'] for row in body['peers'])
+
+
+def machine(name, *clusters, is_self=False):
+    return {'name': name, 'machine': name, 'port': 8770, 'host': '10.0.0.1', 'clusters': list(clusters),
+            'device': {}, 'busy': False, 'queued': 0, 'slots': 1, 'free': 1, 'is_self': is_self,
+            'base_url': f'http://{name}:8770'}
+
+
+def test_the_chosen_development_pool_scopes_what_the_session_sees(development):
+    import time
+    server = development
+    server.ui._peers = (time.time() + 600, [
+        machine('studio', 'workshop', 'research', is_self=True), machine('lab', 'research'),
+        machine('annex', 'workshop'), machine('hall', 'research', 'workshop')])
+    everyone = ['annex', 'hall', 'lab', 'studio']
+    status, anyone, _ = server.call('/ui/peers', cookie=server.ui.sessions.cookie_header(
+        server.ui.sessions.open('setup')).split(';')[0])
+    assert status == 200 and names(anyone) == everyone and anyone['group'] == 'workshop'
+    cookie = local_post(server, {'pool': 'research'})[2]['Set-Cookie'].split(';')[0]
+    status, scoped, _ = server.call('/ui/peers', cookie=cookie)
+    assert status == 200 and names(scoped) == ['hall', 'lab', 'studio'] and scoped['group'] == 'research'
+    fleet = server.call('/ui/fleet', cookie=cookie)[1]
+    assert sorted(row['name'] for row in fleet['peers']) == ['hall', 'lab', 'studio'] and fleet['group'] == 'research'
+    other = local_post(server, {'pool': 'workshop'})[2]['Set-Cookie'].split(';')[0]
+    assert names(server.call('/ui/peers', cookie=other)[1]) == ['annex', 'hall', 'studio']
+    assert names(server.call('/ui/peers', cookie=cookie)[1]) == ['hall', 'lab', 'studio']
+
+
 @pytest.mark.slow
 def test_browser_logout_then_existing_pool_click_signs_in_without_passphrase(development):
     playwright = pytest.importorskip('playwright.sync_api')

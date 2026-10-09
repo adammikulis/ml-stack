@@ -136,6 +136,11 @@ class Base:
         self.host_header = handler.headers.get("Host", "")
         self.cookie = handler.headers.get("Cookie", "")
 
+    def session_pool(self) -> str:
+        """The Development pool this session signed in to on this computer, or "" for all."""
+        session = self.ui.sessions.get(parse_cookie(self.cookie))
+        return session.pool if session else ""
+
     def header(self, name: str, default: str = "") -> str:
         """One request header."""
         return self.handler.headers.get(name, default)
@@ -702,11 +707,12 @@ class ClusterRoutes:
         if self.path == "/ui/clusters/found" and self.method == "GET":
             return found_clusters(self)
         if self.path == "/ui/peers" and self.method == "GET":
-            self.send(200, {"peers": self.ui.peers(), "self": self.ui.name,
-                            "group": cluster_group(self.ui.cluster_key_path)})
+            pool = self.session_pool()
+            self.send(200, {"peers": self.ui.pool_peers(pool), "self": self.ui.name,
+                            "group": pool or cluster_group(self.ui.cluster_key_path)})
             return True
         if self.path == "/ui/fleet" and self.method == "GET":
-            self.send(200, self.ui.fleet())
+            self.send(200, self.ui.fleet(self.session_pool()))
             return True
         if self.path == "/ui/fleet/join" and self.method == "POST":
             return self._join_fleet()
@@ -723,7 +729,7 @@ class ClusterRoutes:
                                      "try '2h', '90m' or '45s'"})
             return True
         self.send(200, self.ui.pause_fleet(resume=bool(req.get("resume")),
-                                           minutes=minutes,
+                                           minutes=minutes, pool=self.session_pool(),
                                            reason=str(req.get("reason") or "")))
         return True
 

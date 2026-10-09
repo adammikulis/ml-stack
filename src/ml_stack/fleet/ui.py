@@ -225,6 +225,13 @@ class UI:
         self._peers = (time.time(), found)
         return found
 
+    def pool_peers(self, pool: str = "", *, force: bool = False) -> list[dict[str, Any]]:
+        """The peers in one pool: this machine and those that share it. No pool: all of them."""
+        rows = self.peers(force=force)
+        if not pool:
+            return rows
+        return [row for row in rows if row.get("is_self") or pool in row.get("clusters", [])]
+
     # -- actions ---------------------------------------------------------
     @contextlib.contextmanager
     def join_guard(self) -> Iterator[None]:
@@ -346,14 +353,15 @@ class UI:
         self._hosting().stop(port)
 
     # -- the fleet, and a sweep over it ----------------------------------
-    def fleet(self) -> dict[str, Any]:
+    def fleet(self, pool: str = "") -> dict[str, Any]:
         """The peers as `join.describe` rows -- serving, room, busy, commit -- and the
-        models they hold between them, which is what a sweep can be built from."""
+        models they hold between them, which is what a sweep can be built from. ``pool``
+        is the Development pool a local sign-in chose; only its machines are counted."""
         from .discovery import Beacon
         from .join import describe
 
         rows = []
-        for row in self.peers():
+        for row in self.pool_peers(pool):
             beacon = Beacon(name=str(row.get("name") or ""), port=int(row.get("port") or 8770),
                             device=dict(row.get("device") or {}), busy=bool(row.get("busy")),
                             queued=int(row.get("queued") or 0), slots=int(row.get("slots") or 1),
@@ -366,7 +374,7 @@ class UI:
                          "called": str(row.get("called") or row["name"])})
         models = sorted({m for r in rows for m in r["models"]})
         return {"peers": rows, "models": models, "self": self.name,
-                "group": cluster_group(self.cluster_key_path), "bench": self.bench_state()}
+                "group": pool or cluster_group(self.cluster_key_path), "bench": self.bench_state()}
 
     def join_fleet(self, *, passphrase: str = "", group: str = "", persist: bool = False,
                    name: str = "") -> dict[str, Any]:
@@ -397,12 +405,13 @@ class UI:
                 *rows]
 
     def pause_fleet(self, *, resume: bool = False, minutes: float | None = None,
-                    reason: str = "") -> dict[str, Any]:
-        """Pause or resume every machine this one can see, and what each of them said."""
+                    reason: str = "", pool: str = "") -> dict[str, Any]:
+        """Pause or resume every machine this one can see in ``pool`` (all pools when none
+        is chosen), and what each of them said."""
         answers = pausing.pause_fleet(
             pausing.Fanout(self.root or default_root(), resume=resume, minutes=minutes,
                    reason=reason, cluster_key_path=self.cluster_key_path),
-            self.with_self(self.peers(force=True)))
+            self.with_self(self.pool_peers(pool, force=True)))
         self._peers = (0.0, [])
         return {"machines": [a.public() for a in answers],
                 "reached": sum(1 for a in answers if a.ok), "total": len(answers)}
