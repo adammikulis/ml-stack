@@ -164,9 +164,7 @@
     }
 
     renderBody(node, text) {
-      node.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }),
-        { USE_PROFILES: { html: true } });
-      node.classList.add("markdown");
+      M.renderMarkdown(node, text);
     }
 
     say(role, text, reasoning = "") {
@@ -266,7 +264,8 @@
         const saved = await api(`/ui/conversations?q=${encodeURIComponent(this.search.value.trim())}`);
         if (epoch !== this.searchEpoch || M.refused(saved)) return;
         if (!saved.ok) throw new Error(saved.error || "Could not read conversations.");
-        const rows = saved.conversations || [];
+        const found = saved.conversations || [];
+        const rows = found.slice(0, M.LIST_MAX);
         this.sidebar.replaceChildren(...rows.map((c) =>
           el("div", { class: `chatrow${c.id === this.open ? " on" : ""}`, "data-conversation": c.id },
             el("a", { href: "#chat", onclick: (e) => {
@@ -279,6 +278,8 @@
                 el("button", { class: "ghost small", onclick: () => this.openManage(c, "delete") }, "Delete"))))));
         if (!rows.length) this.sidebar.append(el("p", { class: "hint" },
           this.search.value.trim() ? "No conversations match your search." : "Your conversations will appear here."));
+        if (found.length > rows.length) this.sidebar.append(el("p", { class: "hint" },
+          `Showing the ${rows.length} most recent of ${found.length}; search to find the others.`));
       } catch (error) { this.showError(error.message); }
     }
 

@@ -37,6 +37,7 @@ from .launch_routes import LaunchRoutes
 from .onboard.clusters import known_clusters
 from .onboard.joining import JoinOptions, cluster_action, join_by_passphrase
 from .page import COMPONENTS, render
+from .page_security import PAGE_HEADERS
 from .pausing import minutes_of
 from .project_board_routes import ProjectBoardRoutes
 from .room_routes import RoomRoutes
@@ -178,7 +179,7 @@ class PageRoutes:
             except OSError:
                 self.send(500, {"error": "the UI assets are missing from this install"})
                 return True
-            write(self.handler, 200, page.encode("utf-8"), "text/html; charset=utf-8")
+            write(self.handler, 200, page.encode("utf-8"), "text/html; charset=utf-8", PAGE_HEADERS)
             return True
         if self.path in ("/ui/gallery", "/ui/gallery/"):
             self.send(302, {}, {"Location": "/ui/ml-ui/gallery.html"})

@@ -30,9 +30,16 @@ export function pageControls(board) {
   if (!messageRoute(board)) return null;
   const action = (label, direction, disabled) => h("button", {type:"button", disabled,
     onclick:async () => {
-      try { await loadPage(board, direction); board.error = ""; }
-      catch (error) { if (error.name !== "AbortError") board.error = String(error.message).slice(0, 160); }
-      board.update();
+      const view = board.viewRevision, endpoint = board.base();
+      const request = loadPage(board, direction), revision = board.pageRevision;
+      // an answer or an error belongs to the conversation that asked, not to whichever is open by then
+      const current = () => !board.stopped && board.viewRevision === view &&
+        board.pageRevision === revision && board.base() === endpoint;
+      try { await request; if (current()) board.error = ""; }
+      catch (error) {
+        if (current() && error.name !== "AbortError") board.error = String(error.message).slice(0, 160);
+      }
+      if (current()) board.update();
     }}, label);
   return h("div", {class:"history-controls"},
     action("Load older messages", "older", !board.page?.has_older),

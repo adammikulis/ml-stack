@@ -39,7 +39,8 @@
     button.onclick = async () => {
       button.disabled = true;
       try {
-        const result = await M.api(`/ui/agent-runtime/${repair ? "repair" : "install"}`, {method: "POST", body: "{}"});
+        const result = await M.api(repair ? "/ui/agent-runtime/repair" : "/ui/agent-runtime/install",
+          {method: "POST", body: "{}"});
         if (!result.ok) throw new Error(result.error || "Could not start agent runtime installation.");
         void follow(result.job);
       } catch (error) { note.textContent = error.message; button.disabled = false; }

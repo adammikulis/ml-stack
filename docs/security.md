@@ -508,9 +508,27 @@ system actions are not simulation actions. Any future agent-facing simulation to
 through the roles, rules and human-only floor described in [agent roles](agent-roles.md).
 
 The Tauri window capability allows core/window-state operations and the app's close-choice and
-closing handlers for its main window. Remote IPC origins are loopback HTTP URLs. It declares
-no filesystem, shell, process-spawn or credential plugin permission. The packaged daemon still
-runs with the launching user's OS privileges; limiting webview IPC does not sandbox the daemon.
+closing handlers for its main window. The one origin that may ask is `http://127.0.0.1:<port>`
+of the daemon the app opened: the static capability names the default port, and a daemon on
+another port is granted that port alone when the app starts. The window refuses to navigate,
+or open another window, anywhere else, so a link or redirect that reaches the page from a
+model reply or a board message does not take the window off its daemon. It declares no
+filesystem, shell, process-spawn or credential plugin permission, and its configuration
+carries a content security policy. The packaged daemon still runs with the launching user's OS
+privileges; limiting webview IPC does not sandbox the daemon.
+
+The app takes the process on the port for its daemon only if it proves it: `/health` answers a
+fresh challenge with an HMAC-SHA256 of it under a secret kept beside the daemon's settings
+(`app-identity`, owner-only, never a link), which the app reads after the answer. A process
+that returns the right JSON without the secret is not our daemon, and a daemon started by an
+earlier version, which has no secret, is not recognised until it is restarted.
+
+The page the daemon serves carries a content security policy of its own (`fleet/page_security.py`):
+it may fetch only from itself (images and media also from `data:` and `blob:`), post no form,
+embed no frame and accept no `<base>`. A model reply is rendered as formatting and text only:
+a link or image in it is shown as the words and the address it names, and forms, frames, media
+and styles are removed, so nothing a model writes can fetch an address or send the person
+anywhere.
 
 Board participation in Fleet uses the existing UI authorization: a signed-in cluster session
 or a strictly local UI on an unjoined machine. Every API request requires the UI header;

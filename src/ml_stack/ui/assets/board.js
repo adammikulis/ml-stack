@@ -8,6 +8,7 @@ import "./composer.js";
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
 const BODY_MAX = 4000;
+const NAV_MAX = 100; // every node costs a frame: a list is cut before it is drawn, never after
 const LINE_MAX = 200;
 const POLL_MIN = 3000;
 const POLL_MAX = 60000;
@@ -306,14 +307,14 @@ class MlBoard extends MlElement {
     h("span", {}, line(label, 160)), count ? h("span", { class: "count" }, String(count)) : null);
     this.nav.replaceChildren(
       h("h3", {}, "Channels"),
-      ...this.boards.map((b) => item(b.name, b.unread, this.view.name === b.name || this.view.board === b.name,
+      ...this.boards.slice(0, NAV_MAX).map((b) => item(b.name, b.unread, this.view.name === b.name || this.view.board === b.name,
         () => this.open({ kind: "board", name: b.name }))),
       h("h3", {}, "Direct messages"),
       ...(this.readonly || !this.me ? [] : [this.newDm()]),
-      ...this.dms.map((c) => item(`${c.a} and ${c.b}`, c.unread,
+      ...this.dms.slice(0, NAV_MAX).map((c) => item(`${c.a} and ${c.b}`, c.unread,
         this.view.kind === "dm" && this.view.a === c.a && this.view.b === c.b,
         () => this.open({ kind: "dm", a: c.a, b: c.b }))),
-      ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.map(agent =>
+      ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.slice(0, NAV_MAX).map(agent =>
         item(agent.display_name || agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
           () => this.open({kind:"dm", a:this.me, b:agent.id}), `${agent.id} · ${agent.device?.verification || "unknown"}`))] : []));
     renderFeed(this, this.pane());

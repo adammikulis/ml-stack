@@ -217,13 +217,15 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
         }}, label);
       const query = this.chat.search.value.trim().toLowerCase();
       const matches = text => String(text).toLowerCase().includes(query);
-      const channels = data.boards.filter(row => matches(row.name));
+      const matched = data.boards.filter(row => matches(row.name));
+      const channels = matched.slice(0, M.LIST_MAX);
       this.channels.replaceChildren(...channels.map(row => button(
         `${row.name}${row.unread ? ` · ${row.unread}` : ''}`,
         [data.view.name, data.view.board].includes(row.name), {kind:'board', name:row.name})));
       if (data.personSetupRequired) this.channels.append(M.el('button', {type:'button', onclick:() => {
         M.go('board');
       }}, 'Join workspace as person'));
+      if (matched.length > channels.length) this.channels.append(M.el('p', {class:'hint'}, `Showing ${channels.length} of ${matched.length}; search to narrow.`));
       if (data.boards.length && !channels.length) this.channels.append(M.el('p', {class:'hint'}, 'No channels match your search.'));
       if (!data.boards.length) this.channels.append(M.el('p', {class:'hint'}, data.error || 'No team channels in this workspace.'));
       const agents = new Map(data.agents.map(agent => [agent.id, agent.display_name || agent.display_label || agent.id]));
@@ -239,11 +241,13 @@ chat-view #chat-activity-output { max-height:240px; overflow:auto; white-space:p
         if (!peers.has(id) && matches(`${label} ${id}`)) peers.set(id, {id, label, view:{kind:'dm', a:data.view.a, b:data.view.b}});
       }
       const newMessage = data.me ? M.el('details', {}, M.el('summary', {}, '+ New direct message'), this.board.newDm()) : null;
-      this.direct.replaceChildren(...(newMessage ? [newMessage] : []), ...[...peers.values()].map(row => {
+      const shown = [...peers.values()].slice(0, M.LIST_MAX);
+      this.direct.replaceChildren(...(newMessage ? [newMessage] : []), ...shown.map(row => {
         const node = button(row.label, data.view.kind === 'dm' && [data.view.a,data.view.b].includes(row.id), row.view, row.id);
         if (row.unread) node.append(M.el('span', {'aria-label':`${row.unread} unread messages`}, ` · ${row.unread}`));
         return node;
       }));
+      if (peers.size > shown.length) this.direct.append(M.el('p', {class:'hint'}, `Showing ${shown.length} of ${peers.size}; search to narrow.`));
       if (!peers.size) this.direct.append(M.el('p', {class:'hint'}, query ? 'No direct messages match your search.' : 'No direct messages yet.'));
     }
     models(rows) {
