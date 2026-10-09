@@ -684,6 +684,14 @@ call, a docstring over twelve lines, a signature over eight parameters, or a wri
 file over its line limit or makes an already-over file longer. `scripts/install-hooks.sh`
 installs the pre-commit chain.
 
+### Setting up a new device
+
+When the owner says to connect this device to the pool, you do all of it with the one command
+`python -m ml_stack.device_setup --yes` (the same on macOS, Linux, Windows and WSL; `--dry-run` lists
+the changes) and ask the owner to type nothing. Follow `docs/windows-wsl.md`: tell him before the one
+Windows prompt appears, read each FAIL's fix, confirm with a board message to the Mac's session, then test
+on this device.
+
 ### Saying that something works
 
 Drive it the way a person does before you say it works: open the interface, click through the

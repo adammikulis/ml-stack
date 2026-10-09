@@ -217,7 +217,7 @@ class Session:
         self.commit = ""
         self.tree_of: Callable[[], str] = lambda: ""
         self.draw: Callable[[], float] = random.random
-        self.tree, self.refresh = "", False
+        self.tree, self.refresh, self.record = "", False, True
         self.report = Report(canary=self.rate)
         self.junit_sha = ""
         self.outcomes: dict[str, Outcome] = {}
@@ -238,13 +238,14 @@ class Session:
         """The outcome record for ``file``."""
         return self.outcomes.setdefault(file, Outcome(file, key=self.lookup(file).key))
 
-    def run(self, launch: Launch, tree: str | Callable[[], str], reuse: bool = True) -> Report:
+    def run(self, launch: Launch, tree: str | Callable[[], str], reuse: bool = True, record: bool = True) -> Report:
         """Reuse what can be reused, execute the rest through ``launch``, record what passed.
 
         ``tree`` is the tree hash, or a function returning it; it is read before and after each launch.
         """
         self.tree_of = tree if callable(tree) else (lambda: tree)
-        self.refresh = not reuse
+        self.refresh = not reuse and record
+        self.record = record
         self.checked_tree = self.tree_of()
         plan = Plan(run=list(self.files or []))
         try:
@@ -343,7 +344,7 @@ class Session:
                     "an error belongs to no test file" if status == 1 and unattributed and unattributed["failed"]
                     else "the tree hash is unknown" if not self.tree else trouble))
             for file in run or sorted(counts):
-                keep = self.refresh or not run or file in plan.claimed or file in plan.canary
+                keep = self.record and (self.refresh or not run or file in plan.claimed or file in plan.canary)
                 why = problem or ("its inputs changed between the hit check and the run" if file in stale else "")
                 self.settle(file, Ran(counts.get(file), seen.get(file), command, keep, plan.canary.get(file),
                                       why, status))

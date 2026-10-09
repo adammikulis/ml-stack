@@ -14,6 +14,7 @@ SRC = REPO / "src" / "ml_stack"
 STANDALONE = {
     "coding": "called by the workspace runner as ml_stack.coding.launch_coding_agent",
     "datasheet": "loaded by name as python:ml_stack.datasheet:tools, never imported",
+    "device_setup": "run as python -m ml_stack.device_setup on a device that has no install yet, never imported",
     "redteam": "run as python -m ml_stack.redteam, never imported",
     "web": "loaded by name as python:ml_stack.web:tools, never imported",
 }

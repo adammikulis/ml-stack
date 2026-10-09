@@ -222,8 +222,9 @@ def walk(c: Check, out: Callable[[str], None] = print) -> bool:
 
 def summary(c: Check) -> str:
     """The closing lines: what the owner has now and how to undo it."""
-    if any(not s.ok for s in c.steps):
-        return "NOT READY: fix the first FAIL above and run this again."
+    failed = next((s for s in c.steps if not s.ok), None)
+    if failed is not None:
+        return f"NOT READY at {failed.name}. The one fix: {failed.fix}\nThen run this again."
     if c.policy != "open":
         return "READY: the node runs with its network on and beacons; policy secure enrols nobody without a pairing code."
     return (f"READY: this device and {len(node_join.others(c.shown))} other(s) share pool {c.shown.get('pool')}. "
