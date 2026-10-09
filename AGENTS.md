@@ -364,6 +364,13 @@ branch with `git branch -d`, prune the registrations, and confirm with `git work
 the path is gone. Report the landed commit and cleanup result. A passing test, commit, or
 handoff alone does not finish the task.
 
+`scripts/worktrees` shows every tree with its owner. An *orphan* is a tree whose owner stopped
+more than the grace ago (2 hours by default) and which still holds work nobody landed, bundled
+or abandoned; before the grace passes it is "finished, waiting to land". A tree whose owner is
+running, or whose owner is unknown and younger than the grace, is never an orphan, and only
+orphans fail the `orphan-trees` gate. Decide one with `scripts/worktrees close TREE --landed`,
+`--bundle` or `--abandon 'reason'`.
+
 This applies to documentation, investigations that created a worktree, cancelled tasks and
 subagents too. If work must remain, name the path, branch, pending work and responsible agent
 in the handoff; do not report it as complete. The lead checks cleanup for every branch it
