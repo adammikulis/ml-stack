@@ -5,9 +5,12 @@ in-memory fake from `tests/keystore_support.py` (see AGENTS.md, "ML_STACK_NO_REA
 from __future__ import annotations
 
 import io
+import os
+import stat
 import sys
 import threading
 import time
+from pathlib import Path
 
 import keyring
 import pytest
@@ -232,3 +235,18 @@ def test_a_lost_master_is_not_quietly_replaced_by_a_second_one(tmp_path, countin
     again = make(tmp_path)
     assert again.provision() is True, "a person who accepts starting over may"
     assert again.subkey("memory", "a") != first
+
+
+# -- modes ---------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+def test_the_state_directory_is_private_even_when_something_else_made_it_first(tmp_path, counting):
+    directory = tmp_path / "ks"
+    directory.mkdir(mode=0o755)
+    directory.chmod(0o755)
+    make(tmp_path).subkey("memory", "a")
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    for held in (f for f in directory.iterdir() if f.suffix != ".lock"):
+        assert stat.S_IMODE(held.stat().st_mode) & 0o077 == 0, held.name
+    assert Path(directory / "flight.lock").exists()

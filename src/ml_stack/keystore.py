@@ -200,6 +200,8 @@ class Keystore:
 
     def _ensure_dir(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == "posix":
+            self.directory.chmod(0o700)
         human.protect(self.directory)
 
     def _doc(self, name: str) -> dict[str, Any]:
