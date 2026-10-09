@@ -20,6 +20,8 @@ const MESSAGE_KEYS: [&str; 7] = ["type", "from", "to", "subject", "body", "reply
 const NOTE_KEYS: [&str; 6] = ["nkind", "title", "body", "source", "tags", "author"];
 const IDENTITY_KEYS: [&str; 3] = ["name", "parent", "family"];
 const CLAIM_KEYS: [&str; 3] = ["target", "action", "note"];
+const LEASE_KEYS: [&str; 3] = ["lease", "action", "resources"];
+const LEASE_ACTIONS: [&str; 5] = ["acquire", "release", "expire", "dead", "abandon"];
 const AUDIT_KEYS: [&str; 3] = ["event", "subject", "detail"];
 pub const BODY_BYTES: usize = 64 * 1024;
 const NOTES_PER_SENDER: usize = 200;
@@ -53,6 +55,7 @@ pub fn channel_of(kind: Kind, fields: &Map<String, Value>) -> String {
         Kind::Message => fields.get("to").and_then(Value::as_str).unwrap_or(GENERAL).to_string(),
         Kind::Note => "#notes".into(),
         Kind::Claim => "#claims".into(),
+        Kind::Lease => "#leases".into(),
         Kind::Identity => "#identity".into(),
         Kind::Audit => "#audit".into(),
         _ => "#other".into(),
@@ -154,6 +157,19 @@ fn claim(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<Str
     Ok((who, map))
 }
 
+fn lease(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let map = only(&row.body, &LEASE_KEYS)?;
+    let who = sender(row, None, ctx, foreign)?;
+    if line(&map, "lease", 64)?.is_empty() || !LEASE_ACTIONS.contains(&text(&map, "action", 8, true)?) {
+        return reject("a lease entry names a lease and what happened to it");
+    }
+    match map.get("resources") {
+        Some(Value::Array(r)) if !r.is_empty() && r.len() <= 8 && r.iter().all(|v| v.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 400 && is_line(s))) => {}
+        _ => return reject("a lease entry lists one to eight resources"),
+    }
+    Ok((who, map))
+}
+
 fn audit(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
     let map = only(&row.body, &AUDIT_KEYS)?;
     let who = sender(row, None, ctx, foreign)?;
@@ -171,6 +187,7 @@ fn entry(row: &Row, ctx: &mut Context) -> Result<Entry> {
         Kind::Identity => identity(row, ctx, foreign)?,
         Kind::Claim => claim(row, ctx, foreign)?,
         Kind::Audit => audit(row, ctx, foreign)?,
+        Kind::Lease => lease(row, ctx, foreign)?,
         _ => return reject("this kind of entry is not accepted yet"),
     };
     Ok(Entry {

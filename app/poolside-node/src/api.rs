@@ -29,7 +29,7 @@ fn params_for(method: &str) -> Option<&'static [&'static str]> {
         "project_add" | "source_add" => &["id", "kind", "path"],
         "project_list" => &[],
         "project_resolve" => &["path"],
-        _ => return None,
+        m => return crate::lease::rpc::params_for(m),
     })
 }
 
@@ -162,6 +162,7 @@ fn dispatch(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<Str
         "project_add" | "source_add" => project(node, method, token, p),
         "project_list" => Ok(json!(node.projects.all())),
         "project_resolve" => node.projects.resolve(str_of(p, "path")?).map(|p| json!({"board": p.id})),
+        m if crate::lease::rpc::METHODS.contains(&m) => crate::lease::rpc::call(node, m, board, token, p),
         "links" => node.access(token, board, false).map(|_| json!(node.links.all().iter().filter(|l| l.from == board || l.to == board).collect::<Vec<_>>())),
         "shutdown" => node.access(token, board, false).map(|_| {
             node.stop.store(true, Ordering::SeqCst);

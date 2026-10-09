@@ -12,6 +12,7 @@ pub mod error;
 pub mod fold;
 pub mod fsutil;
 pub mod identity;
+pub mod lease;
 pub mod links;
 pub mod log;
 pub mod node;

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::api::{handle, API_VERSION};
+use crate::api::API_VERSION;
 use crate::error::{Error, Result};
 use crate::fsutil::private_dir;
 use crate::node::Node;
@@ -81,10 +81,7 @@ fn connection(mut stream: UnixStream, node: &Mutex<Node>, allowed: u32) -> Resul
         return write_frame(&mut stream, &refusal);
     }
     while let Some(request) = read_frame(&mut stream)? {
-        let reply = match node.lock() {
-            Ok(mut n) => handle(&mut n, &request),
-            Err(_) => return Err(Error::Damaged("node poisoned".into())),
-        };
+        let reply = crate::lease::rpc::serve(node, &request)?;
         write_frame(&mut stream, &reply)?;
     }
     Ok(())
