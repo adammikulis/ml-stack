@@ -26,7 +26,7 @@ from ml_stack.workspace import (
 from ml_stack.workspace.boardapi import Held, data_line
 from ml_stack.workspace.cli_options import FOR_AGENT, READ
 from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.modelid import describe
+from ml_stack.workspace.modelid import clean_harness, clean_model, describe
 from ml_stack.workspace.screen import Refused, fence, refusals
 
 __all__ = ["TABLE", "guarded", "runner"]
@@ -150,7 +150,7 @@ def unanswered(s: Session) -> list[dict[str, Any]]:
 
 def whoami(args: argparse.Namespace, s: Session) -> Any:
     """Who the token says you are; --model and --harness record what you say you run on."""
-    a = s.whoami(args.model, args.harness)
+    a = s.whoami(clean_model(args.model) if args.model else "", clean_harness(args.harness))
     return {"id": a.name, "parent": a.parent, "board": s.board, "model": a.model or "unknown", "model_state": a.model_state,
             "harness": a.harness}
 
