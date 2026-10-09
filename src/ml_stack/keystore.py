@@ -264,6 +264,15 @@ class Keystore:
             return False
         return True
 
+    def backend(self) -> str:
+        """The keyring backend this machine would use, by module and class, or why there is none
+        (backends are chosen by import and priority; no item is read or made)."""
+        try:
+            ring = self._ring().get_keyring()
+        except KeystoreUnavailable as exc:
+            return f"none: {exc}"
+        return f"{type(ring).__module__}.{type(ring).__name__}"
+
     def _ring(self) -> Any:
         try:
             import keyring

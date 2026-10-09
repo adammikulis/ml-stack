@@ -44,6 +44,10 @@ hidden = [
     "ml_stack.graph.store", "ml_stack.graph.cypher", "machineid",
     "ml_stack.workspace.coordinator", "ml_stack.workspace.coordinator_routes", "ml_stack.workspace.fleet_routes", "ml_stack.workspace.coding_routes", "ml_stack.mcp",
     "ml_stack.activity.fleet_routes", "ml_stack.workspace.work_reputation",
+    # keyring picks its backend by importing these at run time. The PyInstaller hook collects them
+    # today (checked in a frozen build); naming them keeps a change to that hook from silently
+    # taking the keystore out of the app.
+    "keyring.backends.macOS", "keyring.backends.Windows", "keyring.backends.SecretService",
 ]
 
 hidden += collect_submodules("agents")
