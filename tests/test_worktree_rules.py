@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from git_template import copy_checkout
 
 from ml_stack import harnesshook, harnesspolicy, worktreerules
 
@@ -25,20 +26,24 @@ def git(where: Path, *args: str) -> None:
                     *args], check=True, capture_output=True)
 
 
-@pytest.fixture
-def repo(tmp_path):
-    """A primary checkout on `dev` holding the opt-in marker, and a linked worktree on `work`."""
-    primary = (tmp_path / "primary").resolve()
+def _checkout(root):
+    primary = root / "primary"
     (primary / "scripts" / "hooks").mkdir(parents=True)
     (primary / "scripts" / "hooks" / "primary-only").write_text("", encoding="utf-8")
     (primary / "a.py").write_text("x = 1\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q", "-b", "dev", str(primary)], check=True)
     git(primary, "add", "-A")
     git(primary, "commit", "-qm", "chore: start")
-    inside = primary / ".claude" / "worktrees" / "inside"
-    git(primary, "worktree", "add", "-q", "-b", "work", str(tmp_path / "work"))
-    git(primary, "worktree", "add", "-q", "-b", "nested", str(inside))
-    return primary, (tmp_path / "work").resolve(), inside.resolve()
+    git(primary, "worktree", "add", "-q", "-b", "work", str(root / "work"))
+    git(primary, "worktree", "add", "-q", "-b", "nested", str(primary / ".claude" / "worktrees" / "inside"))
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """A primary checkout on `dev` holding the opt-in marker, and a linked worktree on `work`."""
+    copy_checkout("worktree-rules", _checkout, tmp_path, "primary", "work")
+    primary = (tmp_path / "primary").resolve()
+    return primary, (tmp_path / "work").resolve(), (primary / ".claude" / "worktrees" / "inside").resolve()
 
 
 def hook(script: Path, event: dict, **env: str) -> tuple[int, str]:

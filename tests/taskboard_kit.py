@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from git_template import copy_checkout
 from workspace_kit import Kit, clean_env
 
 from ml_stack.net import git
@@ -16,6 +17,17 @@ from ml_stack.workspace import (
 from ml_stack.workspace.taskboard import TaskBoard
 
 
+def _baseline(root):
+    repository, source = root / 'repository', root / 'source'
+    repository.mkdir()
+    git.run(['init', str(repository)])
+    (repository / 'code.py').write_text('BASELINE = True\n')
+    git.run(['add', 'code.py'], cwd=repository)
+    git.run(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+             'commit', '-m', 'baseline'], cwd=repository)
+    git.run(['worktree', 'add', '-b', 'source', str(source)], cwd=repository)
+
+
 @pytest.fixture
 def board(tmp_path, monkeypatch):
     kit = Kit(clean_env(monkeypatch, tmp_path))
@@ -27,14 +39,8 @@ def board(tmp_path, monkeypatch):
     kit.child = tokens.read_file(Path(delegated['token_file']))
     monkeypatch.setattr(device_agent, 'device_id', lambda: '1234567890abcdef')
     monkeypatch.setattr(resources, 'device_id', lambda: '1234567890abcdef')
-    repository, source = tmp_path / 'repository', tmp_path / 'source'
-    repository.mkdir()
-    git.run(['init', str(repository)])
-    (repository / 'code.py').write_text('BASELINE = True\n')
-    git.run(['add', 'code.py'], cwd=repository)
-    git.run(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
-             'commit', '-m', 'baseline'], cwd=repository)
-    git.run(['worktree', 'add', '-b', 'source', str(source)], cwd=repository)
+    source = tmp_path / 'source'
+    copy_checkout('taskboard', _baseline, tmp_path, 'repository', 'source')
     kit.source = source
     localagent.save(kit.ws, localagent.Agent('native-worker', 'qwen', identity=kit.worker_id,
                                            profile='coding', project=str(source), pid=555, process_started=42))
