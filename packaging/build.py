@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import runpy
 import shutil
@@ -94,6 +95,26 @@ def _telemetry_metadata(wheel: Path) -> None:
         raise SystemExit('telemetry wheel has invalid version metadata') from exc
     if canonicalize_name(headers.get('Name', '')) != 'metal-smi' or version < Version('1.1.0'):
         raise SystemExit('telemetry wheel must provide metal-smi>=1.1.0')
+
+
+def node(out: Path = DIST) -> Path:
+    """Build the release `poolside-node` for this machine into ``out``/node (dist by default), named by target, with its SHA-256 beside it.
+
+    A runtime build (`ml-stack runtime ensure`) compiles the node from its own commit and records the same checksum in the
+    runtime tree; this is the standalone copy a bundle or a release asset carries. Windows has no node yet.
+    """
+    if sys.platform == "win32":
+        raise SystemExit("the node has no Windows build yet: its local API is a Unix socket")
+    run(["cargo", "build", "--release", "--locked", "-p", "poolside-node"], cwd=APP)
+    made = APP / "target" / "release" / "poolside-node"
+    if not made.is_file():
+        raise SystemExit("cargo wrote no poolside-node")
+    into = out / "node" / f"poolside-node-{target_triple()}"
+    into.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(made, into)
+    digest = hashlib.sha256(into.read_bytes()).hexdigest()
+    into.with_name(into.name + ".sha256").write_text(f"{digest}  {into.name}\n", encoding="utf-8")
+    return into
 
 
 def built_from(python: Path) -> Path:
@@ -212,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="freeze the daemon, and stop before the window around it")
     ap.add_argument("--wheelhouse", action="store_true",
                     help="also download the extras, for a machine with no network")
+    ap.add_argument("--node", action="store_true",
+                    help="also build the poolside-node binary for this platform into dist/node, with its checksum")
     ap.add_argument("--clean", action="store_true")
     ap.add_argument('--metal-smi-source', type=Path,
                     help='build and bundle owned metal-smi>=1.1.0 from this local source directory')
@@ -228,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(built)} wheels in {DIST}")
     for w in built:
         print(f"  {w.name}  {w.stat().st_size / 1024:.0f} KB")
+    if a.node:
+        print(f"node: {node()}")
     if a.wheelhouse:
         house = wheelhouse(DIST / "wheels")
         print(f"{len(house)} extra wheels in {DIST / 'wheels'}")

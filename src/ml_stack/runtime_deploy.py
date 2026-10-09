@@ -16,7 +16,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack import runtime, runtime_launchers, runtime_store
+from ml_stack import node_build, runtime, runtime_launchers, runtime_store
 from ml_stack.files import writing
 from ml_stack.fleet import runtime_wheel
 from ml_stack.fleet.environment import Environment
@@ -179,7 +179,13 @@ def build(plan: Plan, stage: Path, prefix: Path) -> runtime.Runtime:
     """Build the plan's commit into a new immutable runtime tree at `prefix`."""
     creator = runtime_store.creator_record(plan.agent or os.environ.get(tokens.AGENT_ENV, ""), "ensure")
     target = runtime_wheel.Target(prefix, creator, host_python())
-    return runtime_wheel.build(plan.checkout, plan.commit, stage, timeout=plan.timeout, target=target)
+    built = runtime_wheel.build(plan.checkout, plan.commit, stage, timeout=plan.timeout, target=target)
+    try:
+        node_build.add_to(built, stage / "source", plan.commit, timeout=plan.timeout)
+    except RECOVERABLE:
+        runtime_store.discard(built.prefix)
+        raise
+    return built
 
 
 def _clean_environment(home: Path, bin_dir: Path) -> dict[str, str]:
@@ -273,7 +279,7 @@ def build_and_switch(plan: Plan, builder: Builder = build, who: Identity | None 
             epoch = source_epoch(stage / "source")
             if epoch < plan.floor:
                 raise DeployError(f"built epoch {epoch} is below the floor {plan.floor}")
-            runtime_store.mark_verified(built, epoch)
+            runtime_store.mark_verified(built, epoch, node_build.mark(built.prefix))
             if plan.launchers is not None:
                 runtime_launchers.install(plan.launchers, built)
             runtime.publish(built)

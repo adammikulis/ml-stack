@@ -1,7 +1,7 @@
 {
- "surfaces": 843,
+ "surfaces": 844,
  "by_status": {
-  "covered": 516,
+  "covered": 517,
   "partial": 199,
   "uncovered": 53,
   "n/a": 75,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 64,
+   "covered": 65,
    "partial": 62,
    "uncovered": 0,
    "n/a": 2,
@@ -11577,6 +11577,19 @@
     "tests/test_net_scan.py"
    ],
    "note": ""
+  },
+  {
+   "id": "spawn:node_binary.py:build",
+   "kind": "spawn",
+   "source": "node_binary.py:build",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_node_binary_build.py::test_a_hostile_source_path_reaches_cargo_as_a_directory_and_nothing_else",
+    "tests/test_node_binary_build.py::test_a_tree_without_the_node_crate_is_refused_before_cargo_starts"
+   ],
+   "note": "cargo starts with a fixed argument list; a source path with shell punctuation or a leading dash is only the working directory"
   },
   {
    "id": "spawn:pi.py:launch",

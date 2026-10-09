@@ -52,10 +52,10 @@ def unmanaged(root: Path | None = None) -> list[dict]:
              "in_use": bool(running_within(tree))} for tree in trees(root) if not ours(tree)]
 
 
-def mark_verified(chosen: runtime.Runtime, epoch: int = 0) -> None:
-    """Record that a runtime passed its smoke, with the runtime epoch its source declares."""
+def mark_verified(chosen: runtime.Runtime, epoch: int = 0, extra: dict | None = None) -> None:
+    """Record that a runtime passed its smoke, with the runtime epoch its source declares and any ``extra`` fields (the node checksum)."""
     write_json(chosen.prefix / MARK, {"commit": chosen.commit, "version": chosen.version, "epoch": epoch,
-                                      "identity": chosen.identity, "verified_at": time.time()})
+                                      "identity": chosen.identity, "verified_at": time.time(), **(extra or {})})
     (chosen.prefix / MARK).chmod(0o600)
 
 
