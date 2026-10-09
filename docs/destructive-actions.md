@@ -107,8 +107,8 @@ reversible, 374 destructive, with obfuscation). Recall counts `unsure` as caught
 Latency per call: mean 0.05 ms, 95th percentile 0.11 ms, maximum about 1 ms.
 
 Read these as optimistic. The held-out rows were written by the author of the rules in three
-batches. Before the rules were adjusted to them, the first pass asked about 202 of 204 (0.990) of
-the first batch's destructive calls, 160 of 172 (0.930) of the second, and asked about 3 of 101 safe
+batches. Before the rules were adjusted to them, the first pass asked about 202 of 204 (99.0%) of
+the first batch's destructive calls, 160 of 172 (93.0%) of the second, and asked about 3 of 101 safe
 calls (3.0%) and 2 of 49 reversible calls of the third. The approval-fatigue number to expect on
 real work is above zero: any program outside the table (an unknown CLI, a script run directly, a
 `python x.py`) is `unsure` and asks. Layer 2 is exercised in tests against the stub logprob server,
