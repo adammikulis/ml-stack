@@ -41,7 +41,7 @@ jobs:
           retention-days: 7
 
       # A CycloneDX SBOM (scripts/sbom.py, no network): the wheel's extras as installed in a clean venv, and the
-      # Rust crates of app/src-tauri/Cargo.lock. The publish job attaches it to the release.
+      # Rust crates of app/Cargo.lock. The publish job attaches it to the release.
       - name: SBOM
         run: |
           python -m venv "$RUNNER_TEMP/sbom-env"

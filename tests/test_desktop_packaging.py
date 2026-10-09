@@ -73,7 +73,7 @@ def test_desktop_builder_bootstraps_without_an_installed_project(tmp_path):
 def test_window_signs_the_built_application_name(builder, tmp_path, monkeypatch):
     sidecar = tmp_path / "daemon"
     sidecar.write_bytes(b"daemon")
-    artifact = builder.APP / "src-tauri/target/release/bundle/macos/Poolside.app"
+    artifact = builder.APP / "target/release/bundle/macos/Poolside.app"
     (artifact / "Contents/MacOS").mkdir(parents=True)
     (artifact / "Contents/MacOS/app").write_bytes(b"native")
     calls = []

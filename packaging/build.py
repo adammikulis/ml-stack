@@ -162,7 +162,7 @@ def window(frozen: Path) -> list[Path]:
     run([npm, "ci", "--silent"], cwd=APP)
     run([npm, "run", "--silent", "build"], cwd=APP)
 
-    artifacts = _artifacts(APP / "src-tauri" / "target" / "release" / "bundle")
+    artifacts = _artifacts(APP / "target" / "release" / "bundle")
     if not artifacts:
         raise SystemExit("the native build produced no application bundle")
     made: list[Path] = []
@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.clean:
         for path in (DIST, ROOT / ".build-venv", ROOT / ".build-work",
-                     APP / "src-tauri" / "target"):
+                     APP / "target"):
             shutil.rmtree(path, ignore_errors=True)
 
     built = wheels()

@@ -14,6 +14,7 @@ distributions, which are tens of megabytes and on the network.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -326,7 +327,7 @@ def test_an_offline_install_says_which_parts_it_did_not_get(tmp_path):
     assert "== what came with it" in done.stdout, done.stdout
     for one in optional_capabilities():
         assert f"{one.name}: not installed" in done.stdout, done.stdout
-        assert one.fix in done.stdout, done.stdout
+        assert shlex.join(one.fix) in done.stdout, done.stdout
     assert "ML_STACK_OFFLINE_WHEELS" in done.stdout, done.stdout
 
 
