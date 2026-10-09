@@ -94,3 +94,26 @@ def test_backend_names_the_ring_in_use_and_why_there_is_none(tmp_path, counting,
     monkeypatch.setenv(keystore.ENV_NO_REAL, "1")
     monkeypatch.setattr(keystore, "is_real", lambda ring: True)
     assert make(tmp_path).backend().startswith("none: the machine's own keystore is switched off")
+
+
+@pytest.mark.parametrize("name", ["with space", "semi;colon", "dollar$(calc)", "back`tick`", "-leading", "pct%PATH%"])
+def test_a_hostile_directory_name_reaches_icacls_as_one_argument(tmp_path, as_windows, name):
+    target = tmp_path / name
+    platform.private_dir(target)
+    icacls = [a for a in as_windows if a[0] == "icacls"]
+    assert icacls and all(a[1] == str(target) and len(a) in (3, 4) for a in icacls)
+    assert all(a[0] in ("whoami", "icacls") for a in as_windows)
+
+
+@pytest.mark.parametrize("answer", ['"HOST\\u","not-a-sid"\n', '"HOST\\u","S-1-5-21;calc"\n', "", '"x"\n'])
+def test_whoami_output_that_is_not_a_sid_is_never_handed_to_icacls(tmp_path, monkeypatch, answer):
+    ran: list[list[str]] = []
+
+    def run(argv, **_k):
+        ran.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout=answer)
+
+    monkeypatch.setattr(platform, "is_windows", lambda: True)
+    monkeypatch.setattr(platform.subprocess, "run", run)
+    assert platform.private_dir(tmp_path) is False
+    assert not any(a[0] == "icacls" for a in ran)

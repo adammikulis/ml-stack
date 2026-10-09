@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import platform as _platform
+import re
 import signal
 import subprocess
 import sys
@@ -206,7 +207,7 @@ def _windows_sid() -> str:
     except (OSError, subprocess.SubprocessError):
         return ""
     fields = [field.strip('"') for field in done.stdout.strip().split(",")]
-    return fields[-1] if done.returncode == 0 and fields[-1].startswith("S-1-") else ""
+    return fields[-1] if done.returncode == 0 and re.fullmatch(r"S-1-\d+(-\d+)+", fields[-1]) else ""
 
 
 def private_dir(path: Path | str) -> bool:
