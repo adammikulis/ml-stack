@@ -59,8 +59,22 @@ def port_held(port: int, timeout: float = 2.0) -> bool:
             return True
     except ConnectionRefusedError:
         return False
+    except TimeoutError:
+        # Windows retransmits the SYN to a closed loopback port for about two seconds before
+        # it refuses, so a free port can time out here. Whether it can be bound says which.
+        return not _can_bind(port)
     except OSError:
         return True
+
+
+def _can_bind(port: int) -> bool:
+    """Whether this machine can listen on the loopback port right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
 
 
 def _held_health(port: int) -> dict[str, Any] | None:

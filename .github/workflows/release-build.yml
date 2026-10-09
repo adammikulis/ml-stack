@@ -10,11 +10,6 @@ on:
         required: false
         type: string
         default: ""
-      ref:
-        description: what to check out; the caller's own ref when empty
-        type: string
-        required: false
-        default: ""
     outputs:
       wheels:
         description: the result of the wheels job
@@ -34,7 +29,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
@@ -78,7 +72,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
@@ -134,8 +127,13 @@ jobs:
         run: |
           U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
           B=http://127.0.0.1:8899
+          # A page is signed in only by a one-use ticket from the daemon's own launch secret
+          # (what `ml-stack peers open` presents), never by headers a client writes.
+          SECRET=$(python -c "import json,pathlib; print(json.loads((pathlib.Path.home()/'.ml-stack'/'traind'/'launch'/'secret.json').read_text())['secret'])")
+          TICKET=$(curl -sf -H "$J" -H "$U" -H "X-ML-Stack-Launch: $SECRET" -X POST -d '{}' \
+            $B/ui/launch/ticket | python -c "import json,sys; print(json.load(sys.stdin)['ticket'])")
           C=$(curl -s -D- -o /dev/null -H "$J" -H "$U" -X POST \
-            -d '{"passphrase":"correct horse battery staple"}' \
+            -d "{\"ticket\":\"$TICKET\"}" \
             $B/ui/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:"{print $2}' \
             | cut -d';' -f1)
           test -n "$C" || { echo "no session cookie"; exit 1; }
