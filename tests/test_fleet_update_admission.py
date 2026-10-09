@@ -92,7 +92,9 @@ def test_daemon_wires_shared_update_admission(tmp_path, monkeypatch, tracked):
     daemon = object.__new__(DaemonRuntime)
     daemon.root = tmp_path
     daemon.settings = SimpleNamespace(track_branch='dev' if tracked else '', track_repo='', auto_update=True, setup_done=False)
-    daemon.runner = SimpleNamespace(status=lambda: {'busy': False})
+    daemon.port = 8770
+    daemon.httpd = SimpleNamespace(shutdown=lambda: None)
+    daemon.runner = SimpleNamespace(status=lambda: {'busy': False, 'queued': 0})
     daemon.downloads = SimpleNamespace(active=lambda: [])
     daemon.interface = None
     daemon.web = True
@@ -153,6 +155,8 @@ def test_leaving_last_cluster_stops_discovery_and_rotates_auth(tmp_path, monkeyp
     runtime.advertiser = runtime.advertisers['old']
     runtime.announcement_lock = threading.RLock()
     runtime.announce = announce
+    runtime.members = SimpleNamespace(ensure_self=lambda identity, name: None)
+    runtime.identity, runtime.name = None, 'fixture'
     runtime.fetcher = SimpleNamespace(key=old_key)
     runtime.settings = SimpleNamespace(cluster_mode='dev')
     runtime.daemon = SimpleNamespace(cluster_mode='dev')
@@ -187,6 +191,8 @@ def test_unannounced_cluster_change_updates_machine_auth(tmp_path, monkeypatch):
     runtime.advertisers = {}
     runtime.announcement_lock = threading.RLock()
     runtime.announce = False
+    runtime.members = SimpleNamespace(ensure_self=lambda identity, name: None)
+    runtime.identity, runtime.name = None, 'fixture'
     member = SimpleNamespace(group='new', key=b'b' * 32)
     monkeypatch.setattr(module, 'memberships', lambda path: [member])
     runtime.start_announcing()
