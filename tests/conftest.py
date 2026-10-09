@@ -1238,6 +1238,8 @@ def pytest_addoption(parser) -> None:
     parser.addoption("--slow", action="store_true", default=False,
                      help="also run the tests marked slow (a browser, a subprocess, a "
                           "wheel build, a network timeout)")
+    parser.addoption("--gate", action="store_true", default=False,
+                     help="also run the tests marked gate (whole-tree scans that `scripts/test gate` runs)")
     parser.addoption("--redteam", action="store_true", default=False,
                      help="also run the tests marked redteam (they need the redteam extra)")
 
@@ -1251,7 +1253,7 @@ def heavy_modules() -> frozenset[str]:
 
 def pytest_collection_modifyitems(config, items) -> None:
     """Mark the modules in ``heavy-modules.txt``, skip the live tests nobody switched on, leave
-    the slow tests out unless --slow, and the redteam tests out unless --redteam."""
+    the slow tests out unless --slow, the whole-tree scans out unless --gate, and the redteam tests out unless --redteam."""
     heavy = heavy_modules()
     for item in items:
         if Path(str(item.fspath)).name in heavy:
@@ -1259,7 +1261,9 @@ def pytest_collection_modifyitems(config, items) -> None:
         reason = live.skip_reason((m.name for m in item.iter_markers()), os.environ)
         if reason:
             item.add_marker(pytest.mark.skip(reason=reason))
-    left_out = [name for name in ("slow", "redteam") if not config.getoption(f"--{name}")]
+    wanted = {name: config.getoption(f"--{name}") for name in ("slow", "gate", "redteam")}
+    wanted["gate"] = wanted["gate"] or wanted["slow"]   # CI runs `--slow`: everything, whole-tree scans too
+    left_out = [name for name, given in wanted.items() if not given]
     if not left_out:
         return
     kept, dropped = [], []

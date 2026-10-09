@@ -44,6 +44,7 @@ def _runnable(checker) -> None:
         pytest.skip(f"{checker.NAME}: {reason}")
 
 
+@pytest.mark.gate
 @pytest.mark.parametrize("checker", gates.checkers(), ids=lambda c: c.NAME)
 def test_metric_is_within_its_budget(checker) -> None:
     _runnable(checker)
@@ -59,6 +60,7 @@ def test_metric_is_within_its_budget(checker) -> None:
     )
 
 
+@pytest.mark.gate
 @pytest.mark.parametrize("checker", gates.checkers(), ids=lambda c: c.NAME)
 def test_budget_matches_the_tree(checker) -> None:
     _runnable(checker)

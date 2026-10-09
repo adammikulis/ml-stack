@@ -2,8 +2,8 @@
 """Run the test suite one tier at a time.
 
     scripts/test quick     only the tests a change reaches (needs pytest-testmon)
-    scripts/test fast      every test not marked slow or heavy
-    scripts/test full      every test not marked slow
+    scripts/test fast      every test not marked slow, gate or heavy
+    scripts/test full      every test not marked slow or gate (the whole-tree scans run in `gate`)
     scripts/test slow      only the tests marked slow
     scripts/test all       everything, slow included: what CI runs
     scripts/test gate      the structural checks a merge is gated on (budgets, red-team coverage,
@@ -372,8 +372,9 @@ def gate_steps(workers: int, rest: list[str]) -> list[tuple[str, list[str]]]:
         ("budgets", [sys.executable, "scripts/budgets"]),
         ("redteam coverage", [sys.executable, "scripts/redteam_coverage.py", "--check"]),
         ("command reference", [sys.executable, "scripts/reference", "--check"]),
-        ("structure tests", [*pytest_command(max(1, min(workers or 6, 6)),
+        ("structure tests", [*pytest_command(max(1, min(workers or 6, 6)), "--gate",
                                              "tests/test_layers.py", "tests/test_budgets.py",
+                                             "tests/test_no_data_files.py", "tests/test_affected_scripts.py",
                                              "tests/test_budget_floors.py",
                                              "tests/test_budget_ratchet.py",
                                              "tests/test_redteam_human_floor.py",
