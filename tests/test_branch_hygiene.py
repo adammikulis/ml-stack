@@ -133,3 +133,39 @@ def test_the_commit_message_line_accepts_it(tmp_path) -> None:
     assert refused.returncode == 1
     assert "1 fewer assertions" in refused.stderr
     assert sh(repo, sys.executable, str(HOOK), "--staged", "--message", str(signed)).returncode == 0
+
+
+GUARD = "tests/test_x_guard.py"
+
+
+def merge_repo(tmp_path: Path) -> Path:
+    where = tmp_path / "m"
+    where.mkdir()
+    sh(where, "git", "init", "-q", "-b", "0.2dev")
+    (where / "tests").mkdir()
+    (where / GUARD).write_text(BEFORE)
+    sh(where, "git", "add", GUARD)
+    assert sh(where, "git", "commit", "-qm", "base", "--no-verify").returncode == 0
+    sh(where, "git", "checkout", "-qb", "side")
+    (where / GUARD).write_text("def test_denied():\n    assert deny()\n")
+    sh(where, "git", "commit", "-qam", "side weakens", "--no-verify")
+    sh(where, "git", "checkout", "-q", "0.2dev")
+    commit(where, "other.txt")
+    return where
+
+
+def test_a_merge_that_takes_a_weakened_file_whole_from_the_other_parent_is_not_judged(tmp_path) -> None:
+    """The weakening belongs to the commit that wrote it; a merge only carries it."""
+    where = merge_repo(tmp_path)
+    sh(where, "git", "merge", "--no-commit", "--no-ff", "side")
+    out = sh(where, sys.executable, str(HOOK), "--staged")
+    assert out.returncode == 0, out.stderr
+
+
+def test_a_merge_that_resolves_a_guard_test_down_by_hand_is_still_reported(tmp_path) -> None:
+    where = merge_repo(tmp_path)
+    sh(where, "git", "merge", "--no-commit", "--no-ff", "side")
+    (where / GUARD).write_text("def test_denied():\n    pass\n")
+    sh(where, "git", "add", GUARD)
+    out = sh(where, sys.executable, str(HOOK), "--staged")
+    assert out.returncode == 1 and "fewer assertions" in out.stderr

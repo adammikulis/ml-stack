@@ -75,6 +75,28 @@ def run(*args: str) -> str:
     return done.stdout
 
 
+def merge_own(diff: str) -> str:
+    """The part of a staged merge diff that the merge itself wrote. A file whose staged content is
+    exactly the other parent's was taken whole from that side, so whatever it lost relative to
+    this side was lost there, in a commit that was judged on its own; only a file that matches
+    neither parent (a conflict resolved by hand) is judged here."""
+    if not run("rev-parse", "-q", "--verify", "MERGE_HEAD").strip():
+        return diff
+    keep, chunk, take = [], [], False
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            if chunk and not take:
+                keep.extend(chunk)
+            path = line.rstrip("\n").rpartition(" b/")[2]
+            theirs = run("rev-parse", "-q", "--verify", f"MERGE_HEAD:{path}").strip()
+            take = bool(theirs) and theirs == run("rev-parse", f":{path}").strip()
+            chunk = []
+        chunk.append(line)
+    if chunk and not take:
+        keep.extend(chunk)
+    return "".join(keep)
+
+
 def weakened(diff: str, read) -> list[str]:
     """Every weakening in a zero-context diff; read(path) is the file as it was before."""
     out = []
@@ -95,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         message = run("log", "--format=%B", f"{args.against}..HEAD")
         base = args.against
     else:
-        diff = run("diff", "--cached", "-U0", "--no-renames", "--", "tests")
+        diff = merge_own(run("diff", "--cached", "-U0", "--no-renames", "--", "tests"))
         message = Path(args.message).read_text(encoding="utf-8") if args.message else ""
         base = "HEAD"
     found = weakened(diff, lambda p: run("show", f"{base}:{p}"))
