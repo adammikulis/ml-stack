@@ -103,5 +103,5 @@ def test_a_hostile_path_is_one_argument_in_every_command_line_the_app_builds():
     sign = node_signing.sign_command(Path(hostile), "app.poolhouse.node", node_app.requirement(SHA1))
     assert sign[-1] == hostile and len(sign) == 9
     probe = node_permission.probe_command(Path(hostile), Path(hostile + ".json"), 5, ["192.168.2.1; id"])
-    assert probe[4] == hostile and probe[7] == "5" and probe[9] == hostile + ".json" and probe[-1] == "192.168.2.1; id"
+    assert probe[4] == hostile and probe[8] == "5" and probe[10] == hostile + ".json" and probe[-1] == "192.168.2.1; id"
     assert node_app.launch_command(Path(hostile), ["run"])[0].startswith(hostile)
