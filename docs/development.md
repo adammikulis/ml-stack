@@ -165,3 +165,10 @@ that accepts every keyword lets a test pass on a keyword the real thing refuses,
 how a `--also tight` flag once reached `Client.__init__` in a benchmark and took the load
 down with it. `tests/test_testing_fakes.py` diffs every fake's signature against the real
 one (`mirrors`, `drift`), so a change to the real one fails the suite until the fake follows.
+
+## Commit history by type
+
+`python3 scripts/commit_types_chart.py [--branch 0.2dev] [--bucket day|week|month] [--out commit-types.png]`
+draws the share of each commit type (feat, fix, chore, and the rest) over time as a 100% stacked
+area chart from `git log`, with no network. It writes the PNG to the current directory by default.
+Needs the `plot` extra (matplotlib).
