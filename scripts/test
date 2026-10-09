@@ -187,7 +187,7 @@ def execute_run(command, environment, tier, record: OutputRecord):
     index = shown.index("-n")
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
-    shown.extend(["-p", "testslots_pytest", "-p", "testdurations"])
+    shown.extend(["-p", "testslots_pytest", "-p", "testdurations", "-p", "testagentenv_pytest"])
     order = None
     if "DEV_TEST_ORDER" not in environment:
         recorded = testhistory.load(testhistory.history_path(ROOT))

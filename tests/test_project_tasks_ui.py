@@ -55,6 +55,13 @@ def test_tasks_refuse_foreign_project_metadata_and_agent_owner(project_board):
     ws = workspaces[PROJECT]
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     tokens.store(ws.base, tokens.OWNER_FILE, ws.mint(owner, 'another-worker'))
+    # the person is the live browser session bound to this project, never the owner file's token
+    assert task_call(project_board)[0] == 200
+    agents = ws.registry._load()
+    person = next(name for name, entry in agents.items() if entry['role'] == 'human')
+    agents[person]['person_project'] = OTHER
+    ws.registry._save(agents)
     assert task_call(project_board)[0] == 403
+    assert task_call(project_board, method='POST', body={'spec': {'title': 'Unbound', 'acceptance': ['No']}})[0] == 403
     projects[OTHER].board_host = 'http://foreign:8770'
     assert task_call(project_board, OTHER)[0] == 409
