@@ -37,7 +37,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-password() { security find-generic-password -a "$USER" -s "$SERVICE" -w 2>/dev/null; }
+# `security -i` parses its stdin line itself, so a quote or a space in a field would change it.
+for field in "$NAME" "$USER" "${ML_STACK_VOLUME_KEYCHAIN:-}"; do
+  case $field in *[!A-Za-z0-9._/@+-]*) echo "unsupported character in '$field'" >&2; exit 2 ;; esac
+done
+# KEYCHAIN names a keychain file instead of the login keychain (tests use a throwaway one).
+KEYCHAIN=${ML_STACK_VOLUME_KEYCHAIN:-}
+password() { security find-generic-password -a "$USER" -s "$SERVICE" -w $KEYCHAIN 2>/dev/null; }
+# The secret goes to `security -i` on stdin, never on argv, where `ps` shows it to every local user.
+store() { printf 'add-generic-password -a "%s" -s "%s" -w "%s" %s\n' "$USER" "$SERVICE" "$1" "$KEYCHAIN" | security -i; }
 # the directory exists whether or not the image is attached; ask the kernel, not the filesystem
 attached() { mount | grep -q " on $MOUNT "; }
 
@@ -46,7 +54,7 @@ setup)
   if [ -e "$IMAGE" ]; then echo "already set up: $IMAGE"; exit 0; fi
   if ! password >/dev/null; then
     PW=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40)
-    security add-generic-password -a "$USER" -s "$SERVICE" -w "$PW"
+    store "$PW"
     echo "made a passphrase and stored it in your login keychain as '$SERVICE'"
   fi
   mkdir -p "$(dirname "$MOUNT")"
