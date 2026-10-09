@@ -182,6 +182,14 @@ def execute_run(command, environment, tier, record: OutputRecord):
     want = int(shown[index + 1])
     shown[index + 1] = "{workers}"
     shown.extend(["-p", "testslots_pytest", "-p", "testdurations"])
+    order = None
+    if "DEV_TEST_ORDER" not in environment:
+        recorded = testhistory.load(testhistory.history_path(ROOT))
+        if recorded:
+            import testorder   # a pytest plugin: imported only when a run is about to use it
+            order = testorder.write(recorded)
+            environment["DEV_TEST_ORDER"] = order
+            shown.extend(["-p", "testorder"])
     if environment.get("DEV_TEST_REUSE_RECORD"):
         shown.extend(["-p", "testreuse_plugin"])
     executed_tree = tree_hash(ROOT)
@@ -195,6 +203,8 @@ def execute_run(command, environment, tier, record: OutputRecord):
                   else testslots_runner.run_pytest(shown, want, env=environment))
     except (OSError, RuntimeError, ValueError) as exc:
         status, failure = 4, exc
+    if order:
+        Path(order).unlink(missing_ok=True)
     if status == 5 and any("::" in value for value in command):
         report_run(record, "test: the explicit node selector matched no tests")
         status = 4
