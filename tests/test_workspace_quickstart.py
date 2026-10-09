@@ -539,8 +539,8 @@ def test_two_children_in_real_processes_labels_and_the_children_filter(base, tea
     allm = child(["inbox", "--agent", "worker", "--json"], base)
     rows = json.loads(allm.stdout)
     assert [r["from"] for r in rows] == ["worker/a", "lead", "lead"]
-    assert rows[0]["from_label"].startswith("Subagent · a (parent Model unknown · ")
-    assert rows[0]["from_label"].endswith(" · session 1)")
+    assert rows[0]["from_label"].startswith("agent-")
+    assert rows[0]["from_label"].endswith(" (a)")
     assert [r["from_label"] for r in rows[1:]] == ["lead", "lead"]
     assert all(r["authority"] == "none" for r in rows)
     assert "labelled" in rows[2]["text"]

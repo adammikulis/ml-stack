@@ -1,7 +1,7 @@
 {
- "surfaces": 822,
+ "surfaces": 823,
  "by_status": {
-  "covered": 498,
+  "covered": 499,
   "partial": 197,
   "uncovered": 53,
   "n/a": 74,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 78,
+   "covered": 79,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -7872,6 +7872,19 @@
    "id": "parser:workspace/service.py",
    "kind": "parser",
    "source": "workspace/service.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/session_name.py",
+   "kind": "parser",
+   "source": "workspace/session_name.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",
