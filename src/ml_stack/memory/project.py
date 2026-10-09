@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ml_stack.home import user_home
 
-__all__ = ["Project", "at", "detect"]
+__all__ = ["Project", "at", "common_git_dir", "detect"]
 
 SCOPES = ("user", "project")
 
@@ -34,6 +34,15 @@ def _git_dir(root: Path) -> Path | None:
         if line.startswith("gitdir:"):
             return (root / line[len("gitdir:"):].strip()).resolve()
     return None
+
+
+def common_git_dir(root: Path) -> Path | None:
+    """The git directory every worktree of ``root``'s repository shares, or None outside a repository."""
+    git = _git_dir(Path(root).resolve())
+    if git is None:
+        return None
+    common = git / "commondir"
+    return (git / common.read_text(errors="replace").strip()).resolve() if common.is_file() else git
 
 
 def _origin(git: Path) -> str:

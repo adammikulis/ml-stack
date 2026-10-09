@@ -17,8 +17,9 @@ from importlib import metadata
 from pathlib import Path
 
 import affected
+import testreuse_facts as facts
 
-NEVER_MARKS = frozenset({"heavy", "live_api", "live_net", "redteam", "gpu", "model"})
+NEVER_MARKS = frozenset({"live_api", "live_net", "redteam", "gpu", "model"})
 NEVER_WORDS = re.compile(r"\b(?:Lease|llama[-_]server|ml-stack-serve)\b")
 SPAWNS = re.compile(r"\b(?:subprocess|Popen|os\.system|os\.exec\w*|os\.spawn\w*|os\.fork\w*|multiprocessing|pexpect|"
                     r"pty|create_subprocess_\w+|ProcessPoolExecutor|runpytest_subprocess|playwright|"
@@ -285,12 +286,9 @@ def executed_identity(arguments: list[str]) -> str:
 def lookup(root: Path, rel: str, arguments: list[str]) -> Lookup:
     """The lookup key of test file ``rel`` under ``arguments``; ``barred`` says why it is never reused."""
     texts = {p: text_of(root / p) for p in [rel, *conftests(root, rel)]}
-    listed = root / "tests/heavy-modules.txt"
     barred = ""
     if marks_in(texts[rel]) & NEVER_MARKS:
-        barred = "carries a heavy, live, redteam or model marker"
-    elif listed.is_file() and Path(rel).name in listed.read_text().split():
-        barred = "listed in tests/heavy-modules.txt"
+        barred = "carries a live, redteam, gpu or model marker"
     elif NEVER_WORDS.search(texts[rel]):
         barred = "uses a model or GPU lease"
     names = set(ENV_FIXED).union(*(set(ENV_NAME.findall(t)) for t in texts.values())) - ENV_SKIP
@@ -402,12 +400,7 @@ def manifest_holds(root: Path, manifest: dict, closures: Closures) -> str:
             return f"environment changed: {name}"
     if manifest["tree"] and closures.tree() != manifest["tree"]:
         return "code tree changed"
-    wanted = {pin.split("==")[0] for pin in manifest["dists"]}
-    installed = {f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions()
-                 if d.metadata["Name"] in wanted}
-    if set(manifest["dists"]) != installed:
-        return "installed distributions changed"
-    return ""
+    return facts.changed_pins(manifest["dists"])
 
 
 def manifest_digest(manifest: dict) -> str:

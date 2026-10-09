@@ -91,6 +91,8 @@ def _write_ok(absolute: str) -> bool:
         target = Path(absolute).resolve()
     except OSError:
         return False
+    if target.name == "__pycache__" or (target.parent.name == "__pycache__" and ".pyc" in target.name):
+        return True  # Python's own bytecode cache, anywhere: regenerable from source, not test output
     if _under(target, ROOT):
         return any(part.startswith(ALLOWED_ROOT_WRITES) for part in target.relative_to(ROOT).parts)
     return any(_under(target, base) or _under(Path(absolute), base) for base in WRITABLE)

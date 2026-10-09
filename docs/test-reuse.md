@@ -55,7 +55,9 @@ listings with an audit hook and attributes them to the test file whose collectio
 running; modules imported at collection are attributed from `sys.modules`.
 
 A hit needs a stored entry for the lookup key whose manifest still matches the checkout byte for
-byte. Nothing in either is a path, so two worktrees with identical content hit the same entry.
+byte. Nothing in either is a path, so two worktrees with identical content hit the same entry. The store is
+`~/.cache/test-reuse/<project>`, and every worktree of one repository is one project (by origin url,
+else by the repository's common git directory).
 
 Limits of what the plugin sees: `DirEntry.stat`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` and C extensions (such as `ladybug`) touch files without a Python-level `open`, `os.stat`, `lstat`, `access` or listing event, and a function bound before the plugin loaded (`from os import stat`) bypasses the `os.stat` wrapper. A file whose own code (the test file, its `tests/` helpers and conftests) mentions any of `DirEntry`, `scandir`, `fstat`, `utime`, `chown`, `setxattr`, `mmap`, `sqlite3` or `ladybug` is therefore never stored. Library code under `src/` that uses them is not scanned: a file that reaches such code is covered by the recorded reads, the tree digest for spawning code and the canary only.
 A removal or rename made relative to a directory file descriptor is not attributed.
@@ -72,12 +74,14 @@ checksums, so it cannot be compared across worktrees.
 
 A file is executed and no passing entry is written for it when any of the following holds:
 
-- the test file carries marker `heavy`, `live_api`, `live_net`, `redteam`, `gpu` or `model`, or is
-  listed in `tests/heavy-modules.txt`, or names a model or GPU lease (`Lease`, `llama-server`,
-  `ml-stack-serve`), or the marker appears on any of its items at run time;
+- the test file carries marker `live_api`, `live_net`, `redteam`, `gpu` or `model`, or names a model or
+  GPU lease (`Lease`, `llama-server`, `ml-stack-serve`), or the marker appears on any of its items at run
+  time. A scheduling label never bars a file: `heavy`, listing in `tests/heavy-modules.txt` and `slow`
+  decide only when and where a file runs, never whether its result is kept;
 - the run was red. A failure is written to the chain as a `fail` entry for attribution; it is never
   a hit, because a hit needs a `pass` entry;
-- its tests wrote under the checkout other than to cache directories, wrote outside the temporary
+- its tests wrote under the checkout other than to cache directories (Python's `__pycache__` bytecode is
+  regenerable: it is ignored wherever it is written, site-packages included, and is not in the key), wrote outside the temporary
   root, or opened anything under the real `~/.ml-stack`, `~/.ssh`, `~/.gnupg`, `~/.config`,
   `~/.cache/huggingface` or `Library/Keychains` (the suite's own isolation guard in
   `tests/conftest.py` reads real state to check it is untouched; those reads are ignored);

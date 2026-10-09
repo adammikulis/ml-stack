@@ -154,15 +154,15 @@ def test_a_failure_is_recorded_for_attribution_and_never_reused(project, tmp_pat
 
 def test_marked_and_skipped_files_are_not_stored(project, tmp_path):
     store = storage.Store(tmp_path / "store")
-    (project / "tests/test_heavy.py").write_text(
-        "import pytest\n\n\n" + "@" + "pytest.mark.heavy\ndef test_h():\n    pass\n")
+    (project / "tests/test_gpu.py").write_text(
+        "import pytest\n\n\n" + "@" + "pytest.mark.gpu\ndef test_h():\n    pass\n")
     (project / "tests/test_skip.py").write_text("import pytest\n\n\ndef test_s():\n    pytest.skip('no')\n")
-    report, _ = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py")
+    report, _ = attempt(project, store, "tests/test_gpu.py", "tests/test_skip.py")
     details = {o.file: o.detail for o in report.outcomes}
-    assert "not reusable" in details["tests/test_heavy.py"]
+    assert "not reusable" in details["tests/test_gpu.py"]
     assert "a test was skipped" in details["tests/test_skip.py"]
     assert reuse.rows(store.folder) == []
-    again, launches = attempt(project, store, "tests/test_heavy.py", "tests/test_skip.py")
+    again, launches = attempt(project, store, "tests/test_gpu.py", "tests/test_skip.py")
     assert hows(again) == ["ran", "ran"] and len(launches) == 1
 
 

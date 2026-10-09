@@ -225,6 +225,7 @@ class Session:
         self.claims: dict[str, str] = {}
         self.checked_tree = ""
         self.clean = False
+        self.unstored = ""
 
     def lookup(self, file: str) -> keys.Lookup:
         """The lookup key of ``file`` under this run's command."""
@@ -385,7 +386,7 @@ class Session:
         else:
             outcome.stored = self.store_entry(file, ran, "pass", manifest)
             if not outcome.stored:
-                outcome.detail = f"{outcome.detail} (not stored: the store is unavailable or an input changed)".strip()
+                outcome.detail = f"{outcome.detail} (not stored: {self.unstored})".strip()
             self.events.finished(file, look.key, "pass" if outcome.stored else "pass-unstored", outcome.stored)
 
     @staticmethod
@@ -404,11 +405,13 @@ class Session:
     def store_entry(self, file: str, ran: Ran, kind: str, manifest: dict | None = None) -> str:
         """Write the entry for an executed file; empty when an input changed or the store could not be written."""
         manifest = manifest or keys.build_manifest(self.root, file, ran.seen or {}, self.closures, tuple(self.command))
-        if kind == "pass" and keys.manifest_holds(self.root, manifest, self.closures):
+        self.unstored = keys.manifest_holds(self.root, manifest, self.closures) if kind == "pass" else ""
+        if self.unstored:
             return ""
         try:
             return self.put_entry(file, ran, kind, manifest)
         except OSError as error:
+            self.unstored = f"the store could not be written: {error}"
             warn(f"test: {file}: result not stored ({error})")
             return ""
 

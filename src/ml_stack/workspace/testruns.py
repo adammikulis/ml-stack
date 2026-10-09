@@ -8,6 +8,7 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.activity import reuse
+from ml_stack.memory import project as repository
 from ml_stack.net import git
 from ml_stack.workspace import project
 
@@ -17,9 +18,13 @@ STORE_BASE = home.user_home() / ".cache" / "test-reuse"
 
 
 def scope(root: Path) -> str:
-    """A short stable name for the project that ``root`` belongs to; a checkout that names no project
+    """A short stable name for the project that ``root`` belongs to, shared by every worktree of one
+    repository (by origin url, else by the common git directory); a checkout that is no repository
     is its own scope, keyed by its resolved path."""
     found = project.describe(start=root)
+    shared = repository.common_git_dir(root) if repository.at(root).ident.startswith("path:") else None
+    if shared is not None:
+        return "repo-" + hashlib.sha256(str(shared).encode()).hexdigest()[:12]
     if found.get("key"):
         return hashlib.sha256(found["key"].encode()).hexdigest()[:16]
     return "local-" + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]

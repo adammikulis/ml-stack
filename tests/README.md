@@ -80,6 +80,7 @@ test would have caught (run it in a throwaway worktree).
 
 `tests/heavy-modules.txt` lists the modules that cost the most; `conftest.py` marks them
 `heavy`. `scripts/test heavy` rewrites the list from the recorded test durations.
+Labels schedule, they never block: `heavy` and `slow` order and place a run, and never stop a file's result from being cached or reused.
 
 ## What is slow, and why
 
