@@ -65,8 +65,8 @@ the client by a MAC over the request, not by a client certificate and not bound 
 
 Keystore usage: `keystore.py` is the only importer of `keyring`; unattended processes never create the
 master and read it only after `ml-stack-security unlock`. Consequence: a headless device holds its
-at-rest key on a 0600 file or a passphrase, which section 3 treats as protection against a stolen disk
-only when the passphrase mode is used.
+secrets in a passphrase-wrapped key file (decision 8.1), the only mode section 3 counts as protection
+against a stolen disk.
 
 ### 2.3 Misconfiguration fixes
 
@@ -131,7 +131,7 @@ tests against real sockets and real files, not mocks (`AGENTS.md`).
 | 1 | **Make unencrypted impossible by default.** `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts removed (decision 8.1), loopback http only; seal `/infer` streams and file chunks (framed AES-GCM, per-chunk nonce counter, AAD = request nonce and chunk index); pairing recovery file KDF parameters reviewed | passive observer in every configuration; streamed tokens | M | none | Sealing streams costs CPU at weight-transfer rates; measure on a 20 GB file before deciding to seal weights (private fine-tunes only) |
 | 2 | **Per-device keys and identities, membership record and revocation** (decision 8.1). Each device has its own identity key and a device record (device id, certificate fingerprint, status) in a signed membership log (`mesh-board.md:275`, `member-add`, revocation) or a simple host-signed list as step one; request authority moves from the cluster key to these. Cluster key stays for beacon sealing only | malicious paired device acting as another; revocation by device | L | 1 | Precedes slice 2b: a certificate cannot be pinned to an identity that does not exist yet |
 | 2b | **Mutual TLS 1.3 with pinned per-device certificates** as the floor on every pool link. `server_context` requests the client certificate; request MAC covers the client certificate fingerprint; TLS 1.2 refused | MAC not tied to channel; downgrade | M | 2 | Android below API 29 is refused (decision 8.1) |
-| 3 | **Encrypt the plaintext stores** under keystore subkeys with `keystore.wrap` / the memory vault pattern: board graph, conversations, person log, job records and logs, workspace tokens, cluster key, TLS key. Headless: passphrase mode or a 0600 key file and an explicit "headless: weaker" row in `status` | stolen disk | M per store, L together | none; reuse `memory/vault.py` | Each store gets a migration (as `memory/migrate.py`). The cluster and TLS keys are the first two: move the file contents into a wrapped blob |
+| 3 | **Encrypt the plaintext stores** under keystore subkeys with `keystore.wrap` / the memory vault pattern: board graph, conversations, person log, job records and logs, workspace tokens, cluster key, TLS key. A device with no OS keystore uses the passphrase-wrapped key file of decision 8.1; no 0600 plaintext fallback | stolen disk | M per store, L together | none; reuse `memory/vault.py` | Each store gets a migration (as `memory/migrate.py`). The cluster and TLS keys are the first two: move the file contents into a wrapped blob |
 | 4 | **End-to-end DMs and notes.** Payload encrypted to the addressee device's X25519 key (HPKE as in section 4), key published in the signed membership record; sender signs with its Ed25519 key. The host stores and relays ciphertext plus metadata (from, to, time, size, board). Group posts to a board stay readable by members: encrypt to a per-board key rotated on membership change | board host and relay learn nothing of DMs; compromised host | L | 2, a per-device Ed25519 identity (exists: `fleet/onboard/signing.py`) | Search, recall and agent reading of DMs happen on the addressee device only; the host cannot index them. Federated search of DMs is lost, by design |
 | 5 | **Per-pair sealing keys.** Replace "cluster key derives everything" with an X25519 key agreement between device certificates' keys (ephemeral on each connection), sealing stays AES-256-GCM, MAC key from the same agreement | forward secrecy and compartmentalisation for the sealed layer | M | 2b | With mutual TLS 1.3 this is partly redundant; do it only for traffic that crosses a relay or the board host |
 | 6 | **Journal replica at rest and mesh transport** (when the mesh lands): per-device journals signed with the device Ed25519 key (integrity), replica encrypted at rest with a keystore subkey (`mesh-board.md:450`), transport mTLS from slice 2b, entries addressed to a device encrypted as in slice 4, entries all members read stay signed-only | the mesh nonexistent today; stolen disk | L, part of the mesh work | 2, 2b, 3 | Do not build the mesh transport before slices 2, 2b and 3 |
@@ -211,7 +211,7 @@ sandbox's key**, and never decrypted into anything the owner's tooling renders.
 - **Metadata the owner still sees:** which guest (name, certificate fingerprint), when each job
   started and ended, size in and out, CPU/GPU/memory use and exit status, which model was requested
   (model names are needed to schedule), the guest's IP address. The owner cannot hide this without
-  breaking scheduling and accounting. Open question Q1 narrows what the guest may see of the owner.
+  breaking scheduling and accounting. Decision 8.1 limits what the guest sees of the owner to one shared guest channel.
 - **Local-model requests.** The model server process (`llama-server`) holds the plaintext prompt and
   the generated tokens in its memory and KV cache, and the pool's `/infer` proxy sees them. Implication:
   a guest prompt is protected from the owner's UI, logs and other tenants but not from the owner as root,
@@ -271,7 +271,7 @@ ends the guest immediately at the next handshake and kills running jobs, discard
 
 | # | Slice | Size | Depends on |
 |---|---|---|---|
-| G1 | `guest` role in the membership record, scoped capabilities, board-side tenant filter, no cluster key for guests; leak tests that plant a marker in every owner-visible sink | M | 2 |
+| G1 | `guest` role in the membership record, scoped capabilities, board-side tenant filter, no cluster key for guests; the one shared guest channel (guests see each other there, nothing else of the owner); leak tests that plant a marker in every owner-visible sink | M | 2 |
 | G2 | Per-tenant sandbox user and encrypted ephemeral scratch, key only in the job process, crypto-erase at the end | L | G1, 3 |
 | G3 | Encrypted submission and results (HPKE to sandbox key / guest key) | M | G1, 4 |
 | G4 | Per-tenant keyed result and prompt caches; cache off for guest model requests unless a per-tenant server instance | M | G1 |
@@ -279,13 +279,7 @@ ends the guest immediately at the next handshake and kills running jobs, discard
 
 ## 8. Owner-only decisions
 
-Decisions taken on 2026-10-08 are in section 8.1. Two questions are open:
-
-- **Q1.** What may a guest see of the owner? Options: (a) only its own jobs and results; (b) plus the owner's
-  device names, model names and free capacity (needed to pick where to send work); (c) plus board
-  read access on channels the owner opens to guests.
-- **Q2.** A headless device with no keystore: (a) passphrase mode only (unattended start impossible);
-  (b) 0600 key file with `status` marking the device "at rest: weak"; (c) refuse to hold secrets.
+Decisions taken on 2026-10-08 are in section 8.1. No question is open.
 
 ### 8.1 Decisions (2026-10-08)
 
@@ -313,6 +307,20 @@ casual visibility to the owner, section 7.3) is built; Level 2 (section 7.4) wai
 verify, and slice G5 stays a spike. Rejected: "no guests, friends bring their own pool", because Level 1 is
 buildable now with its limit stated; and building Level 2 on devices that cannot attest, which would claim a
 guarantee nobody can check. The stated limit of Level 1 is that a determined owner can still read a guest's job.
+
+**What a guest sees of the owner: its own work plus one shared guest channel.** Decided: a guest sees its
+own jobs and results and one shared guest channel with the owner. It sees no other owner channel, no member
+list and no device inventory; guests in that channel see each other's names and messages. Rejected: own work
+only, because a guest could not talk to the owner inside the pool; a member list, because it exposes the
+device inventory. Consequence: slice G1's tenant filter admits exactly that channel and nothing else, and
+the guest channel is the one place guest identities are visible to each other (a leak test plants a marker
+in every other sink).
+
+**A device with no OS keystore: a passphrase-wrapped key file.** Decided: such a device holds its secrets in
+a passphrase-wrapped key file, unlocked at start and held in memory afterwards; a rebooted headless device
+waits for the person before it joins the pool. Rejected: TPM-sealed with a 0600 fallback, and plain 0600,
+because the file fallback protects nothing at rest. Consequence: slice 3 has no "headless: weaker" row, and a
+device that cannot be unlocked by a person at boot is not an unattended pool member.
 
 ## 9. Verification this audit did not do
 
