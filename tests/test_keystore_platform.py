@@ -4,17 +4,69 @@ in-memory fake from `tests/keystore_support.py` (see AGENTS.md, "ML_STACK_NO_REA
 
 from __future__ import annotations
 
+import io
 import sys
 
 import keyring
 import pytest
 from keyring.backend import KeyringBackend
 
-from ml_stack import keystore, keystore_guard
+from ml_stack import keystore, keystore_guard, person
+from ml_stack.keystore import Keystore, Wires
 from tests import keystore_support
+from tests.test_keystore import Said
 
 counting = keystore_support.counting
 REAL_INTERACTIVE = keystore.interactive
+
+
+class Tty(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+@pytest.fixture
+def at_a_desktop(monkeypatch):
+    """A terminal on stdin and a desktop session, and no agent marker."""
+    for marker in person.AGENT_MARKERS:
+        monkeypatch.delenv(marker, raising=False)
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr(keystore, "_desktop", lambda: True)
+
+
+# -- who may cause a prompt ---------------------------------------------------------------------------
+
+
+def test_a_person_at_a_desktop_is_interactive(at_a_desktop):
+    assert REAL_INTERACTIVE() is True
+
+
+@pytest.mark.parametrize("marker", person.AGENT_MARKERS)
+def test_every_agent_marker_makes_a_process_background_whatever_its_terminal_and_desktop(at_a_desktop, monkeypatch,
+                                                                                         marker):
+    monkeypatch.setenv(marker, "1")
+    assert REAL_INTERACTIVE() is False
+
+
+def test_an_agent_on_a_desktop_cannot_make_the_master(tmp_path, counting, at_a_desktop, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setattr(keystore, "interactive", REAL_INTERACTIVE)
+    ks = Keystore(directory=tmp_path / "ks", wires=Wires(say=Said()))
+    with pytest.raises(keystore.KeystoreLocked, match="ml-stack-security unlock"):
+        ks.subkey("memory", "a")
+    assert counting.calls == [] and counting.held == {}
+
+
+@pytest.mark.parametrize(("session", "expected"), [(0, False), (1, True), (None, True)])
+def test_a_windows_service_session_has_no_desktop(monkeypatch, session, expected):
+    def session_id() -> int:
+        if session is None:
+            raise OSError("no answer")
+        return session
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(keystore_guard, "_session_id", session_id)
+    assert keystore._desktop() is expected
 
 
 def test_only_windows_has_a_service_session(monkeypatch):

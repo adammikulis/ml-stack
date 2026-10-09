@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from ml_stack import home, sentinel
+from ml_stack import home, keystore_guard, person, sentinel
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import warn
@@ -134,14 +134,14 @@ def _desktop() -> bool:
     if sys.platform == "darwin":
         return not os.environ.get("SSH_CONNECTION") and os.environ.get("XPC_SERVICE_NAME", "0") in ("0", "")
     if sys.platform == "win32":
-        return True
+        return not keystore_guard.service_session()
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 def interactive() -> bool:
-    """Whether a person could answer an OS prompt: a terminal or a desktop session, and
-    ``ML_STACK_NONINTERACTIVE`` unset."""
-    if os.environ.get(ENV_NONINTERACTIVE):
+    """Whether a person could answer an OS prompt: a terminal or a desktop session, and no agent
+    marker (``ML_STACK_NONINTERACTIVE``, ``ML_STACK_AGENT``, ``CLAUDECODE``) set."""
+    if person.marked():
         return False
     try:
         if sys.stdin.isatty():
