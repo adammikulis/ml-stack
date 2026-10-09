@@ -138,7 +138,7 @@ def test_the_sbom_lists_every_package_notices_lists(bom):
     listed = {c["purl"] for c in bom["components"]}
     for name, version, _licence in notices.python_closure():
         assert f"pkg:pypi/{name.lower()}@{version}" in listed, name
-    lock = sbom.tomllib.loads((ROOT / "app" / "src-tauri" / "Cargo.lock").read_text(encoding="utf-8"))["package"]
+    lock = sbom.tomllib.loads((ROOT / "app" / "Cargo.lock").read_text(encoding="utf-8"))["package"]
     crates = [p for p in lock if p.get("source")]
     assert crates and all(f"pkg:cargo/{p['name']}@{p['version']}" in listed for p in crates)
     assert all(c["hashes"] for c in bom["components"] if c["purl"].startswith("pkg:cargo/"))

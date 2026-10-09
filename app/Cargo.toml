@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["poolside-node", "src-tauri"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

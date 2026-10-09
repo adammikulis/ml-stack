@@ -7,7 +7,7 @@ on:
     - cron: "11 6 * * 1"
   workflow_dispatch:
   pull_request:
-    paths: ["pyproject.toml", "app/package-lock.json", "app/src-tauri/Cargo.lock"]
+    paths: ["pyproject.toml", "app/package-lock.json", "app/Cargo.lock"]
 
 permissions:
   contents: read
@@ -71,7 +71,7 @@ jobs:
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked --version 0.21.2
-          cargo audit --file app/src-tauri/Cargo.lock --json > cargo-audit.json || true
-          cargo audit --file app/src-tauri/Cargo.lock 2>&1 | tee cargo-audit.txt || true
+          cargo audit --file app/Cargo.lock --json > cargo-audit.json || true
+          cargo audit --file app/Cargo.lock 2>&1 | tee cargo-audit.txt || true
           { echo '### cargo audit'; echo '```'; cat cargo-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           python scripts/audit_gate.py --kind cargo cargo-audit.json

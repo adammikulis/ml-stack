@@ -2,7 +2,7 @@
 
 Components: the installed closure of the base requirements and the shipped extras (the same
 list `scripts/notices.py` puts in THIRD_PARTY_NOTICES.md, read from the interpreter that runs
-this) and the Rust crates in `app/src-tauri/Cargo.lock` (read from the lock file, with each
+this) and the Rust crates in `app/Cargo.lock` (read from the lock file, with each
 crate's registry checksum as its SHA-256). Nothing is fetched: no network, no cargo, no index.
 The output is deterministic (same environment, same bytes): the serial number is derived from
 the content, and the timestamp is `SOURCE_DATE_EPOCH` when set, else left out.
@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCK = ROOT / "app" / "src-tauri" / "Cargo.lock"
+LOCK = ROOT / "app" / "Cargo.lock"
 SPEC_VERSION = "1.5"
 PURL = re.compile(r"^pkg:(pypi|cargo)/[A-Za-z0-9._-]+@[A-Za-z0-9._+~-]+$")
 NAMESPACE = uuid.UUID("5d1c6a3e-0d7e-4a52-9a0b-6a4f2b1f5f10")
