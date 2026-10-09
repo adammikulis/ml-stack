@@ -30,8 +30,9 @@ built and tested alone. Nothing in Python calls it yet (see "What is left").
 - **Links.** Nothing crosses between boards except through a link: a session of board `from`
   makes `link {to, channels, mode}` and the sessions of `to` may then use the named channels (none
   named = the whole board) of `from`, read-only (`ro`) or read-write (`rw`). Channels are
-  `#general`, `#announcements` (messages by their `to`), `#notes`, `#claims`, `#identity`,
-  `#audit`. A linked session writes as `name@its-board`. `unlink {id}` revokes it at once. Making
+  `#general`, `#announcements` (messages by their `to`), `#notes` (notes and their verifications),
+  `#leases` (claims), `#identity`, `#audit`. Messages to one session are on `#dm`, which a link never
+  shares (see "Direct messages"). A linked session writes as `name@its-board`. `unlink {id}` revokes it at once. Making
   and revoking a link writes an audit entry on both boards. Links are node-local for now, and any
   session of the sharing board may make one; the owner-only grant arrives with the trust ledger.
 - Unknown board, a token of another board without a link, and a write over a read-only link are all
@@ -49,7 +50,7 @@ row before), `hlc` (wall ms, counter, origin), `kind`, `actor`, `idem`, `body`, 
 Bodies hold integers, text, booleans, arrays and objects; fractions are refused so the hash never
 depends on a float format.
 
-Kinds: `message`, `note`, `identity`, `claim` and `audit` are folded into the view now; `task`,
+Kinds: `message`, `note`, `verify`, `identity`, `lease` and `audit` are folded into the view now; `task`,
 `landing_request` and `reputation_event` are in the schema so a later log still parses, and a
 foreign entry of those kinds is not shown yet. `head` is a signature row, never shown.
 
@@ -107,10 +108,15 @@ Request `{"v":1, "id":…, "method":…, "board":…, "token":…, "params":{…
 |---|---|---|---|
 | `hello` | | | `{node, version, pid, fingerprint}` |
 | `register` | board | `model, harness, session` (token = parent) | `{name, token, created, parent, origin}` |
-| `whoami` | board, token | | `{name, board}` |
+| `whoami` | board, token | `model, harness` (claim what you run on) | `{name, board, target, identity}` |
+| `session_lookup` | board | `harness, session` | `{name}` (denied when none is registered) |
+| `agents` | board, token | `retired` | `{agents: [{name, parent, family, model, model_state, harness, retired, seen_ms}]}` |
+| `retire` | board, token | `target` (empty = yourself) | `{name, retired, by, tokens_revoked, leases_released}` |
 | `post` | board, token | `kind` (message or note), `idem`, `fields` | `{id, seq, sender, status}` |
-| `read` | board, token | `since` (cursor), `kind`, `channel`, `sender`, `limit` | `{entries, cursor}` |
-| `claim`, `release` | board, token | `target, note` | `{target, holder, changed}` |
+| `read` | board, token | `since` (cursor map), `kind`, `channel`, `by` (sender), `limit`, `inbox`, `with` | `{entries, cursor}` |
+| `claim`, `release`, `claims` | board, token | `kind, key, ttl_s, pid` / `kind, key` / `kind` | `{changed, claim}` / `{kind, key, released}` / `{claims}` |
+| `notes` | board, token | `ref, query, kind, all, limit` | `{notes}` |
+| `note_verify` | board, token | `note, exit, out_sha` | `{notes: [the note]}` |
 | `link`, `unlink`, `links` | board, token | `to, channels, mode` / `id` | the link |
 | `project_add` | | `id, kind, path` | the project |
 | `source_add` | token of that project | `id, kind, path` | the project |
@@ -132,9 +138,39 @@ registered local session act, and a node can be given a stricter one. The networ
 other request.
 
 `read` cursors are a map origin to last seq returned, so a read returns each entry once even when a
-sync later brings entries with older clocks, and a `limit` never skips anything. Claims: the first
-claim in the total order holds a target; only the holder releases; the same target on another board
-is unrelated.
+sync later brings entries with older clocks, and a `limit` never skips anything. A cursor belongs to
+the question it came from (seq counts every kind), so a client keeps one per question, such as its
+inbox. `inbox` returns only messages sent to the caller; `with` the conversation between the caller
+and one session.
+
+**Direct messages.** A message whose `to` is a session name is a direct message. The recipient must
+be a live session of the board (here or announced by an identity entry from another device); the post
+is refused otherwise. `read` returns it only to its sender and its recipient, on every path, including
+a linked board that shares everything. Peers replicate it like any row (every member of the pool holds
+the log), so this is privacy between sessions, not encryption between devices. A sender shown as
+`name@dN` (written on another device) is matched by recipient only.
+
+**Sessions.** `register` records the model id and harness (`model_state` `claimed`; the node itself
+may mark one `verified`, and a claim can never lower a verified one); `whoami` with `model`/`harness`
+changes the claim. Each change is an identity entry. Registering a session that has a parent without
+that parent's token, or under another parent, is `denied`, and so is registering a retired one.
+`retire` revokes every token of the session, ends its leases (written to the board), marks the
+identity retired and writes an `audit` entry. A subagent retires itself; a parent (any ancestor)
+retires a descendant; a main session never retires itself.
+
+**Claims** are leases of one `claim` resource taken without waiting. A branch claim is held under the
+board's name, so two boards may claim the same branch name; ports, servers, paths and installs are the
+device's. `claims` lists the claims of the caller's board with the owner. A holder's `pid` and `ttl_s`
+behave as for any lease (dead process or expiry drops it).
+
+**Notes** carry `nkind` (decision, rule, fact, question), `title`, `body`, `source`, `tags`,
+`supersedes` (references to older notes, a bare number for a note of this device or the full id; a
+verified note cannot be superseded), `verify_cmd` and `ttl_days`. `notes` folds them: `trust` is
+`test-verified` while the latest passing `verify` entry for the note's current command is fresh, else
+`agent-claimed`; `stale` once `ttl_days` passed since the last verification (or the note). The node
+never runs `verify_cmd`: a client does and records `exit` and the SHA-256 of the output with
+`note_verify`, and the entry stores the command the note carries. Recording one is the grant
+`note_verify`.
 
 The Rust client (`client::Client`, `client::ensure_running`) finds a dead socket, takes
 `start.lock` (single-flight, so callers queue and the second finds the first's node), spawns
@@ -278,7 +314,6 @@ The workspace Cargo.lock is `app/Cargo.lock`, the build output `app/target/`. Cr
 - Packaging the binary in the wheel (`packaging/build.py`), starting it on a default port and the
   multicast group (`NetConfig::standard`), and a default sync interval; today the network starts only
   with flags.
-- The Python client (`ml_stack.board`) replacing the workspace calls.
 - Python lease clients (the serve broker, `gate.py` tickets, `testslots` permits, fleet `JobRunner` slots,
   `lock.only_one` and `claims.py` calling the lease methods, and their own admission code deleted), a local
   holder yielding when the board shows a peer's earlier acquire of a pool-wide claim, leases on a remote

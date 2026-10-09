@@ -35,11 +35,35 @@ pub fn digest(harness: &str, session: &str) -> String {
     hex(&Sha256::digest(format!("{harness}\0{session}").as_bytes()))
 }
 
+/// How far a session's model id is believed: what it said, or what the node checked.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelState {
+    Unknown,
+    Claimed,
+    Verified,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Ident {
     pub digest: String,
     pub family: String,
     pub parent: String,
+    pub model: String,
+    pub model_state: ModelState,
+    pub harness: String,
+    pub retired: bool,
+    /// Wall milliseconds of the last request this session made (written at most every 30 s).
+    pub seen_ms: u64,
+}
+
+/// A model id or harness name as one short clean line.
+pub fn clean(text: &str, most: usize) -> Result<String> {
+    let text = text.trim();
+    if text.len() > most || text.chars().any(char::is_control) {
+        return Err(Error::Invalid(format!("a model or harness is one clean line of at most {most} bytes")));
+    }
+    Ok(text.into())
 }
 
 /// The names of one board.
@@ -66,6 +90,81 @@ impl Registry {
         self.names.get(name)
     }
 
+    pub fn all(&self) -> &BTreeMap<String, Ident> {
+        &self.names
+    }
+
+    fn save(&self) -> Result<()> {
+        write_atomic(&self.path, &serde_json::to_vec(&self.names)?)
+    }
+
+    /// The name already given to this native session, if any.
+    pub fn find(&self, harness: &str, session: &str) -> Option<&str> {
+        let full = digest(harness, session);
+        self.names.iter().find(|(_, i)| i.digest == full).map(|(n, _)| n.as_str())
+    }
+
+    /// Record what a session says it runs on; a verified model is never lowered to a claim.
+    pub fn claim_model(&mut self, name: &str, model: &str, harness: &str) -> Result<bool> {
+        let (model, harness) = (clean(model, 256)?, clean(harness, 64)?);
+        let ident = self.names.get_mut(name).ok_or_else(|| Error::Denied("no such session".into()))?;
+        let new = if model.is_empty() { ident.model.clone() } else { model };
+        let new_harness = if harness.is_empty() { ident.harness.clone() } else { harness };
+        if ident.model_state == ModelState::Verified && new != ident.model {
+            return Err(Error::Denied("the model of this session was verified; a claim cannot change it".into()));
+        }
+        let state = if new.is_empty() { ModelState::Unknown } else if ident.model == new { ident.model_state } else { ModelState::Claimed };
+        let changed = (new.as_str(), new_harness.as_str(), state) != (ident.model.as_str(), ident.harness.as_str(), ident.model_state);
+        (ident.model, ident.harness, ident.model_state) = (new, new_harness, state);
+        if changed {
+            self.save()?;
+        }
+        Ok(changed)
+    }
+
+    /// Record that the node checked ``name`` runs ``model``; only the node's own checks call this.
+    pub fn verify_model(&mut self, name: &str, model: &str) -> Result<()> {
+        let model = clean(model, 256)?;
+        let ident = self.names.get_mut(name).ok_or_else(|| Error::Denied("no such session".into()))?;
+        (ident.model, ident.model_state) = (model, ModelState::Verified);
+        self.save()
+    }
+
+    /// Mark ``name`` retired; true when it was not already.
+    pub fn retire(&mut self, name: &str) -> Result<bool> {
+        let ident = self.names.get_mut(name).ok_or_else(|| Error::Denied("no such session".into()))?;
+        let fresh = !ident.retired;
+        ident.retired = true;
+        self.save()?;
+        Ok(fresh)
+    }
+
+    /// Note that ``name`` was just active, writing at most every 30 seconds.
+    pub fn touch(&mut self, name: &str, now_ms: u64) -> Result<()> {
+        match self.names.get_mut(name) {
+            Some(i) if now_ms >= i.seen_ms + 30_000 => {
+                i.seen_ms = now_ms;
+                self.save()
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// ``name`` and everything below it by parent links.
+    pub fn descendants(&self, name: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut frontier = vec![name.to_string()];
+        while let Some(top) = frontier.pop() {
+            for (n, i) in &self.names {
+                if i.parent == top && !out.contains(n) {
+                    out.push(n.clone());
+                    frontier.push(n.clone());
+                }
+            }
+        }
+        out
+    }
+
     pub fn len(&self) -> usize {
         self.names.len()
     }
@@ -77,12 +176,19 @@ impl Registry {
     /// The unique name of this session, recorded so no later session takes the same one. The
     /// same session always gets the same name back (``true`` when it is new); a session whose
     /// short suffix collides with another's gets a longer one.
-    pub fn assign(&mut self, model: &str, harness: &str, session: &str, parent: &str) -> Result<(String, bool)> {
+    pub fn assign(&mut self, model: &str, harness: &str, session: &str, parent: &str, now_ms: u64) -> Result<(String, bool)> {
         if session.is_empty() || harness.is_empty() {
             return Err(Error::Denied("a session name needs the native harness and session id".into()));
         }
         let (full, word) = (digest(harness, session), family_word(model));
-        if let Some((name, _)) = self.names.iter().find(|(_, i)| i.digest == full) {
+        let model = clean(model, 256)?;
+        if let Some((name, known)) = self.names.iter().find(|(_, i)| i.digest == full) {
+            if known.retired {
+                return Err(Error::Denied(format!("{name} was retired; its session cannot register again")));
+            }
+            if known.parent != parent {
+                return Err(Error::Denied(format!("{name} is already registered under another parent")));
+            }
             return Ok((name.clone(), false));
         }
         if self.names.len() >= MAX_IDENTITIES {
@@ -90,8 +196,12 @@ impl Registry {
         }
         let name = (SHORT..=full.len()).step_by(2).map(|w| format!("{word}-{}", &full[..w])).find(|n| !self.names.contains_key(n))
             .ok_or_else(|| Error::Quota("no free name".into()))?;
-        self.names.insert(name.clone(), Ident { digest: full, family: word.into(), parent: parent.into() });
-        write_atomic(&self.path, &serde_json::to_vec(&self.names)?)?;
+        let state = if model.is_empty() { ModelState::Unknown } else { ModelState::Claimed };
+        self.names.insert(name.clone(), Ident {
+            digest: full, family: word.into(), parent: parent.into(), model, model_state: state, harness: clean(harness, 64)?,
+            retired: false, seen_ms: now_ms,
+        });
+        self.save()?;
         Ok((name, true))
     }
 }
@@ -131,6 +241,17 @@ impl Tokens {
         self.held.insert(sha256_hex(token.as_bytes()), holder);
         write_atomic(&self.path, &serde_json::to_vec(&self.held)?)?;
         Ok(token)
+    }
+
+    /// Drop every token of ``board``/``name``; how many there were.
+    pub fn revoke_name(&mut self, board: &str, name: &str) -> Result<usize> {
+        let before = self.held.len();
+        self.held.retain(|_, h| !(h.board == board && h.name == name));
+        let gone = before - self.held.len();
+        if gone > 0 {
+            write_atomic(&self.path, &serde_json::to_vec(&self.held)?)?;
+        }
+        Ok(gone)
     }
 
     /// Who ``token`` belongs to.
