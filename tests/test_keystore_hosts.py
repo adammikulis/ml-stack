@@ -17,30 +17,45 @@ counting = keystore_support.counting
 make = test_keystore.make
 
 
+SID = "S-1-5-21-111-222-333-1001"
+
+
 @pytest.fixture
 def as_windows(monkeypatch):
-    """Windows as far as `platform` and the keystore can tell, with `icacls` recorded not run."""
+    """Windows as far as `platform` and the keystore can tell: `whoami` answers a SID and `icacls` is
+    recorded, not run."""
     ran: list[list[str]] = []
+
+    def run(argv, **_k):
+        ran.append(list(argv))
+        out = f'"HOST\\fixture","{SID}"\n' if argv[0] == "whoami" else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=out)
+
     monkeypatch.setattr(platform, "is_windows", lambda: True)
-    monkeypatch.setenv("USERNAME", "fixture-user")
-    monkeypatch.setattr(platform.subprocess, "run",
-                        lambda argv, **_k: ran.append(list(argv)) or subprocess.CompletedProcess(argv, 0))
+    monkeypatch.setattr(platform.subprocess, "run", run)
     monkeypatch.setattr(keystore.human, "protect", lambda _d: None)
     return ran
 
 
-def test_windows_cuts_the_keystore_directory_to_the_owner_at_creation(tmp_path, counting, as_windows):
+def test_windows_grants_the_sid_then_drops_the_inherited_entries_at_creation(tmp_path, counting, as_windows):
     make(tmp_path)._ensure_dir()
-    assert as_windows == [["icacls", str(tmp_path / "ks"), "/inheritance:r", "/grant:r",
-                           "fixture-user:(OI)(CI)F"]]
+    where = str(tmp_path / "ks")
+    assert [a for a in as_windows if a[0] == "icacls"] == [
+        ["icacls", where, "/grant:r", f"*{SID}:(OI)(CI)F"], ["icacls", where, "/inheritance:r"]]
 
 
-def test_a_refused_icacls_is_reported_not_swallowed(tmp_path, counting, as_windows, monkeypatch, caplog):
-    monkeypatch.setattr(platform.subprocess, "run",
-                        lambda argv, **_k: subprocess.CompletedProcess(argv, 5))
+def test_a_failed_grant_never_reaches_the_step_that_would_lock_everyone_out(tmp_path, counting, as_windows,
+                                                                            monkeypatch, caplog):
+    def run(argv, **_k):
+        as_windows.append(list(argv))
+        return subprocess.CompletedProcess(argv, 5 if argv[0] == "icacls" else 0,
+                                           stdout=f'"HOST\\fixture","{SID}"\n')
+
+    monkeypatch.setattr(platform.subprocess, "run", run)
     with caplog.at_level("WARNING", logger="ml_stack.keystore"):
         make(tmp_path)._ensure_dir()
     assert "could not restrict" in caplog.text
+    assert not any(a[-1] == "/inheritance:r" for a in as_windows)
 
 
 def test_posix_uses_chmod_and_never_icacls(tmp_path, counting, monkeypatch):
@@ -50,9 +65,9 @@ def test_posix_uses_chmod_and_never_icacls(tmp_path, counting, monkeypatch):
     assert ran == [] and ((tmp_path / "ks").stat().st_mode & 0o077) == 0
 
 
-def test_private_dir_without_a_username_says_it_did_nothing(tmp_path, monkeypatch):
+def test_private_dir_without_a_sid_says_it_did_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(platform, "is_windows", lambda: True)
-    monkeypatch.delenv("USERNAME", raising=False)
+    monkeypatch.setattr(platform.subprocess, "run", lambda argv, **_k: subprocess.CompletedProcess(argv, 1, stdout=""))
     assert platform.private_dir(tmp_path) is False
 
 
@@ -79,3 +94,26 @@ def test_backend_names_the_ring_in_use_and_why_there_is_none(tmp_path, counting,
     monkeypatch.setenv(keystore.ENV_NO_REAL, "1")
     monkeypatch.setattr(keystore, "is_real", lambda ring: True)
     assert make(tmp_path).backend().startswith("none: the machine's own keystore is switched off")
+
+
+@pytest.mark.parametrize("name", ["with space", "semi;colon", "dollar$(calc)", "back`tick`", "-leading", "pct%PATH%"])
+def test_a_hostile_directory_name_reaches_icacls_as_one_argument(tmp_path, as_windows, name):
+    target = tmp_path / name
+    platform.private_dir(target)
+    icacls = [a for a in as_windows if a[0] == "icacls"]
+    assert icacls and all(a[1] == str(target) and len(a) in (3, 4) for a in icacls)
+    assert all(a[0] in ("whoami", "icacls") for a in as_windows)
+
+
+@pytest.mark.parametrize("answer", ['"HOST\\u","not-a-sid"\n', '"HOST\\u","S-1-5-21;calc"\n', "", '"x"\n'])
+def test_whoami_output_that_is_not_a_sid_is_never_handed_to_icacls(tmp_path, monkeypatch, answer):
+    ran: list[list[str]] = []
+
+    def run(argv, **_k):
+        ran.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout=answer)
+
+    monkeypatch.setattr(platform, "is_windows", lambda: True)
+    monkeypatch.setattr(platform.subprocess, "run", run)
+    assert platform.private_dir(tmp_path) is False
+    assert not any(a[0] == "icacls" for a in ran)

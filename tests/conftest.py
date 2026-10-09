@@ -1266,7 +1266,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     for item in items:
         if Path(str(item.fspath)).name in heavy:
             item.add_marker(pytest.mark.heavy)
-        if Path(str(item.fspath)).name in seatbelt:
+        if (Path(str(item.fspath)).as_posix().removeprefix(Path(__file__).parent.as_posix() + "/")) in seatbelt:
             item.add_marker(pytest.mark.seatbelt)
         reason = live.skip_reason((m.name for m in item.iter_markers()), os.environ)
         if reason:

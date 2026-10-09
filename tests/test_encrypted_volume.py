@@ -135,6 +135,19 @@ def test_a_name_with_a_quote_or_space_is_refused_before_security_runs(fakes):
     assert "security" not in log(fakes)
 
 
+def test_a_keychain_path_starting_with_a_dash_is_refused(fakes):
+    env = {**os.environ, "PATH": f"{fakes / 'bin'}:{os.environ['PATH']}", "FAKE_LOG": str(fakes / "log"),
+           "FAKE_HOME": str(fakes), "USER": "nobody", "ML_STACK_VOLUME_KEYCHAIN": "-evil"}
+    done = subprocess.run(["sh", str(SCRIPT), "kilnbook", str(fakes / "m"), "setup"], capture_output=True, text=True, env=env)
+    assert done.returncode == 2 and "must not start with" in done.stderr and "security" not in log(fakes)
+
+
+def test_an_empty_passphrase_from_the_keychain_stops_before_hdiutil(fakes):
+    (fakes / "keychain").write_text("")
+    done = volume(fakes, "kilnbook", str(fakes / "m"), "setup")
+    assert done.returncode == 1 and "no passphrase found" in done.stderr and "hdiutil" not in log(fakes)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="the `security` CLI and keychains are macOS")
 def test_a_real_throwaway_keychain_gets_the_passphrase_on_stdin_not_argv(tmp_path):
     """The real `security` against a keychain file made here (never the login keychain), with a

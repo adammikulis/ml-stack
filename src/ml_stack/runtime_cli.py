@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ml_stack import (
     jobs,
+    node_launch,
     runtime,
     runtime_board,
     runtime_coalesce,
@@ -129,10 +130,19 @@ def _ensure(args: argparse.Namespace) -> int:
 def _run(args: argparse.Namespace, plan: runtime_deploy.Plan) -> runtime_deploy.Outcome:
     previous = str(runtime_store.selection().get("commit", ""))
     outcome = runtime_deploy.ensure(plan, force=args.force, force_build=args.force_build)
+    if outcome.action in ("switched", "recovered"):
+        outcome = _with_node(outcome)
     _audited(args, "ensure", plan, outcome.action, outcome.detail)
     runtime_board.announce(outcome, previous, verb="ensure", agent=args.agent)
     say(f"{outcome.action} {outcome.commit[:7]} {outcome.detail}".strip())
     return outcome
+
+
+def _with_node(outcome: runtime_deploy.Outcome) -> runtime_deploy.Outcome:
+    """Move the running node onto the new runtime's binary and say what happened; the board is on disk, so nothing is lost."""
+    moved = node_launch.swap()
+    detail = "; ".join(part for part in (outcome.detail, f"node {moved['action']}: {moved['detail']}") if part)
+    return runtime_deploy.Outcome("failed" if moved["action"] == "failed" else outcome.action, outcome.commit, detail)
 
 
 def _settled(args: argparse.Namespace) -> int:
@@ -211,6 +221,7 @@ def status_lines(plan: runtime_deploy.Plan) -> list[str]:
     if record.get("last_failure"):
         failure = record["last_failure"]
         lines.append(f"last failure {failure.get('commit', '')[:7]}: {failure.get('detail', '')[-300:]}")
+    lines.append(node_line())
     if _building():
         lines.append(f"building     {_building()}")
     if row.get("prefix"):
@@ -231,6 +242,16 @@ def _older_pids(row: dict) -> list[int]:
     return [p.pid for p in runtime_stale.older_than(runtime_stale.running(), prefix, runtime_store.verified_at(prefix))]
 
 
+def node_line() -> str:
+    """The node's line in `runtime status`: version, pid, socket, uptime and health, or that it is not answering."""
+    node = node_launch.status()
+    if not node["healthy"]:
+        return f"node         NOT RUNNING  {node['socket']}" + ("  (supervisor waiting to restart it)" if node["supervised"] else "")
+    up = f"{node['uptime_s']:.0f}s" if node["uptime_s"] is not None else "unknown"
+    return (f"node         {node['version']}  pid {node['pid']}  up {up}  healthy ({node['latency_ms']} ms)  {node['socket']}"
+            + ("  supervised" if node["supervised"] else "") + ("  PINNED to the previous binary" if node["pinned"] else ""))
+
+
 def status_record(plan: runtime_deploy.Plan) -> dict:
     """The status as data: the selected commit, whether it is current and healthy, and the kept runtimes."""
     row = runtime_store.selection()
@@ -238,7 +259,8 @@ def status_record(plan: runtime_deploy.Plan) -> dict:
             "healthy": runtime_deploy.healthy(plan) is not None, "floor": plan.floor,
             "kept": [{"commit": c.commit, "prefix": str(c.prefix), "verified_at": runtime_store.verified_at(c.prefix)}
                      for c in runtime_store.candidates()],
-            "state": runtime_store.read_state(), "building": _building(), "older_processes": _older_pids(row),
+            "state": runtime_store.read_state(), "node": node_launch.status(), "building": _building(),
+            "older_processes": _older_pids(row),
             "unmanaged": runtime_store.unmanaged()}
 
 

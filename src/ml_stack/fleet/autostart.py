@@ -578,11 +578,11 @@ def status() -> dict[str, object]:
 def _install_system(user: str, home_dir: str, *, only_print: bool = False) -> int:
     """Write and load the boot service; 0 once installed, 2 when it needs root."""
     made = system_service(user, home_dir)
+    if why := autostart_keystore.notice(user, home_dir, made.platform):
+        warn(why)
     if only_print:
         say(made.body)
         return 0
-    if why := autostart_keystore.notice(user, home_dir, made.platform):
-        warn(why)
     target = Path(made.path)
     try:
         if made.platform == "win32":

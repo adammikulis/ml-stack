@@ -1,7 +1,7 @@
 {
- "surfaces": 841,
+ "surfaces": 844,
  "by_status": {
-  "covered": 516,
+  "covered": 519,
   "partial": 197,
   "uncovered": 53,
   "n/a": 75,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 64,
+   "covered": 67,
    "partial": 60,
    "uncovered": 0,
    "n/a": 2,
@@ -11579,6 +11579,19 @@
    "note": ""
   },
   {
+   "id": "spawn:node_binary.py:build",
+   "kind": "spawn",
+   "source": "node_binary.py:build",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_node_binary_build.py::test_a_hostile_source_path_reaches_cargo_as_a_directory_and_nothing_else",
+    "tests/test_node_binary_build.py::test_a_tree_without_the_node_crate_is_refused_before_cargo_starts"
+   ],
+   "note": "cargo starts with a fixed argument list; a source path with shell punctuation or a leading dash is only the working directory"
+  },
+  {
    "id": "spawn:pi.py:launch",
    "kind": "spawn",
    "source": "pi.py:launch",
@@ -11589,6 +11602,19 @@
     "tests/test_pi_harness.py::test_pi_launch_is_offline_and_uses_the_policy_extension"
    ],
    "note": "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
+  },
+  {
+   "id": "spawn:platform.py:_windows_sid",
+   "kind": "spawn",
+   "source": "platform.py:_windows_sid",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_keystore_hosts.py::test_a_hostile_directory_name_reaches_icacls_as_one_argument",
+    "tests/test_keystore_hosts.py::test_whoami_output_that_is_not_a_sid_is_never_handed_to_icacls"
+   ],
+   "note": "icacls and whoami start from fixed argument lists; a directory name with shell punctuation is one argument and output that is not a SID is never passed on"
   },
   {
    "id": "spawn:platform.py:launch",
@@ -11615,6 +11641,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:platform.py:private_dir",
+   "kind": "spawn",
+   "source": "platform.py:private_dir",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_keystore_hosts.py::test_a_hostile_directory_name_reaches_icacls_as_one_argument",
+    "tests/test_keystore_hosts.py::test_whoami_output_that_is_not_a_sid_is_never_handed_to_icacls"
+   ],
+   "note": "icacls and whoami start from fixed argument lists; a directory name with shell punctuation is one argument and output that is not a SID is never passed on"
   },
   {
    "id": "spawn:platform.py:private_file",

@@ -35,6 +35,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ml_stack import private_path
+
 __all__ = ["Busy", "held_by", "only_one", "release", "rewriting", "take"]
 
 #: The byte locked on Windows. Past any pid text, so a reader is never refused by the lock.
@@ -158,6 +160,9 @@ def rewriting(path: str | Path, *, timeout: float = 10.0) -> Iterator[Path]:
     """Hold ``<path>.lock`` for a read-modify-write of the file ``path``, so two processes
     changing it take turns instead of one losing its change. Raises `Busy` after ``timeout``."""
     target = Path(path)
+    if private_path.windows_mount(target.parent):
+        raise OSError(f"{target.parent} is on a Windows drive mounted into WSL, where file locks and "
+                      "permissions do not work; move ML_STACK_HOME onto the Linux filesystem")
     with only_one(target.with_name(target.name + ".lock"), timeout=timeout, announce=lambda _m: None):
         yield target
 
