@@ -20,8 +20,13 @@ pub fn address(port: u16) -> String {
     format!("http://{HOST}:{port}/ui/")
 }
 
-/// Whether `url` is on the own origin: this scheme, host and port, with no credentials.
+/// Whether `url` is on the own origin: this scheme, host and port, with no credentials. A
+/// `blob:` address the page itself made (a download it built) belongs to that origin too.
 pub fn is_own(url: &Url, port: u16) -> bool {
+    if url.scheme() == "blob" {
+        let prefix = format!("http://{HOST}:{port}/");
+        return url.path().starts_with(&prefix) && !url.path()[prefix.len()..].contains(['@', '\\']);
+    }
     url.scheme() == "http"
         && url.host_str() == Some(HOST)
         && url.port_or_known_default() == Some(port)

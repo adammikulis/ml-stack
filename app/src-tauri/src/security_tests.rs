@@ -65,7 +65,12 @@ fn the_window_stays_on_its_own_origin() {
     assert!(origin::is_own(&url(&origin::address(8770)), 8770));
     assert!(origin::is_own(&url("http://127.0.0.1:8770/ui/#chat"), 8770));
     assert!(origin::is_own(&url("http://127.0.0.1:8770/ui/projects?x=1"), 8770));
+    assert!(origin::is_own(&url("blob:http://127.0.0.1:8770/5f8e1c0a-0000-4000-8000-000000000000"), 8770));
     for outside in [
+        "blob:http://outside.invalid/5f8e1c0a-0000-4000-8000-000000000000",
+        "blob:http://127.0.0.1:8771/5f8e1c0a",
+        "blob:http://127.0.0.1:8770@outside.invalid/x",
+        "blob:https://127.0.0.1:8770/x",
         "https://outside.invalid/",
         "http://outside.invalid:8770/ui/",
         "http://127.0.0.1:8771/ui/",
