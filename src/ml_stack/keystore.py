@@ -390,6 +390,11 @@ class Keystore:
                 if not (person or self._is_interactive()):
                     raise KeystoreLocked("ml-stack has no encryption key for this background process. "
                                          f"A person runs `{UNLOCK_COMMAND}` once in a terminal.")
+                if not person and self._doc("provisioned.json").get("at"):
+                    raise KeystoreMissing("the OS keystore no longer holds the key ml-stack made here, so "
+                                          "everything wrapped under it stays locked; ml-stack will not make a "
+                                          f"second one by itself. Restore the item, or `{UNLOCK_COMMAND}` "
+                                          "to start over.")
                 key = os.urandom(32)
                 stored = "v1:" + base64.b64encode(key).decode()
                 self._call("create", purpose, lambda r: r.set_password(SERVICE, self.account, stored))

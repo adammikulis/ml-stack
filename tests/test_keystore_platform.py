@@ -217,3 +217,18 @@ def test_the_libsecret_backend_counts_as_the_machines_own_keystore():
             return None
 
     assert keystore.is_real(Libsecret())
+
+
+# -- the key is gone ----------------------------------------------------------------------------------------
+
+
+def test_a_lost_master_is_not_quietly_replaced_by_a_second_one(tmp_path, counting):
+    first = make(tmp_path).subkey("memory", "a")
+    counting.held.clear()
+    counting.calls.clear()
+    with pytest.raises(keystore.KeystoreMissing, match="no longer holds the key"):
+        make(tmp_path).subkey("memory", "a")
+    assert counting.count("set") == 0 and counting.held == {}
+    again = make(tmp_path)
+    assert again.provision() is True, "a person who accepts starting over may"
+    assert again.subkey("memory", "a") != first
