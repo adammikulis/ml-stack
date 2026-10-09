@@ -17,6 +17,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import test_container_bridge as bridge
 
 
+@pytest.fixture
+def tmp_path():
+    """A directory short enough for an AF_UNIX path, whatever the worktree or worker path is."""
+    import shutil
+    import tempfile
+    folder = Path(tempfile.mkdtemp(prefix="cb", dir="/tmp")).resolve()
+    yield folder
+    shutil.rmtree(folder, ignore_errors=True)
+
+
 @pytest.mark.parametrize("frame", [
     {"op": "open", "id": True}, {"op": "open", "id": 0},
     {"op": "open", "id": 1, "target": "/other"},

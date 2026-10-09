@@ -289,7 +289,7 @@ def test_the_recipes_ask_mlx_for_the_optimizer_torch_gives():
 
     import ml_stack.train.recipes as recipes
 
-    call = re.compile(r"(?<![\w.])optim\.Adam[W]?\([^)]*\)", re.S)
+    call = re.compile(r"(?<![\w.])optim\.Adam[W]?\((?:[^()]|\([^()]*\))*\)", re.S)
     found = 0
     for path in sorted(Path(recipes.__file__).parent.glob("*.py")):
         for match in call.finditer(path.read_text(encoding="utf-8")):

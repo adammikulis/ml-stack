@@ -206,7 +206,7 @@ def test_broken_hooks_are_announced_once_and_shown_to_the_agent_every_time(sessi
     context = json.loads(first.stdout)["hookSpecificOutput"]["additionalContext"]
     assert first.returncode == 0 and "core.hooksPath" in context and "--unset-all core.hookspath" in context
     [row] = announced()
-    assert "--agent" in row and row[row.index("--agent") + 1] == "claude" and "git hooks in repo" in row[2] and len(row[2]) <= 190
+    assert "--agent" not in row and "git hooks in repo" in row[2] and len(row[2]) <= 190
     second = start()
     assert "core.hooksPath" in second.stdout and len(announced()) == 1
     git(repo, "config", "--unset-all", "core.hooksPath")

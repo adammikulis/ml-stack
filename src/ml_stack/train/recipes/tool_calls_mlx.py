@@ -144,7 +144,7 @@ def build(spec: dict[str, Any], config: dict[str, Any], data: Path | None) -> Bu
     if not training:
         raise ValueError(f'Every assistant answer was cut off at context {context}; raise it')
     keys, params = attach(model, config)
-    optimizer = optim.AdamW(learning_rate=float(config['learning_rate']), weight_decay=0.0)
+    optimizer = optim.AdamW(learning_rate=float(config['learning_rate']), weight_decay=0.0, bias_correction=True)
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     seed, batch = int(config.get('seed') or 0), int(config['batch_size'])
     effective = {**config, 'framework': 'mlx', 'base': str(base), 'base_id': selected,

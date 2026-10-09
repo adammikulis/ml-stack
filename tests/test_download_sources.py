@@ -58,6 +58,7 @@ def test_policy_changes_are_read_for_each_transfer(tmp_path):
 def test_unselected_sources_refuse_ui_download_before_starting_it():
     route = Mock()
     route.ui.settings = Settings()
+    route.ui.models.find.return_value = None
     route.body.return_value = {'name': 'model.gguf', 'source': 'hf:fixture/model'}
     assert ModelRoutes._get_model(route, None, True)
     assert route.send.call_args.args[0] == 409

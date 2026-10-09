@@ -38,6 +38,7 @@ def script():
     loader = importlib.machinery.SourceFileLoader("scripts_test_runner", str(SCRIPT))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
 
