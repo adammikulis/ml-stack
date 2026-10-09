@@ -38,6 +38,7 @@ from typing import Any, TextIO
 
 from ml_stack import home
 from ml_stack.contracts import ContractError, load
+from ml_stack.redact.added import added_lines
 
 __all__ = ["Shapes", "main", "recogniser", "shapes"]
 
@@ -536,7 +537,9 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
         blob = _git(where, "show", f"{ref}:{path}")
         if not blob or "\0" in blob[:2048]:
             continue
-        bad.extend(_findings(path, blob, known, allowed, engine, rules, cleared))
+        wrote = added_lines(where, path, against)
+        bad.extend(f for f in _findings(path, blob, known, allowed, engine, rules, cleared)
+                   if f[1] == 0 or f[1] in wrote)
 
     if cleared:
         print(f"pre-commit: what a rule in {CONTRACT} stood down", file=out)
