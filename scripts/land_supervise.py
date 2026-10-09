@@ -41,6 +41,7 @@ def status(base: Path) -> dict:
 def flag_argv(root: Path, flags: dict) -> list[str]:
     """The command-line flags a supervisor and the runner it keeps share."""
     return ["--repo", str(root), "--interval", str(flags["interval"]), "--stall-minutes", str(flags["stall_minutes"]),
+            "--request-minutes", str(flags["request_minutes"]), "--batch-minutes", str(flags["batch_minutes"]),
             "--remote", flags["remote"], *(["--target", flags["target"]] if flags.get("target") else [])]
 
 

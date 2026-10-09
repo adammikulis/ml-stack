@@ -99,8 +99,19 @@ apply to the subject and body above the trailer.
 
 ## Pushing
 
-I push `0.2dev` myself after every landing (AGENTS.md, "The agents push; the owner does not"). I
-never report a commit as "unpushed, the owner's to push" and never ask whether to push it.
+The landing runner pushes the development branch after each batch it lands (AGENTS.md, "A worker lands
+its own branch through the queue"); I push only what I land by hand, immediately, and the owner never
+pushes it. I never report a commit as "unpushed, the owner's to push" and never ask whether to push it.
+
+## Landing is the worker's
+
+A worker lands its own branch: fetch, rebase its own linear commits onto `origin/<dev>` (merge it when
+the branch holds merges or is shared), run the affected tests, then
+`ml-stack-workspace land-request BRANCH SHA --test ...`. The runner (`scripts/land up`) batches, gates,
+fast-forwards, pushes only the development branch and cleans up; a request that fails is ejected alone and
+the rest land. I step in only for cross-branch conflicts, security review and release, and my heartbeat
+runs `scripts/land up` when `digest --status` says the runner is `NOT RUNNING`. A worker never pushes, and
+never reports landed without a gate result for its exact SHA.
 
 ## Browsers
 

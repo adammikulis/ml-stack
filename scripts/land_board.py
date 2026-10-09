@@ -400,7 +400,8 @@ def serve(root: Path, target: str, flags: dict) -> int:
     token = tokens.resolve(ws.base)
     if not token:
         raise ValueError("land serve acts as an authenticated workspace identity; no token found")
-    runner = Runner(ws, token, root, target, flags["remote"], flags["stall_minutes"] * 60.0)
+    runner = Runner(ws, token, root, target, flags["remote"], flags["stall_minutes"] * 60.0,
+                    request_s=flags["request_minutes"] * 60.0, batch_s=flags["batch_minutes"] * 60.0)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         while True:

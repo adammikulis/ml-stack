@@ -323,18 +323,28 @@ local-only commit on the development branch is not left past the end of the task
   a gate ran on; a tree already gated is not gated again.
 - Finish before starting: no new branch while your own ready branches await landing; about ten
   open worktrees at most per lead.
-- When the parent's brief grants it, a subagent whose leaf passed its affected selectors lands it
-  itself under the short branch claim (fetch, merge development, rerun only the selectors the
-  merge touched, fast-forward, push, release). Batches needing the shared gates go through the lead.
+- A subagent whose leaf passed its affected selectors requests landing itself (below); the runner
+  holds the branch claim, so nobody lands by hand while it runs.
 - If a combined gate fails, bisect to the branch, eject it to its owner, and land the rest.
 - `scripts/land` is the standard whenever more than one leaf is ready: `plan [--cover]` shows unique
   patches, the minimal cover, merge order and predicted conflicts; `run` merges into a sibling
   integration worktree, verifies once and ejects what fails; `finish --apply` fast-forwards the
-  clean primary checkout and removes landed trees. It never pushes; the lead pushes.
-- `scripts/land` is the standard whenever more than one leaf is ready: `plan [--cover]` shows unique
-  patches, the minimal cover, merge order and predicted conflicts; `run` merges into a sibling
-  integration worktree, verifies once and ejects what fails; `finish --apply` fast-forwards the
-  clean primary checkout and removes landed trees. It never pushes; the lead pushes.
+  clean primary checkout and removes landed trees. `plan`, `run` and `finish` never push; the runner
+  (`serve`) pushes only the development branch.
+- **A worker lands its own branch through the queue.** The development branch is whichever branch
+  the primary checkout is on (`ML_STACK_DEV_BRANCH` overrides it); nothing names it. When the
+  branch is ready: fetch, rebase its own linear commits onto `origin/<dev>` (merge `origin/<dev>`
+  instead when the branch holds merges or is shared), run the affected tests, then
+  `ml-stack-workspace land-request BRANCH SHA --test SELECTOR ...` with the full SHA of the tip. After an independent
+  `land-review` accept at that SHA the runner batches, merges, gates, fast-forwards, pushes only
+  the development branch and cleans up the worktree and branch. A worker never pushes, and never
+  reports a branch landed without the runner's `landed` for its exact SHA. One request never fails another: a request
+  that is stale, conflicts, is red, hangs or breaks the runner is ejected alone with its reason and
+  the failing test names, sent to the requester by name, and the rest of the batch lands.
+  The lead steps in only for cross-branch conflicts, security review and release.
+- The runner is `scripts/land up` (a supervised, detached `serve`; `down` and `status` beside it).
+  `digest --status` shows `Runner supervisor: up` or `NOT RUNNING`; the lead's heartbeat runs
+  `scripts/land up` when it reads `NOT RUNNING` (docs/heartbeat.md, docs/landing-queue.md).
 - Claims cover a step: heartbeat while working, release when idle, never hold one across a wait.
   Ask a stale claim's owner once, then use documented recovery.
 - A `HANDOFF.md` or log conflict keeps both sides and never holds a landing.
@@ -432,14 +442,14 @@ is not a reason to refuse an authorized development change.
 
 ### Branch hygiene and landing
 
-- A branch holds at most 10 commits and merges `0.2dev` at least daily. At more than 30 commits
+- A branch holds at most 10 commits and merges the development branch at least daily. At more than 30 commits
   ahead or 20 behind, split it or land part of it before adding more. `scripts/worktrees`
   reports every worktree against these limits and exits 1 when any is over.
 - One lineage per branch: never build on another branch's unlanded commits. Shared work lands
   first and dependents rebase onto it.
 - Work that changes an architectural premise (host broker, transport, authority) gets a board
   note and the coordinator's acknowledgement before it is built.
-- A "superseded" verdict names the `0.2dev` commit that replaces each behaviour it drops.
+- A "superseded" verdict names the development-branch commit that replaces each behaviour it drops.
 - A conflict resolution never weakens an authority, locality or verification check. Touching one
   needs a second reviewer and a test that fails against the weakened form. A diff that removes
   or weakens an assertion in a red-team, guard or authority test is refused by
