@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.fleet import routes
+from ml_stack.fleet import routes, tls
 from ml_stack.fleet.discovery import Membership
 from ml_stack.fleet.invite_routes import public, ui_route
 from ml_stack.fleet.invites import Invitations, decode, proof
@@ -18,14 +18,18 @@ from ml_stack.fleet.ui import UI
 
 
 @pytest.fixture
-def invitation():
+def invitation(tmp_path):
     members = [Membership("lab", base64.urlsafe_b64encode(b"x" * 32).rstrip(b"="))]
     clock = [1000]
-    store = Invitations(lambda: members, lambda: ("https://192.168.2.59:8770", "a" * 64))
+    enrolled = []
+    store = Invitations(lambda: members, lambda: ("https://192.168.2.59:8770", "a" * 64),
+                        enrol=lambda *row: enrolled.append(row))
+    store.enrolled = enrolled
     store.clock = lambda: clock[0]
     minted = store.mint("lab")
     data = json.loads(decode(minted["invite"].split("data=")[1]))
-    fields = {"id": data["id"], "kind": "computer", "platform": "computer", "device_name": "recipient", "public_key": ""}
+    fields = {"id": data["id"], "kind": "computer", "platform": "computer", "device_name": "recipient",
+              "public_key": tls.identity(tmp_path / "recipient", "recipient").beacon}
     return store, data, fields, members, clock
 
 
@@ -51,6 +55,16 @@ def test_atomic_single_use_and_no_key_in_invite(invitation):
     assert len(success) == 1
     grant = json.loads(decode(success[0]["grant_data"]))
     assert grant["key"].encode() == members[0].key
+    assert store.enrolled == [("lab", fields["public_key"], "recipient")]
+
+
+def test_a_computer_without_a_certificate_cannot_redeem_and_a_phone_may_not_send_one(invitation):
+    store, data, fields, _, _ = invitation
+    with pytest.raises(ValueError, match="certificate"):
+        store.exchange("challenge", {**fields, "public_key": ""})
+    with pytest.raises(ValueError, match="certificate"):
+        store.exchange("challenge", {**fields, "public_key": "AAAA"})
+    assert store.enrolled == []
 
 
 def test_expiry_revocation_and_membership_binding(invitation):

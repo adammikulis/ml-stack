@@ -18,7 +18,7 @@ from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
 from ml_stack.redact import secrets
 
-from . import project_enrollment, project_source as source, runtime_wheel, tls, wsl_startup
+from . import project_enrollment, project_source as source, runtime_wheel, wsl_startup
 from .discovery import primary_ip
 from .wsl_network import ENV as BRIDGE_ENV
 
@@ -67,7 +67,7 @@ def lan_host(port: int) -> str:
     except ValueError:
         return ""
     host = f"[{address}]" if parsed.version == 6 else address
-    return f"{'http' if tls.disabled() else 'https'}://{host}:{port}"
+    return f"https://{host}:{port}"
 
 
 def bootstrap() -> bytes:

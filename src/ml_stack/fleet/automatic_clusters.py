@@ -1,7 +1,9 @@
 """Automatic Development cluster discovery, admission and convergence."""
 
+import base64
 import hashlib
 import secrets
+import socket
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -9,6 +11,7 @@ from pathlib import Path
 
 from ml_stack.fleet import cluster_modes, discovery
 from ml_stack.fleet.onboard import joining
+from ml_stack.fleet.pool_roster import Pool
 
 
 def offers(port: int | None = None) -> list[tuple[str, dict]]:
@@ -22,12 +25,15 @@ def offers(port: int | None = None) -> list[tuple[str, dict]]:
             and all(c in "0123456789abcdef" for c in row["cluster_id"])]
 
 
-def receive(host: str, offer: dict) -> discovery.Membership:
-    """Join one advertised Development cluster over its pinned TLS endpoint."""
+def receive(host: str, offer: dict) -> tuple[discovery.Membership, str]:
+    """Join one advertised Development cluster over its pinned TLS endpoint: its membership and the
+    certificate (base64 DER) the endpoint presented, which is the advertised fingerprint's."""
     call = joining._Call(joining.Joiner(host, offer["port"], True), 1.0)
     call.seen = offer["fingerprint"]
     nonce = secrets.token_hex(16)
-    status, result = call.post("automatic", {"group": offer["group"], "nonce": nonce})
+    status, result = call.post("automatic", {"group": offer["group"], "nonce": nonce,
+                                              "cert": joining.local_identity().beacon,
+                                              "name": socket.gethostname()[:40]})
     if status != 200:
         raise discovery.DiscoveryError(str(result.get("error", "automatic join refused")))
     key = result.get("key")
@@ -36,7 +42,7 @@ def receive(host: str, offer: dict) -> discovery.Membership:
             or hashlib.sha256(key.encode()).hexdigest() != offer["cluster_id"]):
         raise discovery.DiscoveryError("automatic cluster response does not match its advertised identity")
     try:
-        return discovery.Membership(result["group"], key.encode(), mode="dev")
+        return discovery.Membership(result["group"], key.encode(), mode="dev"), base64.b64encode(call.der).decode()
     except ValueError as error:
         raise discovery.DiscoveryError("automatic cluster response contains an invalid key") from error
 
@@ -65,10 +71,12 @@ def ensure(path: Path | str | None = None, *, mode: str | None = None,
         if current and own <= offered["cluster_id"]:
             break
         try:
-            member = receive(host, offered)
+            member, host_cert = receive(host, offered)
         except (OSError, discovery.DiscoveryError):
             continue
-        return discovery.adopt(member, path)
+        adopted = discovery.adopt(member, path)
+        Pool(path).joined(adopted.group, host_cert, host, by="automatic")
+        return adopted
     return current or discovery.mint_cluster("development", path, mode="dev", selection="automatic")
 
 

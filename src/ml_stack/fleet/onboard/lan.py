@@ -16,7 +16,8 @@ from urllib.parse import urlsplit
 
 from ml_stack.httpguard import allowed_address
 
-__all__ = ["NotLocal", "in_tailnet", "require_local", "require_local_url"]
+__all__ = ["NotLocal", "in_tailnet", "loopback_host", "require_local", "require_local_url",
+           "secure_scheme"]
 
 TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
 TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
@@ -33,6 +34,24 @@ def in_tailnet(address: str) -> bool:
     except ValueError:
         return False
     return ip in (TAILNET_V4 if ip.version == 4 else TAILNET_V6)
+
+
+def loopback_host(host: str) -> bool:
+    """Whether ``host`` is this machine by name or loopback address."""
+    host = host.strip("[]").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.split("%")[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def secure_scheme(url: str) -> bool:
+    """Whether ``url`` is https, or plain http to this machine: the only two forms a pool link
+    takes. Plain http to anything else is not a way to reach a LAN machine."""
+    parts = urlsplit(url)
+    return parts.scheme == "https" or (parts.scheme == "http" and loopback_host(parts.hostname or ""))
 
 
 def require_local(host: str, port: int = 0) -> None:

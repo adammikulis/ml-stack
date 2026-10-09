@@ -229,8 +229,9 @@ sent when a request is created, once.
 
 `ml-stack cluster revoke NAME-OR-FINGERPRINT` marks the device revoked: it cannot ask again, and
 the key it signs file requests with (issued at pairing, one per device) stops working, so the
-owner's machine serves it nothing. **It cannot take back the cluster key** the device was given:
-the cluster has one shared key. The command says so. The re-keying flow (mint a new key,
+owner's machine serves it nothing. **It cannot take back the cluster key** the device was given.
+`ml-stack-peers members revoke FINGERPRINT` is the per-device revocation: the device's certificate is put out
+of the cluster record and every member refuses it from its next handshake and request. The re-keying flow (mint a new key,
 hand it to each remaining member over its pinned, signed channel) is designed and not
 built. A device-only pairing (`--no-cluster`) has no cluster key to take back.
 

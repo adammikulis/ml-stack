@@ -95,7 +95,7 @@ final class PinnedHttps implements AutoCloseable {
                     transport, origin.getHost(), origin.getPort(), true)) {
                 active = socket;
                 socket.setSoTimeout(20000);
-                socket.setEnabledProtocols(new String[] {"TLSv1.3", "TLSv1.2"});
+                socket.setEnabledProtocols(new String[] {"TLSv1.3"});
                 socket.startHandshake();
                 if (closed) throw new IllegalStateException("Connection was locked.");
                 String authorization = token.isEmpty() ? "" : "Authorization: Bearer " + token + "\r\n";

@@ -193,7 +193,6 @@ def test_standalone_bootstrap_contains_verified_checkout_helpers(repository, tmp
 
 def test_wsl_board_host_uses_authenticated_bridge_lan_address(monkeypatch):
     monkeypatch.setenv("ML_STACK_WSL_NETWORK", json.dumps({"address": ["192.168.2.59", 4321]}))
-    monkeypatch.delenv("ML_STACK_FLEET_TLS", raising=False)
     assert lan_host(8770) == "https://192.168.2.59:8770"
     monkeypatch.setenv("ML_STACK_WSL_NETWORK", json.dumps({"address": ["127.0.0.1", 4321]}))
     assert lan_host(8770) == ""

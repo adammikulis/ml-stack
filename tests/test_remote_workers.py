@@ -19,6 +19,7 @@ from ml_stack.fleet.discovery import (
 )
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.pool_roster import Pool
 from ml_stack.fleet.remote import Peer
 from ml_stack.workspace import localagent, localloop, localmodel, remote_workers, tokens
 from ml_stack.workspace.remote import RemoteWorkspace
@@ -38,7 +39,12 @@ def _server(root, machine, projects):
     daemon = api.Daemon(runner, files, lambda: derive_token(memberships()[0].key))
     daemon.projects, daemon.workspaces = projects, WorkspaceHost(projects)
     ident = tls.identity(root / machine / 'tls', machine)
-    server = LimitedServer((discovery.primary_ip(), 0), api.make_handler(daemon), tls=tls.server_context(ident))
+    pool = Pool()
+    for one in (ident, tls.local()):          # the daemon itself, and this machine as its client
+        pool.enrol(CLUSTER, one.beacon, machine, 'test')
+    daemon.members = pool
+    server = LimitedServer((discovery.primary_ip(), 0), api.make_handler(daemon),
+                           tls=tls.member_context(ident, pool))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     beacon = Beacon(name=machine, machine=machine, host=discovery.primary_ip(), port=server.server_port, cert=ident.beacon)
     peer = Peer(beacon.base_url, derive_token(KEY), beacon=beacon)

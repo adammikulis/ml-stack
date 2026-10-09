@@ -12,6 +12,7 @@ import time
 import urllib.parse
 from typing import Any
 
+from .membership import fingerprint_of
 from .onboard.lan import in_tailnet
 
 
@@ -33,9 +34,11 @@ def proof(secret: bytes, fields: dict[str, Any], fingerprint: str) -> str:
 
 
 class Invitations:
-    def __init__(self, members: Any, origin: Any):
+    def __init__(self, members: Any, origin: Any, enrol: Any = None):
         self.members = members
         self.origin = origin
+        self.enrol = enrol
+        """``enrol(group, certificate, name)`` lists a computer that redeemed an invitation as a device of the cluster."""
         self.clock = time.time
         self.lock = threading.Lock()
         self.rows: dict[str, dict[str, Any]] = {}
@@ -119,7 +122,7 @@ class Invitations:
 
     def exchange(self, action: str, fields: dict[str, Any]) -> dict[str, Any]:
         for name, limit in (("id", 32), ("challenge", 64), ("proof", 64),
-                            ("kind", 16), ("platform", 16), ("device_name", 128), ("public_key", 0)):
+                            ("kind", 16), ("platform", 16), ("device_name", 128), ("public_key", 2048)):
             value = fields.get(name, "")
             if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 for c in value):
                 raise ValueError("invalid invitation field")
@@ -129,8 +132,9 @@ class Invitations:
             raise ValueError("unsupported device platform")
         if not isinstance(fields.get("device_name"), str) or not 1 <= len(fields["device_name"]) <= 128:
             raise ValueError("a bounded device name is required")
-        if fields.get("public_key", "") != "":
-            raise ValueError("unsupported public key")
+        if (fields.get("public_key", "") != "") == (fields["kind"] == "android") or (
+                fields["kind"] == "computer" and not fingerprint_of(fields["public_key"])):
+            raise ValueError("a computer joins with its device certificate; a phone has none")
         with self.lock:
             self._prune()
             row = self.rows.get(fields.get("id"))
@@ -169,6 +173,8 @@ class Invitations:
                 raise ValueError("invitation proof did not match")
             payload = self._grant(row, fields, member)
             self.rows.pop(fields["id"], None)
+            if row["kind"] == "computer" and self.enrol is not None:
+                self.enrol(member.group, fields["public_key"], fields["device_name"])
             grant = json.dumps(payload, separators=(",", ":")).encode()
             signature = hmac.new(row["secret"], ("ml-stack-invite-grant/v1\n" + fields["challenge"] + "\n").encode() + grant,
                                  hashlib.sha256).hexdigest()

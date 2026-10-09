@@ -9,12 +9,13 @@ import pytest
 from test_project_source import repository  # noqa: F401
 
 from ml_stack import home, http, private_path
-from ml_stack.fleet import tls
+from ml_stack.fleet import discovery, tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import ALL_INTERFACES
 from ml_stack.fleet.discovery import Advertiser, Beacon, derive_token
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.pool_roster import Pool
 from ml_stack.fleet.projects import ProjectRegistry
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
@@ -493,15 +494,19 @@ def test_remote_client_never_reuses_global_or_human_token_files(monkeypatch, tmp
 
 
 def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tmp_path, monkeypatch):
-    key = bytes(range(32))
+    keyfile = tmp_path / "cluster.key"
+    key = discovery.mint_cluster("development", keyfile).key
     ident = tls.identity(tmp_path / "tls", "project-host")
+    pool = Pool(keyfile)
+    for one in (ident, tls.local()):          # the host, and this machine as its client
+        pool.enrol("development", one.beacon, "test", "test")
     files = tmp_path / "tls-files"
     files.mkdir()
     runner = JobRunner(tmp_path / "tls-jobs", files)
-    daemon = Daemon(runner, files, derive_token(key))
+    daemon = Daemon(runner, files, derive_token(key), cluster_key_path=keyfile, members=pool)
     daemon.projects = host.projects
     daemon.workspaces = host
-    server = LimitedServer((ALL_INTERFACES, 0), make_handler(daemon), tls=tls.server_context(ident))
+    server = LimitedServer((ALL_INTERFACES, 0), make_handler(daemon), tls=tls.member_context(ident, pool))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("", 0))

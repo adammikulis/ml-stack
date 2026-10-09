@@ -18,7 +18,7 @@
 - **Owner has not reviewed the `AGENTS.md` rules changes** (authority registry, GPU rule, "The agents push; the owner does not").
 - **Not built, discussed:** attested instructions (one-time hash on UserPromptSubmit, taint tracking for delegated gates) and decision-model screening of board messages at ingest.
 - **Home pool, slices 1-12 not started** (`docs/home-pool.md`, section 3): tailnet IPv4 route display, device capability block with a `Requires` filter, board-fed landing queue, phone person credential, remote test runner, mesh board stage 1, remote-broker lease, phone capabilities, pool MCP tools, Tailscale prepare/verify, PWA client, wake and idle unload. Start with slices 1, 2 and 3 (independent). The tailnet IPv4 admission in `Invitations.mint`, `companion_routes` and `invite_routes` is fixed; the route display per device is not.
-- **Pool encryption slices not started, in this order** (`docs/pool-encryption.md`, section 5, decisions 8.1): remove `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts and seal streams (1); per-device keys, signed membership and per-device revocation (2); TLS 1.3 mutual with pinned per-device certificates (2b); end-to-end DMs and notes via HPKE (4); encrypted-at-rest for the cluster key, TLS key and board graph (3); guest tenancy G1-G5 (Level 1 only unless attestation hardware is bought).
+- **Pool encryption: slices 1 (no TLS-off, TLS 1.3 floor) and 2 (per-device certificates, membership, revocation) are done, see `docs/pool-encryption.md` section 10; not started, in this order** (`docs/pool-encryption.md`, section 5, decisions 8.1): remove `ML_STACK_FLEET_TLS=off` and `http://` LAN project hosts and seal streams (1); per-device keys, signed membership and per-device revocation (2); TLS 1.3 mutual with pinned per-device certificates (2b); end-to-end DMs and notes via HPKE (4); encrypted-at-rest for the cluster key, TLS key and board graph (3); guest tenancy G1-G5 (Level 1 only unless attestation hardware is bought).
 - **Blocked until the product takes off: anything needing a paid Apple developer account** (owner constraint 2026-10-08): app attest or a signed helper, Level 2 guest tenancy on Apple silicon, secure enclave keys through a signed app, notarized or signed macOS and iOS builds for others, a native iPhone app, TestFlight, APNs push. Unblocked: PWA over HTTPS over Tailscale for phones, sideloaded Android app, unsigned local Mac builds, Level 1 guest tenancy (`docs/pool-encryption.md` section 8.1).
 - **Fleet jobs cannot run tests** (the `fleet/commands.py` allowlist has no test kind) and there is no pool-wide test dispatch; `docs/home-pool.md` slice 5 is the design.
 - **No idle unload and no Wake-on-LAN** for pool devices (`docs/home-pool.md` slice 12).
@@ -1113,14 +1113,12 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
   and remote task authorization compare the complete project grant, including `cluster_id`.
   Compare stable project authority without changing task specs or hashes; retain negative
   authorization coverage for different projects and authorities.
-- [ ] **A daemon's certificate is renewed only when it starts.** `tls.identity` makes a new
-  one when under 30 days of the 90 are left, but a daemon that runs longer than 60 days
-  keeps serving the old one until it restarts. Renewing in place means rebuilding the
-  `SSLContext` the server holds and re-announcing the new certificate; peers re-pin from the
-  next beacon.
+- [ ] **A device certificate lasts ten years and a replacement is a new pairing.** It is the device's
+  identity in every cluster's record (`fleet/membership.py`), so there is no in-place renewal; rotation with a
+  signed handover is slice 7 of `docs/pool-encryption.md`.
 - [ ] **File and model downloads and the `/infer` stream are signed and not sealed by the
-  application.** They travel inside the daemon's TLS; with `ML_STACK_FLEET_TLS=off` they are
-  readable on the segment. Sealing them needs a framed stream of sealed chunks.
+  application.** They travel inside the daemon's TLS 1.3 (no switch turns it off). Sealing them
+  needs a framed stream of sealed chunks (`docs/pool-encryption.md`, slice 1, the part not yet done).
 - [ ] **A machine that joined from a recovery file holds no hash of the passphrase**, so it cannot
   take other machines in by passphrase and the web interface cannot sign it in by passphrase.
 - [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**

@@ -27,7 +27,12 @@ else on the LAN.
 **A cluster member is fully trusted.** The daemon runs the command line a peer sends it
 (`POST /jobs`), downloads what a peer names (`POST /models/get`) and writes files a peer
 sends (`PUT /files/*`). Holding the cluster key is the same as having a shell on every machine
-in the cluster. Production admission protects its cluster key, 256 random bits that
+in the cluster, and holding the key is no longer enough to be one: a request from another machine
+is answered only over mutual TLS 1.3 by a device whose own certificate is listed as a member
+(`fleet/membership.py`), so a device is put out alone (`ml-stack-peers members revoke`) and is refused
+from its next handshake and next request. The cluster key stays as the secret that seals beacons and
+signs and seals request bodies (defence in depth); a device that is revoked still knows it until the
+key is rotated (docs/pool-encryption.md, slice 7). Production admission protects its cluster key, 256 random bits that
 no passphrase derives. Development admission extends this trust to nearby devices through
 its automatic TLS handshake. The passphrase is only a password for the Production join handshake, which locks out a
 source that keeps failing, so it is at least 5 characters; `ml-stack-peers init` makes a key with
@@ -38,7 +43,7 @@ no passphrase. A job a peer submits is limited to an allowlist of ml-stack comma
 
 | Surface | Default | Who can reach it |
 |---|---|---|
-| Fleet daemon, TCP 8770 | `127.0.0.1` (plain HTTP) until the machine joins a cluster, or `--lan`, `--host`, `--setup-from-lan`; beyond this machine it speaks TLS only | a LAN peer that pins its certificate and holds the cluster key (signed requests inside TLS); plain HTTP from another machine is dropped |
+| Fleet daemon, TCP 8770 | `127.0.0.1` (plain HTTP) until the machine joins a cluster, or `--lan`, `--host`, `--setup-from-lan`; beyond this machine it speaks TLS only | a LAN peer that pins its certificate, shows a member device's certificate in the TLS 1.3 handshake and holds the cluster key (signed requests inside TLS); plain HTTP from another machine is dropped |
 | Daemon web interface, `/ui` | this machine alone | other machines only with `--ui-from-lan`, and then over TLS only (it signs in with the passphrase) |
 | Discovery beacons, UDP 8771, multicast `239.255.77.70`, TTL 1 | sent once a cluster is joined | the LAN segment |
 | llama-server and other model servers | `127.0.0.1`, a random port | this machine; the daemon's `/infer` passes signed requests on to a fixed set of model-server paths |
@@ -75,8 +80,8 @@ with ten failures in a minute is locked out for a minute. Can try passphrase gue
 handshake, at five per ten minutes per address (see above); nothing it captures supports a
 guess offline. Cannot read traffic between peers: request and response bodies and beacons are
 sealed under a key derived from the cluster key, and connections are TLS to a certificate the
-beacon vouched for. With `ML_STACK_FLEET_TLS=off` it can read file transfers and the streamed
-output of the model proxy, which are not sealed by the application.
+beacon vouched for, TLS 1.3 at the least. Nothing turns TLS off, so file transfers and the streamed
+output of the model proxy, which the application does not seal, are protected by the transport alone.
 
 **A web page in the user's browser.** Cannot read the daemon: it listens on loopback, an API
 request must be signed with a secret the page does not have, and `/ui` requires a custom header
@@ -122,8 +127,8 @@ These apply to every consumer of the library without a switch.
 - Importing `ml_stack` registers no signal handler or exit hook, builds no manager, opens no
   socket and writes no file; `ml_stack.__version__` and a `NullHandler` are all it adds.
 - The daemon listens on this machine until the machine joins a cluster; beyond this machine it
-  is TLS to a pinned certificate or nothing (`ML_STACK_FLEET_TLS=off` is the one named switch,
-  announced at every start); every request is signed, fresh and unseen, and its body is sealed
+  is TLS 1.3 to a pinned certificate or nothing (there is no switch that turns it off, and a
+  listener beyond this machine cannot be built without a TLS context); every request is signed, fresh and unseen, and its body is sealed
   with AES-256-GCM under a key derived separately from the signing secret; request framing,
   connection count and time are bounded.
 - A cluster's key is random and is handed to a joining machine by a password-authenticated
@@ -292,8 +297,10 @@ fail the same way, and a captured exchange gives nothing to test guesses against
 exists only after the owner accepts, never appears in a notification, lives 120 seconds and
 has three tries; requests are limited per device, per address and overall, and a declined or
 failed device waits. A cluster member is fully trusted, so pairing hands over the cluster key
-unless told not to; `revoke` stops a device asking again but, while it holds the key, the
-cluster key must be changed to lock it out (not automated yet). Files from peers are checked
+unless told not to. Pairing also lists each side's certificate in the other's cluster record, and
+`ml-stack-peers members revoke` puts a device out of the cluster (not only of pairing): it is
+refused from its next handshake, but, while it holds the key, it can still read captured beacons until
+the key is rotated (not automated yet). Files from peers are checked
 against a manifest signed with the cluster's Ed25519 key (generated on the controller, kept in the
 OS keystore, separate from the cluster key; export, rotation and revocation need a person at a
 terminal; manifests last three days), chunk by chunk, and are staged for the scan rather than

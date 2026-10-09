@@ -82,7 +82,10 @@ def invitation_server(tmp_path, monkeypatch, request):
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.socket = tls.server_context(identity).wrap_socket(server.socket, server_side=True)
     endpoint = f'https://192.168.2.59:{server.server_port}'
-    store = Invitations(lambda: [member], lambda: (endpoint, identity.fingerprint))
+    enrolled = []
+    store = Invitations(lambda: [member], lambda: (endpoint, identity.fingerprint),
+                        enrol=lambda *row: enrolled.append(row))
+    store.enrolled, store.identity = enrolled, identity
     source[0] = store
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -100,7 +103,9 @@ def invitation_server(tmp_path, monkeypatch, request):
 def test_actual_pinned_tls_exchange_joins_once(invitation_server):
     store, member, hits = invitation_server
     invite = store.mint(member.group)['invite']
-    redeemed = invite_client.redeem(invite, 'test-device')
+    redeemed, host_cert = invite_client.redeem(invite, 'test-device')
+    assert host_cert == store.identity.beacon
+    assert store.enrolled == [(member.group, tls.local().beacon, 'test-device')]
     assert redeemed == member
     assert redeemed.mode == member.mode
     assert redeemed.selection == 'manual'
@@ -124,11 +129,11 @@ def test_modified_grant_is_rejected(invitation_server, monkeypatch):
     post = invite_client._post
 
     def tampered(data, path, fields):
-        answer = post(data, path, fields)
+        answer, certificate = post(data, path, fields)
         if path.endswith('/redeem'):
             answer['grant_data'] = encode(json.dumps({'kind': 'computer', 'group': 'Wrong cluster',
                                                          'key': member.key.decode()}).encode())
-        return answer
+        return answer, certificate
 
     monkeypatch.setattr(invite_client, '_post', tampered)
     with pytest.raises(ValueError, match='authenticated'):

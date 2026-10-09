@@ -13,7 +13,7 @@ from typing import Any
 from ml_stack.log import say, warn
 from ml_stack.person import HumanRequired, require_person
 
-from . import launch_open, recovery
+from . import launch_open, members_cli, recovery
 from .discovery import (
     MIN_PASSPHRASE,
     DiscoveryError,
@@ -289,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--reason", default="",
                             help="shown to anyone looking at the fleet")
 
+    members_cli.add_commands(sub)
     busy = sub.add_parser("busy", help="block out hours, e.g. 'mon-fri 09:00-17:00'")
     busy.add_argument("when", nargs="?", default="")
     busy.add_argument("--free", action="store_true",
@@ -301,7 +302,10 @@ def main(argv: list[str] | None = None) -> int:
                            for a in (argv if argv is not None else sys.argv))
     fn = {"setup": cmd_setup, "init": cmd_init, "key": cmd_key,
           "token": cmd_token, "ls": cmd_ls, "pause": cmd_pause,
-          "resume": cmd_resume, "when": cmd_when, "busy": cmd_busy, "open": cmd_open}[args.cmd]
+          "resume": cmd_resume, "when": cmd_when, "busy": cmd_busy, "open": cmd_open,
+          "members": cmd_ls}[args.cmd]
+    if args.cmd == "members":
+        return members_cli.run(args)
     try:
         return fn(args)
     except (DiscoveryError, OSError) as exc:

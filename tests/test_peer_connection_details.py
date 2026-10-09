@@ -20,7 +20,6 @@ def test_shared_host_refuses_non_network_addresses(monkeypatch, address):
                                                ("fd00::2", "[fd00::2]")])
 def test_shared_host_uses_current_route_address(monkeypatch, address, expected):
     monkeypatch.delenv("ML_STACK_WSL_NETWORK", raising=False)
-    monkeypatch.delenv("ML_STACK_FLEET_TLS", raising=False)
     monkeypatch.setattr(projects, "primary_ip", lambda: address)
     assert projects.lan_host(8770) == f"https://{expected}:8770"
 
