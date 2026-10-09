@@ -88,7 +88,6 @@ def test_the_paste_block_has_a_code_and_never_a_token_and_the_code_is_a_hash_at_
     done = cli(kit.base, kit.token, "invite", "--name", "codex", "--ttl", "5m", "--uses", "2",
                env_extra={TAINT_ENV: ""})
     assert done.returncode == 0, done.stderr
-    import re
     code = re.search(rf"join ({CODE_SHAPE})", done.stdout).group(1)
     assert "mlws1" not in done.stdout and "works for 2 agents" in done.stdout
     assert "only to the process you are starting" in done.stdout
