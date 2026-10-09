@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import parse, python_files, rel
+from ._perfile import finder
+from ._util import parse
 
 NAME = "local-imports"
 OWNER = ""
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 
 
@@ -66,20 +68,21 @@ def _imports(body: list[ast.stmt]) -> list[tuple[str, ast.stmt]]:
     return found
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        tree = parse(path)
-        if tree is None:
+    tree = parse(path)
+    if tree is None:
+        return out
+    seen: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        seen: set[tuple[str, str]] = set()
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for module, found in _imports(node.body):
+            if (node.name, module) in seen:
                 continue
-            for module, found in _imports(node.body):
-                if (node.name, module) in seen:
-                    continue
-                seen.add((node.name, module))
-                out.append(Finding(where, found.lineno, f"{module} in {node.name}()"))
+            seen.add((node.name, module))
+            out.append(Finding(where, found.lineno, f"{module} in {node.name}()"))
     return out
+
+
+find = finder(ROOTS, scan)

@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import dotted, parse, python_files, rel
+from ._perfile import finder
+from ._util import dotted, parse
 
 NAME = "broad-excepts"
 OWNER = ""
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 
 
@@ -24,19 +26,20 @@ def _broad(handler: ast.ExceptHandler) -> str:
     return ""
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ExceptHandler):
-                detail = _broad(node)
-                if detail:
-                    out.append(Finding(where, node.lineno, detail))
+    tree = parse(path)
+    if tree is None:
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ExceptHandler):
+            detail = _broad(node)
+            if detail:
+                out.append(Finding(where, node.lineno, detail))
     return out
+
+
+find = finder(ROOTS, scan)
 
 
 def describe() -> str:

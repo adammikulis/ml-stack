@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ._perfile import each
 from ._util import dotted, parse, python_files, remembered
 
 NAME = "tests-collected"
@@ -27,19 +28,20 @@ def describe() -> str:
 
 def guards(root: Path) -> list[str]:
     """Every import a test module waits on before it will collect at all."""
-    out = set()
-    for path in python_files(root, ROOTS):
+    def skipped_imports(path: Path) -> list[str]:
         tree = parse(path)
-        if tree is None:
-            continue
-        for node in tree.body:
+        out = set()
+        for node in tree.body if tree is not None else []:
             for inner in ast.walk(node):
                 if not isinstance(inner, ast.Call) or dotted(inner.func) != "pytest.importorskip":
                     continue
                 first = inner.args[0] if inner.args else None
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
                     out.add(first.value)
-    return sorted(out)
+        return sorted(out)
+
+    found = each(root, python_files(root, ROOTS), skipped_imports, owner=guards)
+    return sorted({name for names in found for name in names})
 
 
 def installed(name: str) -> bool:

@@ -66,13 +66,14 @@ def findings(checker: ModuleType, root: Path) -> list[Finding]:
     """One checker's findings over the tree at root, in path order.
 
     The tree this package sits in is remembered by content, with the version of each
-    external tool a checker may call, so an unchanged tree is not scanned twice.
+    external tool a checker may call, so an unchanged tree is not scanned twice. A checker
+    marked ``INCREMENTAL`` keeps its own per-file results and is never held whole.
     """
     def scan() -> list[list]:
         found = sorted(checker.find(root), key=lambda f: (f.path, f.line, f.detail))
         return [[f.path, f.line, f.detail] for f in found]
 
-    if root.resolve() != Path(__file__).resolve().parents[2]:
+    if root.resolve() != Path(__file__).resolve().parents[2] or getattr(checker, "INCREMENTAL", False):
         return [Finding(*row) for row in scan()]
     tools = ",".join(f"{t}={_stamp(t)}" for t in ("ruff", "pyright"))
     return [Finding(*row) for row in remembered(root, checker.NAME, scan, tools,

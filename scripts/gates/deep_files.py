@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import Finding
-from ._util import python_files, read, rel
+from ._perfile import finder
+from ._util import read
 
 NAME = "deep-files"
 OWNER = ""
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 LIMIT = 900
 HARD = True
@@ -19,10 +21,9 @@ def describe() -> str:
             "Split it into a module per job. There is no allowance: the limit is the limit.")
 
 
-def find(root: Path) -> list[Finding]:
-    out = []
-    for path in python_files(root, ROOTS):
-        lines = len(read(path).splitlines())
-        if lines > LIMIT:
-            out.append(Finding(rel(path, root), 1, f"{lines} lines"))
-    return out
+def scan(path: Path, where: str) -> list[Finding]:
+    lines = len(read(path).splitlines())
+    return [Finding(where, 1, f"{lines} lines")] if lines > LIMIT else []
+
+
+find = finder(ROOTS, scan)

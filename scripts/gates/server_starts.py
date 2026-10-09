@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import calls, exempt, parse, python_files, rel
+from ._perfile import finder
+from ._util import calls, exempt, parse
 
 NAME = "server-starts"
 OWNER = "ml_stack.serve.broker"
+INCREMENTAL = True
 HARD = True
 ROOTS = ("src/ml_stack",)
 GRANTORS = ("src/ml_stack/serve/grant.py", "src/ml_stack/serve/broker.py")
@@ -33,25 +35,26 @@ def describe() -> str:
             "`ml-stack-serve up` asks the broker for a lease.")
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        tree = parse(path)
-        if tree is None:
-            continue
-        if not exempt(where, GRANTORS):
-            out += [Finding(where, n.lineno, "broker_grant")
-                    for n in ast.walk(tree)
-                    if (isinstance(n, ast.Name) and n.id == "broker_grant")
-                    or (isinstance(n, ast.Attribute) and n.attr == "broker_grant")]
-        found = calls(tree)
-        if not exempt(where, LEASERS):
-            out += [Finding(where, n.lineno, "Lease(")
-                    for n, name in found if name.rsplit(".", 1)[-1] == "Lease"]
-        names_server = any(isinstance(n, ast.Constant) and n.value in ("llama-server", "llama_server")
-                           for n in ast.walk(tree))
-        if names_server and not exempt(where, SPAWNERS):
-            out += [Finding(where, n.lineno, f"{name} beside llama-server")
-                    for n, name in found if name in SPAWN]
+    tree = parse(path)
+    if tree is None:
+        return out
+    if not exempt(where, GRANTORS):
+        out += [Finding(where, n.lineno, "broker_grant")
+                for n in ast.walk(tree)
+                if (isinstance(n, ast.Name) and n.id == "broker_grant")
+                or (isinstance(n, ast.Attribute) and n.attr == "broker_grant")]
+    found = calls(tree)
+    if not exempt(where, LEASERS):
+        out += [Finding(where, n.lineno, "Lease(")
+                for n, name in found if name.rsplit(".", 1)[-1] == "Lease"]
+    names_server = any(isinstance(n, ast.Constant) and n.value in ("llama-server", "llama_server")
+                       for n in ast.walk(tree))
+    if names_server and not exempt(where, SPAWNERS):
+        out += [Finding(where, n.lineno, f"{name} beside llama-server")
+                for n, name in found if name in SPAWN]
     return out
+
+
+find = finder(ROOTS, scan)

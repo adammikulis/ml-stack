@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import calls, parse, python_files, rel
+from ._perfile import finder
+from ._util import calls, parse
 
 NAME = "unversioned-records"
 OWNER = "ml_stack.files.write_json"
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 SINKS = ("write_text", "write_json", "write_bytes")
 
@@ -45,20 +47,21 @@ def _to_a_path(tree: ast.Module) -> set[int]:
     return sunk
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        tree = parse(path)
-        if tree is None:
+    tree = parse(path)
+    if tree is None:
+        return out
+    sunk = _to_a_path(tree)
+    for node, name in calls(tree):
+        if name not in ("json.dump", "json.dumps"):
             continue
-        sunk = _to_a_path(tree)
-        for node, name in calls(tree):
-            if name not in ("json.dump", "json.dumps"):
-                continue
-            if name == "json.dumps" and id(node) not in sunk:
-                continue
-            payload = _payload(node)
-            if payload is not None and not _versioned(payload):
-                out.append(Finding(where, node.lineno, name))
+        if name == "json.dumps" and id(node) not in sunk:
+            continue
+        payload = _payload(node)
+        if payload is not None and not _versioned(payload):
+            out.append(Finding(where, node.lineno, name))
     return out
+
+
+find = finder(ROOTS, scan)

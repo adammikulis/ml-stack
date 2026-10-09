@@ -182,7 +182,10 @@ def execute_run(command, environment, tier, record: OutputRecord):
         report_run(record, "test: the explicit node selector matched no tests")
         status = 4
     if tree_hash(ROOT) != executed_tree:
-        report_run(record, "test: source tree changed during the run")
+        moved = subprocess.run(["git", "status", "--short", "--untracked-files=all"], cwd=ROOT,
+                               capture_output=True, text=True, check=False).stdout.split("\n")
+        report_run(record, "test: source tree changed during the run; the result does not describe the tree "
+                   "(changed now: " + ", ".join(line[3:] for line in moved[:5] if line) + ")")
         status = 4
     wall = time.monotonic() - began
     if tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
@@ -345,13 +348,14 @@ def record(args: argparse.Namespace) -> int:
         lock.unlink(missing_ok=True)
 
 
-def gate(args: argparse.Namespace, rest: list[str]) -> int:
-    """The structural checks a merge is gated on, in this order, all of them reported."""
-    steps = [
+def gate_steps(workers: int, rest: list[str]) -> list[tuple[str, list[str]]]:
+    """The gate's steps, in order. Every step only reads the tree: a gate that rewrote a tracked file
+    would dirty the worktree it is judging and make the result cache refuse to store the run."""
+    return [
         ("budgets", [sys.executable, "scripts/budgets"]),
         ("redteam coverage", [sys.executable, "scripts/redteam_coverage.py", "--check"]),
-        ("command reference", [sys.executable, "scripts/reference", "--write"]),
-        ("structure tests", [*pytest_command(max(1, min(args.workers or 6, 6)),
+        ("command reference", [sys.executable, "scripts/reference", "--check"]),
+        ("structure tests", [*pytest_command(max(1, min(workers or 6, 6)),
                                              "tests/test_layers.py", "tests/test_budgets.py",
                                              "tests/test_budget_floors.py",
                                              "tests/test_budget_ratchet.py",
@@ -360,24 +364,25 @@ def gate(args: argparse.Namespace, rest: list[str]) -> int:
                                              "tests/test_onboard_human.py",
                                              "tests/test_cli_reference.py", *rest)]),
     ]
+
+
+STALE_HINTS = {"command reference": "docs/commands.md is stale: run `scripts/reference --write` and commit it",
+               "redteam coverage": "docs/redteam/coverage.json is stale: run `scripts/redteam_coverage.py --write` and commit it"}
+
+
+def gate(args: argparse.Namespace, rest: list[str]) -> int:
+    """The structural checks a merge is gated on, in this order, all of them reported."""
     failed = []
-    for name, command in steps:
-        if name == "command reference":
-            before = subprocess.run(["git", "diff", "--", "docs/commands.md"], cwd=ROOT,
-                                    capture_output=True, text=True, check=False).stdout
+    for name, command in gate_steps(args.workers, rest):
         began = time.monotonic()
         print(f"gate: {name}", flush=True)
         status = (run(command, tier="gate", artifact_output=args.artifact_output) if "pytest" in command
                   else subprocess.run(command, cwd=ROOT, check=False).returncode)
-        if name == "command reference":
-            after = subprocess.run(["git", "diff", "--", "docs/commands.md"], cwd=ROOT,
-                                   capture_output=True, text=True, check=False).stdout
-            if after != before:
-                print("gate: docs/commands.md changed; commit the regenerated table")
-                status = 1
         print(f"gate: {name} {'ok' if status == 0 else 'FAILED'} in {time.monotonic() - began:.0f} s")
         if status:
             failed.append(name)
+            if name in STALE_HINTS:
+                print(f"gate: {STALE_HINTS[name]}")
     print("gate: " + ("every structural check passed" if not failed else "failed: " + ", ".join(failed)))
     return 1 if failed else 0
 

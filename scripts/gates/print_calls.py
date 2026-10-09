@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import calls, dotted, exempt, parse, python_files, rel
+from ._perfile import finder
+from ._util import calls, dotted, exempt, parse
 
 NAME = "print-calls"
 OWNER = "ml_stack.log"
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 OWNS = ("src/ml_stack/log.py",)
 
@@ -21,19 +23,20 @@ def describe() -> str:
     return "A print() in library code; `ml_stack.log` says it, so a caller can redirect it."
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        if where in OWNS or where in COMMANDS or exempt(where, tuple(COMMANDS)):
-            continue
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node, name in calls(tree):
-            if name == "print" and _to_the_console(node):
-                out.append(Finding(where, node.lineno, "print()"))
+    if where in OWNS or where in COMMANDS or exempt(where, tuple(COMMANDS)):
+        return out
+    tree = parse(path)
+    if tree is None:
+        return out
+    for node, name in calls(tree):
+        if name == "print" and _to_the_console(node):
+            out.append(Finding(where, node.lineno, "print()"))
     return out
+
+
+find = finder(ROOTS, scan)
 
 
 def _to_the_console(node: ast.Call) -> bool:

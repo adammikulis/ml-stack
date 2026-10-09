@@ -52,3 +52,23 @@ def test_runner_defaults_to_the_brokers_automatic_pool_and_preserves_explicit_li
     monkeypatch.setattr(module, 'run', lambda command, **kwargs: calls.append(command) or 0)
     assert module.main() == 0
     assert calls[0][calls[0].index('-n') + 1] == str(workers)
+
+
+def test_no_gate_step_writes_to_the_tree():
+    """A gate only reads: a step that rewrote a tracked file dirtied the worktree it was judging."""
+    module = runner()
+    steps = module.gate_steps(0, [])
+    assert [name for name, _ in steps] == ['budgets', 'redteam coverage', 'command reference', 'structure tests']
+    for name, command in steps:
+        assert not {'--write', '--update', '--fix'} & set(command), (name, command)
+    assert [part for part in dict(steps)['command reference'] if part.startswith('--')] == ['--check']
+
+
+def test_a_stale_command_table_fails_the_check_and_leaves_the_page_alone(tmp_path):
+    page = tmp_path / 'commands.md'
+    page.write_text('# The commands\n\n| stale | table |\n', encoding='utf-8')
+    before = page.read_bytes()
+    done = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'reference'), '--check', '--page', str(page)],
+                          capture_output=True, text=True, check=False, cwd=ROOT)
+    assert done.returncode != 0
+    assert page.read_bytes() == before

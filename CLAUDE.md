@@ -31,6 +31,10 @@ file, announces, works in its worktree, commits named files and reports. The har
 to that fresh tree, so `.claude/agents/branch-finisher.md` (no isolation) is the one for a branch
 that already has a claimed sibling worktree.
 
+A worker that has delivered its report is stopped at once with TaskStop, and the same goes for a
+worker that sends a report again. The lead does not wait for it to exit and does not read a
+repeat report as new work. The branch and worktree stay; only the agent ends.
+
 ## Contact comes first
 
 The `SessionStart` hook registers the lead, announces it and puts the inbox in its context. The

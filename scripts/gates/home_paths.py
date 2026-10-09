@@ -6,10 +6,12 @@ import ast
 from pathlib import Path
 
 from . import Finding
-from ._util import calls, dotted, exempt, parse, python_files, rel
+from ._perfile import finder
+from ._util import calls, dotted, exempt, parse
 
 NAME = "home-paths"
 OWNER = "ml_stack.home"
+INCREMENTAL = True
 ROOTS = ("src/ml_stack",)
 OWNS = ("src/ml_stack/home.py",)
 
@@ -26,22 +28,23 @@ def state_literal(value: object) -> bool:
     return value in ("~/.ml-stack", ".ml-stack") or value.startswith(("~/.ml-stack/", ".ml-stack/"))
 
 
-def find(root: Path) -> list[Finding]:
+def scan(path: Path, where: str) -> list[Finding]:
     out = []
-    for path in python_files(root, ROOTS):
-        where = rel(path, root)
-        if exempt(where, OWNS):
-            continue
-        tree = parse(path)
-        if tree is None:
-            continue
-        for node, name in calls(tree):
-            plain = dotted(node.func)
-            if name.endswith("Path.home") or plain.endswith("Path.home"):
-                out.append(Finding(where, node.lineno, "Path.home()"))
-            elif plain == "expanduser" or plain.endswith(".expanduser"):
-                out.append(Finding(where, node.lineno, "expanduser()"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and state_literal(node.value):
-                out.append(Finding(where, node.lineno, f"{node.value!r}"))
+    if exempt(where, OWNS):
+        return out
+    tree = parse(path)
+    if tree is None:
+        return out
+    for node, name in calls(tree):
+        plain = dotted(node.func)
+        if name.endswith("Path.home") or plain.endswith("Path.home"):
+            out.append(Finding(where, node.lineno, "Path.home()"))
+        elif plain == "expanduser" or plain.endswith(".expanduser"):
+            out.append(Finding(where, node.lineno, "expanduser()"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and state_literal(node.value):
+            out.append(Finding(where, node.lineno, f"{node.value!r}"))
     return out
+
+
+find = finder(ROOTS, scan)
