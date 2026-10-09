@@ -25,6 +25,7 @@ EXTERNAL: dict[str, str] = {
     "ML_STACK_TEST_GGUF": "opt-in input of the real-model tests, read by tests/ only",
     "ML_STACK_TEST_SSHD": "opt-in switch of the localhost-sshd onboarding test, read by tests/ only",
     "ML_STACK_PUSH_MAIN": "documented as inert: the Bash guard no longer reads it; release-main approval replaces it",
+    "ML_STACK_FLEET_TLS": "documented as removed: the pool has no TLS-off switch (docs/pool-encryption.md); tests/ sets it to prove it is ignored",
     "ML_STACK_MANUAL_DIALOG": "opt-in switch of the manual notification-dialog test, read by tests/ only",
 }
 """Documented variables that are intentionally not in the shipped source, each with the reason."""
