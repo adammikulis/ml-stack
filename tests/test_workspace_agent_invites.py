@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 
@@ -70,8 +71,9 @@ def test_a_joined_child_is_listed_with_its_parent_and_its_sends_count_against_th
     name = join(kit, make(kit), "peer")
     shown = {r["id"]: r for r in kit.ws.registered()}
     assert shown[name]["parent"] == "lead-a" and shown["lead-a"]["parent"] == ""
-    out = cli(kit.base, kit.token, "agents").stdout
-    assert f"Subagent · {name} (parent " in out
+    from ml_stack.workspace import agent_display
+    shown_name = agent_display.spoken(agent_display.metadata(kit.ws.registry, name))
+    assert shown_name.endswith(" (spawned by lead-a)")
     kit.limits(sends_per_window=3, announce_per_window=1000, child_sends_per_window=2)
     child = tokens.load(kit.base, name)
     sent = 0
@@ -362,9 +364,10 @@ def test_a_childs_held_message_is_a_strike_against_the_issuer_until_it_cannot_in
 
 def test_outputs_are_byte_stable_for_the_same_state(kit):
     join(kit, make(kit), "peer")
-    first = cli(kit.base, kit.token, "agents").stdout
-    assert first == cli(kit.base, kit.token, "agents").stdout
-    one, two = (cli(kit.base, kit.token, "status", "--json").stdout for _ in range(2))
+    first = cli(kit.base, kit.token, "outbox").stdout
+    assert first == cli(kit.base, kit.token, "outbox").stdout
+    one, two = (re.sub(r'"observed_at": [0-9.]+', '"observed_at": 0', cli(kit.base, kit.token, "status", "--json").stdout)
+                for _ in range(2))
     assert one == two
 
 
