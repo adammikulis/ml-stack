@@ -7,11 +7,11 @@ import os
 import subprocess
 import sys
 import threading
-from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+import wheel_cache
 from workspace_kit import Kit, clean_env
 
 from ml_stack import http
@@ -32,18 +32,8 @@ from ml_stack.workspace.taskboard import TaskBoard
 
 
 @pytest.fixture(scope='module')
-def installed_metadata(tmp_path_factory):
-    root = Path(__file__).resolve().parents[1]
-    output = tmp_path_factory.mktemp('coordinator-wheel')
-    environment = {**os.environ, 'PIP_NO_INDEX': '1', 'PIP_DISABLE_PIP_VERSION_CHECK': '1'}
-    subprocess.run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--no-build-isolation',
-                    '--no-cache-dir', '--wheel-dir', str(output), str(root)],
-                   env=environment, check=True, capture_output=True, text=True, timeout=60)
-    target = output / 'installed'
-    subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--no-index',
-                    '--target', str(target), str(next(output.glob('*.whl')))],
-                   env=environment, check=True, capture_output=True, text=True, timeout=60)
-    return target
+def installed_metadata():
+    return wheel_cache.built() / 'installed'
 
 
 @pytest.fixture
