@@ -19,6 +19,7 @@ __all__ = [
     "is_windows",
     "launch",
     "on_quit",
+    "private_dir",
     "private_file",
     "process_group_kwargs",
     "quit_signals",
@@ -194,6 +195,29 @@ def private_file(path: Path | str) -> None:
         subprocess.run(
             ["icacls", str(p), "/inheritance:r", "/grant:r", f"{owner}:F"],
             capture_output=True, check=False, timeout=30)
+
+
+def private_dir(path: Path | str) -> bool:
+    """Make the directory ``path`` (and what is made in it later) for its owner alone.
+
+    ``chmod(0o700)`` on POSIX. On Windows ``icacls`` drops the inherited entries (SYSTEM,
+    Administrators, Users) and grants the owner full control inherited by files and
+    subdirectories. Whether the call took effect: False when there is no ``USERNAME`` or
+    ``icacls`` failed, so a caller can say so; it never raises.
+    """
+    p = Path(path)
+    if not is_windows():
+        p.chmod(0o700)
+        return True
+    owner = os.environ.get("USERNAME", "")
+    if not owner:
+        return False
+    try:
+        done = subprocess.run(["icacls", str(p), "/inheritance:r", "/grant:r", f"{owner}:(OI)(CI)F"],
+                              capture_output=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
 
 
 def open_path(path: Path | str) -> str:
