@@ -30,6 +30,8 @@ import land_git as lg
 import land_plan
 import land_run
 
+from ml_stack.devbranch import development_branch
+
 
 def show_plan(plan: land_plan.Plan) -> dict:
     """Print the plan and return its summary."""
@@ -63,7 +65,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="run: plan and predict, change nothing")
     parser.add_argument("--apply", action="store_true", help="finish: do it (default is a dry run)")
     parser.add_argument("--entries", type=Path, help="plan/run: JSON list of {branch, tip}; a moved tip is refused")
-    parser.add_argument("--target", default=lg.TARGET, help="branch to land on")
+    parser.add_argument("--target", default="", help="branch to land on (default: the development branch)")
     parser.add_argument("--conflicts", choices=["eject", "stop"], default="eject")
     parser.add_argument("-n", "--workers", type=int, default=0, help="affected-test worker ceiling (default 0: what the broker grants)")
     parser.add_argument("--once", action="store_true", help="serve: one pass, then exit")
@@ -73,6 +75,7 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="a checkout of the repository")
     args = parser.parse_args()
     root = lg.toplevel(args.repo)
+    args.target = args.target or development_branch(root)
     if args.command == "serve":
         flags = {"once": args.once, "interval": args.interval, "remote": args.remote,
                  "stall_minutes": args.stall_minutes}

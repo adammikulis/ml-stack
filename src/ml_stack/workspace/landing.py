@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ml_stack.devbranch import development_branch
 from ml_stack.workspace.chain import ChainLog, held
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity
 from ml_stack.workspace.model_tiers import tier_of
@@ -30,12 +31,12 @@ def log(ws) -> ChainLog:
     return ChainLog(ws.base / "landing.jsonl", ws.clock)
 
 
-def runner_claim(ws) -> tuple[str, str]:
+def runner_claim(ws, target: str = "") -> tuple[str, str]:
     """The claim whose holder is the landing runner: the development branch itself.
 
     Task integration claims the same branch, so a runner and an integration never land at once.
     """
-    return "branch", "0.2dev"
+    return "branch", target or development_branch()
 
 
 def eligible(ws, who: Identity) -> str:
@@ -149,7 +150,7 @@ def request(ws, token: str, fields: dict[str, Any]) -> dict[str, Any]:
     if why:
         ws.audit("land.refused", who.id, reason=why)
         raise Denied(why)
-    branch, sha, target = fields["branch"], fields["sha"], fields.get("target") or "0.2dev"
+    branch, sha, target = fields["branch"], fields["sha"], fields.get("target") or development_branch()
     if not NAME.fullmatch(branch) or branch in ("main", "master") or not NAME.fullmatch(target) \
             or target in ("main", "master"):
         raise ValueError("branch and target must be plain branch names, never main")

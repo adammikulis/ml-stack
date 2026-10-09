@@ -6,7 +6,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-TARGET = "0.2dev"
 PROTECTED = ("main", "master")
 
 

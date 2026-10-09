@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Report each worktree against 0.2dev: commits ahead and behind, age, and what is over a limit.
+"""Report each worktree against the development branch: commits ahead and behind, age, and what is over a limit.
 
     worktrees [--target REV]
 
 Read-only. Exits 1 when any worktree is flagged, so it can gate a landing batch.
 Limits (AGENTS.md, "Branch hygiene and landing"): at most 10 commits, at most 30 ahead
 (split or land part before adding more), at most 20 behind, and a branch that is behind
-0.2dev has merged it within the last day.
+the development branch has merged it within the last day.
 """
 
 from __future__ import annotations
@@ -18,8 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import land_git as lg  # noqa: E402
+
+from ml_stack.devbranch import development_branch  # noqa: E402
 
 MAX_COMMITS = 10
 MAX_AHEAD = 30
@@ -70,9 +73,10 @@ def rows(root: Path, target: str, now: float) -> list[Row]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--target", default=lg.TARGET)
+    parser.add_argument("--target", default="", help="default: the development branch")
     args = parser.parse_args(argv)
     root = lg.toplevel(Path.cwd())
+    args.target = args.target or development_branch(root)
     found = rows(root, args.target, time.time())
     for row in found:
         mark = "FLAG" if row.flags else "ok  "

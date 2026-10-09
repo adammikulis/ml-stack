@@ -22,6 +22,7 @@ from pathlib import Path
 import land_entries
 import land_git as lg
 
+from ml_stack.devbranch import development_branch
 from ml_stack.workspace import landing
 from ml_stack.workspace.claims import Conflict
 
@@ -39,11 +40,15 @@ class Runner:
     ws: object
     token: str
     root: Path
-    target: str = lg.TARGET
+    target: str = ""
     remote: str = "origin"
     stall_s: float = STALL_S
     env: dict = field(default_factory=lambda: dict(os.environ))
     poll_s: float = 0.5
+
+    def __post_init__(self) -> None:
+        """An unnamed target is the development branch of this repository."""
+        self.target = self.target or development_branch(self.root)
 
     def say(self, text: str, **fields: object) -> None:
         """One audit row for a runner step."""
@@ -147,7 +152,7 @@ class Runner:
         """One pass over the queue; a summary of what happened."""
         who = self.ws.auth(self.token).id
         try:
-            self.ws.claim(self.token, *landing.runner_claim(self.ws))
+            self.ws.claim(self.token, *landing.runner_claim(self.ws, self.target))
         except Conflict as held:
             return {"status": "runner-held", "owner": held.owner}
         queue = landing.fold(self.ws)
