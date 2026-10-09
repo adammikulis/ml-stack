@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""A UserPromptSubmit and PostToolUse hook: at most once per interval, tells the lead what is unanswered for it and how many announcements are new."""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+
+import workspace_hook
+
+EVERY_S = 600.0
+
+
+def due(session: str, now: float) -> bool:
+    """Whether the interval since this session was last checked has passed; records the check."""
+    every = float(os.environ.get("ML_STACK_ATTENTION_EVERY_S") or EVERY_S)
+    stamp = workspace_hook.state_dir() / "attention" / (session if session.replace("-", "").isalnum() else "none")
+    try:
+        if now - float(stamp.read_text()) < every:
+            return False
+    except (OSError, ValueError):
+        pass
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stamp.write_text(str(now))
+    except OSError as error:
+        workspace_hook.warning("Attention", error)
+    return True
+
+
+def main() -> int:
+    event = workspace_hook.event("Attention")
+    if event is None or event.get("agent_id"):
+        return 0
+    if not due(str(event.get("session_id") or "none"), time.time()):
+        return 0
+    environment = workspace_hook.session_environment(event, "Attention")
+    if environment is None:
+        return 0
+    done = workspace_hook.run(["ml-stack-workspace", "attention", "--agent", "claude"], "Attention", environment=environment)
+    text = done.stdout.strip() if done else ""
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event.get("hook_event_name") or "UserPromptSubmit",
+                                                 "additionalContext": text[:4000]}}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

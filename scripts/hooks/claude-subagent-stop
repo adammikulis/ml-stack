@@ -9,10 +9,6 @@ from pathlib import Path
 import workspace_hook
 
 
-def label_of(event: dict) -> str:
-    return f"{event.get('agent_type') or 'subagent'}-{str(event.get('agent_id') or '')[:6]}".strip("-").lower()
-
-
 def transcript_model(path: str) -> str:
     """The model id on the last assistant line of a transcript, or an empty string."""
     found = ""
@@ -30,6 +26,18 @@ def transcript_model(path: str) -> str:
     return found
 
 
+def checkout_note(event: dict) -> str:
+    """` on BRANCH in WORKTREE` for the checkout the subagent stopped in, or an empty string when it is not a git checkout."""
+    where = str(event.get("cwd") or "")
+    if not where:
+        return ""
+    branch = workspace_hook.run(["git", "-C", where, "branch", "--show-current"], "SubagentStop")
+    top = workspace_hook.run(["git", "-C", where, "rev-parse", "--show-toplevel"], "SubagentStop")
+    if not branch or not top or not branch.stdout.strip():
+        return ""
+    return f" on {branch.stdout.strip()} in {Path(top.stdout.strip()).name}"
+
+
 def main() -> int:
     event = workspace_hook.event("SubagentStop")
     if event is None:
@@ -37,14 +45,18 @@ def main() -> int:
     environment = workspace_hook.session_environment(event, "SubagentStop")
     if environment is None:
         return 0
-    label = label_of(event)
+    label = workspace_hook.label_of(event)
     path = event.get("agent_transcript_path") or ""
     model = transcript_model(str(path)) if path else ""
     if model:
         workspace_hook.run(["ml-stack-workspace", "hello-model", label, model, "--agent", "claude"],
                            "SubagentStop", environment=environment)
-    workspace_hook.run(["ml-stack-workspace", "announce", "done", f"{label}: finished",
-                        "--agent", "claude", "--label", label], "SubagentStop", environment=environment)
+    place = checkout_note(event)
+    said = workspace_hook.run(["ml-stack-workspace", "announce", "done", f"{label}: finished{place}"[:200],
+                               "--agent", "claude", "--label", label], "SubagentStop", environment=environment)
+    if said is None:
+        workspace_hook.run(["ml-stack-workspace", "announce", "milestone", f"{label}: stopped, done refused{place}"[:200],
+                            "--agent", "claude", "--label", label], "SubagentStop", environment=environment)
     return 0
 
 
