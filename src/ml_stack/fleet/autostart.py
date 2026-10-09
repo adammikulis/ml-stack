@@ -26,7 +26,7 @@ from typing import Any
 from ml_stack import home, jobs, runtime
 from ml_stack.log import say, warn
 
-from . import autostart_cli, wsl_startup
+from . import autostart_cli, autostart_keystore, wsl_startup
 from .autostart_backends import elevated as _ask_and_run
 from .autostart_models import (
     ADOPTED,
@@ -581,6 +581,8 @@ def _install_system(user: str, home_dir: str, *, only_print: bool = False) -> in
     if only_print:
         say(made.body)
         return 0
+    if why := autostart_keystore.notice(user, home_dir, made.platform):
+        warn(why)
     target = Path(made.path)
     try:
         if made.platform == "win32":
