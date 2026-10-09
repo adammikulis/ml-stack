@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 81,
+   "covered": 82,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
@@ -6887,7 +6887,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -6902,7 +6903,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -6958,6 +6960,22 @@
    "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
   },
   {
+   "id": "parser:hub/capabilities.py",
+   "kind": "parser",
+   "source": "hub/capabilities.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_net_untrusted.py",
+    "tests/test_pdf_engine.py",
+    "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:hub/cards.py",
    "kind": "parser",
    "source": "hub/cards.py",
@@ -6998,7 +7016,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7187,7 +7206,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7202,7 +7222,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7217,7 +7238,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7232,7 +7254,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7247,7 +7270,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7262,7 +7286,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7277,7 +7302,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7292,7 +7318,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7459,7 +7486,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7514,7 +7542,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7529,7 +7558,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },
@@ -7554,7 +7584,8 @@
     "tests/test_net_untrusted.py",
     "tests/test_pdf_engine.py",
     "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-    "tests/test_redteam_judge.py"
+    "tests/test_redteam_judge.py",
+    "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"
    ],
    "note": ""
   },

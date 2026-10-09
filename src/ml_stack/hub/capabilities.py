@@ -24,7 +24,7 @@ def _metadata(path):
             return {}
         found = json.loads(config.read_text())
         return found if isinstance(found, dict) else {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return {}
 
 

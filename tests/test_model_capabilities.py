@@ -60,3 +60,14 @@ def test_process_mode_uses_observed_arguments(monkeypatch, argv, embedding):
                                      'memory_info': None}, status=lambda: 'running')
     monkeypatch.setattr(process.psutil, 'process_iter', lambda *_: [instance])
     assert process.every_server()[0]['embedding'] is embedding
+
+
+def test_hostile_model_metadata_is_refused_without_a_crash(tmp_path):
+    config = tmp_path / 'config.json'
+    for content in ('[' * 500000, '{"a":' * 100000, json.dumps({'architectures': [1, None, {}], 'model_type': 7}),
+                    json.dumps({'padding': 'x' * (1 << 20)})):
+        config.write_text(content)
+        found = capabilities(tmp_path)
+        assert found['chat'] is None and allows_chat(found)
+    (tmp_path / 'broken.gguf').write_bytes(b'GGUF' + b'\xff' * 64)
+    assert allows_chat(capabilities(tmp_path / 'broken.gguf'))

@@ -1239,11 +1239,12 @@ note = "sealed replies must be bounded JSON objects and project capabilities can
 
 [[group]]
 match = ["parser:net/*", "parser:web.py", "parser:sources/html.py", "parser:taint/*",
-         "parser:guard/*", "parser:hub/modelfile.py"]
+         "parser:guard/*", "parser:hub/modelfile.py", "parser:hub/capabilities.py"]
 status = "covered"
 tests = ["tests/test_net_untrusted.py", "tests/test_pdf_engine.py",
          "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
-         "tests/test_redteam_judge.py"]
+         "tests/test_redteam_judge.py",
+         "tests/test_model_capabilities.py::test_hostile_model_metadata_is_refused_without_a_crash"]
 
 [[group]]
 match = ["parser:workspace/remote_host.py"]
