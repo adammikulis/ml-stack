@@ -314,31 +314,16 @@ rule that one award is never counted twice. The difference: the private pool tru
 paired it, the open market trusts nobody, so M2, M6 and redundant verification are required there and
 only "wanted" here. Keep one ledger; do not fork a "market reputation".
 
-## 9. Owner decisions, one question each, options ranked
+## 9. Owner decisions (2026-10-08)
 
-**Q1. What should a new, model-verified, project-granted agent start at?**
-1. L2: land to dev after one independent review (recommended; matches AGENTS.md and the principle).
-2. L1: edit in its own worktree only, until its first accepted review.
+Each decision records the option taken and the option rejected.
 
-**Q2. May review be relaxed for some changes at L3?**
-1. No relaxation; independent review stays on every landing, L3 only adds coordination (recommended until M1 and M7 exist).
-2. Docs-only and tests-only changes of a clean L3 identity may land with post-hoc review.
-
-**Q3. On a model upgrade within a family, what happens to level?**
-1. Keep standing; require one accepted task on the new model before L3 coordination (recommended).
-2. Keep standing completely.
-
-**Q4. Who may suspend automatically?**
-1. Rules suspend to L0 on security, tamper and forged-claim events and notify; the person lifts it (recommended).
-2. Rules only notify; a person or coordinator suspends.
-
-**Q5. Where does the external anchor for the signed heads live?**
-1. In the OS keystore under the person's gate, signed by a key agents cannot read (recommended; same floor as the reputation seal).
-2. In a separate append-only file in a path agents cannot write.
-
-**Q6. Should the coordinator role require L3 as well as the tier table?**
-1. Yes, with the person able to name the coordinator when nobody is L3 (recommended).
-2. No, keep tier-only eligibility and use the ledger only as the tie-break.
+- **Start level.** A new, model-verified, project-granted agent starts at L2 (land to dev after one independent review). Rejected: L1 (own worktree only until its first accepted review), because it makes every new agent wait for a review round before it is useful.
+- **L3 review.** No relaxation: independent review stays on every landing, and L3 adds coordination only. Revisit after the landing record (M1) and reviewer concentration (M7) exist. Rejected: post-hoc review of docs-only and tests-only changes, because tests can weaken guards and the checks that would catch it do not exist yet.
+- **Model upgrade.** An upgrade within a family keeps standing, and one accepted task on the new model is required before L3 coordination. Rejected: keeping standing completely, because an unproven model could coordinate at once.
+- **Automatic suspension.** Rules suspend to L0 on security, tamper and forged-claim events and notify; the person lifts it. Rejected: notify only, because a real forgery would keep acting until someone reacted.
+- **Head anchor.** The external anchor for signed heads lives in the OS keystore under the person's gate, signed by a key agents cannot read. Headless devices follow the passphrase-wrapped key file decision in docs/pool-encryption.md. Rejected: an append-only file in a path agents cannot write, because it rests on filesystem permissions a same-user process can often bypass.
+- **Coordinator eligibility.** L3 standing is preferred for the coordinator role, and a fresh pool needs no hand-named coordinator: when no eligible live agent is L3, the best eligible live main session by model tier coordinates (lowest tier of any vendor, subagents and unverified models stay ineligible), and the role passes to an L3 agent as soon as one exists. A person can still name a coordinator at any time. Rejected: requiring L3 with a hand-named first coordinator, and tier-only eligibility with the ledger as tie-break alone, because the first leaves a fresh pool without a coordinator and the second never prefers earned standing.
 
 ## 10. Proposed wording for AGENTS.md (not edited here)
 
