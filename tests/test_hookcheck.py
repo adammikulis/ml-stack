@@ -17,7 +17,7 @@ from ml_stack import doctor, hookcheck
 from ml_stack.checks import ask
 
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = ("pre-commit", "commit-msg", "pre-push", "post-merge", "claude-bash-guard")
+NAMES = ("pre-commit", "commit-msg", "pre-push", "post-merge", "post-commit", "claude-bash-guard")
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +167,7 @@ def test_the_doctor_finding_offers_only_the_installer_and_leaves_config_for_a_pe
 @pytest.fixture
 def session(tmp_path, repo):
     """The SessionStart hook of a repository that holds a copy of the real hook scripts."""
-    for name in ("claude-session-start", "workspace_hook.py"):
+    for name in ("claude-session-start", "workspace_hook.py", "tree_watch.py"):
         shutil.copy(ROOT / "scripts" / "hooks" / name, repo / "scripts" / "hooks" / name)
     (repo / "src").symlink_to(ROOT / "src")
     git(repo, "add", "scripts")

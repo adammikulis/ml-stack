@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 
+import tree_watch
 import workspace_hook
 
 
@@ -37,6 +38,8 @@ def main() -> int:
         workspace_hook.run(["ml-stack-workspace", "main-session", "--harness", "claude-code"],
                            "SessionStart", environment=environment)
         parts.append(print_board(environment))
+        parts.append(tree_watch.check("SessionStart", str(event.get("cwd") or ""), environment,
+                                      lead=environment.get("ML_STACK_WORKSPACE_AGENT", "")))
     parts.append(workspace_hook.hook_notice(environment))
     text = "\n\n".join(part for part in parts if part)
     if text:

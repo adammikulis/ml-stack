@@ -1,0 +1,13 @@
+#!/bin/sh
+# After a commit, tell the owner and the coordinator when this tree is too far ahead or behind, or has been forgotten.
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+here=$(cd "$(dirname "$self")" && pwd)
+"${PYTHON:-python3}" "$here/tree_watch.py" post-commit || true
+exit 0

@@ -14,7 +14,7 @@ from ml_stack.files import read_json, write_json
 
 __all__ = ["HOOKS", "Problem", "context", "digest", "inspect", "line", "remember", "remembered"]
 
-HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge")
+HOOKS = ("pre-commit", "commit-msg", "pre-push", "post-merge", "post-commit")
 SCRIPTS = "scripts/hooks"
 VERSION = 1
 LINE_LIMIT = 190

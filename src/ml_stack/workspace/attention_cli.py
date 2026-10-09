@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import time
+from pathlib import Path
 from typing import Any
 
 from ml_stack.command import flag
 from ml_stack.log import say
-from ml_stack.workspace import attention, landing
+from ml_stack.workspace import attention, landing, trees, trees_notice
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.screen import fence
 from ml_stack.workspace.service import Workspace
@@ -38,11 +40,20 @@ def inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     return [m for m in ws.inbox(token, False, 0, args.raw, True) if m["from"] in children]
 
 
+def tree_lines() -> list[str]:
+    """The orphan worktrees and the trees over a threshold of the repository this runs in; none outside a repository."""
+    try:
+        now = time.time()
+        return [*trees.lines(Path.cwd(), now), *trees_notice.status_lines(Path.cwd(), now)]
+    except (RuntimeError, OSError, ValueError):
+        return []
+
+
 def digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     """The digest, or with --status the coordinator's one-screen page of workers, claims and owed answers."""
     if not args.status:
         return ws.board.digest(token, args.ack, args.thread)
-    lines = [*attention.status_lines(ws, ws.auth(token).id), *landing.status_lines(ws)]
+    lines = [*attention.status_lines(ws, ws.auth(token).id), *landing.status_lines(ws), *tree_lines()]
     return {"authority": "none", "text": fence("\n".join(lines), "workspace:status",
                                                 "names and subjects written by agents").text}
 

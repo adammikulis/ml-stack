@@ -1,26 +1,43 @@
 #!/usr/bin/env python3
-"""Report each worktree against 0.2dev: commits ahead and behind, age, and what is over a limit.
+"""Every worktree with its owner and state, the orphans among them, and the one way to remove one.
 
-    worktrees [--target REV]
+    worktrees [--target REV]              report; exits 1 on a flagged tree or an orphan
+    worktrees close TREE --landed         remove a tree whose work is all in the development branch
+    worktrees close TREE --bundle         bundle its unlanded commits, verify the bundle, then remove
+    worktrees close TREE --abandon WHY    remove it on a recorded reason (dirty diff is saved first)
+    worktrees sweep                       close every landed tree whose owner is not active
+    worktrees scan [--owner NAME --here]  register unregistered trees (owner unknown); claim this one
+    worktrees claim TREE OWNER PURPOSE    register a tree created by OWNER
+    worktrees finish OWNER                mark OWNER's trees finished; prints debt, exits 1 when any
+    worktrees notify [--here] [--json]    the threshold and orphan notices due now (rate limited)
+    worktrees lead NAME                   record the coordinator that escalations go to
 
-Read-only. Exits 1 when any worktree is flagged, so it can gate a landing batch.
-Limits (AGENTS.md, "Branch hygiene and landing"): at most 10 commits, at most 30 ahead
-(split or land part before adding more), at most 20 behind, and a branch that is behind
-0.2dev has merged it within the last day.
+The report is the age/ahead/behind view against the development branch (the primary checkout's
+branch). Limits (AGENTS.md, "Branch hygiene and landing"): at most 10 commits, at most 30 ahead
+(split or land part before adding more), at most 20 behind, and a branch that is behind has
+merged the development branch within the last day. An orphan is a tree whose owner stopped and
+which is not landed, bundled or abandoned; see docs/worktrees.md. Removal by anything but
+``close`` or ``sweep`` is not a supported path.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import land_git as lg  # noqa: E402
+import land_git as lg
 
+from ml_stack.workspace import trees, trees_notice
+
+COMMANDS = ("close", "sweep", "scan", "claim", "finish", "notify", "lead")
 MAX_COMMITS = 10
 MAX_AHEAD = 30
 MAX_BEHIND = 20
@@ -68,18 +85,99 @@ def rows(root: Path, target: str, now: float) -> list[Row]:
     return found
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--target", default=lg.TARGET)
-    args = parser.parse_args(argv)
+def report(args: argparse.Namespace) -> int:
+    """The age/ahead/behind report, then the orphans, then the notice conditions."""
     root = lg.toplevel(Path.cwd())
-    found = rows(root, args.target, time.time())
+    now = time.time()
+    target = args.target or trees.development(trees.listing(root)[0][0])
+    trees.scan(root, now)
+    found = rows(root, target, now)
+    state = {r["path"]: r for r in trees.rows(root, now)}
     for row in found:
         mark = "FLAG" if row.flags else "ok  "
-        print(f"{mark} {row.branch}  +{row.ahead} -{row.behind}  {row.age_days:.1f}d  {row.path}")
+        seen = state.get(row.path, {})
+        print(f"{mark} {row.branch}  +{row.ahead} -{row.behind}  {row.age_days:.1f}d  {row.path}"
+              f"  [{seen.get('status', '?')} owner={seen.get('owner', '?')} dirty={seen.get('dirty', 0)}]")
         for flag in row.flags:
             print(f"       {flag}")
-    return 1 if any(r.flags for r in found) else 0
+    orphan = trees.lines(root, now, 50)
+    for text in [*orphan, *trees_notice.status_lines(root, now)]:
+        print(text)
+    return 1 if any(r.flags for r in found) or orphan else 0
+
+
+def command(argv: list[str]) -> int:
+    """Run one of the registry commands."""
+    parser = argparse.ArgumentParser(prog="worktrees")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    close = sub.add_parser("close")
+    close.add_argument("tree")
+    how = close.add_mutually_exclusive_group(required=True)
+    how.add_argument("--landed", action="store_true")
+    how.add_argument("--bundle", action="store_true")
+    how.add_argument("--abandon", metavar="REASON")
+    sub.add_parser("sweep")
+    scan = sub.add_parser("scan")
+    scan.add_argument("--owner", default="")
+    scan.add_argument("--here", action="store_true")
+    mine = sub.add_parser("claim")
+    mine.add_argument("tree")
+    mine.add_argument("owner")
+    mine.add_argument("purpose", nargs="?", default="")
+    mine.add_argument("--pid", type=int, default=0)
+    done = sub.add_parser("finish")
+    done.add_argument("owner")
+    tell = sub.add_parser("notify")
+    tell.add_argument("--here", action="store_true")
+    tell.add_argument("--owner", default="")
+    tell.add_argument("--json", action="store_true")
+    sub.add_parser("lead").add_argument("name")
+    args = parser.parse_args(argv)
+    root, now = lg.toplevel(Path.cwd()), time.time()
+    caller = os.environ.get("ML_STACK_WORKSPACE_AGENT", "")
+    name = getattr(args, "owner", "") or caller
+    claim = (name, root) if getattr(args, "here", False) and name else None
+    try:
+        return run(args, root, now, (caller, claim))
+    except (trees.Refused, RuntimeError) as error:
+        print(f"worktrees: {error}", file=sys.stderr)
+        return 2
+
+
+def run(args: argparse.Namespace, root: Path, now: float, who: tuple[str, tuple[str, Path] | None]) -> int:
+    """Dispatch a parsed registry command for ``who`` = (caller, claim)."""
+    caller, claim = who
+    if args.cmd == "close":
+        mode = "landed" if args.landed else "bundle" if args.bundle else "abandon"
+        print(json.dumps(trees.close(root, args.tree, (mode, args.abandon or ""), now, caller)))
+    elif args.cmd == "sweep":
+        for done in trees.sweep(root, now):
+            print(f"swept {done['path']} ({done['branch']})")
+    elif args.cmd == "scan":
+        trees.rows(root, now, claim)
+    elif args.cmd == "claim":
+        trees.claim(root, args.tree, args.owner, now, {"purpose": args.purpose, "pid": args.pid})
+    elif args.cmd == "finish":
+        debt = trees.finish(root, args.owner, now)
+        for row in debt:
+            print(trees.line(row, now))
+        return 1 if debt else 0
+    elif args.cmd == "notify":
+        notes = trees_notice.notify(root, now, claim, True)
+        for note in notes:
+            print(json.dumps({"to": note.to, "text": note.text, "path": note.path}) if args.json else note.text)
+    else:
+        trees.set_lead(root, args.name)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args and args[0] in COMMANDS:
+        return command(args)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--target", default="")
+    return report(parser.parse_args(args))
 
 
 if __name__ == "__main__":

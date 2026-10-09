@@ -7,6 +7,7 @@ import json
 import os
 import time
 
+import tree_watch
 import workspace_hook
 
 EVERY_S = 600.0
@@ -40,6 +41,8 @@ def main() -> int:
         return 0
     done = workspace_hook.run(["ml-stack-workspace", "attention"], "Attention", environment=environment)
     text = done.stdout.strip() if done else ""
+    orphans = tree_watch.check("Attention", str(event.get("cwd") or ""), environment)
+    text = "\n\n".join(part for part in (text, orphans) if part)
     if text:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event.get("hook_event_name") or "UserPromptSubmit",
                                                  "additionalContext": text[:4000]}}))

@@ -15,7 +15,9 @@ every session (and after a week) with the `CronCreate` tool: a recurring job at 
 
 > Heartbeat. Read the lead's queue and log (the scratch queue file, or HANDOFF.md if there is none), then:
 > (1) read the inbox (`ml-stack-workspace inbox --agent <lead>`) and answer what is addressed to you;
-> (2) check which workers have reported or gone idle and which branch is ready; (3) land the next ready
+> (2) check which workers have reported or gone idle and which branch is ready, and run
+> `scripts/worktrees` (exit 1 means an orphan tree or one over a limit: land, bundle or abandon each with
+> `scripts/worktrees close`, never by removing it by hand); (3) land the next ready
 > branch before anything else: rebase, verify the exact commit, fast-forward, push; (4) resume or brief
 > workers for the next item; (5) append one line to the log. If nothing needs doing, end with one line and
 > do nothing else.

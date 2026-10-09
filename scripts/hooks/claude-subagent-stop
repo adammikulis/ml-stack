@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import tree_watch
 import workspace_hook
 
 
@@ -51,6 +52,7 @@ def main() -> int:
         workspace_hook.run(["ml-stack-workspace", "whoami", "--model", model, "--harness", "claude-code"],
                            "SubagentStop", environment=environment)
     place = checkout_note(event)
+    tree_watch.stopped("SubagentStop", str(event.get("cwd") or ""), environment)
     said = workspace_hook.run(["ml-stack-workspace", "announce", "done", f"finished{place}"[:200]],
                               "SubagentStop", environment=environment)
     if said is None:
