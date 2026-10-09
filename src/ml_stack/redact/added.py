@@ -13,6 +13,8 @@ HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 def added_lines(root: str | None, path: str, against: str | None = None) -> set[int]:
     """The 1-based line numbers of ``path`` that the staged change adds, or, with ``against``, that
     ``HEAD`` adds over that revision. A new file adds every line. A pure deletion adds none."""
+    if against and against.startswith("-"):
+        raise ValueError(f"not a revision: {against!r}")
     command = (["diff", "-U0", "--no-renames", f"{against}...HEAD", "--", path] if against
                else ["diff", "--cached", "-U0", "--no-renames", "--", path])
     done = subprocess.run(["git", *command], cwd=root or None, capture_output=True, text=True,
