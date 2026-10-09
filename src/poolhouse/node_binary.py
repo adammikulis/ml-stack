@@ -11,8 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from poolhouse.platform import is_windows
 from poolhouse.files import read_json, write_json, writing
+from poolhouse.platform import is_windows
 from poolhouse.runtime_store import MARK
 
 DIRECTORY = "node"

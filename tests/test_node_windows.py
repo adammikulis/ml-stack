@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from poolhouse import (
-    features,
     lock,
     node_binary,
     node_health,
