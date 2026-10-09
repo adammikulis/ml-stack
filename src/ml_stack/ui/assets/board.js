@@ -320,7 +320,8 @@ class MlBoard extends MlElement {
     renderFeed(this, this.pane());
     const controls = pageControls(this);
     this.history.replaceChildren(...(controls ? [controls] : []));
-    const key = JSON.stringify([this.target(), this.readonly, this.draft.error]);
+    // the draft a conversation was opened with decides the composer too: one built before it was read is stale
+    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, this.draftKey]);
     if (key !== this.composerKey) {
       this.composerKey = key;
       const node = this.composer();
