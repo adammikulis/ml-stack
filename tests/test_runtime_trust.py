@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import runtime, runtime_deploy, runtime_store, runtime_trust
+from ml_stack import keystore, runtime, runtime_deploy, runtime_store, runtime_trust
 from ml_stack.activity import writer
 from ml_stack.activity.schema import Entry
 
@@ -84,6 +84,9 @@ def world(tmp_path, monkeypatch):
     made = World(tmp_path, monkeypatch)
     before = keyring.get_keyring()
     keyring.set_keyring(FileKeyring())
+    # A person makes the master key once (`unlock`); an agent-marked child never may, so the
+    # sealed activity writer in the child finds it here instead of refusing and leaving no record.
+    keystore.default().provision()
     yield made
     keyring.set_keyring(before)
 
@@ -100,6 +103,13 @@ def test_a_refused_deploy_leaves_an_audit_record(world):
     assert (entry.subject, entry.outcome, entry.meta["command"]) == (world.evil[:12] if False else world.evil, "refused", "ensure")
     assert entry.meta["agent"] == "worker-1" and entry.meta["person"] is False
     assert "development branch" in entry.meta["detail"] and entry.actor == "agent:worker-1"
+
+
+def test_an_agent_child_never_makes_the_master_key_for_its_audit(world):
+    world.keyring.unlink()
+    done = world.cli("ensure", "--ref", world.evil, "--agent", "worker-1")
+    assert done.returncode == 1 and "not on the development branch" in done.stderr
+    assert not world.keyring.exists(), "an agent-marked process made the encryption key itself"
 
 
 def test_a_commit_before_the_tip_is_admitted_and_one_beside_it_is_not(world):
