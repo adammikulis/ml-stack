@@ -93,7 +93,7 @@ def assign(ws, token, worker, task, lease_id):
 
 def verified_binding(ws, worker, task, allocation_id, *, status=None):
     """Verify a persisted assignment against the broker's current live holder and enrollment."""
-    with GraphStore(ws.base / "coordination.db") as graph:
+    with GraphStore(ws.base / "coordination.db", read_only=True) as graph:
         allocation = next((node["attrs"] for node in graph.nodes("allocation")
                            if node["id"] == allocation_id), None)
     if not allocation or allocation["worker"] != worker or allocation["task"] != task:

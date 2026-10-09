@@ -79,14 +79,23 @@ def remember(base: Path, owner: str, label: str, path: str) -> None:
     development = repo.git(primary, 'branch', '--show-current') if primary else ''
     value = {'owner': owner, 'label': label, 'path': str(checkout),
              'primary': str(primary) if primary else '', 'branch': branch, 'development': development}
-    with _storage(base, write=True) as graph:
+    def merged(graph) -> tuple[dict, dict]:
         previous = next((row['attrs'] for row in graph.nodes('worktree-lifecycle') if row['id'] == key), {})
+        wanted = dict(value)
         if not found and previous.get('primary'):
-            value.update({name: previous[name] for name in ('primary', 'branch', 'development')})
+            wanted.update({name: previous[name] for name in ('primary', 'branch', 'development')})
         branches = sorted(set(previous.get('branches', [])) | ({branch} if branch else set()))
         commits = sorted(set(previous.get('commits', [])) | ({commit} if commit else set()))
-        graph.upsert_node({'id': key, 'kind': 'worktree-lifecycle', 'label': label,
-                           'attrs': {**value, 'branches': branches, 'commits': commits}})
+        return previous, {**wanted, 'branches': branches, 'commits': commits}
+
+    if (base / 'worktree-lifecycle.db').exists():
+        with _storage(base) as graph:
+            previous, attrs = merged(graph)
+        if previous == attrs:
+            return                    # already recorded: the checkpoint rewrite is the whole cost
+    with _storage(base, write=True) as graph:
+        attrs = merged(graph)[1]
+        graph.upsert_node({'id': key, 'kind': 'worktree-lifecycle', 'label': label, 'attrs': attrs})
 
 
 def checkpoint(base: Path, owner: str) -> None:
