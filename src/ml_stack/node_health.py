@@ -60,7 +60,10 @@ def _read(recv: Callable[[int], bytes], count: int) -> bytes:
 
 
 def _exchange_socket(state: Path, frame: bytes, timeout: float) -> bytes:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
+    family = getattr(socket, "AF_UNIX", None)
+    if family is None:  # Windows without the `windows-node` feature: no node can answer here
+        raise OSError("this Python has no Unix sockets; on Windows the node needs the windows-node feature")
+    with socket.socket(family, socket.SOCK_STREAM) as stream:
         stream.settimeout(timeout)
         stream.connect(str(socket_path(state)))
         stream.sendall(frame)
