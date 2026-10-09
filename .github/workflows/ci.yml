@@ -257,7 +257,9 @@ jobs:
   # being made, on a machine that always has the [privacy] extra.
   privacy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A promotion pull request carries a release's worth of files (2000 in 0.2.3) and the
+    # recogniser reads each; 10 minutes cancelled it.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
