@@ -1,0 +1,223 @@
+//! The view of a board: merged rows turned into entries through explicit field allow-lists.
+//!
+//! A row from another device is never trusted for what it says about itself: only the fields
+//! named here are copied, each checked for type and size, and the sender is the log's actor,
+//! shown as `actor@dN`.
+
+use std::collections::BTreeMap;
+
+use serde_json::{Map, Value};
+
+use crate::error::{Error, Result};
+use crate::row::{is_line, valid_actor, valid_name, Kind, Row};
+
+pub const GENERAL: &str = "#general";
+pub const ANNOUNCE: &str = "#announcements";
+const MESSAGE_TYPES: [&str; 9] = ["task", "status", "handoff", "question", "answer", "claim", "release", "note", "file"];
+const ANNOUNCE_TYPES: [&str; 4] = ["joined", "milestone", "done", "blocked"];
+const NOTE_KINDS: [&str; 4] = ["decision", "rule", "fact", "question"];
+const MESSAGE_KEYS: [&str; 7] = ["type", "from", "to", "subject", "body", "reply_id", "thread_id"];
+const NOTE_KEYS: [&str; 6] = ["nkind", "title", "body", "source", "tags", "author"];
+const IDENTITY_KEYS: [&str; 3] = ["name", "parent", "family"];
+const CLAIM_KEYS: [&str; 3] = ["target", "action", "note"];
+const AUDIT_KEYS: [&str; 3] = ["event", "subject", "detail"];
+pub const BODY_BYTES: usize = 64 * 1024;
+const NOTES_PER_SENDER: usize = 200;
+
+/// One entry as clients see it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    pub id: String,
+    pub origin: String,
+    pub seq: u64,
+    pub hlc: (u64, u64),
+    pub kind: Kind,
+    pub sender: String,
+    pub foreign: bool,
+    pub channel: String,
+    pub fields: Map<String, Value>,
+}
+
+/// What a fold needs to know about the device it runs on.
+pub struct Context<'a> {
+    pub own_origin: &'a str,
+    /// The `dN` label of a foreign origin.
+    pub label: &'a mut dyn FnMut(&str) -> String,
+    /// Whether a name is registered on this board here.
+    pub is_local: &'a dyn Fn(&str) -> bool,
+}
+
+/// The channel a kind of entry belongs to, the unit a board link names.
+pub fn channel_of(kind: Kind, fields: &Map<String, Value>) -> String {
+    match kind {
+        Kind::Message => fields.get("to").and_then(Value::as_str).unwrap_or(GENERAL).to_string(),
+        Kind::Note => "#notes".into(),
+        Kind::Claim => "#claims".into(),
+        Kind::Identity => "#identity".into(),
+        Kind::Audit => "#audit".into(),
+        _ => "#other".into(),
+    }
+}
+
+fn reject<T>(why: &str) -> Result<T> {
+    Err(Error::Invalid(why.into()))
+}
+
+fn only(body: &Value, allowed: &[&str]) -> Result<Map<String, Value>> {
+    let map = body.as_object().ok_or_else(|| Error::Invalid("body is not an object".into()))?;
+    match map.keys().find(|k| !allowed.contains(&k.as_str())) {
+        Some(k) => reject(&format!("unknown field {}", k.chars().filter(|c| !c.is_control()).take(40).collect::<String>())),
+        None => Ok(map.clone()),
+    }
+}
+
+fn text<'a>(map: &'a Map<String, Value>, key: &str, most: usize, required: bool) -> Result<&'a str> {
+    match map.get(key) {
+        None if !required => Ok(""),
+        Some(Value::String(s)) if s.len() <= most => Ok(s),
+        _ => reject(&format!("{key} is not text within {most} bytes")),
+    }
+}
+
+fn line<'a>(map: &'a Map<String, Value>, key: &str, most: usize) -> Result<&'a str> {
+    let value = text(map, key, most, false)?;
+    if is_line(value) { Ok(value) } else { reject(&format!("{key} is not one clean line")) }
+}
+
+fn sender(row: &Row, declared: Option<&Value>, ctx: &mut Context, foreign: bool) -> Result<String> {
+    if declared.is_some_and(|d| d.as_str() != Some(row.actor.as_str())) || !valid_actor(&row.actor) {
+        return reject("the sender is not the actor of the log");
+    }
+    if !foreign {
+        return Ok(row.actor.clone());
+    }
+    if (ctx.is_local)(&row.actor) {
+        return reject("the sender is named like a local session");
+    }
+    Ok(format!("{}@{}", row.actor, (ctx.label)(&row.origin)))
+}
+
+fn message(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let mut map = only(&row.body, &MESSAGE_KEYS)?;
+    let who = sender(row, map.get("from"), ctx, foreign)?;
+    let (to, kind) = (text(&map, "to", 64, true)?.to_string(), text(&map, "type", 32, true)?.to_string());
+    let announce = to == ANNOUNCE;
+    if !(to == GENERAL && MESSAGE_TYPES.contains(&kind.as_str()) || announce && ANNOUNCE_TYPES.contains(&kind.as_str())) {
+        return reject("the post is not an announcement or a #general message");
+    }
+    line(&map, "subject", 200)?;
+    text(&map, "body", BODY_BYTES, true)?;
+    for link in ["reply_id", "thread_id"] {
+        line(&map, link, 128)?;
+    }
+    map.remove("from");
+    Ok((who, map))
+}
+
+fn note(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let mut map = only(&row.body, &NOTE_KEYS)?;
+    let who = sender(row, map.get("author"), ctx, foreign)?;
+    if !NOTE_KINDS.contains(&text(&map, "nkind", 16, true)?) {
+        return reject("the note kind is unknown");
+    }
+    line(&map, "title", 200)?;
+    text(&map, "body", BODY_BYTES, true)?;
+    line(&map, "source", 300)?;
+    match map.get("tags") {
+        None => {}
+        Some(Value::Array(tags)) if tags.len() <= 10 && tags.iter().all(|t| t.as_str().is_some_and(|s| s.len() <= 40 && is_line(s))) => {}
+        _ => return reject("tags are at most ten short words"),
+    }
+    map.remove("author");
+    Ok((who, map))
+}
+
+fn identity(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let map = only(&row.body, &IDENTITY_KEYS)?;
+    let who = sender(row, map.get("name"), ctx, foreign)?;
+    if !valid_name(text(&map, "name", 48, true)?) || line(&map, "family", 16)?.is_empty() {
+        return reject("an identity names a session and its family");
+    }
+    if !line(&map, "parent", 48)?.is_empty() && !valid_name(text(&map, "parent", 48, true)?) {
+        return reject("the parent is not a session name");
+    }
+    Ok((who, map))
+}
+
+fn claim(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let map = only(&row.body, &CLAIM_KEYS)?;
+    let who = sender(row, None, ctx, foreign)?;
+    if line(&map, "target", 200)?.is_empty() || !matches!(text(&map, "action", 8, true)?, "claim" | "release") {
+        return reject("a claim names a target and claims or releases it");
+    }
+    line(&map, "note", 200)?;
+    Ok((who, map))
+}
+
+fn audit(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let map = only(&row.body, &AUDIT_KEYS)?;
+    let who = sender(row, None, ctx, foreign)?;
+    for key in AUDIT_KEYS {
+        line(&map, key, 300)?;
+    }
+    Ok((who, map))
+}
+
+fn entry(row: &Row, ctx: &mut Context) -> Result<Entry> {
+    let foreign = row.origin != ctx.own_origin;
+    let (who, fields) = match row.kind {
+        Kind::Message => message(row, ctx, foreign)?,
+        Kind::Note => note(row, ctx, foreign)?,
+        Kind::Identity => identity(row, ctx, foreign)?,
+        Kind::Claim => claim(row, ctx, foreign)?,
+        Kind::Audit => audit(row, ctx, foreign)?,
+        _ => return reject("this kind of entry is not accepted yet"),
+    };
+    Ok(Entry {
+        id: row.id(), origin: row.origin.clone(), seq: row.seq, hlc: (row.hlc.0, row.hlc.1), kind: row.kind,
+        sender: who, foreign, channel: channel_of(row.kind, &fields), fields,
+    })
+}
+
+/// Fold merged rows into entries; rows that cannot be folded come back with the reason.
+pub fn fold(rows: &[Row], mut ctx: Context) -> (Vec<Entry>, Vec<(String, String)>) {
+    let (mut entries, mut rejected) = (Vec::new(), Vec::new());
+    let mut notes: BTreeMap<String, usize> = BTreeMap::new();
+    for row in rows {
+        match entry(row, &mut ctx) {
+            Ok(e) if e.kind == Kind::Note && e.foreign && {
+                let n = notes.entry(e.sender.clone()).or_default();
+                *n += 1;
+                *n > NOTES_PER_SENDER
+            } => rejected.push((row.id(), "the sender has written as many notes as it may".into())),
+            Ok(e) => entries.push(e),
+            Err(why) => rejected.push((row.id(), why.to_string())),
+        }
+    }
+    (entries, rejected)
+}
+
+/// Check the body of a row about to be written locally, with the same rules a peer applies.
+pub fn check_local(kind: Kind, actor: &str, body: &Value, own_origin: &str) -> Result<()> {
+    let row = Row {
+        v: 1, board: String::new(), origin: own_origin.into(), seq: 0, prev: String::new(), hlc: (0, 0, own_origin.into()),
+        kind, actor: actor.into(), idem: String::new(), body: body.clone(), hash: String::new(),
+    };
+    let mut label = |_: &str| "d0".to_string();
+    let none = |_: &str| false;
+    entry(&row, &mut Context { own_origin, label: &mut label, is_local: &none }).map(|_| ())
+}
+
+/// Who holds each claim target after the entries, first claim in the total order wins.
+pub fn holders(entries: &[Entry]) -> BTreeMap<String, String> {
+    let mut held: BTreeMap<String, String> = BTreeMap::new();
+    for e in entries.iter().filter(|e| e.kind == Kind::Claim) {
+        let target = e.fields.get("target").and_then(Value::as_str).unwrap_or("").to_string();
+        match e.fields.get("action").and_then(Value::as_str) {
+            Some("claim") => { held.entry(target).or_insert_with(|| e.sender.clone()); }
+            Some("release") if held.get(&target) == Some(&e.sender) => { held.remove(&target); }
+            _ => {}
+        }
+    }
+    held
+}

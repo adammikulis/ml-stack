@@ -193,7 +193,7 @@ jobs:
               case "$file" in
                 "") ;;
                 *.md|docs/*) ;;
-                pyproject.toml|app/src-tauri/Cargo.toml) ;;
+                pyproject.toml|app/src-tauri/Cargo.toml|app/poolside-node/Cargo.toml) ;;
                 *) return 0 ;;
               esac
             done < <(git show --name-only --pretty=format: "$1")
