@@ -70,7 +70,7 @@ jobs:
           python-version: "3.13"
       - name: cargo audit
         run: |
-          cargo install cargo-audit --locked --version 0.21.2
+          cargo install cargo-audit --locked --version 0.22.2
           cargo audit --file app/src-tauri/Cargo.lock --json > cargo-audit.json || true
           cargo audit --file app/src-tauri/Cargo.lock 2>&1 | tee cargo-audit.txt || true
           { echo '### cargo audit'; echo '```'; cat cargo-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

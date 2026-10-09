@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 from taskboard_kit import board, proposed
 from test_fleet_ui import Serving
 

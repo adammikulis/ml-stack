@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 from test_fleet_ui import Serving
 
 from ml_stack.scrape.browser import Window, browser

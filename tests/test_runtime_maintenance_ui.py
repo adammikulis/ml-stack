@@ -1,7 +1,7 @@
 """Healthy chat stays clear while advanced Maintenance reaches runtime repair."""
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 from rail import reach
 from test_fleet_ui import Serving
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import runpy
 import shutil
 import subprocess
@@ -95,14 +96,22 @@ def _telemetry_metadata(wheel: Path) -> None:
         raise SystemExit('telemetry wheel must provide metal-smi>=1.1.0')
 
 
-def built_from() -> Path:
-    """Write the current commit marker into the build directory."""
-    sys.path.insert(0, str(ROOT / "src"))
-    from ml_stack.fleet.measuring import BUILT_FROM, installed_commit
+def built_from(python: Path) -> Path:
+    """Write the current commit marker into the build directory.
 
-    where = ROOT / ".build-work" / BUILT_FROM
+    Asked of the build venv's interpreter, which has ml-stack's dependencies; the
+    interpreter running this script has none, and importing the package there fails.
+    """
+    probe = ("from ml_stack.fleet.measuring import BUILT_FROM, installed_commit;"
+             "print(BUILT_FROM);print(installed_commit())")
+    done = subprocess.run([str(python), "-c", probe], cwd=ROOT, capture_output=True, text=True,
+                          env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
+    if done.returncode != 0:
+        raise SystemExit(f"could not read the commit marker: {done.stderr.strip()}")
+    name, _, commit = done.stdout.partition("\n")
+    where = ROOT / ".build-work" / name
     where.parent.mkdir(parents=True, exist_ok=True)
-    where.write_text(installed_commit() + "\n", encoding="utf-8")
+    where.write_text(commit.strip() + "\n", encoding="utf-8")
     return where
 
 
@@ -118,7 +127,7 @@ def daemon() -> Path:
     run([str(pip), "install", "-q", "--find-links", str(DIST),
          "ml-stack[agents,hub,fleet-onboard,coordinator]"])
 
-    built_from()
+    built_from(env / ("Scripts" if sys.platform == "win32" else "bin") / ("python.exe" if sys.platform == "win32" else "python"))
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
     run([str(tool), "--clean", "--noconfirm", "--distpath", str(DIST / "bundle"),
          "--workpath", str(ROOT / ".build-work"), "ml-stack.spec"],

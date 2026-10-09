@@ -13,6 +13,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ml_stack.client import families
 from ml_stack.client.families import Family
@@ -56,7 +57,7 @@ def parse_url(base_url: str, api: str | None) -> tuple[str, str, str | None]:
         url = f"http://{host}"
         model = tag or None
         api = api or "ollama"
-    elif "api.openai.com" in url:
+    elif urlsplit(url).hostname == "api.openai.com":
         api = api or "openai"
     api = api or "llama"
     if api not in APIS:

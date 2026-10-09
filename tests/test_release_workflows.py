@@ -261,11 +261,17 @@ def setups() -> list[dict[str, Any]]:
 
 @pytest.mark.parametrize("step", setups(), ids=lambda s: str(s.get("with", {}).get(
     "python-version", "?")))
-def test_every_job_caches_the_packages_it_installs(step):
-    """Every job installs the same set; without a cache each one downloads torch again."""
+def test_no_job_that_checks_out_a_caller_ref_shares_a_package_cache(step):
+    """CodeQL's cache-poisoning rule: ``ref: inputs.ref`` on a dispatch runs untrusted code in
+    the default branch's context, and a cache it saved would be restored by trusted jobs."""
     with_ = step.get("with") or {}
-    assert with_.get("cache") == "pip"
-    assert with_.get("cache-dependency-path") == "pyproject.toml"
+    assert "cache" not in with_
+    assert "cache-dependency-path" not in with_
+
+
+def test_the_bundle_job_keeps_no_rust_cache():
+    uses = [str(s.get("uses", "")) for s in BUILD["jobs"]["bundle"]["steps"]]
+    assert not any(u.startswith("Swatinem/rust-cache@") for u in uses)
 
 
 def bundle_runs() -> list[str]:

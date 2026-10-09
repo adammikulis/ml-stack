@@ -503,3 +503,11 @@ def test_the_chat_has_no_flag_that_answers_for_the_person():
 
 def test_nothing_in_chat_names_a_file_outside_the_state_root(tmp_path):
     assert Path(chat.Session.folder()).is_relative_to(tmp_path)
+
+
+def test_a_host_that_only_contains_the_openai_name_is_not_openai():
+    from ml_stack.client.chat import parse_url
+
+    assert parse_url("https://api.openai.com/v1", None)[1] == "openai"
+    assert parse_url("https://api.openai.com.evil.example/v1", None)[1] == "llama"
+    assert parse_url("http://evil.example/api.openai.com", None)[1] == "llama"

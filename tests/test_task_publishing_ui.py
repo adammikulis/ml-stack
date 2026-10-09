@@ -1,7 +1,7 @@
 """The assembled Tasks page exposes publishing evidence without offering new authority."""
 
 import pytest
-from playwright.sync_api import expect
+from browser_expect import expect
 from test_fleet_ui import Serving
 
 pytestmark = pytest.mark.slow
