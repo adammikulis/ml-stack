@@ -7,11 +7,13 @@ from pathlib import Path
 
 from ml_stack.ui import Component, assemble, load
 
+from . import vocabulary
+
 WEB = Path(__file__).parent / "web"
 COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
-COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "launch-needed", "startup-models", "cluster-actions", "first-run", "fleet-benchmark", "cluster-view",
-              "chat-stream", "chat-markdown", "chat-view", "coordinator-control", "board-view", "projects-view", "wired-memory", "models-library", "model-browser", "models-view", "theme-editor", "settings-view", "fit-model", "fit-view",
+COMPONENTS = ("fleet-model", "vocabulary-model", "fleet-nav", "sign-in", "launch-needed", "startup-models", "cluster-actions", "first-run", "fleet-benchmark", "cluster-view",
+              "chat-stream", "chat-markdown", "chat-view", "coordinator-control", "board-view", "projects-view", "wired-memory", "models-library", "model-browser", "models-view", "theme-editor", "vocabulary-settings", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view",
               "workspace-jobs", "history-view", "tasks-view", "data-view", "knowledge-view",
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",
@@ -50,4 +52,5 @@ def components(names: Sequence[str | Component] = COMPONENTS) -> list[Component]
 def render(parts: Sequence[str | Component] = COMPONENTS) -> str:
     """The whole page, as one string."""
     shell = (WEB / "shell.html").read_text(encoding="utf-8")
-    return assemble(shell, components(parts))
+    page = assemble(shell, components(parts))
+    return page.replace("__VOCABULARY_DATA__", vocabulary.payload()).replace("__VOCAB__", vocabulary.default_vocabulary())

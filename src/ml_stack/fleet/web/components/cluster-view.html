@@ -33,7 +33,7 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
 <!-- cluster-view: the machines on this network, the clusters this one is in, and a sweep across them -->
 <template>
   <main id="cluster" hidden>
-    <header class="pool-heading"><div><h1>Devices</h1><p class="sub" id="cluster-sub"></p></div></header>
+    <header class="pool-heading"><div><h1 data-t="devices.title">Devices</h1><p class="sub" id="cluster-sub"></p></div></header>
     <div class="stat" id="cluster-stat"></div>
     <div class="pool-layout">
       <section aria-label="Pool devices"><div id="cluster-cards"></div><section class="pool-jobs"><h2>Jobs on this device</h2><p class="hint">Training and tool jobs managed by this device. Each device card shows its pool slot usage.</p><workspace-jobs></workspace-jobs></section></section>
@@ -163,6 +163,7 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
         document.querySelector("settings-view").selectSection("compute");
       };
       this.sweep = { models: new Set(), peers: new Set(), sample: "", label: "", note: "" };
+      window.addEventListener("vocabulary-change", () => { if (!this.box.hidden) this.draw(); });
       M.onRoute((route) => {
         const on = route === "cluster";
         this.box.hidden = !on;
@@ -182,7 +183,7 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
       const busy = peers.reduce((a, p) => a + ((p.slots || 1) - (p.free ?? (p.busy ? 0 : (p.slots || 1)))), 0);
 
       this.querySelector("#cluster-sub").textContent =
-        peers.length === 1 ? "One device ready to share compute." : `${peers.length} devices sharing compute in this pool.`;
+        peers.length === 1 ? M.t("devices.sub_one") : M.t("devices.sub_many", { n: peers.length });
       const paused = peers.filter((p) => ((p.device || {}).availability || {}).paused);
       this.drawPause(peers.length, paused.length);
       this.querySelector("#cluster-stat").replaceChildren(
@@ -202,7 +203,7 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
         alone
           ? el("div", { class: "empty" },
               el("div", { class: "big" }, "Your pool starts here"),
-              el("div", {}, "Install Poolside on another device to add its spare compute."),
+              el("div", {}, "Install Poolhouse on another device to add its spare compute."),
               el("div", {}, "Dev connects trusted devices automatically. You can also pair manually below."))
           : null));
 
@@ -259,9 +260,9 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
         note.replaceChildren(this.pauseNote);
         this.draw();
       };
-      const stop = el("button", { class: "ghost small" }, "Pause pool");
+      const stop = el("button", { class: "ghost small", title: M.plain("action.pause") }, M.t("action.pause"));
       stop.onclick = () => send(false, stop);
-      const go = el("button", { class: "ghost small" }, "Resume pool");
+      const go = el("button", { class: "ghost small", title: M.plain("action.resume") }, M.t("action.resume"));
       go.onclick = () => send(true, go);
 
       this.querySelector("#cluster-pause").replaceChildren(
@@ -303,7 +304,7 @@ cluster-view .url,cluster-view .name,cluster-view .loaded-models { overflow-wrap
                 body: JSON.stringify({ group: c.group }) });
               if (left.error || left.ok === false) { joined.append(el("div", { class: "err", role: "alert" }, left.error || "Could not leave this pool.")); return; }
               await refresh();
-            } }, "Leave"))) : [el("div", { class: "hint" }, "No pool joined.")]),
+            }, title: M.plain("action.leave") }, M.t("action.leave")))) : [el("div", { class: "hint" }, "No pool joined.")]),
         M.clusterForm({ endpoint: "/ui/clusters", groups: rows.map(c => c.group), group: rows[0]?.group || "default", onComplete: refresh }));
     }
 

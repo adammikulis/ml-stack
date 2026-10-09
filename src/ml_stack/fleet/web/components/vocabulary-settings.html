@@ -1,0 +1,40 @@
+<!-- vocabulary-settings: the Developer section of Settings -- flip the vocabulary, live -->
+<style>
+vocabulary-settings { display:block; }
+vocabulary-settings fieldset { border:1px solid var(--line); border-radius:var(--radius); padding:14px 18px 16px; margin:0 0 18px; min-width:0; }
+vocabulary-settings legend { font-weight:750; padding:0 8px; }
+vocabulary-settings .choice-row { display:flex; gap:12px; flex-wrap:wrap; }
+vocabulary-settings label.pick { display:flex; align-items:flex-start; gap:10px; flex:1 1 240px; margin:0; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg-sunken); color:var(--text); cursor:pointer; }
+vocabulary-settings label.pick:has(input:checked) { border-color:var(--accent-ink); box-shadow:0 0 0 2px var(--accent-ink) inset; }
+vocabulary-settings label.pick:has(input:focus-visible) { outline:3px solid var(--accent-ink); outline-offset:2px; }
+vocabulary-settings label.pick input { margin-top:4px; }
+vocabulary-settings label.pick b { display:block; }
+vocabulary-settings label.pick small { display:block; color:var(--muted); font-weight:400; margin-top:2px; line-height:1.45; }
+vocabulary-settings .env { font-size:.85rem; color:var(--muted); }
+vocabulary-settings .env code { margin:0 6px; }
+</style>
+<script>
+(function () {
+  const M = window.fleetModel, el = M.el;
+  const OPTIONS = [["professional", "dev.vocab_professional", "dev.vocab_professional_body"],
+    ["friendly", "dev.vocab_friendly", "dev.vocab_friendly_body"]];
+  class VocabularySettings extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      const row = el("div", { class: "choice-row" }, OPTIONS.map(([value, titleKey, bodyKey]) => {
+        const input = el("input", { type: "radio", name: "vocab", value, checked: value === M.vocab });
+        input.onchange = () => M.setVocab(value);
+        return el("label", { class: "pick" }, input, el("span", {}, el("b", { "data-t": titleKey }), el("small", { "data-t": bodyKey })));
+      }));
+      this.append(el("header", {}, el("h2", { "data-t": "dev.heading" }), el("p", { class: "hint", "data-t": "dev.hint" })),
+        el("fieldset", {}, el("legend", { "data-t": "dev.vocab" }), row),
+        el("p", { class: "env" }, el("span", { "data-t": "dev.how" }), " ", el("code", {}, "?vocab="), " ", el("code", {}, "ML_STACK_UI_VOCAB")));
+      window.addEventListener("vocabulary-change", () => {
+        for (const input of this.querySelectorAll("input[name=vocab]")) input.checked = input.value === M.vocab;
+      });
+    }
+  }
+  customElements.define("vocabulary-settings", VocabularySettings);
+})();
+</script>

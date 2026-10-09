@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Poolhouse">
+  <rect width="64" height="64" rx="14" fill="#1b1f3a"/>
+  <rect x="31" y="35" width="27" height="19" rx="5" fill="#2de2e6"/>
+  <path d="M34 42q3-3 6 0t6 0 6 0 4 0M34 48q3-3 6 0t6 0 6 0 4 0" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <path d="M5 31 19 15l14 16z" fill="#ff5fa2" stroke="#ff5fa2" stroke-width="2" stroke-linejoin="round"/>
+  <rect x="9" y="31" width="20" height="23" rx="2" fill="#ffd166"/>
+  <rect x="16" y="40" width="7" height="14" rx="1.5" fill="#1b1f3a"/>
+  <circle cx="21" cy="47" r=".9" fill="#ffd166"/>
+</svg>

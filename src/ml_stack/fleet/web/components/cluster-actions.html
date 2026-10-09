@@ -158,7 +158,7 @@
             text.focus(); text.select();
             if (!document.execCommand("copy")) throw new Error("Select the invitation and copy it.");
           }
-          note.textContent = "Invite copied. On the other machine, open Poolside and choose Join with invite.";
+          note.textContent = "Invite copied. On the other machine, open Poolhouse and choose Join with invite.";
         } catch { text.focus(); text.select(); note.textContent = "Select the invitation and copy it."; }
       };
       const revoke = el("button", { class: "ghost small" }, "Revoke invite");

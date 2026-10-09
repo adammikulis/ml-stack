@@ -150,7 +150,7 @@ def test_four_workspaces_context_pages_and_theme_navigation(usability_page):
     page.evaluate("location.hash = 'board'")
     expect(page.locator('#app')).to_have_attribute('data-workspace', 'conversations')
     assert page.locator('#workspace').bounding_box()['y'] == 0
-    page.get_by_role('button', name='Explore Poolside', exact=True).click()
+    page.get_by_role('button', name='Explore Poolhouse', exact=True).click()
     expect(page.locator('.demo-slice')).to_have_count(10)
     page.locator('.demo-slice').filter(has_text='Fine-tune a model').click()
     assert page.url.endswith('#training')
@@ -220,7 +220,7 @@ def test_named_workspace_tools_stay_with_main_navigation_at_all_sizes(usability_
     for width, height in [(1440, 900), (1280, 768), (1280, 640), (1024, 420), (390, 844)]:
         page.set_viewport_size({'width': width, 'height': height})
         tools = page.get_by_role('group', name='Workspace tools', exact=True)
-        explore = tools.get_by_role('button', name='Explore Poolside', exact=True)
+        explore = tools.get_by_role('button', name='Explore Poolhouse', exact=True)
         training = tools.get_by_role('button', name='Training jobs:', exact=False)
         expect(explore).to_be_visible()
         expect(training).to_be_visible()

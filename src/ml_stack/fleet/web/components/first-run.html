@@ -18,7 +18,8 @@ first-run button { margin-top: 12px; }
   const el = M.el;
   const api = M.api;
 
-  const STAGES = ["Device", "Pool", "Work", "Startup", "Downloads", "Capabilities", "Background", "Memory", "Ready"];
+  const STAGES = 9;
+  const stageName = (i) => M.t(`wizard.stage.${i}`);
 
   class FirstRun extends HTMLElement {
     connectedCallback() {
@@ -27,10 +28,14 @@ first-run button { margin-top: 12px; }
       this.box = this.querySelector("#first-run");
       this.card = this.querySelector("#first-run-card");
       this.stepper = M.ui("ml-stepper", {
-        steps: STAGES.map((title, i) => ({ id: String(i), title })),
+        steps: Array.from({ length: STAGES }, (_, i) => ({ id: String(i), title: stageName(i) })),
         controls: "none", compact: true });
       this.summary = el("p", { class: "hint", role: "status", "aria-live": "polite" });
       this.card.append(this.summary, this.stepper);
+      window.addEventListener("vocabulary-change", () => {
+        this.stepper.steps = Array.from({ length: STAGES }, (_, i) => ({ id: String(i), title: stageName(i) }));
+        this.summary.textContent = M.t("wizard.summary", { at: this.state.step + 1, total: STAGES, name: stageName(this.state.step) });
+      });
       this.state = { step: 0, name: "", group: "", pass: "", clusters: [],
                      libraries: null, suggest: null, prefs: null, install: null };
       M.onRoute((route) => {
@@ -49,7 +54,7 @@ first-run button { margin-top: 12px; }
     show(...nodes) {
       const at = this.state.step;
       this.stepper.current = at;
-      this.summary.textContent = `Poolside setup · ${at + 1} of ${STAGES.length} · ${STAGES[at]}`;
+      this.summary.textContent = M.t("wizard.summary", { at: at + 1, total: STAGES, name: stageName(at) });
       this.stepper.replaceChildren(el("div", { slot: `step-${at}` },
         ...nodes, this.installStatus, this.modelInstall?.status));
       M.applyAdvanced?.(this.card);
@@ -85,7 +90,7 @@ first-run button { margin-top: 12px; }
       const note = el("div", { role: "status" });
       this.show(
         this.steps(0),
-        el("h1", {}, "Set up this machine"),
+        el("h1", { "data-t": "wizard.title" }, "Set up this machine"),
         el("p", { class: "sub" },
           "Name your device, connect its compute, and choose its capabilities. Downloads can run in the background. You can change these choices in Settings."),
         el("label", { for: "n" }, "What should this machine be called?"),
@@ -127,7 +132,7 @@ first-run button { margin-top: 12px; }
           draw((await api("/ui/clusters")).clusters || []); } }));
       const automatic = st.mode === "dev";
       if (!automatic || this.setup.selection === "manual") manualForm();
-      this.show(this.steps(1, () => this.go(0)), el("h1", {}, "Clusters"),
+      this.show(this.steps(1, () => this.go(0)), el("h1", { "data-t": "wizard.pool" }, "Clusters"),
         el("p", { class: "sub" }, automatic
           ? "Automatic connection is the default for trusted devices on this network. You can also pair with a cluster manually."
           : "Join an explicitly admitted cluster with an invitation or its name and passphrase."),
@@ -307,8 +312,8 @@ first-run button { margin-top: 12px; }
                           .reduce((a, x) => a + (x.size_mb || 0), 0);
         size.textContent = mb
           ? `About ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} to download, `
-            + "in the Poolside runtime."
-          : "Installed in the Poolside runtime.";
+            + "in the Poolhouse runtime."
+          : "Installed in the Poolhouse runtime.";
       };
 
       go.onclick = async () => {
@@ -432,7 +437,7 @@ first-run button { margin-top: 12px; }
         el("button", { onclick: () => this.doneStep() }, "Retry"));
       const joined = st.clusters[0];
       const open = el("button", { onclick: () => location.reload() },
-        joined ? "Open the cluster" : "Open Poolside");
+        joined ? "Open the cluster" : "Open Poolhouse");
       const ssh = el("div", { class: "aside" },
         el("div", { class: "hint" },
           "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
@@ -477,7 +482,7 @@ first-run button { margin-top: 12px; }
         el("h1", {}, `Joined “${joined.group}”`),
         el("p", { class: "sub" }, "Now add your other machines. On each one:"),
         el("ol", { class: "howto" },
-          step(1, "Install Poolside", "The same installer you used here."),
+          step(1, "Install Poolhouse", "The same installer you used here."),
           step(2, "Open it", "It asks the same questions there."),
           step(3, st.mode === "dev" && this.setup.selection !== "manual"
             ? "Choose Dev" : "Join the same cluster", st.mode === "dev" && this.setup.selection !== "manual"
