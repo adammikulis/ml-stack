@@ -7,7 +7,7 @@ from typing import Any
 
 from ml_stack.command import flag
 from ml_stack.log import say
-from ml_stack.workspace import attention
+from ml_stack.workspace import attention, landing
 from ml_stack.workspace.screen import fence
 from ml_stack.workspace.service import Workspace
 
@@ -42,7 +42,7 @@ def digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     """The digest, or with --status the coordinator's one-screen page of workers, claims and owed answers."""
     if not args.status:
         return ws.board.digest(token, args.ack, args.thread)
-    lines = attention.status_lines(ws, ws.auth(token).id)
+    lines = [*attention.status_lines(ws, ws.auth(token).id), *landing.status_lines(ws)]
     return {"authority": "none", "text": fence("\n".join(lines), "workspace:status",
                                                 "names and subjects written by agents").text}
 
