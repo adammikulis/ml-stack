@@ -13,11 +13,14 @@ import json
 import sys
 from pathlib import Path
 
+from ml_stack import features
 from ml_stack.board import session as board_session
 from ml_stack.board.client import NodeError
 from ml_stack.log import say
 
 ACTIONS = ("on", "off", "status")
+FEATURE = "remote-tests"
+"""The experimental feature (`ml_stack.features`) that has to be on before a device takes tests or sends them."""
 
 
 def own_checkout() -> str:
@@ -58,6 +61,9 @@ def run(argv: list[str]) -> int:
     if given is None:
         say("usage: python -m ml_stack.testfarm.consent on|off|status [--python PATH] [--repo PATH] [--json]")
         return 2
+    if given["action"] == "on" and not features.enabled(FEATURE):
+        say(f"test shards: remote tests are an experimental feature and off here; a person turns them on with `ml-stack features enable {FEATURE}`")
+        return 1
     try:
         held = switch(given["action"], given["python"], given["repo"])
     except NodeError as exc:

@@ -144,3 +144,6 @@ register("test-runner-extras", "experimental",
 register("guard-change", "experimental",
          "A person-approved change to the guards and the code that makes them (no gate is wired yet).",
          "Would let an approved diff alter the guard code itself; nothing reads it until it is wired.")
+register("remote-tests", "experimental",
+         "Run tests on other devices of the pool (scripts/test --on), and take their tests here when this device's node allows it.",
+         "While a device allows it, any member of its pool runs a checkout's tests there as its user: a stolen pool certificate is code execution.")

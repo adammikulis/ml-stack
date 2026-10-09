@@ -21,7 +21,7 @@ import test_on
 from node_kit import STRIPPED, node_binary  # noqa: F401  (a fixture the ones below use)
 from testfarm_tree import make_tree
 
-from ml_stack import node_binary as node_binary_module, node_launch, node_supervise
+from ml_stack import features, node_binary as node_binary_module, node_launch, node_supervise
 from ml_stack.board import session as board_session
 from ml_stack.board.client import Client
 from ml_stack.testfarm.client import Shards, pool_devices
@@ -76,6 +76,7 @@ def pool(node_binary, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setenv("ML_STACK_BOARD", BOARD)
     monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a.token)
     monkeypatch.setenv("DEV_TEST_REUSE_DIR", str(tmp_path / "reuse"))
+    features.switch("remote-tests", True)  # this machine (device A's root) has the experimental feature on
     tree = make_tree(tmp_path / "tree", tmp_path / "pids")
     made = [a, b]
     try:

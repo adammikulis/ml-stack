@@ -17,9 +17,15 @@ unreachable, refused, Python 3.13 missing). A refused or unreachable device is n
 
 ## How the owner turns it on
 
-Nothing runs on a device until its person says so, per device, and the default is off. At the device (its agent
-does it on the person's order; see `docs/windows-wsl.md`), from this repository's checkout, with the Python 3.13
-the tests should use:
+Nothing runs on a device until its person says so, per device, and the default is off. There are two switches,
+both off, and both audited:
+
+1. The experimental feature `remote-tests` (`ml_stack.features`), on each machine that sends or takes tests:
+   `ml-stack features enable remote-tests`. `scripts/test --on` refuses to start while it is off on the asking
+   machine, and `consent on` refuses while it is off on the device. It is recorded in the authority audit log
+   with who did it.
+2. The device's own switch, at the device (its agent does it on the person's order; see `docs/windows-wsl.md`),
+   from this repository's checkout, with the Python 3.13 the tests should use:
 
 ```
 python -m ml_stack.testfarm.consent on        # status | off
@@ -29,7 +35,8 @@ python -m ml_stack.testfarm.consent on        # status | off
 checkout), refuses a Python that is not 3.13 and writes an `audit` entry to the pool board naming the session
 that did it. `off` stops the next upload at once (the file is read at every request). Turning it on lets any
 other device of the pool run a tree's tests here as this user, so do it only on a device whose pool you trust;
-revoking a pool member (`member_revoke`) refuses it at its next request.
+revoking a pool member (`member_revoke`) refuses it at its next request. Disabling the feature does not reach the
+node: run `consent off` too.
 
 ## What runs where
 

@@ -19,7 +19,7 @@ import pytest
 import test_on
 from testfarm_kit import BOARD, enable, go, gone, jobs_on, peer, until
 
-from ml_stack import node_launch
+from ml_stack import features, node_launch
 from ml_stack.fleet import shard_split, shard_tree
 from ml_stack.testfarm import consent, devices
 from ml_stack.testfarm.client import ShardError, Shards, choose
@@ -47,6 +47,9 @@ def test_the_person_turns_a_device_on_with_the_command_and_off_stops_the_next_up
     fp = peer(a)["fingerprint"]
     monkeypatch.setenv("ML_STACK_HOME", str(b.root))
     monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", b.token)
+    assert consent.run(["on"]) == 1 and "experimental feature" in capsys.readouterr().out
+    assert shards.capability(fp)["accepts"] is False, "the feature is off on B, so the switch stays off"
+    features.switch("remote-tests", True)
     assert consent.run(["on"]) == 0 and "test shards: on" in capsys.readouterr().out
     assert consent.run(["status", "--json"]) == 0 and json.loads(capsys.readouterr().out)["python"] == sys.executable
     monkeypatch.setenv("ML_STACK_HOME", str(a.root))

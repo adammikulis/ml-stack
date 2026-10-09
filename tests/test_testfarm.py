@@ -24,8 +24,9 @@ import pytest
 import test_on
 from testfarm_tree import MARKERS, make_tree
 
+from ml_stack import features
 from ml_stack.fleet import shard_exec, shard_spec, shard_split, shard_tree
-from ml_stack.testfarm import devices, ledger, report
+from ml_stack.testfarm import consent, devices, ledger, report
 
 ROOT = Path(__file__).resolve().parents[1]
 ID = "ab" * 16
@@ -245,3 +246,12 @@ def test_the_tiers_a_node_accepts_are_the_ones_the_runner_has():
     assert set(shard_spec.TIERS) | {"quick"} == set(test_on.TIERS)
     with pytest.raises(shard_spec.Refused):
         shard_spec.check_header({"id": ID, "tree_sha256": "0" * 64, "tier": "heavy"})
+
+
+def test_nothing_is_sent_or_taken_until_the_experimental_feature_is_on(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+    args = argparse.Namespace(tier="all", on="somewhere", split=False, base="main", timeout=60.0)
+    assert test_on.main(args, ["tests/test_a.py"], ROOT, lambda tier, file: [], True) == 4
+    assert "experimental feature" in capsys.readouterr().err
+    assert features.enabled(consent.FEATURE) is False and consent.run(["on"]) == 1
+    assert "ml-stack features enable remote-tests" in capsys.readouterr().out

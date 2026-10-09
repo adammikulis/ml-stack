@@ -27,12 +27,14 @@ from pathlib import Path
 import affected
 import testreuse_key as keys
 
+from ml_stack import features
 from ml_stack.activity import reuse
 from ml_stack.activity.gate import tree_hash
 from ml_stack.fleet import shard_split
 from ml_stack.fleet.shard_spec import TEST_FILE
 from ml_stack.testfarm import report
 from ml_stack.testfarm.client import ShardError, Shards, choose, pool_devices
+from ml_stack.testfarm.consent import FEATURE
 from ml_stack.testfarm.ledger import Ledger, key as ledger_key
 from ml_stack.workspace import testruns
 
@@ -196,6 +198,8 @@ def main(args: argparse.Namespace, rest: list[str], root: Path, command_for: Cal
         return refuse("a run on another device takes test files tests/NAME.py only: no options, node ids or paths")
     if tier == "gate" and files:
         return refuse("the gate takes no files")
+    if not features.enabled(FEATURE):
+        return refuse(f"running tests on another device is an experimental feature and off here; a person turns it on with `ml-stack features enable {FEATURE}`")
     try:
         chosen = choose(args.on, pool_devices())
         shards = Shards()

@@ -94,7 +94,8 @@ node (this document's steps) and its own switch, in its own checkout.
 1. Have Python 3.13 on this device (`python --version`; Windows: `py -3.13 --version`; WSL and Linux: `python3.13
    --version`). If it is missing, install it (Windows: `winget install Python.Python.3.13`; WSL: the distribution's
    package or pyenv) and give it the test dependencies the way this device already installs ml-stack (`AGENTS.md`).
-2. Turn it on from the repository root, with that Python and `PYTHONPATH=src`:
+2. Turn the experimental feature on (`ml-stack features enable remote-tests`), then turn it on from the repository
+   root, with that Python and `PYTHONPATH=src`:
    `python -m ml_stack.testfarm.consent on` (Windows: `py -3.13 -m ml_stack.testfarm.consent on`, with
    `$env:PYTHONPATH="src"`). It prints `test shards: on (python ..., checkout ...)`. If it says Python 3.13 is
    needed, run it with the 3.13 interpreter, or pass `--python PATH`; if it says the repo has no `shard_exec.py`,
