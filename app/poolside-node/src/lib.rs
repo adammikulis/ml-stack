@@ -20,6 +20,7 @@ pub mod links;
 pub mod log;
 pub mod membership;
 pub mod net;
+pub mod netif;
 pub mod netsync;
 pub mod node;
 pub mod notes;

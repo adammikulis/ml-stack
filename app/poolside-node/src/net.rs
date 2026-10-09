@@ -6,14 +6,14 @@
 use std::collections::BTreeSet;
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use rustls::ServerConfig;
 use serde_json::{json, Value};
 
 use crate::api::{parse, respond, Call};
-use crate::beacon::{self, Advert, Beacon, BeaconConfig, Hooks};
+use crate::beacon::{self, Advert, Beacon, BeaconConfig, BeaconStats, Hooks};
 use crate::cert::{board_fingerprint, Identity};
 use crate::error::{Error, Result};
 use crate::fsutil::{sha256_hex, unhex};
@@ -58,6 +58,9 @@ pub struct Net {
     pub stop: Arc<AtomicBool>,
     window: Mutex<Option<Window>>,
     joining: Mutex<BTreeSet<String>>,
+    beacon_stats: OnceLock<Arc<BeaconStats>>,
+    /// The last attempt to join a pool automatically, and how it ended.
+    last_join: Mutex<Value>,
     /// True while the device listens for a pool of its project before making one.
     settling: AtomicBool,
 }
@@ -69,6 +72,24 @@ fn locked<T>(m: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
 fn addr_of(host: &str, port: u64) -> Result<SocketAddr> {
     let port = u16::try_from(port).ok().filter(|p| *p > 0).ok_or_else(|| Error::Invalid("port is 1 to 65535".into()))?;
     (host, port).to_socket_addrs()?.next().ok_or_else(|| Error::Invalid("host does not resolve".into()))
+}
+
+/// ``base`` with the keys of ``more`` added (both are objects).
+fn merged(mut base: Value, more: Value) -> Value {
+    if let (Some(b), Value::Object(m)) = (base.as_object_mut(), more) {
+        b.extend(m);
+    }
+    base
+}
+
+/// A join failure as a person should read it: what happened and what to do about it.
+fn join_hint(e: &Error) -> String {
+    let text = e.to_string();
+    let blocked = matches!(e, Error::Io(io) if matches!(io.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock | std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ConnectionRefused));
+    if blocked {
+        return format!("{text}: the other device did not accept the connection; allow this program through its firewall on the private network (macOS: Privacy & Security > Local Network)");
+    }
+    text
 }
 
 impl Net {
@@ -85,7 +106,7 @@ impl Net {
         let port = listener.local_addr()?.port();
         let net = Arc::new(Net {
             node, server_config: server_config(&me, standing)?, me, port, stop,
-            window: Mutex::new(None), joining: Mutex::new(BTreeSet::new()), settling: AtomicBool::new(false),
+            window: Mutex::new(None), joining: Mutex::new(BTreeSet::new()), settling: AtomicBool::new(false), beacon_stats: OnceLock::new(), last_join: Mutex::new(Value::Null),
         });
         locked(&net.node)?.facts.listen = Some(listener.local_addr()?.to_string());
         let n = net.clone();
@@ -156,7 +177,31 @@ impl Net {
             on_beacon: Box::new(move |beacon| b.heard(beacon)),
         };
         locked(&self.node)?.facts.beacon = true;
-        beacon::start(cfg, key, hooks, self.stop.clone(), wall_ms)
+        let stats = beacon::start(cfg, key, hooks, self.stop.clone(), wall_ms)?;
+        let _ = self.beacon_stats.set(stats);
+        Ok(())
+    }
+
+    /// What the beacon has sent and heard, and how the last automatic join ended.
+    fn network_facts(&self) -> Value {
+        let count = |f: fn(&BeaconStats) -> &std::sync::atomic::AtomicU64| self.beacon_stats.get().map_or(0, |s| f(s).load(Ordering::Relaxed));
+        let text = |f: fn(&BeaconStats) -> &Mutex<String>| self.beacon_stats.get().and_then(|s| f(s).lock().ok().map(|t| t.clone())).unwrap_or_default();
+        json!({
+            "beacon_sent": count(|s| &s.sent), "beacon_send_errors": count(|s| &s.send_errors), "beacon_heard": count(|s| &s.heard),
+            "beacon_own": count(|s| &s.own), "beacon_rejected": count(|s| &s.rejected),
+            "beacon_last_send_error": text(|s| &s.last_send_error), "beacon_last_reject": text(|s| &s.last_reject),
+            "last_join": self.last_join.lock().map(|j| j.clone()).unwrap_or(Value::Null),
+        })
+    }
+
+    fn record_join(&self, fingerprint: &str, addr: SocketAddr, result: &Result<()>) {
+        let (ok, error) = match result {
+            Ok(()) => (true, String::new()),
+            Err(e) => (false, join_hint(e)),
+        };
+        if let Ok(mut j) = self.last_join.lock() {
+            *j = json!({"fingerprint": fingerprint, "addr": addr.to_string(), "ok": ok, "error": error, "at": wall_ms()});
+        }
     }
 
     /// Take the project of this device (when it is alone) and look for an `open` pool of it: for
@@ -212,13 +257,15 @@ impl Net {
                 let settling = self.settling.load(Ordering::SeqCst);
                 let lone_joins = node.members.alone() && (b.pool < node.members.id || !b.lone);
                 let eligible = b.project == node.members.project
+                    && crate::netif::on_segment(b.addr)
                     && ((node.members.policy == Policy::Open && (b.pool == node.members.id || lone_joins))
                         || (settling && b.pool != node.members.id && lone_joins));
                 drop(node);
                 if eligible && self.joining.lock().is_ok_and(|mut j| j.insert(b.fingerprint.clone())) {
                     let (net, fp) = (self.clone(), b.fingerprint.clone());
                     std::thread::spawn(move || {
-                        let _ = net.join_open(addr, &fp);
+                        let result = net.join_open(addr, &fp);
+                        net.record_join(&fp, addr, &result);
                         if let Ok(mut j) = net.joining.lock() {
                             j.remove(&fp);
                         }
@@ -232,6 +279,9 @@ impl Net {
     /// Join the pool of the device at ``addr`` whose certificate has fingerprint ``expect``,
     /// under its policy `open`; the device is enrolled here and this one there.
     pub fn join_open(&self, addr: SocketAddr, expect: &str) -> Result<()> {
+        if !crate::netif::on_segment(addr.ip()) {
+            return Err(Error::Denied(format!("{} is not on a network this device is on; a device joins without a code only from the same network, so pair with a code", addr.ip())));
+        }
         let mut c = PeerClient::connect(&self.me, addr, Some(expect))?;
         let name = locked(&self.node)?.members.get(&self.me.fingerprint()).map(|d| d.name.clone()).unwrap_or_default();
         let hello = c.call(&json!({"op": "hello"}))?;
@@ -400,6 +450,10 @@ impl Net {
         let parsed = parse(request);
         match parsed {
             Ok(c) if NETWORK.contains(&c.method.as_str()) => respond(request, self.network(&c)),
+            Ok(c) if c.method == "pool_status" => match self.node.lock() {
+                Ok(n) => respond(request, Ok(merged(n.pool_status(), self.network_facts()))),
+                Err(_) => respond(request, Err(Error::Damaged("node poisoned".into()))),
+            },
             _ => match self.node.lock() {
                 Ok(mut n) => crate::api::handle(&mut n, request),
                 Err(_) => respond(request, Err(Error::Damaged("node poisoned".into()))),

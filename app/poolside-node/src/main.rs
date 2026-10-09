@@ -11,7 +11,7 @@
 //! names one instead; `--no-project` turns this off), listens `--settle-ms N` for an `open` pool
 //! of that project to join, and makes one when it hears none.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -48,7 +48,11 @@ fn beacon_config(args: &[String], bind: &str) -> Result<BeaconConfig, String> {
         send_to.push(SocketAddr::from((GROUP, LAN_BEACON_PORT)));
     }
     let advertise = flag(args, "--advertise").map(|a| a.parse::<IpAddr>().map_err(|e| e.to_string())).transpose()?;
-    Ok(BeaconConfig { bind: addr(bind)?, send_to, advertise, interval: Duration::from_millis(500), allow_loopback: args.iter().any(|a| a == "--allow-loopback") })
+    let interface = flag(args, "--multicast-if").map(|a| a.parse::<Ipv4Addr>().map_err(|e| format!("--multicast-if: {e}"))).transpose()?;
+    Ok(BeaconConfig {
+        bind: addr(bind)?, send_to, advertise, interval: Duration::from_millis(500), allow_loopback: args.iter().any(|a| a == "--allow-loopback"),
+        interface, broadcast: lan(args),
+    })
 }
 
 /// The project key: the named project, else that of the repository around the directory; None

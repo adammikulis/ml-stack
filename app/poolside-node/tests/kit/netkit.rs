@@ -48,6 +48,8 @@ pub fn beacon(bind: u16, to: &[u16]) -> BeaconConfig {
         advertise: Some("127.0.0.1".parse().unwrap()),
         interval: Duration::from_millis(100),
         allow_loopback: true,
+        interface: None,
+        broadcast: false,
     }
 }
 
