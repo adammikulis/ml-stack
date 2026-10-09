@@ -123,6 +123,7 @@ _install_git_hooks()
 # ``src`` goes on the path above, so these cannot be imported with the rest.
 import testslots  # noqa: E402  (``scripts`` is on the path above)
 from environ_guard import environment_is_restored  # noqa: E402,F401  (an autouse fixture)
+import walkbound  # noqa: E402
 
 from ml_stack.http import Server  # noqa: E402
 from ml_stack.testing import live  # noqa: E402
@@ -1059,24 +1060,8 @@ def real_state_changes(root: Path, before: dict[str, int], after: dict[str, int]
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS, *, attribute_external: bool = True) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
-    out: dict[str, int] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        rel = Path(dirpath).relative_to(root)
-        dirnames[:] = [d for d in dirnames if (rel / d).as_posix() not in skip]
-        if not rel.parts:
-            filenames = [f for f in filenames if f not in skip]
-        for name in filenames:
-            if name.endswith(".tmp"):
-                continue
-            if attribute_external and skip is LIVE_WRITERS and _external_state_write(root, rel / name):
-                continue
-            if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
-                continue
-            try:
-                out[(rel / name).as_posix()] = (Path(dirpath) / name).lstat().st_mtime_ns
-            except OSError:
-                continue
-    return out
+    live = skip is LIVE_WRITERS
+    return walkbound.mtimes(root, skip, lambda rel: live and ((attribute_external and _external_state_write(root, rel)) or _live(rel.as_posix())))
 
 
 def changed_files(before: dict[str, int], after: dict[str, int]) -> list[str]:

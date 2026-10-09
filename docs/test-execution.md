@@ -55,7 +55,7 @@ inside a live test permit fails promptly instead of queuing behind its parent.
 Run an independent suite after the parent releases its permit.
 
 `python scripts/testslots.py pytest --want auto --min 1 --label NAME -- COMMAND`
-supervises a pytest command that loads `-p testslots_pytest` and uses
+supervises a pytest command that loads `-p testslots_pytest` (`scripts/test` also loads `-p testagentenv_pytest`, which clears the agent markers for every test) and uses
 `DEV_TEST_WORKERS` as its worker ceiling. `{workers}` in a command argument is
 replaced by that ceiling. `DEV_TEST_SLOTS_DIR` identifies the shared host broker.
 The supervisor supplies `DEV_TEST_PYTEST_ENDPOINT`, `DEV_TEST_PYTEST_TOKEN`, and

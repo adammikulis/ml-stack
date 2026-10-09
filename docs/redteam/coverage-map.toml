@@ -15,6 +15,34 @@ uncovered = 53
 partial = 197
 
 [[group]]
+match = ["spawn:fleet/shard_run.py:checkout"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_test_shards.py::test_a_path_outside_the_plain_test_files_is_refused",
+         "tests/test_redteam_test_shards.py::test_extra_fields_are_refused_whatever_they_say",
+         "tests/test_redteam_test_shards.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+         "tests/test_redteam_test_shards.py::test_a_device_with_shards_off_runs_nothing_and_says_so",
+         "tests/test_fleet_test_shards.py::test_the_host_runs_only_the_test_runner_on_the_named_files"]
+note = "the argv is built by the host from the test runner and validated file names; the sender supplies no argv, environment or working directory, and a refused shard starts nothing"
+
+[[group]]
+match = ["spawn:fleet/shard_tree.py:tracked_paths"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_test_shards.py::test_a_tree_with_anything_but_plain_shipped_files_is_refused",
+         "tests/test_redteam_test_shards.py::test_a_tree_that_inflates_past_the_limit_is_refused"]
+note = "lists the sender's own checkout with a fixed argv; the receiving side never runs it"
+
+[[group]]
+match = ["egress:fleet/shard_client.py:device_peer"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_test_shards.py::test_a_peer_that_is_not_paired_is_refused_before_anything_is_read",
+         "tests/test_redteam_test_shards.py::test_the_cluster_secret_is_not_a_paired_device",
+         "tests/test_fleet_test_shards.py::test_unpaired_name_is_not_found"]
+note = "connects only to an active paired device's pinned certificate; an unpaired name or an unknown secret reaches nothing"
+
+[[group]]
 match = ["human:fleet/autostart_apply.py:install", "human:fleet/autostart_apply.py:rollback"]
 status = "covered"
 count = 2
@@ -605,9 +633,9 @@ note = "raising the GPU wiring limit is person-only: agent processes, tokens, fo
 
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
-match = ["parser:workspace/boardroute.py"]
+match = ["parser:workspace/boardroute.py", "route:workspace/fleet_routes.py:/ui/board/*"]
 status = "covered"
-count = 1
+count = 2
 tests = [
   "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
   "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",

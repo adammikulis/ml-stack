@@ -317,7 +317,7 @@ def test_claim_before_final_commit_cannot_complete_after_lost_checkout_and_branc
     repo.git(kit.checkout, 'commit', '-m', 'feat: uncaptured final commit')
     repo.git(kit.primary, 'worktree', 'remove', str(kit.checkout))
     repo.git(kit.primary, 'branch', '-D', 'worker/change')
-    lifecycle.remember(kit.base, 'worker', 'helper', str(kit.checkout))
+    lifecycle.remember(kit.base, 'worker', str(kit.checkout))
     with pytest.raises(Denied, match='cleanup proof is missing'):
         kit.ws.announce(kit.sender, 'done', 'Complete')
 
