@@ -1,8 +1,6 @@
 //! The node: one per device. It holds the boards this device takes part in as signed
 //! append-only logs, assigns every session one unique name per board, stamps every write from
-//! the session's token, and answers a local API on a Unix socket.
-//!
-//! Unix only for now; a Windows named pipe is a later slice.
+//! the session's token, and answers a local API on a Unix socket, or on a Windows named pipe limited to the current user.
 
 pub mod api;
 pub mod beacon;
@@ -34,5 +32,6 @@ pub mod rules;
 pub mod server;
 pub mod state;
 pub mod sync;
+pub mod sys;
 pub mod tls;
 pub mod wire;

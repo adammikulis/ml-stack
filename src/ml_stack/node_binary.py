@@ -25,11 +25,6 @@ class NodeBinaryError(OSError):
     """The node binary is missing, was built wrongly or does not match its recorded checksum."""
 
 
-def supported() -> bool:
-    """Whether the node exists on this platform; its local API is a Unix socket, so Windows has none yet."""
-    return sys.platform != "win32"
-
-
 def target() -> str:
     """The platform this binary was built for."""
     return f"{sys.platform}-{platform.machine().lower()}"

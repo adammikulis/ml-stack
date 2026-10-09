@@ -1,8 +1,7 @@
 //! One origin's append-only log on disk: JSON lines, fsynced on append, a torn tail dropped on open.
 
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
@@ -23,7 +22,7 @@ impl Log {
     /// newline was never acknowledged: it is cut off. Any other damage is an error.
     pub fn open(path: &Path, board: &str, origin: &str) -> Result<Log> {
         let created = !path.exists();
-        let mut file = OpenOptions::new().read(true).append(true).create(true).mode(0o600).open(path)?;
+        let mut file = crate::sys::open_log(path)?;
         if created {
             if let Some(parent) = path.parent() {
                 sync_dir(parent)?;
@@ -67,9 +66,9 @@ impl Log {
             buf.push(b'\n');
         }
         let before = self.file.metadata()?.len();
-        let written = self.file.write_all(&buf).and_then(|_| self.file.sync_data());
+        let written = self.file.seek(SeekFrom::End(0)).and_then(|_| self.file.write_all(&buf)).and_then(|_| self.file.sync_data());
         if let Err(e) = written {
-            let _ = self.file.set_len(before);
+            let _ = self.file.set_len(before).and_then(|_| self.file.seek(SeekFrom::End(0)));
             return Err(e.into());
         }
         self.rows.extend(rows);

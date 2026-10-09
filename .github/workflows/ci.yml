@@ -152,6 +152,24 @@ jobs:
           python -m pip install --upgrade pip build
           python packaging/build.py
 
+      # The node (app/poolside-node) is native on Windows: its local API is a named pipe limited to
+      # the current user, its leases know a process by handle and creation time, its files are
+      # owner-only by ACL. The crate's own tests run here, then the launcher starts the real
+      # binary under its supervisor and stops it by the stop events (tests/test_node_windows.py).
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: crate tests of poolside-node
+        shell: pwsh
+        working-directory: app
+        run: cargo test --locked -p poolside-node
+      - name: the node starts under its supervisor and stops on its event
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install pytest pytest-xdist numpy psutil keyring cryptography pyyaml
+          $env:PYTHONPATH = "src"
+          python -m pytest tests/test_node_windows.py -q -n 0 -p no:cacheprovider
+          if ($LASTEXITCODE -ne 0) { throw "the Windows node tests failed" }
+
       - name: install.ps1 -Headless against a scratch prefix
         shell: pwsh
         run: |

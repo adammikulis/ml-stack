@@ -18,10 +18,7 @@ pub fn wall_ms() -> u64 {
 }
 
 fn host_name() -> String {
-    let mut buf = [0u8; 256];
-    // SAFETY: the buffer is valid for its length for the call.
-    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len() - 1) };
-    let name = if rc == 0 { String::from_utf8_lossy(&buf).trim_end_matches('\0').to_string() } else { String::new() };
+    let name = crate::sys::hostname();
     let name: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')).take(40).collect();
     if name.is_empty() { "device".into() } else { name }
 }

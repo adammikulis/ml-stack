@@ -101,15 +101,14 @@ def node(out: Path = DIST) -> Path:
     """Build the release `poolside-node` for this machine into ``out``/node (dist by default), named by target, with its SHA-256 beside it.
 
     A runtime build (`ml-stack runtime ensure`) compiles the node from its own commit and records the same checksum in the
-    runtime tree; this is the standalone copy a bundle or a release asset carries. Windows has no node yet.
+    runtime tree; this is the standalone copy a bundle or a release asset carries. On Windows it is `poolside-node.exe`.
     """
-    if sys.platform == "win32":
-        raise SystemExit("the node has no Windows build yet: its local API is a Unix socket")
+    suffix = ".exe" if sys.platform == "win32" else ""
     run(["cargo", "build", "--release", "--locked", "-p", "poolside-node"], cwd=APP)
-    made = APP / "target" / "release" / "poolside-node"
+    made = APP / "target" / "release" / f"poolside-node{suffix}"
     if not made.is_file():
-        raise SystemExit("cargo wrote no poolside-node")
-    into = out / "node" / f"poolside-node-{target_triple()}"
+        raise SystemExit(f"cargo wrote no poolside-node{suffix}")
+    into = out / "node" / f"poolside-node-{target_triple()}{suffix}"
     into.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(made, into)
     digest = hashlib.sha256(into.read_bytes()).hexdigest()

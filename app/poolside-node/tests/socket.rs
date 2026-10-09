@@ -1,21 +1,18 @@
 mod kit;
 
+use kit::{kill_hard, short_dir};
+
 use poolside_node::client::{ensure_running, Client, Started};
 use poolside_node::error::Error;
-use poolside_node::server::{socket_path, Server};
-use poolside_node::wire::my_uid;
+#[cfg(unix)]
+use poolside_node::server::socket_path;
+use poolside_node::server::Server;
+use poolside_node::sys::{connect, owner_only, Principal};
 use serde_json::json;
 use std::io::{Read, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
-use tempfile::TempDir;
 
 const BIN: &str = env!("CARGO_BIN_EXE_poolside-node");
-
-fn short_dir() -> TempDir {
-    tempfile::Builder::new().prefix("pn").tempdir_in("/tmp").unwrap()
-}
 
 fn register(c: &mut Client, board: &str, session: &str) -> (String, String) {
     let r = c.call("register", board, "", json!({"model": "claude-sonnet-5-5", "harness": "claude-code", "session": session})).unwrap();
@@ -25,7 +22,7 @@ fn register(c: &mut Client, board: &str, session: &str) -> (String, String) {
 fn stop(state: &Path, token: &str, board: &str) {
     let _ = Client::connect(state).unwrap().call("shutdown", board, token, json!({}));
     for _ in 0..200 {
-        if Client::connect(state).is_err() || UnixStream::connect(socket_path(state)).is_err() {
+        if Client::connect(state).is_err() || connect(state).is_err() {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -34,7 +31,7 @@ fn stop(state: &Path, token: &str, board: &str) {
 }
 
 #[test]
-fn a_round_trip_over_the_socket_with_owner_only_modes() {
+fn a_round_trip_over_the_socket_with_owner_only_access() {
     let dir = short_dir();
     let server = Server::bind(dir.path()).unwrap();
     let handle = std::thread::spawn(move || server.serve());
@@ -44,17 +41,17 @@ fn a_round_trip_over_the_socket_with_owner_only_modes() {
     c.call("post", "demo", &token, json!({"kind": "message", "fields": {"type": "status", "body": "over the wire"}})).unwrap();
     let read = c.call("read", "demo", &token, json!({"kind": "message"})).unwrap();
     assert_eq!(read["entries"][0]["sender"], name);
-    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode(&socket_path(dir.path())), 0o600);
-    assert_eq!(mode(dir.path()), 0o700);
+    #[cfg(unix)]
+    assert!(owner_only(&socket_path(dir.path())), "the socket is owner-only (a pipe's access list is its creation attributes)");
+    assert!(owner_only(dir.path()), "the state directory is owner-only");
     c.call("shutdown", "demo", &token, json!({})).unwrap();
     handle.join().unwrap().unwrap();
 }
 
 #[test]
-fn a_peer_with_another_uid_is_refused() {
+fn a_peer_who_is_another_user_is_refused() {
     let dir = short_dir();
-    let server = Server::bind(dir.path()).unwrap().allow_only(my_uid() + 1);
+    let server = Server::bind(dir.path()).unwrap().allow_only(Principal::stranger());
     let node = server.node();
     std::thread::spawn(move || server.serve());
     let mut c = Client::connect(dir.path()).unwrap();
@@ -77,12 +74,12 @@ fn a_bad_frame_closes_that_connection_and_not_the_node() {
     let server = Server::bind(dir.path()).unwrap();
     let node = server.node();
     std::thread::spawn(move || server.serve());
-    let mut raw = UnixStream::connect(socket_path(dir.path())).unwrap();
+    let mut raw = connect(dir.path()).unwrap();
     raw.write_all(&(u32::MAX).to_be_bytes()).unwrap();
     let mut rest = Vec::new();
     let _ = raw.read_to_end(&mut rest);
     assert!(rest.is_empty());
-    let mut garbled = UnixStream::connect(socket_path(dir.path())).unwrap();
+    let mut garbled = connect(dir.path()).unwrap();
     garbled.write_all(&5u32.to_be_bytes()).unwrap();
     garbled.write_all(b"[not ").unwrap();
     let _ = garbled.read_to_end(&mut rest);
@@ -116,15 +113,15 @@ fn a_killed_node_is_restarted_on_demand_and_loses_nothing() {
     for i in 0..5 {
         c.call("post", "demo", &token, json!({"kind": "message", "fields": {"type": "status", "body": format!("m{i}")}})).unwrap();
     }
-    let pid = c.call("hello", "", "", json!({})).unwrap()["pid"].as_i64().unwrap();
-    // SAFETY: kill -9 of the node process this test started.
-    assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+    let pid = c.call("hello", "", "", json!({})).unwrap()["pid"].as_u64().unwrap();
+    kill_hard(pid as u32);
     for _ in 0..200 {
         if Client::connect(&state).is_err() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    #[cfg(unix)]
     assert!(socket_path(&state).exists(), "the dead node left its socket behind");
     assert_eq!(ensure_running(&state, Path::new(BIN)).unwrap(), Started::Spawned);
     let mut c = Client::connect(&state).unwrap();
@@ -132,4 +129,24 @@ fn a_killed_node_is_restarted_on_demand_and_loses_nothing() {
     assert_eq!(read["entries"].as_array().unwrap().len(), 5, "committed entries and the token survive kill -9");
     assert_eq!(read["entries"][0]["sender"], name);
     stop(&state, &token, "demo");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_stop_event_ends_a_node_that_has_no_terminal() {
+    use poolside_node::sys::signal_stop;
+    let dir = short_dir();
+    let server = Server::bind(dir.path()).unwrap();
+    let handle = std::thread::spawn(move || server.serve());
+    assert!(signal_stop(dir.path()), "the node holds its stop event");
+    handle.join().unwrap().unwrap();
+    assert!(Client::connect(dir.path()).is_err(), "the pipe went with the node");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_second_pipe_of_the_same_name_is_refused_even_without_the_lock() {
+    let dir = short_dir();
+    let _first = poolside_node::sys::Listener::bind(dir.path()).unwrap();
+    assert!(matches!(poolside_node::sys::Listener::bind(dir.path()), Err(Error::Denied(_))));
 }

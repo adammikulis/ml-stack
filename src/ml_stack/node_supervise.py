@@ -14,10 +14,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ml_stack import node_binary, runtime
+from ml_stack import node_binary, runtime, win32
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
-from ml_stack.platform import start_process
+from ml_stack.node_health import node_stop_event, state_key
+from ml_stack.platform import is_windows, start_process
 
 POINTER = "node-binary.json"
 RUN = "node-run.json"
@@ -28,6 +29,11 @@ MAX_DELAY_S = 30.0
 STABLE_S = 60.0
 GIVE_UP_AFTER = 5
 POLL_S = 0.1
+
+
+def supervisor_stop_event(state: Path) -> str:
+    """The named event whose signal stops the supervisor of a state directory on Windows, where a signal can not reach it."""
+    return f"Local\\mlstack-node-supervisor-stop-{state_key(state)}"
 
 
 def pointer(state: Path) -> dict:
@@ -111,14 +117,27 @@ def _note(state: Path, text: str) -> None:
 def supervise(state: Path, extra: list[str] | None = None) -> int:
     """Keep the node of ``state`` running until stopped; 0 on a stop, 1 when it cannot find a verified binary or is already supervised."""
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    stop = {"now": False}
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
-    stopping = lambda: stop["now"]  # noqa: E731
+    stopping, close = _stop_requests(state)
     try:
         with only_one(state / LOCK, wait=False, note="node supervisor"):
             return _loop(state, extra or [], stopping)
     except Busy:
         return 1
+    finally:
+        close()
+
+
+def _stop_requests(state: Path) -> tuple[Callable[[], bool], Callable[[], None]]:
+    """(whether a stop was asked for, how to let go): SIGTERM on Unix; on Windows Ctrl+Break, Ctrl+C and the stop event."""
+    stop = {"now": False}
+    handler = lambda *_: stop.update(now=True)  # noqa: E731
+    if not is_windows():
+        signal.signal(signal.SIGTERM, handler)
+        return (lambda: stop["now"]), (lambda: None)
+    signal.signal(signal.SIGBREAK, handler)  # type: ignore[attr-defined]
+    signal.signal(signal.SIGINT, handler)
+    event = win32.Event(supervisor_stop_event(state))
+    return (lambda: stop["now"] or event.is_set()), event.close
 
 
 def _loop(state: Path, extra: list[str], stopping: Callable[[], bool]) -> int:
@@ -139,19 +158,19 @@ def _loop(state: Path, extra: list[str], stopping: Callable[[], bool]) -> int:
         child = _spawn(state, binary, sha, extra)
         code = _wait(child, state, seen, stopping)
         if code is None:
-            _end(child)
+            end(child, state)
         _note(state, f"node {child.pid} exited {child.returncode}")
         delay = MIN_DELAY_S if code is None or code == -signal.SIGTERM or time.monotonic() - began >= STABLE_S else min(delay * 2, MAX_DELAY_S)
         _pause(state, delay, seen, stopping)
     return 0
 
 
-def _end(child: subprocess.Popen) -> None:
-    """Stop a node the supervisor was told to leave or replace: ask, then insist."""
-    child.terminate()
+def end(child: subprocess.Popen, state: Path) -> None:
+    """Stop a node the supervisor was told to leave or replace: ask (the stop event on Windows, SIGTERM elsewhere), then insist."""
+    if not (is_windows() and win32.signal_event(node_stop_event(state))):
+        child.terminate()
     try:
         child.wait(timeout=10)
     except subprocess.TimeoutExpired:
         child.kill()
         child.wait()
-

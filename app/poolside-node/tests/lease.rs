@@ -40,7 +40,11 @@ fn release(n: &mut Node, token: &str, id: &Value) {
 }
 
 fn sleeper() -> Child {
-    Command::new("sleep").arg("120").stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
+    #[cfg(unix)]
+    let mut command = { let mut c = Command::new("sleep"); c.arg("120"); c };
+    #[cfg(windows)]
+    let mut command = { let mut c = Command::new("ping"); c.args(["-n", "120", "127.0.0.1"]); c };
+    command.stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
 }
 
 fn two() -> (TempDir, Node, (String, String), (String, String)) {
@@ -219,6 +223,9 @@ fn claims_conflict_on_the_same_worktree_and_on_a_nested_path() {
     assert_eq!(acquire(&mut n, &tb, json!({"resources": wt("/repos/x/wt1"), "wait": false}))["state"], "busy");
     assert_eq!(acquire(&mut n, &tb, json!({"resources": wt("/repos/x/wt1/src"), "wait": false}))["state"], "busy");
     assert_eq!(acquire(&mut n, &tb, json!({"resources": wt("/repos/x/wt10"), "wait": false}))["state"], "held", "a sibling with a longer name is not nested");
+    let drive = acquire(&mut n, &ta, json!({"resources": wt("C:\\repos\\x\\wt1")}));
+    assert_eq!(drive["state"], "held", "a Windows drive path is an absolute path");
+    assert_eq!(acquire(&mut n, &tb, json!({"resources": wt("c:/repos/x/wt1/src"), "wait": false}))["state"], "busy", "one place, however it is written");
     let branch = json!([{"type": "claim", "kind": "branch", "name": "feature"}]);
     assert_eq!(acquire(&mut n, &ta, json!({"resources": branch}))["state"], "held");
     assert_eq!(acquire(&mut n, &tb, json!({"resources": branch, "wait": false}))["state"], "busy");
@@ -329,7 +336,7 @@ fn grants_and_ends_are_board_entries_and_peers_merge_them_earliest_acquire_first
 fn lease_wait_over_the_socket_blocks_until_the_holder_releases() {
     use poolside_node::client::Client;
     use poolside_node::server::Server;
-    let dir = tempfile::Builder::new().prefix("pn").tempdir_in("/tmp").unwrap();
+    let dir = kit::short_dir();
     let server = Server::bind(dir.path()).unwrap();
     let handle = std::thread::spawn(move || server.serve());
     let reg = |c: &mut Client, s: &str| {

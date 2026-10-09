@@ -1,7 +1,5 @@
-//! The client side: talk to the node, and start it when the socket is dead.
+//! The client side: talk to the node, and start it when the socket (the pipe) is dead.
 
-use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -10,14 +8,14 @@ use serde_json::{json, Value};
 
 use crate::api::API_VERSION;
 use crate::error::{Error, Result};
-use crate::server::socket_path;
-use crate::wire::{lock, read_frame, write_frame};
+use crate::sys::{connect, lock, spawn_detached, Stream};
+use crate::wire::{read_frame, write_frame};
 
 pub const START_LOCK: &str = "start.lock";
 const START_WAIT: Duration = Duration::from_secs(10);
 
 pub struct Client {
-    stream: UnixStream,
+    stream: Stream,
 }
 
 /// Whether `ensure_running` found a node or started one.
@@ -29,7 +27,7 @@ pub enum Started {
 
 impl Client {
     pub fn connect(state: &Path) -> Result<Client> {
-        let stream = UnixStream::connect(socket_path(state))?;
+        let stream = connect(state)?;
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         Ok(Client { stream })
     }
@@ -79,8 +77,8 @@ pub fn ensure_running(state: &Path, node_bin: &Path) -> Result<Started> {
         return Ok(Started::Found);
     }
     let mut command = Command::new(node_bin);
-    command.arg("run").arg("--state").arg(state).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0);
-    command.spawn()?;
+    command.arg("run").arg("--state").arg(state).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    spawn_detached(&mut command)?;
     let deadline = Instant::now() + START_WAIT;
     while Instant::now() < deadline {
         if hello(state).is_ok() {
