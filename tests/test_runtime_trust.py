@@ -143,10 +143,25 @@ def test_an_agent_cannot_name_another_repository(world):
     assert not (runtime.directory() / world.tip).exists()
 
 
-def test_an_agent_cannot_deploy_on_a_machine_with_no_recorded_repository(world):
+def test_only_a_delegated_lead_records_the_first_repository_on_a_machine_with_none(world):
     (runtime.directory() / runtime_store.STATE).unlink()
-    done = world.cli("ensure", "--checkout", str(world.repo))
-    assert done.returncode == 1 and "a person runs" in done.stderr
+    assert runtime_trust.primary_for(world.repo, delegated=True) == world.repo.resolve()
+    with pytest.raises(runtime_deploy.DeployError, match="no source repository is recorded"):
+        runtime_trust.primary_for(world.repo)
+
+
+def test_a_helper_agent_cannot_record_the_first_repository(world):
+    (runtime.directory() / runtime_store.STATE).unlink()
+    done = world.cli("ensure", "--checkout", str(world.repo), ML_STACK_WORKSPACE_AGENT="lead/helper")
+    assert done.returncode != 0 and "not a helper" in done.stderr
+    assert not (runtime.directory() / runtime_store.STATE).exists() and not (runtime.directory() / world.tip).exists()
+
+
+def test_a_delegated_lead_still_cannot_move_a_recorded_repository(world):
+    clone = world.tmp / "clone"
+    subprocess.run(["git", "clone", "-q", str(world.repo), str(clone)], check=True, capture_output=True)
+    with pytest.raises(runtime_deploy.DeployError, match="recorded repository"):
+        runtime_trust.primary_for(clone, delegated=True)
 
 
 def test_background_ensure_of_the_tip_needs_no_agent_identity(world):

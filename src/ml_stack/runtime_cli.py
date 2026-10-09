@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ml_stack import (
+    authority,
     jobs,
     node_launch,
     runtime,
@@ -59,7 +60,8 @@ def _launchers(named: str) -> Path | None:
 
 def plan_from(args: argparse.Namespace, *, deploying: bool = True) -> runtime_deploy.Plan:
     """The deploy plan an ensure, status or rollback command names, built from the recorded primary checkout."""
-    primary = runtime_trust.primary_for(_checkout(args.checkout), deploying=deploying)
+    primary = runtime_trust.primary_for(_checkout(args.checkout), deploying=deploying,
+                                        delegated=getattr(args, "via", "") == authority.DELEGATED)
     commit = runtime_deploy.resolve_commit(primary, getattr(args, "ref", "HEAD"))
     if deploying:
         runtime_trust.admit(primary, commit, allow_unmerged=getattr(args, "allow_unmerged", False))

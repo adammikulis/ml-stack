@@ -61,18 +61,20 @@ def recorded_primary() -> Path | None:
         return None
 
 
-def primary_for(supplied: Path, *, deploying: bool = True) -> Path:
+def primary_for(supplied: Path, *, deploying: bool = True, delegated: bool = False) -> Path:
     """The primary checkout to deploy from: the recorded one when `supplied` is a worktree of it.
 
-    A person may name another repository; any other process that deploys must use the one an earlier deploy recorded.
+    A person may name another repository. A lead agent that passed the delegated `runtime.deploy` gate (``delegated``)
+    may record the first one on a machine with none; any other process that deploys must use the one already recorded.
     """
     recorded = recorded_primary()
     if recorded is not None and common_dir(supplied) == common_dir(recorded):
         return recorded
-    if is_person() or not deploying:
+    if is_person() or not deploying or (recorded is None and delegated):
         return main_worktree(supplied)
     if recorded is None:
-        raise DeployError("no source repository is recorded: a person runs `ml-stack runtime ensure --checkout PATH` once at a terminal")
+        raise DeployError("no source repository is recorded: a person, or a lead agent while `runtime.deploy` is delegated, "
+                          "runs `ml-stack runtime ensure --checkout PATH`")
     raise DeployError(f"{supplied} is not a worktree of the recorded repository {recorded}; only a person at a terminal may deploy another repository")
 
 
