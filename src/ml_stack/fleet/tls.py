@@ -1,13 +1,14 @@
 """Transport security for fleet traffic: a self-signed certificate per daemon, pinned by the
 machines that talk to it.
 
-A daemon makes its own certificate (`identity`) and puts it in its beacon, which is signed with
-the cluster key, so a machine that holds the key learns the certificate from a source it can
-trust and a stranger cannot forge. A client then trusts that one certificate and no other
-(`pinned_context`): no certificate authority and no first-use trust. A certificate that has
-expired, or been replaced since the beacon, is refused by the handshake.
+A device makes its own certificate (`identity`) and is that certificate: it is pinned at pairing
+and listed in the cluster's membership (`fleet.membership`), it is what the device presents as a
+client and what its daemon serves. A client trusts the one certificate it was told to and no
+other (`pinned_context`): no certificate authority and no first-use trust. A server asks every
+client for its certificate and completes the handshake only with one that is a member
+(`member_context`); a member that is revoked afterwards is refused at its next request.
 
-`ML_STACK_FLEET_TLS=off` is the one switch that turns this off, for signed-only traffic.
+Nothing turns this off: a link off this machine is TLS 1.3 or it is not made.
 """
 
 from __future__ import annotations
@@ -18,33 +19,34 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import ssl
 import stat
 import subprocess
 import tempfile
+import threading
 import time
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Protocol
 
+from ml_stack import home
 from ml_stack.files import write_json
 from ml_stack.windows_private import problem as windows_problem, restrict
 
-__all__ = ["ENV", "Identity", "TlsUnavailable", "disabled", "identity", "pinned_context",
-           "server_context"]
+__all__ = ["Identity", "Members", "TlsUnavailable", "device_directory", "identity", "local",
+           "member_context", "pinned_context", "present", "server_context"]
 
-ENV = "ML_STACK_FLEET_TLS"
-VALID_DAYS = 90
+VALID_DAYS = 3650
+"""A device certificate is an identity pinned by the people it was paired with, not a session
+credential: it lasts ten years and a replacement is a new pairing."""
 RENEW_DAYS = 30
 INSTALL = "pip install 'ml-stack[fleet-tls]' (the cryptography package), or put openssl on PATH"
 
 
 class TlsUnavailable(RuntimeError):
     """No way to make a certificate here."""
-
-
-def disabled() -> bool:
-    """Whether the operator has named signed-only traffic with ``ML_STACK_FLEET_TLS=off``."""
-    return os.environ.get(ENV, "").strip().lower() == "off"
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,22 +176,81 @@ def identity(root: Path, name: str, *, now: float | None = None,
 
 
 def server_context(ident: Identity) -> ssl.SSLContext:
-    """The context a daemon answers TLS clients with."""
+    """The context a listener answers TLS clients with, asking none for a certificate: TLS 1.3
+    or nothing. Pairing and installing use it, since their clients are not members yet."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.load_cert_chain(str(ident.certfile), str(ident.keyfile))
     return ctx
 
 
-def pinned_context(cert: str) -> ssl.SSLContext:
-    """A client context that trusts the one certificate ``cert`` (a beacon's base64 DER) and
-    nothing else: another certificate, or this one past its dates, fails the handshake."""
+def _partial(ctx: ssl.SSLContext) -> None:
+    """Trust a self-signed certificate that is itself listed as the anchor."""
+    ctx.verify_flags = (ctx.verify_flags | ssl.VERIFY_X509_PARTIAL_CHAIN) & ~ssl.VERIFY_X509_STRICT
+
+
+class Members(Protocol):
+    """What `member_context` reads from a membership record."""
+
+    def stamp(self) -> Hashable: ...
+
+    def certs_pem(self) -> str: ...
+
+
+def member_context(ident: Identity, members: Members) -> Callable[[], ssl.SSLContext]:
+    """A daemon's server context: TLS 1.3, and a client that presents a certificate must present
+    a member's. The context is made again whenever the record changes, so a device that is
+    revoked fails its next handshake; a client with no certificate still completes the
+    handshake (a phone, a browser) and is held to its own credential by the request check."""
+    built: list[Any] = [None, None]
+    guard = threading.Lock()
+
+    def current() -> ssl.SSLContext:
+        stamp = members.stamp()
+        with guard:
+            if built[1] is None or built[0] != stamp:
+                ctx = server_context(ident)
+                ctx.verify_mode = ssl.CERT_OPTIONAL
+                _partial(ctx)
+                if pem := members.certs_pem():
+                    ctx.load_verify_locations(cadata=pem)
+                built[:] = [stamp, ctx]
+            return built[1]
+
+    return current
+
+
+_PRESENTED: Identity | None = None
+
+
+def present(ident: Identity | None) -> None:
+    """Say which identity this process shows as a client from now on (a daemon says its own)."""
+    global _PRESENTED
+    _PRESENTED = ident
+
+
+def device_directory() -> Path:
+    """Where this machine's own identity lives."""
+    return home.state("onboard", "tls")
+
+
+def local() -> Identity:
+    """This machine's identity: the one it presents as a client, made on first use."""
+    return _PRESENTED or identity(device_directory(), socket.gethostname())
+
+
+def pinned_context(cert: str, *, who: Identity | None = None) -> ssl.SSLContext:
+    """A client context that trusts the one certificate ``cert`` (base64 DER) and nothing else:
+    another certificate, or this one past its dates, fails the handshake. It presents ``who``
+    (this machine's identity unless said) to a server that asks who is calling."""
     pem = ssl.DER_cert_to_PEM_cert(base64.b64decode(cert))
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.verify_flags = (ctx.verify_flags | ssl.VERIFY_X509_PARTIAL_CHAIN) \
-        & ~ssl.VERIFY_X509_STRICT
+    _partial(ctx)
     ctx.load_verify_locations(cadata=pem)
+    with contextlib.suppress(TlsUnavailable, OSError):
+        caller = who or local()
+        ctx.load_cert_chain(str(caller.certfile), str(caller.keyfile))
     return ctx

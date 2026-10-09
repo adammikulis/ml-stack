@@ -177,6 +177,7 @@ def _dev_device(state, number, checkout, udp, *, default_profile=False):
     from ml_stack.fleet.framing import LimitedServer
     from ml_stack.fleet.jobs import JobRunner
     from ml_stack.fleet.onboard.joining import Joining
+    from ml_stack.fleet.pool_roster import Pool
     from ml_stack.fleet.projects import ProjectRegistry
     from ml_stack.http import Server
     from ml_stack.workspace.remote_host import WorkspaceHost
@@ -194,7 +195,11 @@ def _dev_device(state, number, checkout, udp, *, default_profile=False):
     cert = tls.identity(state / "tls", f"node-{number}")
     daemon.joining = Joining(lambda: discovery.memberships(keyfile),
                              fingerprint=lambda: hashlib.sha256(cert.der).hexdigest(), log=lambda message: None)
-    context = tls.server_context(cert)
+    pool = Pool(keyfile)
+    for one in (cert, tls.local()):          # the node itself, and this machine as the others' client
+        pool.enrol(member.group, one.beacon, f"node-{number}", "test")
+    daemon.members = pool
+    context = tls.member_context(cert, pool)
     secured = LimitedServer((discovery.primary_ip(), 0), make_handler(daemon), tls=context)
     loopback = LimitedServer(("127.0.0.1", secured.server_port), make_handler(daemon), tls=context)
     local = Server(("127.0.0.1", 0), make_handler(daemon))

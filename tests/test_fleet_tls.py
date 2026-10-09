@@ -10,12 +10,13 @@ import time
 import pytest
 
 from ml_stack import http, macauth
-from ml_stack.fleet import tls
+from ml_stack.fleet import membership, tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import ALL_INTERFACES, load_or_create_token
-from ml_stack.fleet.discovery import Beacon, discover, primary_ip
+from ml_stack.fleet.discovery import Beacon, discover, mint_cluster, primary_ip
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.pool_roster import Pool
 from ml_stack.fleet.remote import Peer, PeerError
 from ml_stack.windows_private import problem as windows_problem, restrict
 
@@ -38,8 +39,13 @@ def serve(tmp_path, ident, *, name="d"):
     (root / "files").mkdir(parents=True)
     runner = JobRunner(root)
     token = load_or_create_token(root)
-    handler = make_handler(Daemon(runner, root / "files", token, name=name))
-    httpd = LimitedServer((ALL_INTERFACES, 0), handler, tls=tls.server_context(ident))
+    keyfile = tmp_path / name / "cluster.key"
+    mint_cluster("lab", keyfile, mode="prod")
+    pool = Pool(keyfile)
+    for one in (ident, tls.local()):          # the daemon, and this machine as its client
+        pool.enrol("lab", one.beacon, name, "test")
+    handler = make_handler(Daemon(runner, root / "files", token, name=name, cluster_key_path=keyfile, members=pool))
+    httpd = LimitedServer((ALL_INTERFACES, 0), handler, tls=tls.member_context(ident, pool))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd, runner, token
 
@@ -105,9 +111,9 @@ def test_a_junction_identity_directory_is_refused_without_writing_a_key(tmp_path
 
 def test_a_certificate_close_to_its_end_is_made_again(tmp_path):
     now = time.time()
-    old = tls.identity(tmp_path / "tls", "box", now=now - 70 * 86400)
-    assert tls.identity(tmp_path / "tls", "box", now=now - 70 * 86400).der == old.der
-    fresh = tls.identity(tmp_path / "tls", "box", now=now)
+    old = tls.identity(tmp_path / "tls", "box", now=now - 70 * 86400, days=90)
+    assert tls.identity(tmp_path / "tls", "box", now=now - 70 * 86400, days=90).der == old.der
+    fresh = tls.identity(tmp_path / "tls", "box", now=now, days=90)
     assert fresh.der != old.der and fresh.not_after > now + 80 * 86400
 
 
@@ -165,8 +171,8 @@ def test_a_certificate_other_than_the_pinned_one_is_refused(tmp_path):
 
 
 def test_a_certificate_that_has_been_rotated_since_the_beacon_is_refused(tmp_path):
-    old = tls.identity(tmp_path / "tls", "d", now=time.time() - 70 * 86400)
-    renewed = tls.identity(tmp_path / "tls", "d")
+    old = tls.identity(tmp_path / "tls", "d", now=time.time() - 70 * 86400, days=90)
+    renewed = tls.identity(tmp_path / "tls", "d", days=90)
     assert renewed.der != old.der
     httpd, runner, token = serve(tmp_path, renewed)
     try:
@@ -254,8 +260,7 @@ def test_a_beacon_carries_the_certificate_and_names_an_https_address(tmp_path):
     assert Beacon(name="d", port=8770, host="10.1.2.3").base_url == "http://10.1.2.3:8770"
 
 
-def test_a_machine_that_offers_no_certificate_is_not_talked_to_unless_that_is_named(
-        tmp_path, monkeypatch):
+def test_a_machine_that_offers_no_certificate_is_not_talked_to(tmp_path):
     from ml_stack.fleet import discovery
 
     ident = tls.identity(tmp_path / "tls", "d")
@@ -265,8 +270,6 @@ def test_a_machine_that_offers_no_certificate_is_not_talked_to_unless_that_is_na
     assert discovery._trusted(bare) is False
     assert discovery._trusted(sealed) is True and "192.0.2.10:2" in http._PINNED
     assert discovery._trusted(here) is True
-    monkeypatch.setenv(tls.ENV, "off")
-    assert discovery._trusted(bare) is True
 
 
 def test_an_advertised_certificate_is_pinned_by_discovery_over_real_sockets(tmp_path):
@@ -277,6 +280,7 @@ def test_an_advertised_certificate_is_pinned_by_discovery_over_real_sockets(tmp_
         udp = probe.getsockname()[1]
     ident = tls.identity(tmp_path / "tls", "d")
     key = create_cluster_key(tmp_path / "k", group="ml-stack").encode()
+    membership.roster(key).enrol(ident.beacon, "d", "test")
     tell = Advertiser(Beacon(name="d", port=8770, cert=ident.beacon), key, port=udp,
                       interval_s=30).start()
     try:

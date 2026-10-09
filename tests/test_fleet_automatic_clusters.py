@@ -64,11 +64,13 @@ def test_receive_pins_advertised_certificate_and_binds_nonce(monkeypatch):
         return 200, {"mode": "dev", "group": "development", "key": KEY.decode(), "nonce": body["nonce"]}
 
     monkeypatch.setattr(joining._Call, "post", post)
-    assert automatic.receive("127.0.0.1", offer()) == discovery.Membership("development", KEY)
+    member, _ = automatic.receive("127.0.0.1", offer())
+    assert member == discovery.Membership("development", KEY)
     assert len(captured) == 1
     pin, tls, timeout, step, body = captured[0]
-    assert (pin, tls, step, body) == (FINGERPRINT, True, "automatic",
-                                      {"group": "development", "nonce": NONCE})
+    assert (pin, tls, step) == (FINGERPRINT, True, "automatic")
+    assert {k: body[k] for k in ("group", "nonce")} == {"group": "development", "nonce": NONCE}
+    assert body["cert"] == joining.local_identity().beacon
     assert 0 < timeout <= 5.0
 
 
@@ -129,7 +131,7 @@ def test_singletons_converge_on_same_cluster_regardless_of_offer_order(tmp_path,
     members = [discovery.Membership("development", value * 43) for value in (b"a", b"b", b"c")]
     winner = min(members, key=lambda member: hashlib.sha256(member.key).hexdigest())
     by_identity = {hashlib.sha256(member.key).hexdigest(): member for member in members}
-    monkeypatch.setattr(automatic, "receive", lambda host, row: by_identity[row["cluster_id"]])
+    monkeypatch.setattr(automatic, "receive", lambda host, row: (by_identity[row["cluster_id"]], ""))
     for index, member in enumerate(members):
         path = tmp_path / f"device-{index}.key"
         discovery.adopt(member, path)
@@ -220,7 +222,7 @@ def test_failed_candidate_does_not_block_next_cluster(tmp_path, monkeypatch):
         calls.append(host)
         if host == rows[0][0]:
             raise discovery.DiscoveryError("unreachable")
-        return member
+        return member, ""
 
     monkeypatch.setattr(automatic, "receive", receive)
     assert automatic.ensure(tmp_path / "device.key") == member
@@ -265,7 +267,7 @@ def test_auto_action_releases_manual_selection_and_converges(tmp_path, monkeypat
     discovery.adopt(discovery.Membership("chosen-dev", candidates[1], selection="manual"), path)
     target = discovery.Membership("automatic-dev", candidates[0])
     monkeypatch.setattr(automatic, "offers", lambda port: [("127.0.0.1", offer(target.key))])
-    monkeypatch.setattr(automatic, "receive", lambda host, offered: target)
+    monkeypatch.setattr(automatic, "receive", lambda host, offered: (target, ""))
     assert automatic.select_automatic(path) == target
     assert discovery.memberships(path)[0] == target
 
@@ -292,7 +294,7 @@ def test_automatic_action_refuses_production_and_invalid_selection(tmp_path):
 def test_manual_join_marks_received_dev_membership(tmp_path, monkeypatch):
     path = tmp_path / "device.key"
     received = discovery.Membership("chosen-dev", KEY)
-    monkeypatch.setattr(joining, "_shake", lambda *args: received)
+    monkeypatch.setattr(joining, "_shake", lambda *args: (received, ""))
     member = joining._accept([joining.Joiner("127.0.0.1", 8770, True)],
                              received.group, "shared secret", path, mode="dev")
     assert member.key == received.key

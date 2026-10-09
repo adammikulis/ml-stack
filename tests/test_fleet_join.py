@@ -959,12 +959,12 @@ class TestWhoAPauseIsSentTo:
         held = {m.group: m.key for m in memberships(key)}
 
         clients = peer_clients(
-            [{"name": "workshop", "base_url": "http://10.0.0.4:8770", "clusters": ["studio"]},
-             {"name": "attic", "base_url": "http://10.0.0.5:8770", "clusters": ["annex"]}],
+            [{"name": "workshop", "base_url": "https://10.0.0.4:8770", "clusters": ["studio"]},
+             {"name": "attic", "base_url": "https://10.0.0.5:8770", "clusters": ["annex"]}],
             cluster_key_path=key, timeout=12.5)
 
         assert sorted(clients) == ["attic", "workshop"]
-        assert clients["workshop"].base_url == "http://10.0.0.4:8770"
+        assert clients["workshop"].base_url == "https://10.0.0.4:8770"
         assert clients["workshop"].token == derive_token(held["studio"])
         assert clients["attic"].token == derive_token(held["annex"])
         assert clients["workshop"].token != clients["attic"].token
@@ -977,9 +977,9 @@ class TestWhoAPauseIsSentTo:
         join_cluster("nine blue kettles", group="studio", path=key)
 
         clients = peer_clients(
-            [{"name": "workshop", "base_url": "http://10.0.0.4:8770", "clusters": ["studio"]},
-             {"name": "stranger", "base_url": "http://10.0.0.6:8770", "clusters": ["elsewhere"]},
-             {"name": "unlisted", "base_url": "http://10.0.0.7:8770"}],
+            [{"name": "workshop", "base_url": "https://10.0.0.4:8770", "clusters": ["studio"]},
+             {"name": "stranger", "base_url": "https://10.0.0.6:8770", "clusters": ["elsewhere"]},
+             {"name": "unlisted", "base_url": "https://10.0.0.7:8770"}],
             cluster_key_path=key)
 
         assert list(clients) == ["workshop"]

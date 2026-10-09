@@ -32,6 +32,7 @@ from .discovery import (
     load_cluster_key,
     primary_ip,
 )
+from .onboard.lan import secure_scheme
 
 if TYPE_CHECKING:
     from ml_stack.speech.protocols import Transcript
@@ -100,6 +101,8 @@ def _peer_error(where: str, exc: ServerError) -> PeerError:
 class Peer:
     def __init__(self, base_url: str, token: str, *, timeout: float = 60.0,
                  beacon: Beacon | None = None) -> None:
+        if not secure_scheme(base_url):
+            raise ValueError(f"a peer is reached over https, or http on this machine only: {base_url}")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
@@ -181,6 +184,10 @@ class Peer:
     def health(self) -> dict:
         _, body, _ = self._request("GET", "/health", timeout=10, retry=READS)
         return json.loads(body or b"{}")
+
+    def members(self, group: str, rows: list[dict]) -> dict:
+        """Give this peer our record of a cluster's devices and take back its own."""
+        return self._json("POST", "/fleet/v1/members", {"group": group, "rows": rows})
 
     def availability(self, action: str = "", **fields: Any) -> dict:
         """Read or change when this peer takes work."""

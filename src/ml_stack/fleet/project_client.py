@@ -14,7 +14,7 @@ from ml_stack.files import read_json
 from ml_stack.http import Sealed, ServerError, ServerUnreachable, open_stream
 
 from .discovery import derive_token, memberships
-from .onboard.lan import require_local_url
+from .onboard.lan import require_local_url, secure_scheme
 from .project_source import MAX_ARCHIVE, MAX_FILES, MAX_SOURCE, ProjectError, checkout, project_id
 from .remote import Peer
 
@@ -120,7 +120,7 @@ def validate_project(project: dict) -> None:
             raise ProjectError(f"Invalid project {field}")
     if project.get("board_host"):
         parts = urlsplit(project["board_host"])
-        if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username
+        if (not secure_scheme(project["board_host"]) or not parts.hostname or parts.username
                 or parts.password or parts.query or parts.fragment or parts.path not in {"", "/"}):
             raise ProjectError("Invalid project board_host")
         require_local_url(project["board_host"])

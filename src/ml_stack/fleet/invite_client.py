@@ -1,6 +1,7 @@
 """Certificate-pinned redemption of invitations to owned computers."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import http.client
@@ -17,6 +18,7 @@ from .discovery import Membership
 from .invites import decode, encode, proof
 from .onboard.lan import require_local
 from .recovery import parse_recovery
+from .tls import local
 
 LIMIT = 16384
 
@@ -86,7 +88,7 @@ def parse_invite(text: str, now: float | None = None) -> dict[str, Any]:
     return data
 
 
-def _post(data: dict[str, Any], path: str, fields: dict[str, Any]) -> dict[str, Any]:
+def _post(data: dict[str, Any], path: str, fields: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     parts, addresses = _addresses(data["endpoint"])
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
@@ -113,7 +115,7 @@ def _post(data: dict[str, Any], path: str, fields: dict[str, Any]) -> dict[str, 
         raw = response.read(LIMIT + 1)
         if len(raw) != int(lengths[0]):
             raise ValueError("the invitation response is incomplete")
-        return _json(raw)
+        return _json(raw), certificate
     except (OSError, http.client.HTTPException) as exc:
         raise ValueError("could not complete the secure invitation exchange") from exc
     finally:
@@ -121,22 +123,23 @@ def _post(data: dict[str, Any], path: str, fields: dict[str, Any]) -> dict[str, 
         plain.close()
 
 
-def redeem(invite: str, device_name: str) -> Membership:
-    """Redeem a pinned single-use computer invitation and return its membership."""
+def redeem(invite: str, device_name: str) -> tuple[Membership, str]:
+    """Redeem a pinned single-use computer invitation: its membership, and the certificate (base64 DER)
+    of the device that issued it, which the invitation's fingerprint pinned."""
     if (not isinstance(device_name, str) or not 1 <= len(device_name) <= 128
             or any(ord(char) < 32 or ord(char) == 127 for char in device_name)):
         raise ValueError("a bounded device name is required")
     data = parse_invite(invite)
     fields = {"id": data["id"], "kind": "computer", "platform": "computer",
-                  "device_name": device_name, "public_key": ""}
-    answer = _post(data, "/join/invite/challenge", fields)
+              "device_name": device_name, "public_key": local().beacon}
+    answer, _ = _post(data, "/join/invite/challenge", fields)
     challenge = answer.get("challenge")
     if not isinstance(challenge, str) or not re.fullmatch(r"[a-f0-9]{64}", challenge):
         raise ValueError("invalid invitation challenge")
     fields["challenge"] = challenge
     secret = decode(data["secret"])
     fields["proof"] = proof(secret, fields, data["fingerprint"])
-    answer = _post(data, "/join/invite/redeem", fields)
+    answer, certificate = _post(data, "/join/invite/redeem", fields)
     if not isinstance(answer.get("grant_data"), str) or not isinstance(answer.get("proof"), str):
         raise ValueError("invalid invitation grant")
     grant = decode(answer["grant_data"])
@@ -149,4 +152,4 @@ def redeem(invite: str, device_name: str) -> Membership:
     document = _json(grant)
     if set(document) != {"kind", "group", "key", "mode"} or document.pop("kind") != "computer":
         raise ValueError("the invitation granted unexpected access")
-    return parse_recovery(json.dumps(document))
+    return parse_recovery(json.dumps(document)), base64.b64encode(certificate).decode()

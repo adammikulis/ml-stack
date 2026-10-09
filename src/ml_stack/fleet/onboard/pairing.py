@@ -281,7 +281,7 @@ def unverified_context() -> ssl.SSLContext:
     """A client context that accepts any certificate and so authenticates nothing; used only
     to learn which certificate the other end presents, which the exchange then binds."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx

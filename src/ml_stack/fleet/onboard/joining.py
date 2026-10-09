@@ -9,6 +9,7 @@ import http.client
 import json
 import re
 import secrets
+import socket
 import threading
 import time
 from collections import deque
@@ -22,8 +23,11 @@ from ml_stack.log import warn
 
 from .. import discovery as disc, recovery
 from ..discovery import DiscoveryError, Membership
+from ..membership import fingerprint_of as cert_fingerprint
+from ..pool_roster import Pool
+from ..tls import local as local_identity
 from . import pake
-from .lan import require_local
+from .lan import loopback_host, require_local
 from .pairing import fingerprint_of, unverified_context
 
 __all__ = [
@@ -44,8 +48,6 @@ __all__ = [
 ]
 
 API = "/join/v1"
-CLIENT = "joiner"
-"""The identity the new machine gives the exchange; it has no certificate."""
 PLAIN = "plain"
 """The daemon's identity when it serves without TLS."""
 MOST_PENDING = 16
@@ -97,6 +99,8 @@ class _Pending:
     context: bytes
     source: str
     expires: float
+    cert: str
+    name: str
 
 
 def _context(group: str, nonce: str) -> bytes:
@@ -109,8 +113,10 @@ class Joining:
 
     def __init__(self, groups: Callable[[], list[Membership]],
                  fingerprint: Callable[[], str] = lambda: PLAIN,
-                 log: Callable[[str], None] = warn) -> None:
-        self.groups, self.fingerprint, self.log = groups, fingerprint, log
+                 log: Callable[[str], None] = warn,
+                 enrol: Callable[[str, str, str], None] | None = None) -> None:
+        self.groups, self.fingerprint, self.log, self.enrol = groups, fingerprint, log, enrol
+        """``enrol(group, certificate, name)`` lists a machine that proved the passphrase as a device of the cluster."""
         self.lockout = macauth.Lockout(failures=5, window_s=600.0, lock_s=600.0)
         self.everyone = macauth.Lockout(failures=30, window_s=600.0, lock_s=600.0)
         self.attempts: deque[tuple[float, str, str, str]] = deque(maxlen=200)
@@ -145,11 +151,15 @@ class Joining:
             raise Refusal(403, "automatic cluster admission requires TLS")
         if self.lockout.locked(source) or self.everyone.locked("automatic"):
             raise Refusal(429, "too many automatic joins; retry shortly")
-        nonce = body.get("nonce")
+        nonce, cert = body.get("nonce"), str(body.get("cert", ""))
         if not isinstance(nonce, str) or not re.fullmatch("[0-9a-f]{32}", nonce):
             raise Refusal(400, "automatic join needs a request nonce")
+        if not cert_fingerprint(cert):
+            raise Refusal(400, "a machine joins with its device certificate")
         self.lockout.failed(source)
         self.everyone.failed("automatic")
+        if self.enrol is not None:
+            self.enrol(group, cert, str(body.get("name", ""))[:80])
         self._note(source, group, "joined development cluster")
         return {"group": group, "key": member.key.decode(), "mode": member.mode,
                 "cluster_id": hashlib.sha256(member.key).hexdigest(), "nonce": nonce}
@@ -174,9 +184,12 @@ class Joining:
         self.lockout.failed(source)
         self.everyone.failed("*")
         sid, context = secrets.token_hex(16), _context(group, str(body.get("nonce"))[:64])
+        cert, name = str(body.get("cert", "")), str(body.get("name", ""))[:80]
+        if not cert_fingerprint(cert):
+            raise Refusal(400, "a machine joins with its device certificate")
         try:
             session = pake.start_responder(words, context=context,
-                                           mine=self.fingerprint(), theirs=CLIENT)
+                                           mine=self.fingerprint(), theirs=cert_fingerprint(cert))
             session.receive(str(body.get("message")))
         except pake.Bad as exc:
             self._note(source, group, "refused, bad message")
@@ -187,7 +200,7 @@ class Joining:
                 del self._pending[old]
             if len(self._pending) >= MOST_PENDING:
                 raise Refusal(429, "too many joins at once; try again in a moment")
-            self._pending[sid] = _Pending(session, group, context, source, now + PENDING_S)
+            self._pending[sid] = _Pending(session, group, context, source, now + PENDING_S, cert, name)
         self._note(source, group, "started")
         return {"id": sid, "message": session.message}
 
@@ -203,6 +216,8 @@ class Joining:
         if member is None:
             raise Refusal(404, "this machine left that cluster")
         self.lockout.passed(source)
+        if self.enrol is not None:
+            self.enrol(held.group, held.cert, held.name)
         payload = json.dumps({"group": member.group, "key": member.key.decode(), "mode": member.mode}).encode()
         sealed = sealing.seal(held.session.key("join"), payload, held.context)
         self._note(source, held.group, "joined")
@@ -297,15 +312,19 @@ class _Call:
     def __init__(self, joiner: Joiner, timeout: float) -> None:
         self.joiner, self.timeout = joiner, timeout
         self.seen = ""
+        self.der = b""
 
     def _connect(self) -> http.client.HTTPConnection:
         j = self.joiner
         require_local(j.host, j.port)
+        if not j.tls and not loopback_host(j.host):
+            raise DiscoveryError(f"{j.host} offers no TLS; a machine is only joined over an encrypted link")
         conn: http.client.HTTPConnection = (
             http.client.HTTPSConnection(j.host, j.port, context=unverified_context(), timeout=self.timeout)
             if j.tls else http.client.HTTPConnection(j.host, j.port, timeout=self.timeout))
         conn.connect()
-        seen = fingerprint_of(conn.sock.getpeercert(binary_form=True) or b"") if j.tls else PLAIN  # type: ignore[union-attr]
+        self.der = conn.sock.getpeercert(binary_form=True) or b"" if j.tls else b""  # type: ignore[union-attr]
+        seen = fingerprint_of(self.der) if j.tls else PLAIN
         if self.seen and seen != self.seen:
             conn.close()
             raise DiscoveryError("the machine changed its certificate during the join")
@@ -338,16 +357,19 @@ class _Call:
         return response.status, parsed if isinstance(parsed, dict) else {}
 
 
-def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> Membership:
-    """The cluster key ``joiner`` gives a machine that knows ``words``; `Declined` when it will not."""
+def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> tuple[Membership, str]:
+    """The cluster key ``joiner`` gives a machine that knows ``words`` and the certificate (base64
+    DER) of the machine that gave it; `Declined` when it will not."""
     call = _Call(joiner, timeout)
     context = _context(group, secrets.token_hex(16))
+    mine = local_identity()
     try:
-        session = pake.start_initiator(words, context=context, mine=CLIENT, theirs=call.fingerprint())
+        session = pake.start_initiator(words, context=context, mine=mine.fingerprint, theirs=call.fingerprint())
     except pake.PakeUnavailable as exc:
         raise DiscoveryError(str(exc)) from None
     status, got = call.post("start", {"group": group, "message": session.message,
-                                      "nonce": context.rsplit(b"/", 1)[1].decode()})
+                                      "nonce": context.rsplit(b"/", 1)[1].decode(),
+                                      "cert": mine.beacon, "name": socket.gethostname()[:40]})
     if status != 200:
         raise Declined(status, str(got.get("error", f"status {status}")))
     try:
@@ -366,7 +388,7 @@ def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> Membership
             raise DiscoveryError("the machine answered for a different cluster")
     except (sealing.SealError, ValueError, KeyError, TypeError, DiscoveryError):
         raise Declined(400, "the machine's answer did not authenticate") from None
-    return held
+    return held, base64.b64encode(call.der).decode()
 
 
 def create_by_passphrase(passphrase: str, group: str,
@@ -424,11 +446,13 @@ def _accept(joiners: list[Joiner], group: str, secret: str,
     refused: list[Declined] = []
     for one in joiners:
         try:
-            held = _shake(one, group, secret, 10.0)
+            held, host_cert = _shake(one, group, secret, 10.0)
             if mode is not None and held.mode != mode:
                 raise Declined(403, "the cluster admission mode differs from the requested mode")
-            return disc.adopt(Membership(group=held.group, key=held.key, join=secret, mode=held.mode,
-                                         selection="manual"), path)
+            joined = disc.adopt(Membership(group=held.group, key=held.key, join=secret, mode=held.mode,
+                                           selection="manual"), path)
+            Pool(path).joined(joined.group, host_cert, one.host)
+            return joined
         except Declined as why:
             refused.append(why)
         except DiscoveryError as why:

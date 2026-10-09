@@ -26,7 +26,7 @@ from typing import Any
 from ml_stack import gate, sealing, sentinel, serverkeys
 from ml_stack.files import promote
 from ml_stack.http import _open
-from ml_stack.macauth import Authenticator, Verdict, parts
+from ml_stack.macauth import Verdict, parts
 from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
@@ -34,6 +34,7 @@ from ml_stack.speech.service import as_json, transcribe
 
 from . import (
     app_identity,
+    callers,
     commands,
     companion_routes,
     device_auth,
@@ -66,8 +67,10 @@ from .framing import (
 )
 from .jobs import DaemonError, JobRunner
 from .measuring import BenchHost, Job as BenchJob, Refused
+from .member_routes import answer as member_answer
 from .models import Models
 from .onboard.joining import API as JOIN_API, Joining
+from .pool_roster import Pool
 from .serving import Hosting, NoRoom, ServeSettings, Serving
 from .ui import routes as ui_routes
 from .weights import ModelError
@@ -116,6 +119,8 @@ class Daemon:
     launcher_control: Callable[[], Any] | None = None
     joining: Joining | None = None
     """Answers a machine that asks to join with the passphrase; without it the join routes are off."""
+    members: Pool | None = None
+    """Which devices are in this daemon's clusters; by default the record beside ``cluster_key_path``."""
     command: Callable[[list[str]], list[str]] = commands.allowed
     """Which argv a ``POST /jobs`` may run, and in what form; raises ValueError to refuse."""
 
@@ -134,15 +139,15 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
     bench, hosting, decide = daemon.bench, daemon.hosting, daemon.decide
     ui_from_lan = daemon.ui_from_lan
     joining, command = daemon.joining, daemon.command
+    roster = daemon.members or Pool(cluster_key_path)
 
     def secrets_now() -> set[str]:
         """Every secret this machine answers to, read at request time."""
         own = token() if callable(token) else token
         return {one for one in (own, *(tokens() if tokens else ())) if one}
 
-    authenticator = watch_authenticator(Authenticator(secrets_now), sentinel.armed(), Verdict)
-    device_authenticator = Authenticator(lambda: [*secrets_now(),
-                                                  *(device_auth.secret(device) for device in daemon.devices())])
+    screen = callers.Screen(secrets_now, lambda: [device_auth.secret(device) for device in daemon.devices()],
+                            roster, cluster_key_path, lambda auth: watch_authenticator(auth, sentinel.armed(), Verdict))
 
     class Handler(Limited, BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
@@ -221,13 +226,20 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                         return
                     remaining -= len(chunk)
 
+        _peer = ""
+
         def _guard(self, body: bytes | None = None) -> bool:
-            """Whether this request is signed by a secret this machine answers to; the
-            answer is sent when it is not. ``body`` is what the request carried."""
+            """Whether this request is signed by a secret this machine answers to, and when it
+            came over TLS from another machine, by a device that is a member; the answer is
+            sent when it is not. ``body`` is what the request carried."""
             self._workspace_device = None
             self._workspace_projects = daemon.projects
-            checking = device_authenticator if self.path.split('?')[0].startswith('/workspace/v1/') else authenticator
-            verdict = checking.check(self.command, self.path, self.headers, body, self.client_address[0])
+            seen = screen.check(self, body)
+            verdict, self._peer = seen.verdict, seen.peer
+            if seen.refusal is not None:
+                self.close_connection = seen.kind == callers.STRANGER
+                self._send(seen.refusal[0], {"error": seen.refusal[1]})
+                return False
             if verdict.ok:
                 self._workspace_device = device_auth.identify(daemon.devices(), verdict.secret)
                 mode = self.headers.get(sealing.HEADER, "")
@@ -424,6 +436,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not (path == "/health" and here and "Authorization" not in self.headers) \
                     and not self._guard():
                 return
+            if member_answer(self, roster, "GET", path, None):
+                return
             if project_routes.answer(self, daemon.projects, parsed,
                                      cluster_key_path=cluster_key_path) or self._extension():
                 return
@@ -610,6 +624,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             body = self._unsealed(body)
             if body is None:
+                return
+            if member_answer(self, roster, "POST", self.path.split("?")[0], body):
                 return
             if project_routes.register(self, daemon.projects, cluster_key_path, body):
                 return

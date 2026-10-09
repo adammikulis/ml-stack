@@ -14,6 +14,7 @@ from qrcode.image.svg import SvgPathFillImage
 from .discovery import DiscoveryError, adopt
 from .invites import Invitations
 from .onboard.lan import in_tailnet
+from .pool_roster import Pool
 from .session import parse_cookie
 
 
@@ -117,7 +118,9 @@ def public(ui: Any, handler: Any, raw: bytes | None) -> bool:
     return True
 
 
-def joined(ui: Any, member: Any) -> dict[str, Any]:
+def joined(ui: Any, redeemed: tuple[Any, str]) -> dict[str, Any]:
+    member, host_cert = redeemed
     adopt(member, ui.cluster_key_path)
+    Pool(ui.cluster_key_path).joined(member.group, host_cert, "invitation")
     ui.rejoined()
     return {"ok": True, "group": member.group}

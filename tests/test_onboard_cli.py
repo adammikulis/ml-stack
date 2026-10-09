@@ -137,6 +137,14 @@ def test_the_whole_conversation_across_three_processes(owner, tmp_path):
     mine = discovery.memberships(tmp_path / "newbox" / "cluster.key")
     theirs = discovery.memberships(owner.key_path)
     assert mine and mine[0].key == theirs[0].key
+    # each machine lists the other's certificate as a device of the cluster
+    def devices_of(env, key_path):
+        listing = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers", "--cluster-key", str(key_path),
+                                  "members", "list"], env=env, capture_output=True, text=True, timeout=60, check=False)
+        assert listing.returncode == 0, listing.stderr
+        return listing.stdout
+    assert "active" in devices_of(owner.env, owner.key_path) and "new-box" in devices_of(owner.env, owner.key_path)
+    assert devices_of(new_env, tmp_path / "newbox" / "cluster.key").count("active") == 2
     # and the owner can see it and revoke it
     devices = json.loads((owner.state / "devices.json").read_text())["devices"]
     assert devices[0]["name"] == "new-box" and devices[0]["status"] == "active"

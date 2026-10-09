@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from ml_stack import home, http, private_path, sealing
 from ml_stack.fleet import tls
 from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
-from ml_stack.fleet.onboard.lan import require_local_url
+from ml_stack.fleet.onboard.lan import require_local_url, secure_scheme
 from ml_stack.fleet.remote import Peer, device_address, primary_ip, same_machine_host
 from ml_stack.graph.store import GraphStore
 from ml_stack.http import ServerError, open_stream
@@ -50,9 +50,9 @@ class RemoteWorkspace:
     def __init__(self, host: str, project_id: str, *, cluster_key: Path | None = None,
                  cluster: str = "") -> None:
         parts = urlsplit(host)
-        if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username
+        if (not secure_scheme(host) or not parts.hostname or parts.username
                 or parts.password or parts.query or parts.fragment or parts.path not in {"", "/"}):
-            raise ValueError("a project host is an http(s) LAN address without a path")
+            raise ValueError("a project host is an https LAN address (http only on this machine) without a path")
         if not re.fullmatch("[a-f0-9]{32}", project_id):
             raise ValueError("invalid shared project ID")
         require_local_url(host)

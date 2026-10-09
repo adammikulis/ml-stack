@@ -65,9 +65,11 @@ from .invites import Invitations
 from .jobs import JobRunner
 from .launch_secret import LaunchSecret
 from .measuring import BenchHost, bench_home as bench_home_beside
+from .membership_sync import admit, start as start_syncing
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
+from .pool_roster import Pool
 from .projects import ProjectRegistry, lan_host, local_candidates
 from .runtime_paths import announce_token, configure as configure_runtime_paths, default_root
 from .serving import Hosting, Serving
@@ -212,12 +214,7 @@ class DaemonRuntime:
             self.key,
             profile=self.cluster_key_path or os.environ.get("ML_STACK_CLUSTER_KEY"),
         )
-        self.name = (
-            self.name
-            or os.environ.get("ML_STACK_PEER_NAME")
-            or self.settings.name
-            or socket.gethostname()
-        )
+        self.name = self.name or os.environ.get("ML_STACK_PEER_NAME") or self.settings.name or socket.gethostname()
         if self.slots == 1 and self.settings.slots != 1:
             self.slots = self.settings.slots
         if not self.labels and self.settings.labels:
@@ -299,6 +296,7 @@ class DaemonRuntime:
             lan_host(self.port),
         )
         self.workspaces = workspace_host(self.projects, self.workspace_factory)
+        self.members = Pool(self.cluster_key_path)
         self.daemon = Daemon(
                 self.runner,
                 self.files_root,
@@ -323,7 +321,9 @@ class DaemonRuntime:
                 decide=Deciding(self.serving),
                 ui_from_lan=self.ui_from_lan or self.setup_from_lan,
                 launcher_control=lambda: self.control,
-                joining=Joining(lambda: memberships(self.cluster_key_path), self.fingerprint),
+                joining=Joining(lambda: memberships(self.cluster_key_path), self.fingerprint,
+                                enrol=lambda group, cert, name: admit(self.members, group, cert, name)),
+                members=self.members,
             )
         self.handler = make_handler(self.daemon)
         self.listening = bind_address(
@@ -335,6 +335,7 @@ class DaemonRuntime:
             self.interface.invitations = Invitations(
                 lambda: memberships(self.cluster_key_path),
                 lambda: (lan_host(self.port), self.fingerprint()),
+                enrol=lambda group, cert, name: admit(self.members, group, cert, name),
             )
             self.interface.join_invitation = lambda code: invite_routes.joined(
                 self.interface, invite_client.redeem(code, self.name)
@@ -403,8 +404,10 @@ class DaemonRuntime:
             + ("" if self.listening != LOOPBACK else "  (this machine only; --lan opens it)")
         )
         say(f"  name  {self.name}")
+        self.members.ensure_self(self.identity, self.name)
         for member in memberships(self.cluster_key_path):
-            say(f"  cluster {member.group}")
+            alone = member.group in self.members.alone()
+            say(f"  cluster {member.group}" + ("  (no other device enrolled: pair, or 'ml-stack-peers members adopt')" if alone else ""))
         say(f"  root  {self.root}")
         say(f"  bench {self.measuring_home}")
         say(f"  slots {self.slots}")
@@ -460,6 +463,7 @@ class DaemonRuntime:
             )
             self.convergence.start()
         runtime_repair.resume_stored(self.interface, self.root)
+        self.syncing = start_syncing(self.members)
         try:
             while True:
                 self.httpd.serve_forever()
@@ -477,6 +481,7 @@ class DaemonRuntime:
             pass
         finally:
             try:
+                self.syncing.set()
                 self.convergence_stop.set()
                 if self.convergence is not None:
                     self.convergence.join(timeout=12.0)
@@ -527,29 +532,23 @@ class DaemonRuntime:
         offered = self.served_cert()
         return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
 
-    def identity(self) -> tls.Identity | None:
-        """This daemon's certificate, made on first use; None when signed-only is named."""
-        if tls.disabled():
-            return None
+    def identity(self) -> tls.Identity:
+        """This daemon's certificate, made on first use."""
         if self.cert is None:
             self.cert = tls.identity(identity_directory(self.root), self.name)
+            tls.present(self.cert)
         return self.cert
 
     def served_cert(self) -> str:
         """The certificate peers should pin: this daemon's, if it listens beyond this machine."""
-        if self.listening == LOOPBACK or (found := self.identity()) is None:
-            return ""
-        return found.beacon
+        return "" if self.listening == LOOPBACK else self.identity().beacon
 
     def listen(self, address: str) -> LimitedServer:
         """A server on ``address``: a machine-only one speaks plain HTTP, any other TLS."""
         if address in (LOOPBACK, "localhost", "::1"):
             return LimitedServer((address, self.port), self.handler)
-        found = self.identity()
-        if found is None:
-            warn(f"  {tls.ENV}=off: traffic on {address}:{self.port} is signed but NOT encrypted")
-            return LimitedServer((address, self.port), self.handler)
-        return LimitedServer((address, self.port), self.handler, tls=tls.server_context(found))
+        return LimitedServer((address, self.port), self.handler,
+                             tls=tls.member_context(self.identity(), self.members))
 
     def refresh(self, b: Beacon) -> None:
         """Bring the beacon's mutable half up to date before it goes on the wire."""
@@ -570,6 +569,7 @@ class DaemonRuntime:
         """Advertise on every cluster this machine is in, and stop on any it left."""
         with self.announcement_lock:
             joined = {m.group: m for m in memberships(self.cluster_key_path)}
+            self.members.ensure_self(self.identity, self.name)
             for group in [g for g in self.advertisers if g not in joined]:
                 with contextlib.suppress(Exception):
                     self.advertisers.pop(group).stop()

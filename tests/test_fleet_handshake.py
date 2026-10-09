@@ -13,6 +13,7 @@ from collections import Counter
 import pytest
 
 from ml_stack import http, macauth, sealing
+from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.availability import Availability
 from ml_stack.fleet.daemon import load_or_create_token
@@ -26,9 +27,11 @@ from ml_stack.fleet.discovery import (
     memberships,
     mint_cluster,
 )
+from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.onboard import joining, pake
 from ml_stack.fleet.onboard.joining import Joining, join_by_passphrase, join_secret, matches
+from ml_stack.fleet.pool_roster import Pool
 from ml_stack.fleet.remote import Peer, PeerError
 
 WORDS = "quince larch marlow"
@@ -52,7 +55,11 @@ class Machine:
         self.runner = JobRunner(root)
         self.logged: list[str] = []
         self.captured: list[tuple[str, dict, dict]] = []
-        self.joining = Joining(lambda: memberships(self.keyfile), log=self.logged.append)
+        self.ident = tls.identity(tmp_path / "a" / "tls", "a")
+        self.pool = Pool(self.keyfile)
+        self.joining = Joining(lambda: memberships(self.keyfile), lambda: self.ident.fingerprint,
+                               log=self.logged.append,
+                               enrol=lambda group, cert, name: self.pool.enrol(group, cert, name, "join"))
         handle = self.joining.handle
 
         def record(path, body, source, *, transport_tls=False):
@@ -62,11 +69,13 @@ class Machine:
 
         self.joining.handle = record
         token = load_or_create_token(root, self.member.key)
-        self.httpd = http.Server(("0.0.0.0", 0), make_handler(  # noqa: S104 - native LAN fixture
-            Daemon(self.runner, root / "files", token, name="a", joining=self.joining)))
+        self.pool.enrol("lab", self.ident.beacon, "a", "self")
+        self.httpd = LimitedServer(("0.0.0.0", 0), make_handler(  # noqa: S104 - native LAN fixture
+            Daemon(self.runner, root / "files", token, name="a", joining=self.joining, members=self.pool,
+                   cluster_key_path=self.keyfile)), tls=tls.member_context(self.ident, self.pool))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.port = self.httpd.server_port
-        self.advertiser = Advertiser(Beacon(name="a", port=self.port), self.member.key,
+        self.advertiser = Advertiser(Beacon(name="a", port=self.port, cert=self.ident.beacon), self.member.key,
                                      port=udp, cluster="lab", interval_s=0.2)
         self.advertiser.mode = self.member.mode
         self.advertiser.joinable = True
@@ -102,13 +111,39 @@ def test_a_new_machine_given_the_passphrase_receives_the_cluster_key(machine, tm
     assert got.group == "lab" and got.key == machine.member.key
     assert load_cluster_key(tmp_path / "b" / "cluster.key") == machine.member.key
     assert any("joined from" in line for line in machine.logged)
+    # the host listed the joiner's certificate, which the passphrase exchange bound; the joiner listed the host's
+    roster = machine.pool.roster("lab")
+    assert roster.get(tls.local().fingerprint).by == "join"
+    assert roster.get(machine.ident.fingerprint).active
+
+
+def test_a_join_over_the_real_tls_listener_lists_each_machine_in_the_others_record(machine, tmp_path):
+    """The same exchange without the multicast that finds the daemon: the joiner is told where it is."""
+    keyfile = tmp_path / "b" / "cluster.key"
+    held = joining._accept([joining.Joiner("127.0.0.1", machine.port, True)], "lab", join_secret(WORDS, "lab"),
+                           keyfile)
+    assert held.key == machine.member.key
+    assert machine.pool.roster("lab").get(tls.local().fingerprint).by == "join"
+    host = Pool(keyfile).roster("lab").get(machine.ident.fingerprint)
+    assert host.active
+    with pytest.raises(DiscoveryError, match="none accepts that passphrase"):
+        joining._accept([joining.Joiner("127.0.0.1", machine.port, True)], "lab",
+                        join_secret("not the words", "lab"), tmp_path / "c" / "cluster.key")
+    assert not (tmp_path / "c" / "cluster.key").exists()
+
+
+def test_a_join_without_a_device_certificate_is_refused(machine):
+    status, answer = machine.joining.handle("/join/v1/start", {"group": "lab", "nonce": "n", "message": "00"},
+                                            "10.0.0.5")
+    assert status == 400 and "certificate" in answer["error"]
+    assert machine.pool.roster("lab").devices()[0].fingerprint == machine.ident.fingerprint
 
 
 def test_the_joined_machine_finds_and_drives_the_first_with_what_it_received(machine, tmp_path, udp):
     got = _join(tmp_path, udp)
     found = discover(got.key, timeout_s=2.0, port=udp)
     assert [b.name for b in found] == ["a"]
-    peer = Peer(f"http://127.0.0.1:{machine.port}", derive_token(got.key))
+    peer = Peer(f"https://{found[0].host}:{machine.port}", derive_token(got.key))
     assert peer.health()["name"] == "a"
     assert peer.jobs() == []
 
@@ -165,7 +200,7 @@ def test_a_captured_join_holds_nothing_to_test_a_guess_against(machine, tmp_path
     for words in (WORDS, "password", "quince"):
         context = joining._context("lab", start["nonce"])
         attacker = pake.start_initiator(join_secret(words, "lab"), context=context,
-                                        mine=joining.CLIENT, theirs=joining.PLAIN)
+                                        mine=tls.local().fingerprint, theirs=machine.ident.fingerprint)
         try:
             attacker.receive(started["message"])
         except pake.Bad:
@@ -199,9 +234,9 @@ def test_a_finish_for_a_join_nobody_started_is_refused(machine):
 
 def test_a_finish_from_another_source_is_refused(machine):
     context = joining._context("lab", "n")
-    session = pake.start_initiator(join_secret(WORDS, "lab"), context=context, mine=joining.CLIENT,
-                                   theirs=joining.PLAIN)
-    _, started = machine.joining.handle("/join/v1/start", {"group": "lab", "nonce": "n",
+    session = pake.start_initiator(join_secret(WORDS, "lab"), context=context, mine=tls.local().fingerprint,
+                                   theirs=machine.ident.fingerprint)
+    _, started = machine.joining.handle("/join/v1/start", {"group": "lab", "nonce": "n", "cert": tls.local().beacon,
                                                            "message": session.message}, "10.0.0.5")
     session.receive(started["message"])
     status, _ = machine.joining.handle("/join/v1/finish", {"id": started["id"],

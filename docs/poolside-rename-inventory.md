@@ -52,7 +52,7 @@ says "fleet pool"; none found.
 - Identifiers: `fleet_join`, `fleet_peers`, `pause_fleet`, `join_fleet`, `fleet_planned`,
   `fleet_measure`, `FLEET_VIEWS`, `FLEET_STEPS`, `FLEET_PORT`, `FLEET_BASE`, `FLEET_WRITES`,
   `Capability.FLEET`, `FleetTransport`, `Join-Fleet` (install.ps1), `cmd_fleet`.
-- Flags `--fleet`; route `/ui/fleet`; env `ML_STACK_FLEET_TLS`; `ml-stack-fleet-bench`; walk view
+- Flags `--fleet`; route `/ui/fleet`; `ml-stack-fleet-bench`; walk view
   `fleet`.
 - Tests: 74 files under fleet names (`test_fleet_join`, `test_fleet_daemon`, ...).
 - Prose: README and docs; `docs/fleet.md` -> `docs/pool.md`.

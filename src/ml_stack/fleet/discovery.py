@@ -26,6 +26,7 @@ from ml_stack.platform import private_file
 
 from . import tls, wsl_network
 from .cluster_modes import validate
+from .membership import Roster, fingerprint_of, roster
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
@@ -58,6 +59,8 @@ MAX_DATAGRAM = 65507
 #: What a beacon body may take. macOS refuses a datagram over ``net.inet.udp.maxdgram``
 #: -- 9216 by default -- with EMSGSIZE, well below what IP allows.
 BEACON_BUDGET = 8000
+RETRY_S = 0.3
+"""Seconds between the questions `discover` asks while it waits for answers."""
 
 
 class DiscoveryError(RuntimeError):
@@ -214,8 +217,12 @@ def _write_memberships(rows: list[Membership],
 
 def leave(group: str, path: Path | str | None = None) -> list[Membership]:
     """Drop a cluster. The machine stops answering to it at once."""
-    rows = [m for m in memberships(path) if m.group != group]
+    held = memberships(path)
+    rows = [m for m in held if m.group != group]
     _write_memberships(rows, path)
+    for gone in held:
+        if gone.group == group and not any(m.key == gone.key for m in rows):
+            roster(gone.key).forget()
     return rows
 
 
@@ -642,8 +649,12 @@ def _join_nonce(raw: bytes, group: str) -> str | None:
 
 
 def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
-             port: int | None = None, retry_s: float = 0.3) -> list[Beacon]:
-    """Ask the LAN who is running a daemon, and return everyone who proves it."""
+             port: int | None = None, enrolled: bool = True) -> list[Beacon]:
+    """Ask the LAN who is running a daemon, and return everyone who proves it with the cluster key
+    and is a device of the cluster (`membership`): a beacon whose certificate was never enrolled,
+    or was revoked, is not pinned and not returned. ``enrolled=False`` is for a person choosing
+    which devices to enrol, who compares the fingerprints themselves."""
+    devices = roster(key) if enrolled else None
     group = group or default_group()
     port = port if port is not None else default_port()
     nonce = secrets.token_hex(16)
@@ -652,14 +663,14 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
     with _socket(broadcast=True, bind=("", 0)) as sock:
         _say(sock, query, group, port)
         deadline = time.time() + timeout_s
-        next_query = time.time() + retry_s
+        next_query = time.time() + RETRY_S
         while True:
             now = time.time()
             if now >= deadline:
                 break
             if now >= next_query:
                 _say(sock, query, group, port)
-                next_query = now + retry_s
+                next_query = now + RETRY_S
             sock.settimeout(max(0.0, min(deadline, next_query) - time.time()))
             try:
                 raw, addr = sock.recvfrom(65535)
@@ -689,7 +700,7 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
                                 cert=str(body.get("cert", "")))
             except (TypeError, ValueError):
                 continue
-            if not _trusted(beacon):
+            if not _trusted(beacon, devices):
                 continue
             key_id = beacon.identity
             prior = found.get(key_id)
@@ -700,24 +711,28 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
 _WARNED: set[str] = set()
 
 
-def _trusted(beacon: Beacon) -> bool:
+def _trusted(beacon: Beacon, devices: Roster | None = None) -> bool:
     """Whether this machine may be talked to, and if it offers a certificate, pin it.
 
-    A beacon with no certificate is a daemon serving signed-only, which is ignored unless
-    this machine has opted into that (`tls.disabled`) or it is on this machine."""
+    With ``devices`` the certificate must belong to an active device of the cluster, else it is
+    dropped and any pin to its address forgotten.
+
+    A beacon with no certificate is a daemon that is not listening beyond its own machine,
+    which is ignored unless it is on this machine: nothing off this machine is spoken to
+    without TLS."""
     if beacon.cert:
         try:
-            context = tls.pinned_context(beacon.cert)
+            context = tls.pinned_context(beacon.cert) if devices is None or devices.is_active(
+                fingerprint_of(beacon.cert)) else None
         except (ValueError, ssl.SSLError):
             return False
         for name in {beacon.host, beacon.hostname}:
             if name:
                 http.pin(f"{name}:{beacon.port}", context)
-        return True
-    if tls.disabled() or beacon.host.startswith("127."):
+        return context is not None
+    if beacon.host.startswith("127."):
         return True
     if beacon.identity not in _WARNED:
         _WARNED.add(beacon.identity)
-        warn(f"{beacon.name} at {beacon.host} offers no TLS, so it is ignored; "
-             f"{tls.ENV}=off here talks to it with signed requests only")
+        warn(f"{beacon.name} at {beacon.host} offers no TLS, so it is ignored")
     return False

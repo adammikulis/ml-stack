@@ -315,7 +315,11 @@ makes it listen on the network from that moment. Every request to it is signed w
 HMAC-SHA256 over the method, target, `Host`, body, a timestamp and a nonce, keyed by a secret
 derived from the cluster key, so the secret never crosses the wire; a request is refused
 outside a two minute window or if its nonce was seen, and an address that fails ten times in a
-minute is locked out for a minute. An unsigned `/health` from another machine says only that
+minute is locked out for a minute. Beyond this machine the connection is TLS 1.3 with the client's certificate
+asked for: a caller must show the certificate of a device listed in the cluster's record
+(`ml-stack-peers members list`) and sign with that cluster's secret, or it is refused (403), and a device put out
+is refused at its next request even on a connection already open. A caller with no certificate (a phone) is held
+to its own device credential. An unsigned `/health` from another machine says only that
 a daemon is there.
 
 **What is encrypted.** A signed request's body is sealed with AES-256-GCM under a second key

@@ -29,7 +29,7 @@ the client by a MAC over the request, not by a client certificate and not bound 
 
 | Channel | Today | Authenticated | Primitive and library | Key custody | Gap |
 |---|---|---|---|---|---|
-| Fleet daemon, any non-loopback listener (`fleet/daemon.py:listen`, `fleet/tls.py`) | TLS (1.2 minimum, 1.3 negotiated by OpenSSL when both ends allow) | Server: pinned certificate learned from the signed beacon. Client: MAC secret. Not channel-bound | stdlib `ssl`; ECDSA P-256 self-signed, 90 day lifetime, 30 day renewal; `cryptography` makes it, else the `openssl` binary | `cert.pem`/`key.pem` 0600 in the daemon's identity dir, plaintext on disk | `ML_STACK_FLEET_TLS=off` turns TLS off (warned at start; then signed-only, bodies still sealed). Key at rest unencrypted |
+| Fleet daemon, any non-loopback listener (`fleet/daemon.py:listen`, `fleet/tls.py`) | TLS 1.3 only (changed by slice 1) | Server: pinned certificate. Client: its own certificate, which must be an active member (slice 2, section 10), plus the MAC | stdlib `ssl`; ECDSA P-256 self-signed, ten year lifetime (slice 2: an identity, not a session credential); `cryptography` makes it, else the `openssl` binary | `cert.pem`/`key.pem` 0600 in the daemon's identity dir, plaintext on disk | (the TLS-off switch is gone.) Key at rest unencrypted |
 | Loopback listener (`127.0.0.1:8770`) | plaintext HTTP by design | MAC or session | n/a | n/a | In scope only for the same-machine threat (section 3) |
 | Request and response bodies on `/workspace/v1/*`, `/jobs`, work dispatch, board/note/DM routes (`http.build_request`, `fleet/api.py:_unsealed`) | sealed inside TLS | Request is signed (method, target, host, body, 120 s window, nonce); answer is sealed with the request nonce and status as AAD | HMAC-SHA256, HKDF-SHA256 written with stdlib `hmac`/`hashlib` (`macauth.derive`, `keystore.hkdf`); AES-256-GCM, random 96 bit nonce (`sealing.py`) via `cryptography` | Key derived from the cluster key (`/workspace/v1/*` also accepts per-device secrets, `fleet/device_auth.py`) | No forward secrecy: a leaked cluster or device secret opens every captured body. Nonce cache is in memory (resets on restart; the 120 s window bounds it). `Sealed.open` accepts an unsealed answer when status >= 400, empty body or non-JSON, so streams and errors are not sealed |
 | Fleet job dispatch (`POST /jobs`) | as above | cluster MAC | as above | cluster key | Job argv and env travel sealed; job results and logs are fetched through the same sealed JSON, but log streaming is not sealed |
@@ -346,3 +346,73 @@ I did not run a packet capture; "TLS" rows come from reading `fleet/daemon.py:li
 LLM harness hook-diagnostics sinks for guest leak paths, or whether the `openssl` binary fallback in
 `tls.py` produces the same certificate profile. Slice 1 starts with a loopback capture test that proves
 nothing but ciphertext crosses a non-loopback listener with a planted marker in the body and the stream.
+
+## 10. Progress (2026-10-08)
+
+Section 2 above is the audit of `c1007d3b`; where it describes the shared key, the TLS-off switch or TLS 1.2 it
+is superseded by this section.
+
+### The first slice (done in part)
+
+- **Done.** `ML_STACK_FLEET_TLS` and `tls.disabled` are removed. `LimitedServer` refuses to be built on an
+  address beyond this machine without a TLS context, so a plain listener on the LAN cannot exist; a plain
+  connection from another address is dropped. Every pool context (`server_context`, `member_context`,
+  `pinned_context`, the pairing and install clients) has `minimum_version = TLSv1_3`; the Android client
+  offers 1.3 only. A beacon with no certificate is ignored unless it is on this machine. `Peer`,
+  `RemoteWorkspace` and a project's `board_host` accept `https://`, or `http://` on this machine only; the
+  join client refuses a plain-HTTP daemon off this machine. Tests: `tests/test_fleet_wire_floor.py` (a relay
+  keeps every byte of a request with a planted marker: none of it is plain and the version is TLS 1.3; plain
+  HTTP from a LAN address gets no answer; a client capped at TLS 1.2 is refused; the listener cannot be
+  built without TLS; the old environment variable changes nothing; `http://` LAN hosts are refused).
+- **Not done.** Sealing `/infer` streams and file chunks (framed AES-GCM) and the recovery-file KDF parameter
+  review. Those are the rest of slice 1.
+
+### The second slice (and the mutual-TLS half of 2b), done
+
+- A device is its certificate (`fleet/tls.py`, now valid ten years so that its fingerprint is a stable
+  identity; replacing it is a new pairing). A cluster's record of devices is `fleet/membership.py`
+  (`Roster`: one file per cluster, named for the key's hash, 0600, locked, atomically written; a row whose
+  fingerprint is not the hash of its certificate is dropped on load; `revoked` is sticky and wins every
+  merge; a revoked certificate cannot be enrolled again). `fleet/pool_roster.py` (`Pool`) is the view over
+  every cluster the machine is in.
+- **Mutual TLS.** The daemon's TLS context (`tls.member_context`) asks every client for a certificate and
+  completes the handshake only with an active member's; it is rebuilt whenever a record changes, so a revoked
+  device fails its next handshake. A client context presents this machine's certificate (`tls.local`, or the
+  daemon's own via `tls.present`).
+- **Request authority.** `fleet/callers.py` is the per-request check: a TLS caller must show a current member's
+  certificate (else 403, even on a connection opened before the revocation), and a request signed with a
+  cluster's secret must come from a member of that cluster. A caller with no certificate (a phone, a browser)
+  may use only a device's own enrolment secret on `/workspace/v1/*`, never a cluster secret. The cluster key
+  remains the secret that signs and seals request bodies and seals beacons; it is no longer enough to be
+  served. `GET /fleet/v1/self` says which device the daemon took a caller to be.
+- **Everywhere a device is checked.** The TLS handshake, every request, discovery (`discover` pins and returns
+  only beacons whose certificate is an active member and un-pins a revoked one; `enrolled=False` is for the
+  person choosing whom to enrol), the membership exchange route, and the sync loop (it talks only to enrolled
+  peers).
+- **Spreading.** `POST /fleet/v1/members` merges a member's record and answers with the receiver's;
+  `membership_sync` pushes at once on enrolment and revocation and every 20 s each daemon asks its peers.
+- **Joining.** Pairing lists each side's certificate in the other's record (the asker's certificate is checked
+  against the fingerprint the SPAKE2 exchange bound). The passphrase join binds the joiner's certificate as
+  its SPAKE2 identity (it was the fixed string `joiner`), the automatic Development join and a computer
+  invitation carry it too, and each joiner lists the machine that admitted it. A cluster joined from a
+  recovery file, or before this change, has only itself in its record: `ml-stack-peers members adopt` lists the
+  machines that answer for the cluster with their fingerprints for a person to compare, `members add` enrols
+  one by certificate, `members revoke` puts one out (all three need a person at a terminal), and the daemon
+  says at start which clusters are still alone.
+- **Migration.** There is no automatic migration of trust: a daemon starting on an existing cluster enrols
+  only itself, so its peers refuse it until they are paired again or adopted by a person. The owner is the
+  only user.
+- **Tests.** `tests/test_pool_membership.py`: real TLS sockets and the real daemon handler on temp roots; two
+  devices with different keys told apart; an unpaired device refused; a revoked device refused at its next
+  request on a live session and at its next handshake; a revoked device out of every check; a stale peer
+  cannot revive one; a downgrade to TLS 1.2 refused; a wrong or one-byte-changed server pin refused; a
+  tampered roster row dropped; a beacon that was never enrolled not pinned; a caller with no certificate cannot
+  use the cluster secret; a member of another cluster cannot use this cluster's secret.
+
+### Left
+
+Slice 1's stream and chunk sealing; slice 3 (the cluster key and TLS key are still plaintext files, now
+joined by the roster); the channel-bound MAC of 2b (the certificate is checked on the same TLS session as
+the request, but the MAC does not yet cover its fingerprint); slices 4 to 8 and G1 to G5; rotating the
+cluster key on revocation (a revoked device still holds it); a real multi-device run, which this work could not
+do.

@@ -29,6 +29,9 @@ from ml_stack.log import say, warn
 from ml_stack.units import parse_duration
 
 from ..discovery import Membership, _write_memberships as write_memberships, memberships, primary_ip
+from ..membership import fingerprint_of
+from ..membership_sync import push
+from ..pool_roster import Pool
 from ..tailnet import detect
 from ..tls import TlsUnavailable, identity, pinned_context
 from . import nearby as near
@@ -245,6 +248,9 @@ def cmd_listen(args: argparse.Namespace) -> int:
 
     def learned(request: Request, offer: Offer) -> None:
         learn_from_offer(directory, request, offer)
+        if held and not args.no_cluster and offer.certificate and fingerprint_of(offer.certificate) == request.fingerprint:
+            Pool().enrol(held[0].group, offer.certificate, request.name, "pairing")
+            threading.Thread(target=push, args=(Pool(), held[0].group), daemon=True, name="members-push").start()
 
     def tell(request: Request) -> None:
         """Ask the owner with real buttons, off the request's own thread; the answer goes
@@ -388,6 +394,8 @@ def cmd_pair(args: argparse.Namespace) -> int:
         _emit(args, {"error": str(exc), "tries_left": exc.tries_left}, f"error: {exc}")
         return 2
     joined = adopt(grant, directory)
+    if joined and grant.certificate and fingerprint_of(grant.certificate) == client.server_fingerprint:
+        Pool().joined(grant.group, grant.certificate, grant.name or args.host)
     learn_from_grant(directory, grant, host=args.host, server_fingerprint=client.server_fingerprint,
                      my_secret=mine_secret, mine=args.mine)
     key_id = key_fingerprint(base64.b64decode(grant.signing_key)) if grant.signing_key else ""

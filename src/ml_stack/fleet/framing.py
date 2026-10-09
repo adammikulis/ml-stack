@@ -16,6 +16,7 @@ import socket
 import ssl
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 from ml_stack.http import Server
@@ -136,6 +137,14 @@ def addressed_to_this_machine(host_header: str, client: str) -> bool:
     return loopback and named_by_address
 
 
+def _loopback(host: str) -> bool:
+    """Whether ``host`` is a loopback address or ``localhost``: the only place plain HTTP is served."""
+    try:
+        return ipaddress.ip_address(host.split("%")[0]).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
 class Limited:
     """Handler mixin: a socket timeout, and a deadline for the request line and headers."""
 
@@ -145,7 +154,7 @@ class Limited:
     def setup(self) -> None:
         """On a TLS server, shake hands with a client that starts with a TLS hello; a client
         from this machine may speak plain HTTP, any other that does is dropped."""
-        context = getattr(self.server, "tls", None)  # type: ignore[attr-defined]
+        context = getattr(self.server, "context", lambda: None)()
         if context is not None:
             sock = self.request  # type: ignore[attr-defined]
             sock.settimeout(HANDSHAKE_S)
@@ -179,11 +188,19 @@ class LimitedServer(Server):
     """A threaded server that answers 503 to a connection past ``most`` open at once."""
 
     def __init__(self, address: tuple[str, int], handler: Any, *, most: int = MOST_CONNECTIONS,
-                 tls: ssl.SSLContext | None = None) -> None:
+                 tls: ssl.SSLContext | Callable[[], ssl.SSLContext] | None = None) -> None:
+        if tls is None and not _loopback(address[0]):
+            raise ValueError(f"{address[0]} is beyond this machine: it is served over TLS or not at all")
         super().__init__(address, handler)
         self._room = threading.BoundedSemaphore(most)
         self.tls = tls
-        """With a context, a client that speaks TLS is served over it; see `Limited.setup`."""
+        """With a context (or a function that makes the current one, which is how a membership
+        change reaches the next handshake), a client that speaks TLS is served over it; see
+        `Limited.setup`."""
+
+    def context(self) -> ssl.SSLContext | None:
+        """The context to shake hands with now."""
+        return self.tls() if callable(self.tls) else self.tls
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         """A handshake that failed or a client that hung up is not worth a traceback."""
