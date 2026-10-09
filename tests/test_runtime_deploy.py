@@ -275,11 +275,11 @@ def test_outcomes_reach_the_board_as_announcements_and_failures_as_incidents(wor
     kit = Kit(Path(os.environ["ML_STACK_WORKSPACE_HOME"]))
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
     first = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder())
-    assert runtime_board.announce(first, "", agent="runtime-agent", label="runtime-cd")
+    assert runtime_board.announce(first, "", agent="runtime-agent")
     second_commit = commit(repo, "b")
     failed = runtime_deploy.ensure(plan_for(repo, launchers), builder=builder(hook_code=3))
     assert failed.action == "failed"
-    assert runtime_board.announce(failed, first.commit, agent="runtime-agent", label="runtime-cd")
+    assert runtime_board.announce(failed, first.commit, agent="runtime-agent")
     assert not runtime_board.announce(runtime_deploy.Outcome("current", second_commit), "", agent="runtime-agent")
     rows = [row for row in kit.ws.bus.outbox("runtime-agent", 20) if row["to"] == "#announcements"]
     assert len(rows) == 2
