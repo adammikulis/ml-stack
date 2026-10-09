@@ -48,7 +48,11 @@ def read_junit(path: Path, files: list[str]) -> dict:
     tests: list[list] = []
     if not path.is_file() or path.stat().st_size > MOST_JUNIT:
         return {"files": counts, "failures": failures, "tests": tests}
-    for case in ET.parse(path).getroot().iter("testcase"):  # noqa: S314
+    try:
+        cases = list(ET.parse(path).getroot().iter("testcase"))  # noqa: S314
+    except ET.ParseError:
+        return {"files": counts, "failures": failures, "tests": tests}
+    for case in cases:
         name = file_of(case.get("classname", ""), files)
         state, message = outcome(case)
         seconds = round(float(case.get("time") or 0.0), 4)
