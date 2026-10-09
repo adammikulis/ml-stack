@@ -38,8 +38,9 @@ def _cargo_env() -> tuple[str, dict[str, str]]:
 
 
 @pytest.fixture(scope="session")
-def node_binary() -> Path:
-    """The node binary, built once for the session (and once across parallel workers)."""
+def node_binary(tmp_path_factory) -> Path:
+    """The node binary, built once for the session (and once across parallel workers), and copied to a folder of
+    this session's own: another worker's build rewrites the built file, and a test reading it then finds none."""
     cargo, env = _cargo_env()
     target = ROOT / "app" / "target"
     target.mkdir(parents=True, exist_ok=True)
@@ -47,9 +48,11 @@ def node_binary() -> Path:
         fcntl.flock(handle, fcntl.LOCK_EX)
         done = subprocess.run([cargo, "build", "-p", "poolside-node"], cwd=ROOT / "app", env=env, capture_output=True,
                               text=True, check=False)
-    if done.returncode:
-        pytest.fail(f"cargo build -p poolside-node failed:\n{done.stderr[-2000:]}", pytrace=False)
-    return target / "debug" / "poolside-node"
+        if done.returncode:
+            pytest.fail(f"cargo build -p poolside-node failed:\n{done.stderr[-2000:]}", pytrace=False)
+        mine = tmp_path_factory.mktemp("node") / "poolside-node"
+        shutil.copy2(target / "debug" / "poolside-node", mine)
+    return mine
 
 
 @dataclass
