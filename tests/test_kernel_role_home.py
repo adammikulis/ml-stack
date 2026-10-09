@@ -14,8 +14,16 @@ import test_kernel_role_smoke as smoke
 from ml_stack.files import write_json
 
 
+def _holder_file(name):
+    """The file the kernel holder (scripts/test_kernel_holder.py) hands these cases; absent in a plain run."""
+    value = os.environ.get(name)
+    if value is None:
+        pytest.skip(f"{name} is set only by scripts/test_kernel_holder.py, which prepares the role home")
+    return Path(value)
+
+
 def test_role_home_atomic_state_and_immutable_fences(tmp_path):
-    bank = json.loads(Path(os.environ["ML_STACK_TEST_HOLDER_ROLE_BANK"]).read_text())
+    bank = json.loads(_holder_file("ML_STACK_TEST_HOLDER_ROLE_BANK").read_text())
     node = "tests/test_kernel_role_home.py::test_role_home_atomic_state_and_immutable_fences"
     assert set(bank["cases"]) == {node}
     entry = bank["cases"][node]
@@ -73,7 +81,7 @@ def test_role_home_atomic_state_and_immutable_fences(tmp_path):
 
 
 def test_fixed_normal_role_imports_and_runtime_verification():
-    bank = json.loads(Path(os.environ["ML_STACK_TEST_HOLDER_ROLE_BANK"]).read_text())
+    bank = json.loads(_holder_file("ML_STACK_TEST_HOLDER_ROLE_BANK").read_text())
     node = "tests/test_kernel_role_home.py::test_fixed_normal_role_imports_and_runtime_verification"
     assert set(bank["cases"]) == {node}
     entry = bank["cases"][node]
@@ -136,7 +144,7 @@ def test_smoke_unknown_membership_never_signals_or_claims_cleanup(monkeypatch):
 
 
 def test_owned_smoke_reaps_exited_leader_and_known_stdout_child():
-    report = json.loads(Path(os.environ["ML_STACK_TEST_ROLE_CONTROL_REPORT"]).read_text())
+    report = json.loads(_holder_file("ML_STACK_TEST_ROLE_CONTROL_REPORT").read_text())
     assert report["status"] == "passed" and report["expected_output_timeout"] is True
     assert report["cleanup"] == "captured group checked and leader reaped"
     assert report["exit"] == 0 and report["gate_released"] is True
