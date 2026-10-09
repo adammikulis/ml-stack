@@ -38,6 +38,7 @@ def test_unregistered_self_address_has_no_invented_lan_host():
 @pytest.mark.slow
 @pytest.mark.parametrize("advertised", ["http://192.168.4.8:8770", ""])
 def test_fleet_card_displays_authoritative_lan_address(tmp_path, monkeypatch, advertised):
+    pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
     monkeypatch.setattr(automatic_clusters, "offers", lambda port=None: [])
     served = Serving(tmp_path, secure=False)
     try:

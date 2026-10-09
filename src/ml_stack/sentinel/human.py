@@ -114,6 +114,7 @@ def _flatten(value: Any) -> str:
         text = json.dumps(value, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         text = str(value)
+    text = text.replace("\\\\ ", " ")  # a shell-escaped space (`ml-stack\ security`) is a space
     text = text.replace("\\\\", "/").replace("\\", "").replace('"', " ").replace("'", " ").replace(",", " ")
     return re.sub(r"\s+", " ", re.sub(r"/+", "/", text)).strip().lower()
 

@@ -32,6 +32,7 @@ REFUSED = {
 def guard(tmp_path) -> Path:
     copy = tmp_path / "claude-bash-guard"
     shutil.copy2(GUARD, copy)
+    shutil.copy2(GUARD.parent / "rules_loader.py", tmp_path / "rules_loader.py")  # the guard imports its sibling
     return copy
 
 

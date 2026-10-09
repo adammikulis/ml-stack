@@ -72,6 +72,7 @@ def test_the_approved_release_goes_through_once_and_is_recorded(world):
 def test_the_facts_come_from_the_repository_even_when_git_exports_its_own_directory(world):
     tmp, state, repo = world
     other = repository(tmp / "elsewhere")
+    commit(other, "only-elsewhere.txt")  # two repositories made in one second would share every sha
     done = person_consume(repo, state, "propose", GIT_DIR=str(other / ".git"), GIT_WORK_TREE=str(other))
     assert done.returncode == 0 and tip(repo) in done.stdout and tip(other) not in done.stdout
 

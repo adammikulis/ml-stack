@@ -13,7 +13,7 @@ import pytest
 from keyring.backends import null
 
 import ml_stack
-from ml_stack import home, keystore, memory
+from ml_stack import files, home, keystore, memory
 from ml_stack.memory import vault
 from ml_stack.memory.store import Setup, Tampered
 from tests import memory_keys
@@ -75,7 +75,7 @@ def test_the_default_store_in_the_state_directory_holds_no_plaintext():
 def test_a_write_that_dies_midway_leaves_only_ciphertext(tmp_path, monkeypatch):
     store = make(tmp_path)
     fill(store)
-    real, calls = os.replace, []
+    real, calls = files.replace, []  # files binds the platform's replace once, so os.replace is not it
 
     def dying(src, dst):
         calls.append(dst)
@@ -83,10 +83,10 @@ def test_a_write_that_dies_midway_leaves_only_ciphertext(tmp_path, monkeypatch):
             raise OSError("power cut")
         real(src, dst)
 
-    monkeypatch.setattr(os, "replace", dying)
+    monkeypatch.setattr(files, "replace", dying)
     with pytest.raises(OSError, match="power cut"):
         store.add(f"{CANARY} one more", "note")
-    monkeypatch.setattr(os, "replace", real)
+    monkeypatch.setattr(files, "replace", real)
     assert_no_plaintext(tmp_path)
     survivor = make(tmp_path)
     assert survivor.status == "recovered" and len(survivor.facts()) == 2

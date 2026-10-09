@@ -122,6 +122,7 @@ _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
 import testslots  # noqa: E402  (``scripts`` is on the path above)
+from environ_guard import environment_is_restored  # noqa: E402,F401  (an autouse fixture)
 
 from ml_stack.http import Server  # noqa: E402
 from ml_stack.testing import live  # noqa: E402
