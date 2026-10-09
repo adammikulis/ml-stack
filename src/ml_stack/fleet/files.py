@@ -68,10 +68,13 @@ def safe_relpath(root: Path, relpath: str) -> Path:
         if seg in ("..", "/") or not _SAFE_SEGMENT.match(seg):
             raise DaemonError(f"unsafe path segment: {seg!r}")
     # normalise, then require the base as a prefix: the shape a path scanner recognises as the
-    # guard, and the same refusal as the symlink-resolving check below
+    # guard (one plain condition, not a compound one), and the same refusal as the
+    # symlink-resolving check below
     base = os.path.realpath(root)
     joined = os.path.normpath(f"{base}{os.sep}{relpath}")
-    if joined != base and not joined.startswith(base + os.sep):
+    if joined == base:
+        return Path(base)
+    if not joined.startswith(base + os.sep):
         raise DaemonError("path escapes the file root")
     target = Path(joined).resolve()
     root_resolved = Path(base)
