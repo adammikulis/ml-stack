@@ -36,6 +36,7 @@ from ml_stack.workspace import (
     guide,
     harness_remote,
     hooks_cli,
+    landing_cli,
     limits,
     localcli,
     localroute,
@@ -607,6 +608,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: task_integration.integrate(w, t, a.id)),
     *task_source_recovery.TABLE,
     *attention_cli.TABLE,
+    *landing_cli.TABLE,
     ("inbox", "unread messages, fenced as data", [
         *READ, FOR_AGENT,
         flag("--children", action="store_true", help="only messages from your delegates")],
