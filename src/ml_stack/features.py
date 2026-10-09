@@ -19,9 +19,8 @@ from pathlib import Path
 
 from ml_stack import authority, home
 from ml_stack.files import read_json, write_json
-from ml_stack.platform import is_windows
 
-__all__ = ["FEATURES", "FLOORS", "STAGES", "Feature", "UnknownFeature", "enabled", "listing", "register", "switch", "windows_node"]
+__all__ = ["FEATURES", "FLOORS", "STAGES", "Feature", "UnknownFeature", "enabled", "listing", "register", "switch"]
 
 STAGES = ("experimental", "beta", "stable")
 NAME = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
@@ -112,11 +111,6 @@ def enabled(name: str, root: str = "") -> bool:
     return _held(root).get(name) is True
 
 
-def windows_node() -> bool:
-    """Whether the node takes its Windows path (named pipe, .exe, stop events): on Windows, with `windows-node` on."""
-    return is_windows() and enabled("windows-node")
-
-
 def listing(root: str = "") -> list[dict[str, object]]:
     """Every feature with its stage, description, risk and whether it is on, in name order."""
     return [{"name": f.name, "stage": f.stage, "about": f.about, "risk": f.risk, "enabled": enabled(f.name, root)}
@@ -135,9 +129,6 @@ def switch(name: str, on: bool, *, root: str = "") -> bool:
     return before != on
 
 
-register("windows-node", "experimental",
-         "Run the poolside node on Windows: its .exe, its named pipe and its stop events.",
-         "Untested on real Windows machines; a wrong pipe or stop event leaves a node running or unreachable.")
 register("test-runner-extras", "experimental",
          "The test runner's learned test order and its full-tier timing record, beyond plain affected tests.",
          "Reorders tests by past timings and writes a timing baseline into the checkout.")

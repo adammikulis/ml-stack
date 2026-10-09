@@ -19,12 +19,11 @@ from pathlib import Path
 
 from ml_stack import jobs, node_binary, node_pool, node_supervise, runtime, win32
 from ml_stack.command import Group, flag
-from ml_stack.features import windows_node
 from ml_stack.home import state as state_root
 from ml_stack.lock import Busy, held_by, only_one, pid_alive
 from ml_stack.log import say, warn
 from ml_stack.node_health import node_health, node_stop_event, socket_path
-from ml_stack.platform import private_dir, start_process
+from ml_stack.platform import is_windows, private_dir, start_process
 
 START_LOCK = "start.lock"
 START_WAIT_S = 20.0
@@ -104,7 +103,7 @@ def stop_node(state: Path, *, wait_s: float = STOP_WAIT_S) -> bool:
 
 def _ask_to_stop(state: Path, run: dict) -> None:
     """SIGTERM to the supervisor and the node; on Windows, where a detached process has no signal, their two stop events."""
-    if windows_node():
+    if is_windows():
         win32.signal_event(node_supervise.supervisor_stop_event(state))
         win32.signal_event(node_stop_event(state))
         return

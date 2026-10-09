@@ -22,37 +22,23 @@ def machine(monkeypatch, tmp_path):
 
 @pytest.fixture
 def on_windows(monkeypatch):
-    monkeypatch.setattr(features, "is_windows", lambda: True)
+    for module in (node_binary, node_health):
+        monkeypatch.setattr(module, "is_windows", lambda: True)
 
 
 STATE = Path("/tmp/node-state")
 
 
-def test_windows_node_is_off_on_windows_until_enabled(machine, on_windows):
-    assert features.windows_node() is False
-    assert node_binary.name() == "poolside-node"
-    assert node_health.socket_path(STATE) == STATE / node_health.SOCKET
-
-
-def test_windows_node_enabled_on_windows_picks_the_exe_and_the_pipe(machine, on_windows):
-    features.switch("windows-node", True)
-    assert features.windows_node() is True
+def test_on_windows_the_node_takes_the_exe_and_the_pipe_with_no_flag(machine, on_windows):
     assert node_binary.name() == "poolside-node.exe"
     assert str(node_health.socket_path(STATE)).startswith("\\\\.\\pipe\\poolside-node-")
 
 
-def test_windows_node_enabled_elsewhere_changes_nothing(machine, monkeypatch):
-    features.switch("windows-node", True)
-    monkeypatch.setattr(features, "is_windows", lambda: False)
-    assert features.windows_node() is False
+def test_elsewhere_the_node_takes_the_plain_binary_and_the_socket(machine, monkeypatch):
+    for module in (node_binary, node_health):
+        monkeypatch.setattr(module, "is_windows", lambda: False)
     assert node_binary.name() == "poolside-node"
     assert node_health.socket_path(STATE) == STATE / node_health.SOCKET
-
-
-def test_windows_node_disabled_again_goes_back(machine, on_windows):
-    features.switch("windows-node", True)
-    features.switch("windows-node", False)
-    assert node_binary.name() == "poolside-node"
 
 
 def test_the_test_runner_extras_are_absent_until_enabled(machine, tmp_path, monkeypatch):
@@ -95,5 +81,5 @@ def test_guard_change_is_registered_with_no_gate_to_flip(machine):
 
 def test_a_settings_save_keeps_the_files_own_features_never_the_objects(tmp_path):
     path = tmp_path / "settings.json"
-    Settings(features={"windows-node": True}).save(path)
+    Settings(features={"test-runner-extras": True}).save(path)
     assert Settings.load(path).features == {}   # a save keeps the file's own map, never the object's

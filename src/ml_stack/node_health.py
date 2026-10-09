@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ml_stack import win32
-from ml_stack.features import windows_node
+from ml_stack.platform import is_windows
 
 SOCKET = "node.sock"
 API_VERSION = 1
@@ -46,7 +46,7 @@ def node_stop_event(state: Path) -> str:
 
 def socket_path(state: Path) -> Path:
     """Where the node of a state directory listens: a socket file, or on Windows a pipe name."""
-    return Path(pipe_name(state)) if windows_node() else state / SOCKET
+    return Path(pipe_name(state)) if is_windows() else state / SOCKET
 
 
 def _read(recv: Callable[[int], bytes], count: int) -> bytes:
@@ -61,8 +61,8 @@ def _read(recv: Callable[[int], bytes], count: int) -> bytes:
 
 def _exchange_socket(state: Path, frame: bytes, timeout: float) -> bytes:
     family = getattr(socket, "AF_UNIX", None)
-    if family is None:  # Windows without the `windows-node` feature: no node can answer here
-        raise OSError("this Python has no Unix sockets; on Windows the node needs the windows-node feature")
+    if family is None:  # a Python without Unix sockets: no node can answer here
+        raise OSError("this Python has no Unix sockets")
     with socket.socket(family, socket.SOCK_STREAM) as stream:
         stream.settimeout(timeout)
         stream.connect(str(socket_path(state)))
@@ -110,7 +110,7 @@ def _exchange_pipe(state: Path, frame: bytes, timeout: float) -> bytes:
 
 def exchange(state: Path, body: bytes, timeout: float = TIMEOUT_S) -> bytes:
     """One framed request body to the node of ``state`` and the body of its reply."""
-    return (_exchange_pipe if windows_node() else _exchange_socket)(state, struct.pack(">I", len(body)) + body, timeout)
+    return (_exchange_pipe if is_windows() else _exchange_socket)(state, struct.pack(">I", len(body)) + body, timeout)
 
 
 def call(state: Path, method: str, params: dict | None = None, *, board: str = "", token: str = "") -> dict:
