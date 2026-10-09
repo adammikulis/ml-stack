@@ -288,7 +288,7 @@ def write_launcher(target: Path, module: str, function: str, chosen: Runtime) ->
     if target.exists():
         info = target.lstat()
         if (not stat.S_ISREG(info.st_mode) or (os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o022))
-                or (os.name == "nt" and windows_private.problem(target))):
+                or (os.name == "nt" and windows_private.launcher_problem(target))):
             raise OSError("runtime launcher must be an owned regular file")
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     arguments = (["-c", f"import sys;sys.argv[0]={target.name!r};from {module} import {function};sys.exit({function}())"]

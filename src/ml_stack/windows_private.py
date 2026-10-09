@@ -83,3 +83,34 @@ def problem(path: Path) -> str:
         return ""
     except pywintypes.error:
         return "Windows ownership or permissions could not be verified"
+
+
+_WRITE = (ntsecuritycon.FILE_WRITE_DATA | ntsecuritycon.FILE_APPEND_DATA | ntsecuritycon.FILE_WRITE_EA
+          | ntsecuritycon.FILE_WRITE_ATTRIBUTES | ntsecuritycon.DELETE | ntsecuritycon.WRITE_DAC
+          | ntsecuritycon.WRITE_OWNER | ntsecuritycon.GENERIC_WRITE | ntsecuritycon.GENERIC_ALL) if sys.platform == "win32" else 0
+_SYSTEM_SIDS = ("S-1-5-18", "S-1-5-32-544", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
+
+
+def launcher_problem(path: Path) -> str:
+    """Describe a launcher this account does not own or that another account could change.
+
+    The Windows form of the Unix rule (owned by the user, no group or other write): other accounts may read and run it,
+    and the system and administrator accounts keep the access they always have, but no one else may write it."""
+    try:
+        descriptor = win32security.GetNamedSecurityInfo(
+            str(path), win32security.SE_FILE_OBJECT,
+            win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION)
+        user = _user()
+        if descriptor.GetSecurityDescriptorOwner() != user:
+            return "belongs to another user"
+        acl = descriptor.GetSecurityDescriptorDacl()
+        if acl is None:
+            return "has unrestricted Windows access"
+        trusted = [user, *(win32security.ConvertStringSidToSid(sid) for sid in _SYSTEM_SIDS)]
+        for index in range(acl.GetAceCount()):
+            ace = acl.GetAce(index)
+            if ace[0][0] == win32security.ACCESS_ALLOWED_ACE_TYPE and ace[1] & _WRITE and ace[-1] not in trusted:
+                return "Windows permissions let another account change it"
+        return ""
+    except pywintypes.error:
+        return "Windows ownership or permissions could not be verified"

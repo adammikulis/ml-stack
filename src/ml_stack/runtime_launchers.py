@@ -23,7 +23,7 @@ def owned(path: Path) -> None:
     runtime.plain(path)
     info = path.stat()
     if (not stat.S_ISREG(info.st_mode) or (os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o022))
-            or (os.name == "nt" and windows_private.problem(path))):
+            or (os.name == "nt" and windows_private.launcher_problem(path))):
         raise OSError("runtime entrypoint must be an owned regular file")
 
 
