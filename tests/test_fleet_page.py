@@ -17,6 +17,7 @@ pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 #: Every test here launches headless Chromium and drives a real page.
 pytestmark = pytest.mark.slow
 
+from launch_support import sign_in  # noqa: E402
 from test_fleet_ui import WORDS, Serving  # noqa: E402
 
 #: where each screen is reached from the workspace rail
@@ -90,10 +91,9 @@ def daemon(tmp_path, monkeypatch):
 @pytest.fixture
 def joined(daemon):
     """That daemon, in a cluster, with a session cookie for the browser."""
-    daemon.call("/ui/setup/join", method="POST",
+    daemon.cookie = sign_in(daemon)
+    daemon.call("/ui/setup/join", method="POST", cookie=daemon.cookie,
                 body={"passphrase": WORDS, "group": "home"})
-    _, _, headers = daemon.call("/ui/session", method="POST", body={"passphrase": WORDS})
-    daemon.cookie = headers["Set-Cookie"].split(";")[0]
     daemon.ui.setup_finished()
     return daemon
 
@@ -179,6 +179,7 @@ class TestFirstRun:
     def test_a_short_passphrase_cannot_be_joined_with(self, daemon, open_page):
         page, errors = open_page(daemon)
         page.wait_for_selector("#first-run:not([hidden])")
+        page.fill("#n", "quillhaven")
         page.click("#first-run button:has-text('Continue')")
         page.click("#first-run button:has-text('Pair manually')")
         page.wait_for_selector("#setup-cluster-passphrase")

@@ -36,6 +36,7 @@ def wired_page(joined, tmp_path, monkeypatch, open_page):  # noqa: F811
                                        read=ran.read, daemon=tmp_path / "d.plist", others=0)
     page, errors = open_page(joined, cookie=joined.cookie)
     page.click("#nav-settings")
+    page.get_by_role("tab", name="Compute & device").click()
     page.wait_for_selector("#settings-wired .wired-slider")
     return page, errors, ran
 
