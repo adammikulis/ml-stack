@@ -16,7 +16,7 @@ def answer(handler, host, body, cluster_key_path):
     if not match:
         return False
     opening = handler._sealing()
-    if any(handler.header(name) for name in IDENTITY_HEADERS):
+    if any(handler.headers.get(name) for name in IDENTITY_HEADERS):
         handler._send(400, {"error": "a project call is attributed to its token; it carries no sender, "
                                      "parent, name or label header"})
     elif host is None:

@@ -174,6 +174,18 @@ def test_a_board_call_with_a_sender_parent_name_or_label_is_refused_by_the_host(
         assert code == 400
 
 
+def test_the_project_route_refuses_a_header_that_names_a_sender(host):
+    from types import SimpleNamespace
+
+    from ml_stack.fleet import project_workers
+
+    sent = []
+    handler = SimpleNamespace(path="/workspace/v1/projects/" + "a" * 32 + "/board", headers={"X-ML-Stack-Sender": "mac"},
+                              _sealing=lambda: None, _send=lambda code, body: sent.append((code, body)))
+    assert project_workers.answer(handler, host, b"{}", None) is True
+    assert sent[0][0] == 400 and "attributed to its token" in sent[0][1]["error"]
+
+
 def test_the_hook_scripts_exist_without_a_label(kit):
     done = subprocess.run(["grep", "-rn", "label", "scripts/hooks/claude-subagent-start",
                            "scripts/hooks/claude-subagent-stop", "scripts/hooks/workspace_hook.py"],
