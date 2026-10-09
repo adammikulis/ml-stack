@@ -18,12 +18,15 @@ file): edits that only add references to its new code and change no existing beh
 2026-10-08 (a commit-history chart script) passed review: it worked, its tests failed when the code
 was broken, it broke no repo rule and it took a correction cleanly. The lead reviews every such diff
 to existing files before it lands.
-Haiku now has a thinking effort setting. At `xhigh` effort it costs less than Sonnet and matches
-Sonnet at low effort (owner, 2026-10-08), so run Haiku at `xhigh` for well-specified code that Sonnet at
-low effort would do: a clear brief, tests it writes for its own code, additive integration edits. Keep
-Sonnet (normal or high effort) for work where judgment decides the result: design, conflict-heavy
-merges, cross-module refactors and anything near security. Pass the effort to the Agent tool only for
-this reason; the limits below hold at any effort.
+Haiku now has a thinking effort setting, and on the owner's OSWorld 2.1 cost chart (docs/model-benchmarks.md)
+Haiku at `xhigh` (about 68%) beats Sonnet at low and medium for under half the cost, and at `max` (about 72%) it
+matches Sonnet at high (about 73%) for about 45% of it. Only Sonnet at xhigh or max (about 81% and 84%) goes
+higher. So run Haiku for well-specified code (a clear brief, tests it writes for its own code, additive
+integration edits): `xhigh` by default, `max` when `xhigh` fell short or the task is harder, passing the
+effort to the Agent tool. Use Sonnet, at the effort the task needs, when the work needs more than
+Haiku's ceiling or when judgment decides the result: design, conflict-heavy merges, cross-module
+refactors, anything near security. The chart is a computer-use benchmark, not our code: when a Haiku
+run at `xhigh` or `max` fails review, move that kind of task to Sonnet and note it here.
 Haiku never deletes or weakens a test or an assertion, edits authorization, grant, claim, guard,
 hook or red-team code, resolves a semantic merge conflict, changes anything outside its worktree
 (an install, an interpreter, a shared service), or decides that a branch is ready to land.
