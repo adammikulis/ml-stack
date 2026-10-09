@@ -1033,6 +1033,13 @@ tests = ["tests/test_no_real_names.py::test_a_revision_that_is_an_option_is_refu
 note = "a hostile path stays one literal git argument and a revision that is an option is refused before git runs"
 
 [[group]]
+match = ["spawn:node_binary.py:build"]
+status = "covered"
+tests = ["tests/test_node_binary_build.py::test_a_hostile_source_path_reaches_cargo_as_a_directory_and_nothing_else",
+         "tests/test_node_binary_build.py::test_a_tree_without_the_node_crate_is_refused_before_cargo_starts"]
+note = "cargo starts with a fixed argument list; a source path with shell punctuation or a leading dash is only the working directory"
+
+[[group]]
 match = ["spawn:*"]
 status = "partial"
 tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]
