@@ -539,7 +539,8 @@ def test_why_names_the_rule_that_cleared_each_pair(tmp_path):
     assert "t.py:2  'Payroll Specialist' cleared by role_last: specialist" in told
     assert "t.py:3  'Jane O' cleared by fixtures" in told
     assert "'one@example.com' cleared by reserved_domains: example.com" in told
-    assert "cleared by patterns: uuid" in told
+    # a uuid's middle is no longer a phone candidate at all (the grammar needs ddd-ddd-dddd or
+    # a plus), so no rule has to clear it and none is named; it must still pass, above
 
     said = io.StringIO()
     hook.main(env={**wiring(tmp_path), "NAMES_WHY": "1"}, root=where, stdout=said)
