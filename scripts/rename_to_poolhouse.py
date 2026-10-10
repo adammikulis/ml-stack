@@ -71,6 +71,7 @@ EXCLUDED = (
     "tests/test_migrate.py",
     "tests/test_migrate_edges.py",
     "tests/migrate_support.py",
+    "docs/cutover.md",
     "docs/rename-protected.patch",
 )
 """Paths whose old names are history or the rename's own record; they are neither moved nor rewritten."""
