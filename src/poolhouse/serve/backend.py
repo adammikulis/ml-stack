@@ -731,7 +731,7 @@ class LlamaServerBackend(ServerBackend):
 
     @staticmethod
     def resolved_model(spec: ServerSpec) -> ServerSpec:
-        """The spec with a model named by `hf:` reference fetched into the model store and
+        """The spec with a model named by `hf:` reference fetched into the Hugging Face hub cache and
         served by path."""
         return replace(spec, model=fetched(spec.model, "model"))
 
@@ -874,7 +874,7 @@ class LlamaServerBackend(ServerBackend):
 
 
 def fetched(ref: str | Path, what: str) -> str | Path:
-    """``ref`` downloaded into the model store through the net pipeline when it is an `hf:`
+    """``ref`` downloaded into the Hugging Face hub cache through the net pipeline when it is an `hf:`
     reference (a repository alone takes its default build), else ``ref``. llama-server is
     never handed an `hf:` reference, so it never downloads anything itself."""
     parts = ServerSpec.hf_parts(ref)

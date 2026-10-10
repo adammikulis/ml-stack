@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +9,7 @@ from urllib.parse import quote
 
 from poolhouse import files, hub, lock, net, worktreerules
 from poolhouse.hub import remote
+from poolhouse.hub.hfstore import git_blob_sha1
 from poolhouse.hub.transfer import PICKLES
 from poolhouse.net.sniff import expected_kind
 from poolhouse.safenames import safe_filename, safe_join
@@ -30,15 +30,7 @@ class Member:
     def verify(self, path: Path, _headers: dict[str, str]) -> str:
         if path.stat().st_size != self.size:
             return "snapshot file size differs from its revision metadata"
-        if self.lfs:
-            actual = files.sha256_file(path)
-        else:
-            digest = hashlib.sha1(usedforsecurity=False)
-            digest.update(f"blob {self.size}\0".encode())
-            with path.open("rb") as stream:
-                while block := stream.read(1 << 20):
-                    digest.update(block)
-            actual = digest.hexdigest()
+        actual = files.sha256_file(path) if self.lfs else git_blob_sha1(path, self.size)
         return "" if actual == self.digest else "snapshot file differs from its revision digest"
 
 

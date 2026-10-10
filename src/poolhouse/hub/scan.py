@@ -116,7 +116,7 @@ def _etag_repo(path: Path) -> tuple[str, str]:
 def _repo_hint(place: Place, rel: tuple[str, ...], path: Path) -> tuple[str, str]:
     if place.label == "llama.cpp":
         return _etag_repo(path)
-    if place.label in ("lmstudio", "poolhouse") and len(rel) == 3:
+    if place.label == "lmstudio" and len(rel) == 3:
         return f"{rel[0]}/{rel[1]}", rel[2]
     if place.label == "modelscope" and "models" in rel and len(rel) > rel.index("models") + 3:
         at = rel.index("models")

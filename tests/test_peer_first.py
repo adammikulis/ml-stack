@@ -364,9 +364,10 @@ def test_the_machine_setting_skips_them(stand_in, fleet, tmp_path):
     assert fleet.requests(peer) == []
 
 
-def test_the_fetch_command_has_the_flag(stand_in, fleet, tmp_path):
+def test_the_fetch_command_has_the_flag(stand_in, fleet, tmp_path, monkeypatch):
     from poolhouse.hub import cli
 
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hub"))
     peer = fleet.peer("kitchen")
     assert cli.main(["fetch", "--no-peers", REF]) == 0
     assert fleet.requests(peer) == [] and file_requests(stand_in) > 0

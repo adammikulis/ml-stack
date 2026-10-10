@@ -47,11 +47,14 @@ def server(monkeypatch):
         yield hub_
 
 
-def test_a_file_reference_downloads_into_the_store_and_is_found_afterwards(server, tmp_path):
+def test_a_file_reference_downloads_into_the_hub_cache_and_is_found_afterwards(
+        server, tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hub"))
     got = hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
     assert got.read_bytes() == REPOS["maker/thing-GGUF"]["thing-Q4_K_M.gguf"]
-    assert got.parent.name == "thing-GGUF" and got.parent.parent.name == "maker"
-    assert not list(got.parent.glob("*.part"))
+    assert got.is_symlink() and got.parent.parent.name == "snapshots"
+    assert got.parent.parent.parent.name == "models--maker--thing-GGUF"
+    assert not list((tmp_path / "hub").rglob("*.part"))
     (found,) = [m for m in hub.discover(formats=("gguf",)) if m.path == got] or [None]
     assert found is None or found.repo == "maker/thing-GGUF"
 

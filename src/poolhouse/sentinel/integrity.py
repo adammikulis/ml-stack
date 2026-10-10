@@ -59,6 +59,17 @@ class Manifest:
     def pins(self) -> dict[str, Pin]:
         return {p: Pin(**v) for p, v in self._file.load().payload.get("pins", {}).items()}
 
+    def pin_of(self, path: Path | str) -> Pin | None:
+        """The pin of the file at ``path``. A link is looked up as itself and then as the file it
+        points at: the Hub cache keeps a model's bytes in ``blobs/<digest>`` and names them with a
+        link in ``snapshots/``, and a pull pinned the blob."""
+        where = Path(path).expanduser()
+        pins = self.pins()
+        found = pins.get(str(where))
+        if found is None and where.is_symlink():
+            found = pins.get(str(where.resolve()))
+        return found
+
     def _save(self, pins: dict[str, Pin]) -> None:
         self._file.save({"pins": {p: v.to_json() for p, v in sorted(pins.items())}})
 

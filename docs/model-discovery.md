@@ -45,7 +45,6 @@ tool's default folders, as it does for the tool. A folder reached twice is read 
 
 | Tool | Folder (macOS / Linux / Windows) | Moved by | Verified |
 | --- | --- | --- | --- |
-| Poolhouse store | `<state>/models` | `POOLHOUSE_HOME` | yes |
 | Hugging Face hub | `~/.cache/huggingface/hub` (all three) | `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `HF_HOME`/hub, `TRANSFORMERS_CACHE`, `XDG_CACHE_HOME`/huggingface/hub | macOS |
 | llama.cpp (`llama-server -hf`) | `~/Library/Caches/llama.cpp` / `$XDG_CACHE_HOME/llama.cpp` or `~/.cache/llama.cpp` / `%LOCALAPPDATA%\llama.cpp` | `LLAMA_CACHE` | macOS |
 | Ollama | `~/.ollama/models` (Linux service: `/usr/share/ollama/.ollama/models`) | `OLLAMA_MODELS` | macOS |
@@ -128,7 +127,9 @@ name such as `llama3:latest` to its Ollama blob.
 
 `pull(ref, dest=None, on_progress=None, cancel=None) -> Path` downloads `hf:owner/repo/file.gguf`
 (every shard of that build), `hf:owner/repo:Q4_K_M`, or `hf:owner/repo` (the `Q4_K_M` build, else
-the largest under 85% of this machine's room), into `dest` or `<state>/models/owner/repo`.
+the largest under 85% of this machine's room), into the Hugging Face hub cache (`models--owner--repo/blobs/<sha256>` with a link in
+`snapshots/<commit>/<file>` and `refs/main`, the folder `hub.hub_cache()` names), or into the plain folder `dest`.
+Serving, `fetch`, `snapshot` and `which` read the same cache: a file path is always a snapshot path.
 `on_progress` gets a `Progress` (`phase` of `downloading`, `verifying` or `done`, byte counts,
 `bytes_per_second`, `fraction`); a `CancelToken` stops it and the partial `<file>.part` is
 continued by the next pull with an HTTP range request. Two processes pulling one file take
@@ -136,6 +137,22 @@ turns. A finished file is checked against the sha256 the endpoint lists; the fre
 destination is checked first (`NotEnoughSpace`). A gated or private repository raises
 `GatedRepo` saying to accept the licence and set `HF_TOKEN`. `HF_ENDPOINT` moves the endpoint; the
 token goes to the endpoint and not to the CDN host it redirects to.
+
+### Moving the old store
+
+Earlier versions wrote `<state>/models/<owner>/<repo>/<file>`; nothing reads or writes that folder as a
+store now. `poolhouse-models migrate plan` lists, in seconds and without hashing or asking the Hub, how many
+files and bytes would move, whether the old store and the cache share a volume (then each file is linked
+into the cache and the old name removed: no extra disk; otherwise it is copied first and the cache needs the
+room) and what blocks it: a model server holding a lease on one of the files (`poolhouse-serve leases`) or a
+cache that cannot be written. `poolhouse-models migrate run` asks the Hub for each repository's commit and
+file listing, checks every file's size and digest against it (sha256 for LFS files, the git object id for
+small ones) and only then puts it at `blobs/<digest>`, links it into `snapshots/<commit>/` and removes the old
+path once the link reads back right. A blob the cache already has is verified and the old copy removed; a
+blob is never replaced. A file the Hub cannot vouch for (offline, repository gone, other bytes than the
+revision's) stays where it is and is listed, and the command exits 1. Everything is appended to
+`<state>/models-migrate.log`; a cut-off run is finished by the next, and a second run finds nothing to do.
+Files outside an `owner/repo` folder and half-written `.part` files are listed and never moved.
 
 ### Peers first
 

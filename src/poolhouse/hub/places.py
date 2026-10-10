@@ -55,7 +55,6 @@ class Place:
 _LMSTUDIO = ("{home}/.lmstudio/models", "{home}/.cache/lm-studio/models")
 
 SPECS: tuple[Spec, ...] = (
-    Spec("poolhouse", "flat", True, (), ("{state}/models",)),
     Spec("huggingface", "hf", True,
          (("HF_HUB_CACHE", ""), ("HUGGINGFACE_HUB_CACHE", ""), ("HF_HOME", "hub"),
           ("TRANSFORMERS_CACHE", ""), ("XDG_CACHE_HOME", "huggingface/hub")),

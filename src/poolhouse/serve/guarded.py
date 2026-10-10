@@ -52,7 +52,8 @@ def blocked(model: object) -> str:
     if node.mode == sentinel.Mode.OFF:
         return ""
     path = Path(str(model)).expanduser()
-    if node.store.blocked("model", str(path)):
+    if node.store.blocked("model", str(path)) or (
+            path.is_symlink() and node.store.blocked("model", str(path.resolve()))):
         return (f"{path.name} is quarantined by sentinel; a person releases it with "
                 f"`poolhouse-security release`")
     return ""
@@ -125,15 +126,15 @@ def start(node: Sentinel, targets: Callable[[], list[canaries.Target]]) -> Armed
     return Armed(sentinel.arm_scan(node, rounds), decoy.arm(node))
 
 
-def _by_manifest(node: Sentinel, path: Path, digest: str) -> str:
-    """Check ``path`` (whose bytes hash to ``digest``) against the signed lists this machine
-    has accepted. '' when no list names the file (or none can be read); ``verified by manifest
-    serial N`` when one does and agrees; `SentinelRefused` after quarantining when lists name it
-    and none lists these bytes."""
+def _by_manifest(node: Sentinel, path: Path, digest: str, name: str) -> str:
+    """Check ``path`` (whose bytes hash to ``digest``, and which a list knows as ``name``) against
+    the signed lists this machine has accepted. '' when no list names the file (or none can be
+    read); ``verified by manifest serial N`` when one does and agrees; `SentinelRefused` after
+    quarantining when lists name it and none lists these bytes."""
     try:
-        listed = TrustedLists().lookup(path.name)
+        listed = TrustedLists().lookup(name)
     except (OSError, ImportError, ValueError) as exc:
-        logger.warning("signed lists not consulted for %s: %s", path.name, exc)
+        logger.warning("signed lists not consulted for %s: %s", name, exc)
         return ""
     if not listed:
         return ""
@@ -141,7 +142,7 @@ def _by_manifest(node: Sentinel, path: Path, digest: str) -> str:
         if one.entry.sha256 == digest:
             text = f"verified by manifest serial {one.serial}"
             node.bus.emit(Event("model.manifest_verified", Severity.INFO, "serve",
-                                f"model:{path}", {"name": path.name, "serial": one.serial,
+                                f"model:{path}", {"name": name, "serial": one.serial,
                                                   "key_id": one.key_id}, node.clock()))
             return text
     found = finding("integrity.manifest_mismatch", Severity.CRITICAL, ("model", str(path)), HIGH,
@@ -151,7 +152,7 @@ def _by_manifest(node: Sentinel, path: Path, digest: str) -> str:
     node.handle(found)
     if node.mode == sentinel.Mode.OBSERVE:
         return ""
-    raise SentinelRefused(f"{path.name} is not what the signed manifest lists for it and is "
+    raise SentinelRefused(f"{name} is not what the signed manifest lists for it and is "
                           f"quarantined by sentinel; the file was moved aside")
 
 
@@ -170,18 +171,21 @@ def verify(model: object, *, state_file: Path, stop: Callable[[int], Any]) -> st
     path = file_of(model)
     if path is None:
         return ""
-    pin = node.manifest.pins().get(str(path))
+    name = path.name
+    pin = node.manifest.pin_of(path)
     if pin is None:
+        # a link into the Hub cache is pinned as the blob it points at, which is what a pull pins
+        path = path.resolve() if path.is_symlink() else path
         digest = sha256_file(path)
-        said = _by_manifest(node, path, digest)
+        said = _by_manifest(node, path, digest, name)
         node.manifest.pin_verified(path, "model", digest, source="first-use",
                                    digest_from="computed")
         logger.warning("%s was not pulled by poolhouse and had no pin: pinned on first use "
-                       "(its bytes are trusted as they are now)", path.name)
+                       "(its bytes are trusted as they are now)", name)
         node.bus.emit(Event("model.pinned_first_use", Severity.NOTICE, "serve", f"model:{path}",
-                            {"name": path.name, "manifest": said}, node.clock()))
+                            {"name": name, "manifest": said}, node.clock()))
         return said
     if not node.verify_before_load(path, cached=True):
-        raise SentinelRefused(f"{path.name} does not match its pin and is quarantined by "
+        raise SentinelRefused(f"{name} does not match its pin and is quarantined by "
                               f"sentinel; the file was moved aside")
-    return _by_manifest(node, path, pin.sha256)
+    return _by_manifest(node, Path(pin.path), pin.sha256, name)

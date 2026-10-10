@@ -13,7 +13,7 @@ def listed(monkeypatch):
         "model-00002-of-00002.safetensors", "weights.bin", ".gitattributes")]
     monkeypatch.setattr(transfer.remote, "listing", lambda *args: files)
     calls = []
-    monkeypatch.setattr(transfer, "_bring", lambda *args: calls.append(args))
+    monkeypatch.setattr(transfer, "_bring", lambda *args: calls.append(args) or args[2])
     return files, calls
 
 

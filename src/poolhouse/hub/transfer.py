@@ -1,4 +1,7 @@
-"""Downloading a model from a Hugging Face endpoint, resumably, with progress.
+"""Downloading a model from a Hugging Face endpoint, resumably, with progress, into the Hub cache.
+
+Files land in the standard Hugging Face hub cache (`poolhouse.hub.hfstore`: ``blobs/``, ``snapshots/<commit>/``,
+``refs/``), one copy per machine whichever tool fetched it; ``dest`` names a plain folder instead.
 
 ``pull`` takes ``hf:owner/repo/file.gguf`` (every shard of that build comes down),
 ``hf:owner/repo:Q4_K_M`` or a folder-less file reference. Safetensors references
@@ -20,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from poolhouse import home, http, hub, lock, net
-from poolhouse.hub import peers as peering, remote
+from poolhouse.hub import hfstore, peers as peering, remote
 from poolhouse.hub.remote import GatedRepo, NotFound, RemoteFile
 from poolhouse.net.download import staged_part
 from poolhouse.units import human_bytes
@@ -85,12 +88,27 @@ class Progress:
 Report = Callable[[Progress], None]
 
 
-def destination(dest: str | Path | None, ref: remote.Ref) -> Path:
-    """The folder files land in: ``dest``, or the store's ``models/owner/repo``."""
+@dataclass(frozen=True, slots=True)
+class _Target:
+    """One file of a pull: where its bytes are written, and the snapshot path linked to them (none
+    when it is written in a plain folder)."""
+
+    file: RemoteFile
+    final: Path
+    link: Path | None = None
+
+
+def _targets(parsed: remote.Ref, chosen: list[RemoteFile],
+             dest: str | Path | None) -> tuple[Path, list[_Target]]:
+    """The folder the files can be read from, and where each goes: a plain ``dest`` folder, or the
+    Hub cache's ``blobs/`` with a link in ``snapshots/<commit>/`` for the commit the revision means."""
     if dest is not None:
-        return home.expand(dest)
-    owner, name = ref.repo.split("/")
-    return home.state("models", owner, name)
+        folder = home.expand(dest)
+        return folder, [_Target(f, folder / f.path) for f in chosen]
+    root = hfstore.repo_root(parsed.repo)
+    folder = root / "snapshots" / remote.commit(parsed.repo, parsed.revision)
+    return folder, [_Target(f, root / "blobs" / hfstore.blob_name(f), folder / f.path)
+                    for f in chosen]
 
 
 def plan(ref: str) -> tuple[remote.Ref, list[RemoteFile]]:
@@ -160,10 +178,18 @@ def _kind(path: str) -> str:
     return "gguf" if low.endswith(".gguf") else "safetensors" if low.endswith(".safetensors") else ""
 
 
+def _by_object_id(one: RemoteFile) -> Callable[[Path, dict[str, str]], str] | None:
+    """The check of a small file the Hub lists by its object id only, which has no sha256 to pin."""
+    if one.sha256 or not one.oid:
+        return None
+    return lambda path, _headers: ("" if hfstore.git_blob_sha1(path, one.size) == one.oid
+                                   else f"{one.path} differs from the object id the Hub lists")
+
+
 def _want(one: RemoteFile, auth: str) -> net.Want:
     return net.Want(kind=_kind(one.path), sha256=one.sha256, size=one.size, token=auth,
                     max_bytes=int(one.size * 1.001) + MARGIN if one.size else 1 << 41,
-                    purpose="model download")
+                    purpose="model download", verify=_by_object_id(one))
 
 
 def _from_peers(parsed: remote.Ref, one: RemoteFile, final: Path, meter: _Meter) -> bool:
@@ -224,11 +250,11 @@ def _present(final: Path, one: RemoteFile) -> bool:
         return False
 
 
-def _remaining(parsed: remote.Ref, final: Path, one: RemoteFile) -> int:
-    """Bytes still to come for ``one``: all of them, less what a partial file holds."""
-    if _present(final, one):
+def _remaining(parsed: remote.Ref, target: _Target) -> int:
+    """Bytes still to come for a file: all of them, less what a partial file holds."""
+    if _present(target.final, target.file):
         return 0
-    return max(0, one.size - _staged(_url(parsed, one), final))
+    return max(0, target.file.size - _staged(_url(parsed, target.file), target.final))
 
 
 def _space(folder: Path, need: int) -> None:
@@ -242,9 +268,9 @@ def _space(folder: Path, need: int) -> None:
 
 def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = None,
          cancel: CancelToken | None = None, *, peers: bool | None = None) -> Path:
-    """Download ``ref`` into ``dest`` and return its GGUF file or safetensors folder.
+    """Download ``ref`` and return its GGUF file or safetensors folder, in the Hub cache's snapshot.
 
-    ``dest`` defaults to ``<store>/models/owner/repo``. Every shard of a sharded build comes
+    ``dest`` writes plain files into that folder instead of the cache. Every shard of a sharded build comes
     down; files already complete are kept. Raises `NotFound`, `GatedRepo` (with how to
     get a token), `NotEnoughSpace`, `ChecksumMismatch` or `Cancelled`; a cancelled or
     failed pull leaves ``<file>.part`` and the next pull of the same reference continues
@@ -270,8 +296,7 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
                                                    for name in names):
             raise
         return _snapshot_files(parsed, files, dest, _Run(on_progress, cancel, peers))
-    folder = destination(dest, parsed)
-    _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
+    folder = _bring(parsed, chosen, dest, _Run(on_progress, cancel, peers))
     return folder / chosen[0].path
 
 
@@ -284,27 +309,35 @@ class _Run:
     peers: bool | None = None
 
 
-def _bring(parsed: remote.Ref, chosen: list[RemoteFile], folder: Path, run: _Run) -> None:
+def _bring(parsed: remote.Ref, chosen: list[RemoteFile], dest: str | Path | None,
+           run: _Run) -> Path:
+    """Fetch what is missing of ``chosen`` and return the folder the files can be read from."""
+    folder, targets = _targets(parsed, chosen, dest)
     root = folder.resolve()
     for one in chosen:
         relative = Path(one.path)
         if (relative.is_absolute() or ".." in relative.parts
-                or not (folder / relative).resolve().is_relative_to(root)):
+                or not (folder / relative.parent).resolve().is_relative_to(root)):
             raise ValueError(f"Unsafe model file path: {one.path}")
-    _space(folder, sum(_remaining(parsed, folder / f.path, f) for f in chosen))
+    _space(targets[0].final.parent, sum(_remaining(parsed, t) for t in targets))
     meter = _Meter(parsed.text, sum(f.size for f in chosen), len(chosen), run.report)
     meter.cancel = run.cancel
-    if any(not _present(folder / f.path, f) for f in chosen):
+    if any(not _present(t.final, t.file) for t in targets):
         meter.session = peering.session(run.peers)
-    for index, one in enumerate(chosen):
+    for index, target in enumerate(targets):
         meter.index = index
-        final = folder / one.path
-        final.parent.mkdir(parents=True, exist_ok=True)
-        with lock.only_one(_lock_for(final), announce=lambda _t: None):
-            if not _present(final, one):
-                _fetch(parsed, one, final, meter)
-        meter.base += one.size
-        meter.send("done" if index == len(chosen) - 1 else "downloading", one, 0, force=True)
+        target.final.parent.mkdir(parents=True, exist_ok=True)
+        with lock.only_one(_lock_for(target.final), announce=lambda _t: None):
+            if not _present(target.final, target.file):
+                _fetch(parsed, target.file, target.final, meter)
+        if target.link:
+            hfstore.link(target.link, target.final)
+        meter.base += target.file.size
+        meter.send("done" if index == len(chosen) - 1 else "downloading", target.file, 0,
+                   force=True)
+    if dest is None:
+        hfstore.point_ref(parsed.repo, parsed.revision, folder.name)
+    return folder
 
 
 PICKLES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".msgpack", ".npy", ".npz")
@@ -312,8 +345,8 @@ PICKLES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".msgpack",
 
 def snapshot(repo: str, revision: str = "main", on_progress: Report | None = None,
              cancel: CancelToken | None = None, *, dest: str | Path | None = None) -> Path:
-    """Every file of ``repo`` but its pickle-based weights, in ``<store>/models/owner/repo``;
-    returns that folder. For a repository that holds safetensors."""
+    """Every file of ``repo`` but its pickle-based weights, in the Hub cache (or ``dest``);
+    returns the snapshot folder. For a repository that holds safetensors."""
     parsed = remote.Ref(repo, "", "", revision)
     return _snapshot_files(parsed, remote.listing(repo, revision), dest,
                            _Run(on_progress, cancel))
@@ -325,17 +358,16 @@ def _snapshot_files(parsed: remote.Ref, files: list[RemoteFile], dest: str | Pat
               if not f.path.lower().endswith(PICKLES) and not f.name.startswith(".git")]
     if not chosen:
         raise NotFound(f"{parsed.repo} has no files")
-    folder = destination(dest, parsed)
-    _bring(parsed, chosen, folder, run)
-    return folder
+    return _bring(parsed, chosen, dest, run)
 
 
 def held_snapshot(repo: str) -> Path | None:
-    """The folder `snapshot` made for ``repo``, or the newest Hugging Face cache snapshot of
-    it, when either is on this machine; nothing is fetched."""
-    ours = home.state("models", *repo.split("/")[:2])
-    if ours.is_dir() and any(ours.iterdir()):
-        return ours
-    snaps = hub.hub_cache() / ("models--" + repo.replace("/", "--")) / "snapshots"
-    found = sorted((d for d in snaps.glob("*") if d.is_dir()), key=lambda d: d.stat().st_mtime)
+    """The Hub cache's snapshot of ``repo`` that ``refs/main`` names, else its newest one, when
+    it is on this machine; nothing is fetched."""
+    root = hfstore.repo_root(repo)
+    commit = hfstore.main_commit(repo)
+    if commit and (root / "snapshots" / commit).is_dir():
+        return root / "snapshots" / commit
+    found = sorted((d for d in (root / "snapshots").glob("*") if d.is_dir()),
+                   key=lambda d: d.stat().st_mtime)
     return found[-1] if found else None

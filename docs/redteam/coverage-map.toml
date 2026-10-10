@@ -1400,6 +1400,13 @@ status = "covered"
 tests = ["tests/test_onboard_manifest.py", "tests/test_peer_pairing.py", "tests/test_onboard_pairing.py"]
 
 [[group]]
+match = ["parser:hub/hfstore.py"]
+status = "covered"
+count = 1
+tests = ["tests/test_hub_cache_store.py::test_a_planted_ref_is_not_followed_out_of_the_cache"]
+note = "refs/main is read back from a cache any tool can write; anything but a commit id is ignored, so a planted path never leaves the snapshots folder"
+
+[[group]]
 match = ["parser:hub/*", "parser:ingest/*", "parser:sources/*", "parser:media/*",
          "parser:speech/*", "parser:scrape/*", "parser:vision/*"]
 status = "uncovered"

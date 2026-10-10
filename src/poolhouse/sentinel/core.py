@@ -337,7 +337,7 @@ class Sentinel:
         """Hash a pinned file and compare it with its pin. False when it changed or is
         quarantined; an unpinned file passes. With ``cached`` a file whose size, mtime and
         inode are those of its last full verification against this pin is not hashed again."""
-        pin = self.manifest.pins().get(str(Path(path).expanduser()))
+        pin = self.manifest.pin_of(path)
         if pin is None or self.mode == Mode.OFF:
             return True
         if self.store.blocked(pin.kind, pin.path):

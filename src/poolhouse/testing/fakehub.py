@@ -29,7 +29,8 @@ class FakeHub:
 
     ``cut_after`` closes the connection after that many body bytes the first time a file is
     read; ``ignore_range`` answers a range request with the whole file; ``corrupt`` names paths whose served bytes differ from the listed sha256;
-    ``redirect`` sends file reads through the CDN socket. ``hub_seen`` and ``cdn_seen`` are
+    ``redirect`` sends file reads through the CDN socket. ``plain`` names ``repo/path`` files listed as
+    small non-LFS files (an object id, no sha256); ``commit(repo)`` is the commit every revision means. ``hub_seen`` and ``cdn_seen`` are
     ``(method, path, range, authorization)`` for every request.
     """
 
@@ -40,6 +41,7 @@ class FakeHub:
         self.cut_after: int | None = None
         self.ignore_range = False
         self.corrupt: set[str] = set()
+        self.plain: set[str] = set()
         self.downloads: dict[str, int] = {}
         self.hub_seen: list[tuple[str, str, str, str]] = []
         self.cdn_seen: list[tuple[str, str, str, str]] = []
@@ -70,10 +72,18 @@ class FakeHub:
     def listing(self, repo: str) -> list[dict[str, Any]]:
         rows = []
         for path, body in sorted(self.repos[repo].items()):
+            oid = hashlib.sha1(b"blob %d\0" % len(body) + body, usedforsecurity=False).hexdigest()
+            if f"{repo}/{path}" in self.plain:
+                rows.append({"type": "file", "path": path, "size": len(body), "oid": oid})
+                continue
             digest = hashlib.sha256(body).hexdigest()
-            rows.append({"type": "file", "path": path, "size": len(body),
+            rows.append({"type": "file", "path": path, "size": len(body), "oid": oid,
                          "lfs": {"oid": digest, "size": len(body)}})
         return rows
+
+    def commit(self, repo: str) -> str:
+        """The commit id the Hub names for ``repo``."""
+        return hashlib.sha1(f"commit {repo}".encode(), usedforsecurity=False).hexdigest()
 
     def search(self, query: str) -> list[dict[str, Any]]:
         return [{"id": name, "downloads": 1000 - n * 100, "likes": n,
@@ -127,6 +137,12 @@ class FakeHub:
                         self._send(404, b"{}")
                     else:
                         self._send(200, json.dumps(hub.listing(repo)).encode())
+                elif bits[:2] == ["api", "models"] and "revision" in bits:
+                    repo = "/".join(bits[2:4])
+                    if repo not in hub.repos:
+                        self._send(404, b"{}")
+                    else:
+                        self._send(200, json.dumps({"id": repo, "sha": hub.commit(repo)}).encode())
                 elif "resolve" in bits:
                     self._file("/".join(bits[:2]), "/".join(bits[bits.index("resolve") + 2:]))
                 elif cdn and bits[0] == "cdn":

@@ -10,11 +10,11 @@ from collections.abc import Callable
 from poolhouse import hub
 from poolhouse.hub import cli as hub_cli, hf_cache, origins
 from poolhouse.log import say, warn
-from poolhouse.serve import estimate as est, suggest as pick
+from poolhouse.serve import estimate as est, models_migrate, suggest as pick
 from poolhouse.units import human_bytes
 
 COMMANDS = ("list", "where", "info", "which", "fit", "suggest", "pull", "snapshot", "search",
-            "recommend", "machine")
+            "recommend", "machine", "migrate")
 
 
 def _emit(args: argparse.Namespace, payload: object, text: Callable[[], None]) -> int:
@@ -57,7 +57,7 @@ def add(sub: argparse._SubParsersAction) -> None:
     fit.add_argument("--batch", type=int, default=512)
     suggest.add_argument("--max-verdict", choices=("green", "yellow", "red"), default="green")
     pull = make("pull", "download hf:owner/repo[/file.gguf][:QUANT]", arg="ref")
-    pull.add_argument("--dest", help="folder to download into (default: the store)")
+    pull.add_argument("--dest", help="plain folder to download into (default: the Hugging Face hub cache)")
     pull.add_argument("--no-peers", action="store_true",
                       help="do not ask paired devices first; download from the Hub (also POOLHOUSE_NO_PEERS=1)")
     snapshot = make("snapshot", "download a public Hub model or dataset into the persistent Hugging Face cache",
@@ -73,6 +73,8 @@ def add(sub: argparse._SubParsersAction) -> None:
                      default="agent")
     rec.add_argument("--query", default="", help="also rank what the Hub offers for this")
     make("machine", "the memory this machine has for a model")
+    make("migrate", "move the old <state>/models store into the Hugging Face hub cache: plan, then run",
+         arg="action")
 
 
 def _table(rows: list[list[str]], head: list[str]) -> None:
@@ -232,6 +234,12 @@ def _machine(args: argparse.Namespace) -> int:
                                                got.as_dict().items()])
 
 
+def _migrate(args: argparse.Namespace) -> int:
+    if args.action not in ("plan", "run"):
+        raise SystemExit("poolhouse-models migrate takes plan or run")
+    return models_migrate.command(args.action, as_json=args.json)
+
+
 def _snapshot(args: argparse.Namespace) -> int:
     path = hf_cache.fetch(args.repo, revision=args.revision, repo_type=args.repo_type)
     return _emit(args, {"repo": args.repo, "repo_type": args.repo_type,
@@ -243,7 +251,7 @@ def _snapshot(args: argparse.Namespace) -> int:
 RUN: dict[str, Callable[[argparse.Namespace], int]] = {
     "list": _list, "where": _where, "info": _info, "which": _which, "fit": _fit,
     "suggest": _suggest, "pull": _pull, "search": _search, "recommend": _recommend,
-    "machine": _machine, "snapshot": _snapshot,
+    "machine": _machine, "snapshot": _snapshot, "migrate": _migrate,
 }
 
 
