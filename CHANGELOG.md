@@ -6,7 +6,7 @@ This project was renamed to Poolhouse on 2026-10-09 (it was ml-stack); the entri
 
 ### Breaking changes
 
-* **Renamed to Poolhouse.** Package `poolhouse`, commands `poolhouse*`, variables `POOLHOUSE_*`, state in `~/.poolhouse`. `poolhouse migrate run` moves the old state and cache directories, the keychain key and the project files once, with the old build stopped; nothing else moves them.
+* **Renamed to Poolhouse.** Package `poolhouse`, commands `poolhouse*`, variables `POOLHOUSE_*`, state in `~/.poolhouse`. `poolhouse migrate run` moves the old state and cache directories, the keychain key and the project files once, with the old build stopped; nothing else moves them. The desktop app's identifier is now `app.poolhouse.app`: its data and Keychain access list start empty and its sign-ins are repeated once.
 
 * **Python 3.12 or later.** `requires-python` is `>=3.12`; CI runs 3.12 to 3.14.
 * **`mcp>=2.3,<3`.** `ml_stack.mcp` and `ml_stack.agent.McpTools` use the 2.x client (MCP revision 2026-07-28).

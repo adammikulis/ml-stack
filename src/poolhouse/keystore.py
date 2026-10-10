@@ -421,22 +421,27 @@ class Keystore:
                 self._put_doc("provisioned.json", {"at": self._clock(), "account": self.account})
             return key
 
-    def carry_old_key(self) -> bool:
-        """Move the master key an install under the old name left in the keychain to this name:
-        written, read back, and only then deleted from the old name. Run by `poolhouse migrate`
-        alone; whether a key moved."""
+    def carry_old_key(self) -> str:
+        """Move the master key an install under the old name left in the keychain to this name: written, read
+        back, and only then deleted from the old name. Run by `poolhouse migrate` alone. Returns ``none`` (no key
+        under either name), ``present`` (only the new name holds one), ``moved``, ``differs`` (both hold a key and
+        they are not the same, so nothing was changed) or ``mismatch`` (the new item read back wrong and was
+        deleted)."""
         purpose = "migrate"
         with self._flight(purpose, person=True):
-            if _parse(self._call("read", purpose, lambda r: r.get_password(SERVICE, self.account))):
-                return False
+            new = self._call("read", purpose, lambda r: r.get_password(SERVICE, self.account))
             old = self._call("read", purpose, lambda r: r.get_password(legacy.KEYCHAIN_SERVICE, self.account))
             if _parse(old) is None:
-                return False
-            self._call("create", purpose, lambda r: r.set_password(SERVICE, self.account, old))
-            if self._call("read", purpose, lambda r: r.get_password(SERVICE, self.account)) != old:
-                return False
+                return "present" if _parse(new) else "none"
+            if _parse(new) is not None and new != old:
+                return "differs"
+            if _parse(new) is None:
+                self._call("create", purpose, lambda r: r.set_password(SERVICE, self.account, old))
+                if self._call("read", purpose, lambda r: r.get_password(SERVICE, self.account)) != old:
+                    self._call("delete", purpose, lambda r: r.delete_password(SERVICE, self.account))
+                    return "mismatch"
             self._call("delete", purpose, lambda r: r.delete_password(legacy.KEYCHAIN_SERVICE, self.account))
-            return True
+            return "moved"
 
     def provision(self) -> bool:
         """Make the master key if there is none (for the unlock command, a person present);

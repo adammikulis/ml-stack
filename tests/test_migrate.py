@@ -13,38 +13,15 @@ import pytest
 
 from poolhouse import home, keystore, legacy, migrate
 from poolhouse.files import CrossDevice, sha256_file, write_json
-from poolhouse.keystore import Keystore, Wires
 from poolhouse.sentinel import moves
-from poolhouse.sentinel.events import Bus
-from tests import keystore_support
-from tests.onboard_support import Clock
+from tests import keystore_support, migrate_support
 
 counting = keystore_support.counting
 
 
-@pytest.fixture
-def account(tmp_path, monkeypatch):
-    """A fresh account home, with no state root or cache root named by the environment, and no process
-    of the old name alive."""
-    for name in (home.ROOT_ENV, home.CACHE_ENV):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(home, "user_home", lambda: tmp_path)
-    monkeypatch.setattr(migrate.process, "command_lines", lambda: [])
-    monkeypatch.setattr(migrate.process, "running_within", lambda _path: [])
-    return tmp_path
-
-
-def old_state(account: Path) -> Path:
-    root = account / ".ml-stack"
-    (root / "workspace" / "tokens").mkdir(parents=True)
-    (root / "workspace" / "tokens" / "claude-1").write_text("secret", encoding="utf-8")
-    (root / "machine-id").write_text("abc123", encoding="utf-8")
-    return root
-
-
-def ring(tmp_path: Path):
-    wires = Wires(clock=Clock(), say=lambda _t: None, bus=Bus(), interactive=lambda: True, sleep=lambda _s: None)
-    return lambda: Keystore(directory=tmp_path / "ks", wires=wires)
+account = migrate_support.account
+old_state = migrate_support.old_state
+ring = migrate_support.ring
 
 
 # -- the leak: nothing but the explicit step moves live state ------------------------------------
@@ -123,7 +100,7 @@ def test_a_process_running_inside_the_old_directory_stops_the_move(account, monk
 def test_an_existing_new_directory_is_never_replaced(account, tmp_path):
     old = old_state(account)
     (account / ".poolhouse").mkdir()
-    assert migrate.run(account, ring=ring(tmp_path / "k")) == 0
+    assert migrate.run(account, ring=ring(tmp_path / "k")) == 3
     assert (old / "machine-id").exists() and not (account / ".poolhouse" / "machine-id").exists()
 
 
@@ -169,7 +146,7 @@ def test_a_copy_that_does_not_match_removes_nothing(account, monkeypatch):
         return real(a, b)
 
     monkeypatch.setattr(migrate, "promote", across)
-    monkeypatch.setattr(migrate, "_tree", lambda root: {"x": 1} if root == old else {"y": 2})
+    monkeypatch.setattr(migrate, "_tree", lambda root: {"x": ("file", 0, "a")} if root == old else {"y": ("file", 0, "b")})
     with pytest.raises(OSError, match="did not match"):
         migrate.move_directory(old, account / ".poolhouse")
     assert (old / "machine-id").exists() and not (account / ".poolhouse").exists()

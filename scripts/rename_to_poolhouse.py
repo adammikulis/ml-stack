@@ -69,6 +69,8 @@ EXCLUDED = (
     "src/poolhouse/legacy.py",
     "src/poolhouse/migrate.py",
     "tests/test_migrate.py",
+    "tests/test_migrate_edges.py",
+    "tests/migrate_support.py",
     "docs/rename-protected.patch",
 )
 """Paths whose old names are history or the rename's own record; they are neither moved nor rewritten."""
