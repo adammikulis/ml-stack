@@ -65,14 +65,15 @@ def _python_runs_old(args: list[str]) -> bool:
 
 
 def _named_old(argv: tuple[str, ...]) -> bool:
-    """Whether a command line is the old build: its program or the directories it sits in carry the old
-    name, or an interpreter (or ``uv run``) is told to run an old module or script. A plain argument that
-    only starts with the old name, such as a file an editor has open, is not."""
+    """Whether a command line is the old build: its program carries the old name, or an interpreter (or
+    ``uv run``) is told to run an old module or script. A directory of the old name on the path, such as a
+    checkout folder or a virtualenv inside it, is not (a process inside the old state or cache directory is
+    found by `running`), and neither is a plain argument that only starts with the old name."""
     if not argv:
         return False
-    if any(_old(part) for part in Path(argv[0]).parts):
-        return True
     program = Path(argv[0]).name
+    if _old(program):
+        return True
     if INTERPRETER.match(program):
         return _python_runs_old(list(argv[1:]))
     if program in ("uv", "uvx"):
@@ -85,11 +86,12 @@ def _named_old(argv: tuple[str, ...]) -> bool:
     return False
 
 
-def running(old_state: Path) -> list[str]:
+def running(old_state: Path, *old_dirs: Path) -> list[str]:
     """The live processes that a move would pull the ground from: one of the old name, one run from the
-    old state directory."""
+    old state directory or any of ``old_dirs`` (the old cache)."""
     found = [f"{pid}: {' '.join(argv)[:90]}" for pid, _started, argv in process.command_lines() if _named_old(argv)]
-    found += [f"{pid}: runs inside {old_state}" for pid in process.running_within(old_state)]
+    for old in (old_state, *old_dirs):
+        found += [f"{pid}: runs inside {old}" for pid in process.running_within(old)]
     return found
 
 
@@ -264,7 +266,7 @@ def run(account: Path, *, dry: bool = False, ring: Callable[[], keystore.Keystor
     of the old name is alive, 2 when a step failed, 3 when both names of a directory exist."""
     steps = plan(account)
     old_state = next((old for kind, old, _new in steps if kind == "state" and old), account / legacy.STATE_DIR)
-    alive = running(old_state)
+    alive = running(old_state, account / ".cache" / legacy.CACHE_DIR)
     for line in alive:
         warn(f"still running: {line}")
     if alive and not dry:

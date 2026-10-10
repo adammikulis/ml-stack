@@ -154,6 +154,22 @@ def test_a_live_process_of_the_old_name_stops_the_run_and_is_printed(machine):
     assert machine.called("python3 -m pip install") == [] and machine.called("poolhouse migrate") == []
 
 
+def test_a_program_that_only_sits_in_a_folder_of_the_old_name_is_not_a_process_of_it(machine):
+    (machine.dir / "procs").write_text(
+        "9876 /x/ml-stack/.build-venv/bin/python /x/run-jedi-language-server.py\n"
+        "9877 vim ml-stack-notes.md\n")
+    done = machine.run("--yes")
+    assert done.returncode == 0, done.stdout
+    assert "9876" not in done.stdout and "STOPPED at step 3" not in done.stdout
+
+
+def test_a_program_of_the_old_name_is_a_process_of_it(machine):
+    (machine.dir / "procs").write_text("4244 /opt/bin/ml-stack-serve up\n")
+    (machine.dir / "stubborn").write_text("")
+    done = machine.run("--yes")
+    assert done.returncode == 1 and "4244" in done.stdout and "STOPPED at step 3" in done.stdout
+
+
 def test_a_process_that_stops_when_asked_lets_the_run_go_on(machine):
     (machine.dir / "procs").write_text("4242 /usr/bin/python -m ml_stack.node_launch supervise\n")
     (machine.dir / "launchd").write_text("123\t0\tcom.ml-stack.traind\n- 0 com.apple.other\n")

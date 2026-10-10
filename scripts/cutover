@@ -123,7 +123,22 @@ ancestors() {
 # Processes of the old name, minus this script and the shells that started it.
 live_procs() {
     anc=$(ancestors)
-    pgrep -fl "$PATTERN" 2>/dev/null | grep -v 'scripts/cutover' | awk -v skip="$anc" 'index(skip, " " $1 " ") == 0'
+    # Only a program, a -m module or a script run by python that is itself named for the old build counts; a
+    # folder of that name on the path (a checkout, a venv inside it) or a file an editor has open does not.
+    pgrep -fl "$PATTERN|scripts/land (serve|supervise)" 2>/dev/null | grep -v 'scripts/cutover' | awk -v skip="$anc" '
+        function base(w) { sub(".*/", "", w); return w }
+        function old(w) { return base(w) ~ /^(ml-stack|ml_stack|\.ml-stack|poolside-node)/ }
+        index(skip, " " $1 " ") != 0 { next }
+        /scripts\/land (serve|supervise)/ { print; next }
+        old($2) { print; next }
+        base($2) ~ /^python[0-9.]*(\.exe)?$/ {
+            for (i = 3; i <= NF; i++) {
+                if ($i == "-m") { if (old($(i + 1))) print; break }
+                if ($i ~ /^-/) continue
+                if (old($i)) print
+                break
+            }
+        }'
 }
 
 terminate() {

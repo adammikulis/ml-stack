@@ -204,8 +204,7 @@ def test_the_log_is_written_even_when_the_first_step_raises(account, monkeypatch
     ("/usr/bin/python3", "-X", "dev", "-u", "-m", "ml_stack.node_launch", "supervise"),
     ("uv", "run", "ml-stack-serve", "up"),
     ("uv", "run", "--with", "x", "python", "-m", "ml_stack.bench.run"),
-    ("/Users/x/repos/ml-stack/.venv/bin/python", "-c", "pass"),
-    ("/Users/x/.ml-stack/runtimes/r/bin/python", "worker.py"),
+    ("/Users/x/repos/ml-stack/.venv/bin/ml-stack-serve", "up"),
     ("python3.13", "/opt/ml-stack/bin/ml-stack-traind"),
 ])
 def test_these_are_processes_of_the_old_build(argv):
@@ -220,6 +219,21 @@ def test_these_are_processes_of_the_old_build(argv):
     ("python", "-m", "poolhouse.node_launch", "supervise"),
     ("uv", "run", "poolhouse-serve"),
     ("tail", "-f", "ml_stack.log"),
+    ("/x/ml-stack/.build-venv/bin/python", "/x/run-jedi-language-server.py"),
+    ("/Users/x/repos/ml-stack/.venv/bin/python", "-c", "pass"),
 ])
 def test_these_only_mention_the_old_name(argv):
     assert not migrate._named_old(argv)
+
+
+def test_a_process_inside_the_old_cache_or_state_directory_counts(account, monkeypatch):
+    old_cache = account / ".cache" / "ml_stack"
+    monkeypatch.setattr(migrate.process, "running_within", lambda path: [9] if path == old_cache else [])
+    assert [line for line in migrate.running(account / ".ml-stack", old_cache) if line.startswith("9:")]
+    assert migrate.running(account / ".ml-stack") == []
+
+
+def test_a_language_server_in_a_checkout_named_for_the_old_build_does_not_count(account, monkeypatch):
+    argv = ("/x/ml-stack/.build-venv/bin/python", "/x/run-jedi-language-server.py")
+    monkeypatch.setattr(migrate.process, "command_lines", lambda: [(9876, 0.0, argv)])
+    assert migrate.running(account / ".ml-stack") == []
