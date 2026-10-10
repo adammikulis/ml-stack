@@ -44,7 +44,7 @@ def test_the_node_comes_from_the_runtime_then_a_binary_in_the_repository_then_ca
     repo = tmp_path / "repo"
     assert device_setup.node_source(repo, selected=None, cargo=None) == device_setup.Source("rustup")
     assert device_setup.node_source(repo, selected=None, cargo="/bin/cargo") == device_setup.Source("build")
-    built = repo / "app" / "target" / "release" / node_binary.NAME
+    built = repo / "app" / "target" / "release" / node_binary.name()
     built.parent.mkdir(parents=True)
     built.write_text("x", encoding="utf-8")
     assert device_setup.node_source(repo, selected=None, cargo=None) == device_setup.Source("found", str(built))

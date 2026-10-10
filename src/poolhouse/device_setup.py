@@ -76,8 +76,8 @@ def node_source(repo: Path, *, selected: Path | None, cargo: str | None) -> Sour
     if selected is not None and node_binary.location(selected).is_file():
         return Source("runtime", str(node_binary.location(selected)))
     for folder in (repo / "app" / "target" / "release", *(repo / name for name in OFFSITE_DIRECTORIES)):
-        if (folder / node_binary.NAME).is_file():
-            return Source("found", str(folder / node_binary.NAME))
+        if (folder / node_binary.name()).is_file():
+            return Source("found", str(folder / node_binary.name()))
     return Source("build") if cargo else Source("rustup")
 
 

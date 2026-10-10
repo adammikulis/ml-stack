@@ -196,6 +196,8 @@ poolhouse-store = "poolhouse.graph.store_cli:main"
 poolhouse-world = "poolhouse.world.cli:main"
 # documents read section by section into one graph, with what each cost
 poolhouse-ingest = "poolhouse.ingest:main"
+# set this device up to join a pool (firewall rules in one Windows prompt, the node, the join check): poolhouse device-setup --yes
+poolhouse-device-setup = "poolhouse.device_setup:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 poolhouse-jobs = "poolhouse.jobs:main"
 # the other devices of the pool that take tests (scripts/test TIER --on DEVICE): platform, free slots, last result

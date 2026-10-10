@@ -79,7 +79,7 @@ class TestPolicy:
             assert answer.action == "deny" and "poolhouse-requests answer" in answer.reason
 
     def test_nothing_in_the_call_or_the_environment_changes_the_role(self, monkeypatch):
-        for name in ("POOLHOUSE_ROLE", "POOLHOUSE_GUARD", "POOLHOUSE_GUARD", "CLAUDE_ROLE"):
+        for name in ("POOLHOUSE_ROLE", "POOLHOUSE_GUARD", "CLAUDE_ROLE"):
             monkeypatch.setenv(name, "off")
         call = {"command": "rm -rf /tmp/x", "role": "plan-and-go", "poolhouse_role": "plan-and-go",
                 "permission_mode": "bypassPermissions", "dangerouslyDisableSandbox": True}
@@ -150,7 +150,7 @@ class TestHook:
         done = _hook("pre", {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x",
                                                                  "role": "plan-and-go"}},
                      "--role", "read-only", "--root", "/w",
-                     env={"POOLHOUSE_ROLE": "plan-and-go", "POOLHOUSE_GUARD": "off", "POOLHOUSE_GUARD": "off"})
+                     env={"POOLHOUSE_ROLE": "plan-and-go", "POOLHOUSE_GUARD": "off"})
         assert _verdict(done)["permissionDecision"] == "deny"
 
     def test_a_hook_that_fails_blocks_the_call(self):

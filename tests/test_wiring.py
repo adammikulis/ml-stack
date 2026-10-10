@@ -14,7 +14,6 @@ SRC = REPO / "src" / "poolhouse"
 STANDALONE = {
     "coding": "called by the workspace runner as poolhouse.coding.launch_coding_agent",
     "datasheet": "loaded by name as python:poolhouse.datasheet:tools, never imported",
-    "device_setup": "run as python -m poolhouse.device_setup on a device that has no install yet, never imported",
     "redteam": "run as python -m poolhouse.redteam, never imported",
     "web": "loaded by name as python:poolhouse.web:tools, never imported",
 }
