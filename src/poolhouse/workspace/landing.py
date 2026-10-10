@@ -4,8 +4,8 @@ The queue is a fold of the board's `landing` entries written on this device (and
 `trust`), made by the node, which stamps every entry with the session behind the token and applies the rules
 that need the board (independence, the runner's claim). Entries of any other device stay on the board and are
 listed as foreign and ignored. What the node cannot know is a model's tier, so this module holds the bar for who
-may ask for the development branch and re-derives it from this device's own registrations when the runner is about
-to land.
+may ask for the development branch and checks it, from the standing the node stamped on each entry, when the runner
+is about to land.
 """
 
 from __future__ import annotations
@@ -22,10 +22,11 @@ from poolhouse.lock import pid_alive
 from poolhouse.workspace.model_tiers import tier_of
 from poolhouse.workspace.modelid import VERIFIED
 
-__all__ = ["Queue", "beat", "brake", "cancel", "eligible", "fold", "request", "review", "runner_claim", "standing",
-           "status_lines", "supervisor_state", "transition", "trust"]
+__all__ = ["Queue", "beat", "brake", "cancel", "eligible", "fold", "refusal", "request", "review", "runner_claim",
+           "standing", "status_lines", "supervisor_state", "transition", "trust"]
 
 OPEN = ("queued", "needs-review", "running")
+CAUSES = ("revoked", "forged")
 SUPERVISOR_STATUS = "land-runner.json"
 RUNNER_TTL_S = 1800
 
@@ -40,6 +41,7 @@ class Queue:
     beat: dict[str, Any] | None = None
     foreign: dict[str, Any] = field(default_factory=dict)
     trusted_devices: list[str] = field(default_factory=list)
+    foreign_claims: list[dict[str, Any]] = field(default_factory=list)
 
     def waiting(self) -> list[dict[str, Any]]:
         """Requests the runner may act on, oldest first."""
@@ -54,13 +56,19 @@ def runner_claim(target: str = "") -> tuple[str, str]:
     return "branch", target or development_branch()
 
 
-def eligible(who: Agent) -> str:
-    """Why ``who`` may not land work, or an empty string: the model must be listed and above the lowest tier.
+def tier_reason(model: str) -> str:
+    """Why a session on ``model`` may not land work, or an empty string: the model must be listed and above the
+    lowest tier.
 
     A model id counts as the session claimed it: the node has no model verification yet, so the table is
     read as if every listed id were verified (a stub, listed in docs/node.md with the grants).
     """
-    return tier_of(who.model, VERIFIED).reason
+    return tier_of(model, VERIFIED).reason
+
+
+def eligible(who: Agent) -> str:
+    """Why ``who`` may not land work, or an empty string."""
+    return tier_reason(who.model)
 
 
 def fold(s: Session) -> Queue:
@@ -69,7 +77,8 @@ def fold(s: Session) -> Queue:
     requests = {r["id"]: {**r, "ts": r["ts_ms"] / 1000, "reviews": {n: {**v, "ts": v["ts_ms"] / 1000}
                                                                     for n, v in r["reviews"].items()}}
                 for r in got["requests"]}
-    return Queue(requests, got["paused"], got["paused_by"], got["beat"], got["foreign"], got["trusted_devices"])
+    return Queue(requests, got["paused"], got["paused_by"], got["beat"], got["foreign"], got["trusted_devices"],
+                 got["foreign_claims"])
 
 
 def _caller(s: Session) -> Agent:
@@ -124,32 +133,52 @@ def beat(s: Session, what: str) -> None:
     s.call("land_beat", what=what[:300])
 
 
-def _lineage(known: dict[str, Agent], a: str, b: str) -> bool:
-    def above(name: str) -> set[str]:
-        out = set()
-        while name in known and known[name].parent and known[name].parent not in out:
-            name = known[name].parent
-            out.add(name)
-        return out
-    return a == b or a in above(b) or b in above(a)
+def _related(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two stamped standings are one session or one is an ancestor of the other."""
+    return a["name"] == b["name"] or a["name"] in b["ancestors"] or b["name"] in a["ancestors"]
+
+
+def _stamped(entry: dict[str, Any], who: str) -> dict[str, Any]:
+    """The standing the node stamped on a request or review by ``who``, or an empty dict when it carries none."""
+    found = entry.get("standing")
+    ok = isinstance(found, dict) and found.get("name") == who and isinstance(found.get("ancestors"), list)
+    return found if ok else {}
+
+
+def _ended_for_cause(s: Session) -> dict[str, str]:
+    """The sessions of this board retired as revoked or forged, by name, with why."""
+    return {a.name: a.retired_reason for a in s.agents(retired=True) if a.retired and a.retired_reason in CAUSES}
+
+
+def refusal(s: Session, req: dict[str, Any]) -> str:
+    """Why ``req`` can never land, or an empty string: its requester was ended for cause after it asked."""
+    why = _ended_for_cause(s).get(req["by"], "")
+    return f"the requester {req['by']} was {why} after it asked" if why else ""
 
 
 def standing(s: Session, req: dict[str, Any]) -> str:
     """Why the runner must not land ``req`` now, or an empty string.
 
-    Re-derived from the live sessions at landing time, not trusted from when the entries were written: the
-    requester must still be at the landing level, and an accepting reviewer must still be live, at the
-    landing level and independent of the requester, with no rejection standing.
+    The node stamped the requester's and each reviewer's name, ancestors and model on the entry when it was
+    written, so a worker that asked and then ended (its session retired) stays landable. What can still change is
+    an end for cause: a session retired as ``revoked`` or ``forged`` after it asked or reviewed no longer counts.
+    A reviewer counts when its stamped model was at the landing level and its stamped lineage was independent of
+    the requester's; any standing reject blocks.
     """
-    known = {a.name: a for a in s.agents()}
-    asker = known.get(req["by"])
-    if asker is None or eligible(asker):
-        return "the requester is no longer at the landing level"
-    live = {name: found["verdict"] for name, found in req["reviews"].items()
-            if name in known and not eligible(known[name]) and not _lineage(known, name, req["by"])}
+    cause = _ended_for_cause(s)
+    asked = _stamped(req, req["by"])
+    if not asked:
+        return "the node stamped no standing on the request"
+    if tier_reason(asked["model"]):
+        return "the requester was not at the landing level when it asked"
+    live = {}
+    for name, found in req["reviews"].items():
+        seen = _stamped(found, name)
+        if seen and not tier_reason(seen["model"]) and name not in cause and not _related(seen, asked):
+            live[name] = found["verdict"]
     if "reject" in live.values():
         return "an independent reviewer rejected it"
-    return "" if "accept" in live.values() else "needs review: no live independent accept"
+    return "" if "accept" in live.values() else "needs review: no independent accept that still stands"
 
 
 def supervisor_state(base: Path) -> dict[str, Any]:
@@ -186,6 +215,8 @@ def status_lines(s: Session, base: Path) -> list[str]:
             f"{' - ' + r['detail'] if r['detail'] else ''}"
             for r in queue.requests.values() if r["status"] in OPEN or r["status"] == "needs-human"]
     ignored = [f"{e['ev']} by {e['by']} on {e['device']}: foreign, ignored" for e in queue.foreign.get("latest", [])[-5:]]
+    ignored += [f"claim on branch {c['branch']} held by {c['holder']} on {c['device']}: foreign, ignored"
+                for c in queue.foreign_claims]
     if queue.foreign.get("total"):
         ignored.insert(0, f"{queue.foreign['total']} entries of other devices, foreign, ignored (trusted devices: "
                           f"{', '.join(d[:12] for d in queue.trusted_devices) or 'none'}); latest:")

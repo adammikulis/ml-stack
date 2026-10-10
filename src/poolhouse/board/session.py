@@ -53,6 +53,7 @@ class Agent:
     harness: str
     retired: bool
     seen_ms: int
+    retired_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +114,7 @@ def _entry(raw: dict[str, Any]) -> Entry:
 
 def _agent(raw: dict[str, Any]) -> Agent:
     return Agent(raw["name"], raw["parent"], raw["family"], raw["model"], raw["model_state"], raw["harness"],
-                 raw["retired"], raw["seen_ms"])
+                 raw["retired"], raw["seen_ms"], raw.get("retired_reason", ""))
 
 
 def _claim(raw: dict[str, Any], changed: bool = True) -> Claim:
@@ -158,9 +159,13 @@ class Session:
     def agents(self, retired: bool = False) -> list[Agent]:
         return [_agent(a) for a in self.call("agents", retired=retired)["agents"]]
 
-    def retire(self, target: str = "") -> dict[str, Any]:
-        """End ``target`` (default this session): its tokens, leases and name."""
-        return dict(self.call("retire", target=target))
+    def retire(self, target: str = "", reason: str = "") -> dict[str, Any]:
+        """End ``target`` (default this session): its tokens, leases and name.
+
+        ``reason`` is ``done`` (the default, an ordinary end) or, only for a subagent and by its parent, ``revoked``
+        or ``forged``: an end for cause, which the landing runner holds against the work it asked for.
+        """
+        return dict(self.call("retire", target=target, **({"reason": reason} if reason else {})))
 
     def register(self, native: Native) -> Registration:
         """Register a native session as a subagent of this token's owner."""
@@ -196,9 +201,10 @@ class Session:
     def note_verify(self, ref: str, exit_code: int, out_sha: str) -> Note:
         return _note(self.call("note_verify", note=ref, exit=exit_code, out_sha=out_sha)["notes"][0])
 
-    def claim(self, kind: str, key: str, ttl_s: int = 0, pid: int = 0) -> Claim:
-        """Take a claim; `Conflict` when another session holds it."""
-        params = {k: v for k, v in (("ttl_s", ttl_s), ("pid", pid)) if v}
+    def claim(self, kind: str, key: str, ttl_s: int = 0, pid: int = 0, local: bool = False) -> Claim:
+        """Take a claim; `Conflict` when another session holds it. A ``local`` claim waits only for this device's
+        sessions: a pool-wide claim another device holds on the key does not keep it from being granted."""
+        params = {k: v for k, v in (("ttl_s", ttl_s), ("pid", pid), ("local", local)) if v}
         try:
             got = self.call("claim", kind=kind, key=key, **params)
         except Denied as err:

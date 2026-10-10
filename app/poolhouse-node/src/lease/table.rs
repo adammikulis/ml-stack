@@ -120,7 +120,7 @@ impl Table {
             id: id.clone(), holder, board: req.board.clone(), name: req.name.clone(), resources: req.resources.clone(), class: req.class,
             state: State::Queued, estimate_s, seq: self.next_seq, since_ms: now, granted_ms: 0,
             expires_ms: now + cfg.queue_patience_s * 1000, pid: req.pid, pid_start: (req.pid != 0).then(|| live::start_of(req.pid)).flatten(),
-            remote: req.remote, ttl_s,
+            remote: req.remote, local: req.local, ttl_s,
         });
         Ok(id)
     }
@@ -130,7 +130,7 @@ impl Table {
             return false;
         }
         l.resources.iter().all(|r| {
-            if r.pool_wide() && foreign.contains_key(&(l.board.clone(), r.key())) {
+            if r.pool_wide() && !l.local && foreign.contains_key(&(l.board.clone(), r.key())) {
                 return false;
             }
             let held = self.leases.iter().filter(|o| o.state == State::Held && o.id != l.id);

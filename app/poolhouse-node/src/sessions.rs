@@ -16,7 +16,7 @@ pub fn params_for(method: &str) -> Option<&'static [&'static str]> {
         "whoami" => &["model", "harness"],
         "session_lookup" => &["harness", "session"],
         "agents" => &["retired"],
-        "retire" => &["target"],
+        "retire" => &["target", "reason"],
         _ => return None,
     })
 }
@@ -31,7 +31,7 @@ fn text<'a>(p: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
 
 fn show(name: &str, i: &Ident) -> Value {
     json!({"name": name, "parent": i.parent, "family": i.family, "model": i.model, "model_state": i.model_state,
-           "harness": i.harness, "retired": i.retired, "seen_ms": i.seen_ms})
+           "harness": i.harness, "retired": i.retired, "retired_reason": i.retired_reason, "seen_ms": i.seen_ms})
 }
 
 pub fn call(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<String, Value>) -> Result<Value> {
@@ -85,6 +85,11 @@ fn retire(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> 
         return Err(Error::Denied("only a session of the board retires its sessions".into()));
     }
     let (caller, asked) = (access.holder.name.clone(), text(p, "target")?);
+    let reason = match text(p, "reason")? {
+        "" | "done" => "done",
+        cause @ ("revoked" | "forged") => cause,
+        _ => return Err(Error::Invalid("a session ends done, revoked or forged".into())),
+    };
     let target = if asked.is_empty() { caller.clone() } else { asked.to_string() };
     let names = &node.host(board)?.names;
     let ident = names.get(&target).ok_or_else(|| Error::Denied("no such session".into()))?;
@@ -92,6 +97,9 @@ fn retire(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> 
         return Err(Error::Denied(format!("{target} is already retired")));
     }
     if target == caller {
+        if reason != "done" {
+            return Err(Error::Denied("a session cannot revoke or flag itself; its parent does".into()));
+        }
         if ident.parent.is_empty() {
             return Err(Error::Denied("only a spawned subagent retires itself; a main session ends with its harness".into()));
         }
@@ -100,11 +108,11 @@ fn retire(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> 
     }
     let freed = release_leases(node, board, &target)?;
     let revoked = node.tokens.revoke_name(board, &target)?;
-    node.host(board)?.names.retire(&target)?;
+    node.host(board)?.names.retire(&target, reason)?;
     node.write_identity(board, &target)?;
-    let detail = format!("retired by {caller}: {revoked} tokens revoked, {freed} leases released");
+    let detail = format!("retired by {caller} ({reason}): {revoked} tokens revoked, {freed} leases released");
     node.host(board)?.board.append(Kind::Audit, &caller, json!({"event": "retire", "subject": target, "detail": detail}), "")?;
-    Ok(json!({"name": target, "retired": true, "by": caller, "tokens_revoked": revoked, "leases_released": freed}))
+    Ok(json!({"name": target, "retired": true, "reason": reason, "by": caller, "tokens_revoked": revoked, "leases_released": freed}))
 }
 
 /// End every lease of ``name``, held or queued, and tell the board; how many there were.

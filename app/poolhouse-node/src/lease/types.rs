@@ -192,6 +192,9 @@ pub struct Lease {
     pub pid: u32,
     pub pid_start: Option<u64>,
     pub remote: bool,
+    /// Held among this device's sessions only: a pool-wide claim another device holds does not keep it waiting.
+    #[serde(default)]
+    pub local: bool,
     /// How long one renewal extends the lease.
     pub ttl_s: u64,
 }
@@ -237,6 +240,8 @@ pub struct Request {
     pub ttl_s: Option<u64>,
     pub pid: u32,
     pub remote: bool,
+    /// See ``Lease::local``.
+    pub local: bool,
     /// Queue when not free now; otherwise answer `busy`.
     pub wait: bool,
 }

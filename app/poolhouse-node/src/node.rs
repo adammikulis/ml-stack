@@ -222,5 +222,5 @@ impl Node {
 /// The body of an identity entry.
 pub fn identity_body(name: &str, i: &Ident) -> Result<Value> {
     Ok(json!({"name": name, "parent": i.parent, "family": i.family, "model": i.model, "model_state": serde_json::to_value(i.model_state)?,
-              "harness": i.harness, "retired": i.retired}))
+              "harness": i.harness, "retired": i.retired, "retired_reason": i.retired_reason}))
 }

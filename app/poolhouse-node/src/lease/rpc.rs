@@ -22,7 +22,7 @@ const POLL: Duration = Duration::from_millis(25);
 /// The params each lease method takes.
 pub fn params_for(method: &str) -> Option<&'static [&'static str]> {
     Some(match method {
-        "lease_acquire" => &["resources", "class", "estimate_s", "ttl_s", "pid", "remote", "wait"],
+        "lease_acquire" => &["resources", "class", "estimate_s", "ttl_s", "pid", "remote", "local", "wait"],
         "lease_renew" => &["id", "ttl_s"],
         "lease_release" => &["id"],
         "lease_list" => &[],
@@ -115,7 +115,7 @@ fn acquire(node: &mut Node, board: &str, who: &str, p: &Map<String, Value>) -> R
     let req = Request {
         board: board.into(), name: who.into(), resources, class, estimate_s: num(p, "estimate_s")?, ttl_s: num(p, "ttl_s")?,
         pid: num(p, "pid")?.map_or(Ok(0), |n| u32::try_from(n).map_err(|_| Error::Invalid("pid is a process id".into())))?,
-        remote: p.get("remote").and_then(Value::as_bool).unwrap_or(false), wait: p.get("wait").and_then(Value::as_bool).unwrap_or(true),
+        remote: p.get("remote").and_then(Value::as_bool).unwrap_or(false), local: p.get("local").and_then(Value::as_bool).unwrap_or(false), wait: p.get("wait").and_then(Value::as_bool).unwrap_or(true),
     };
     if req.pid != 0 && req.remote {
         return Err(Error::Invalid("a remote holder has no local pid; its lease lives by expiry".into()));

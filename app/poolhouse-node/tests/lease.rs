@@ -363,3 +363,18 @@ fn lease_wait_over_the_socket_blocks_until_the_holder_releases() {
     c.call("shutdown", "demo", &ta, json!({})).unwrap();
     handle.join().unwrap().unwrap();
 }
+
+#[test]
+fn a_local_claim_does_not_wait_behind_a_claim_another_device_holds() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (mut a, mut b) = (Node::open(da.path()).unwrap(), Node::open(db.path()).unwrap());
+    let (ta, tb) = (session(&mut a, "demo", "a").1, session(&mut b, "demo", "b").1);
+    let claim = |name: &str| json!([{"type": "claim", "kind": "branch", "name": name}]);
+    for name in ["dev", "other"] {
+        assert_eq!(acquire(&mut a, &ta, json!({"resources": claim(name)}))["state"], "held");
+    }
+    poolhouse_node::sync::exchange_nodes(&mut a, &mut b).unwrap();
+    assert_eq!(acquire(&mut b, &tb, json!({"resources": claim("dev"), "local": true}))["state"], "held", "a local claim waits for this device's sessions only");
+    let tb2 = session(&mut b, "demo", "b2").1;
+    assert_eq!(acquire(&mut b, &tb2, json!({"resources": claim("other")}))["state"], "queued", "a pool-wide claim waits behind a peer's");
+}

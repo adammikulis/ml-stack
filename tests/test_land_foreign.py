@@ -61,7 +61,6 @@ def post_forgery(world, a, b, sha: str) -> str:
     landing.review(judge, rid, sha, "accept")
     runner.claim(*landing.runner_claim())
     landing.transition(runner, rid, "queued", "forged")
-    runner.release(*landing.runner_claim())  # a foreign holder of the claim would stop this device's runner by itself
     b.call("sync_now", token=b.token)
     a.call("sync_now", token=a.token)
     wait_for("the foreign entries to reach a", lambda: landing.fold(world.lead).foreign.get("total", 0) >= 3)
@@ -97,3 +96,21 @@ def test_naming_a_device_is_refused_to_a_subagent(pool):
     with pytest.raises(Denied):
         landing.trust(kid, device["fingerprint"])
     assert landing.fold(world.lead).trusted_devices == []
+
+
+def test_a_branch_claim_held_on_another_device_does_not_stop_this_devices_runner(pool):
+    world, a, b = pool
+    holder = other(b, "b-holder", "")
+    holder.claim(*landing.runner_claim())
+    b.call("sync_now", token=b.token)
+    a.call("sync_now", token=a.token)
+    wait_for("the foreign claim to reach a", lambda: "claim:branch" in str(a.call("read", kit.BOARD, a.token, kind="lease")))
+    assert world.runner.once()["status"] == "idle", "the foreign claim does not hold the runner back"
+    wait_for("the claim to be listed", lambda: landing.fold(world.lead).foreign_claims)
+    (shown,) = landing.fold(world.lead).foreign_claims
+    assert (shown["branch"], shown["status"]) == (landing.runner_claim()[1], "foreign, ignored")
+    assert shown["holder"].startswith(holder.name)
+    assert "foreign, ignored" in "\n".join(landing.status_lines(world.lead, world.proj.base))
+    rid, _ = world.ready("viaforeign", mod(2))
+    assert world.runner.once()["status"] == "landed"
+    assert world.status(rid) == "landed"

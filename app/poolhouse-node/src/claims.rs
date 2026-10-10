@@ -15,7 +15,7 @@ pub const METHODS: [&str; 3] = ["claim", "release", "claims"];
 
 pub fn params_for(method: &str) -> Option<&'static [&'static str]> {
     Some(match method {
-        "claim" => &["kind", "key", "ttl_s", "pid"],
+        "claim" => &["kind", "key", "ttl_s", "pid", "local"],
         "release" => &["kind", "key"],
         "claims" => &["kind"],
         _ => return None,
@@ -70,7 +70,7 @@ fn claim(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> R
     let mut ask = Map::new();
     ask.insert("resources".into(), json!([{"type": "claim", "kind": kind, "name": name}]));
     ask.insert("wait".into(), json!(false));
-    for field in ["ttl_s", "pid"] {
+    for field in ["ttl_s", "pid", "local"] {
         if let Some(v) = p.get(field) {
             ask.insert(field.into(), v.clone());
         }

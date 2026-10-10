@@ -136,3 +136,32 @@ fn a_retired_session_and_a_session_of_another_board_cannot_use_the_queue() {
     ok(req(&mut n, "retire", "demo", &lead, json!({"target": name})));
     assert_eq!(code(&ask(&mut n, &kid, "z", &sha(6))), "denied");
 }
+
+#[test]
+fn the_node_stamps_who_asked_and_who_reviewed_and_a_retirement_says_why() {
+    let dir = tempdir().unwrap();
+    let mut n = node(dir.path());
+    let (lead_name, lead) = session(&mut n, "demo", "lead");
+    let (worker_name, worker) = child_of(&mut n, &lead, "worker");
+    let (sibling_name, sibling) = child_of(&mut n, &lead, "sibling");
+    let (_, grandchild) = child_of(&mut n, &worker, "grandchild");
+    let tip = sha(7);
+    let id = id_of(ask(&mut n, &worker, "stamped", &tip));
+    for (who, kin) in [(&lead, "its ancestor"), (&worker, "itself"), (&grandchild, "its descendant")] {
+        assert_eq!(code(&req(&mut n, "land_review", "demo", who, json!({"req": id, "sha": tip, "verdict": "accept"}))), "denied", "{kin} cannot accept it");
+    }
+    ok(req(&mut n, "land_review", "demo", &sibling, json!({"req": id, "sha": tip, "verdict": "accept"})));
+    let shown = queue(&mut n, &lead)["requests"][0].clone();
+    assert_eq!((shown["standing"]["name"].clone(), shown["standing"]["parent"].clone(), shown["standing"]["ancestors"].clone()), (json!(worker_name), json!(lead_name), json!([lead_name])));
+    assert_eq!(shown["standing"]["model"], "claude-sonnet-5-5");
+    assert_eq!(shown["reviews"][&sibling_name]["standing"]["name"], json!(sibling_name));
+    assert_eq!(code(&req(&mut n, "retire", "demo", &worker, json!({"reason": "forged"}))), "denied", "a session does not flag itself");
+    assert_eq!(code(&req(&mut n, "retire", "demo", &lead, json!({"target": worker_name, "reason": "bogus"}))), "invalid");
+    ok(req(&mut n, "retire", "demo", &lead, json!({"target": worker_name, "reason": "revoked"})));
+    ok(req(&mut n, "retire", "demo", &sibling, json!({})));
+    let all = ok(req(&mut n, "agents", "demo", &lead, json!({"retired": true})));
+    let why = |who: &str| all["agents"].as_array().unwrap().iter().find(|a| a["name"] == who).unwrap()["retired_reason"].clone();
+    assert_eq!((why(&worker_name), why(&sibling_name)), (json!("revoked"), json!("done")));
+    let still = queue(&mut n, &lead)["requests"][0].clone();
+    assert_eq!(still["standing"]["name"], json!(worker_name), "the stamp outlives the session");
+}

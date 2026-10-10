@@ -20,12 +20,12 @@ const ANNOUNCE_TYPES: [&str; 4] = ["joined", "milestone", "done", "blocked"];
 const NOTE_KINDS: [&str; 4] = ["decision", "rule", "fact", "question"];
 const MESSAGE_KEYS: [&str; 7] = ["type", "from", "to", "subject", "body", "reply_id", "thread_id"];
 const NOTE_KEYS: [&str; 9] = ["nkind", "title", "body", "source", "tags", "author", "supersedes", "verify_cmd", "ttl_days"];
-const IDENTITY_KEYS: [&str; 7] = ["name", "parent", "family", "model", "model_state", "harness", "retired"];
+const IDENTITY_KEYS: [&str; 8] = ["name", "parent", "family", "model", "model_state", "harness", "retired", "retired_reason"];
 const VERIFY_KEYS: [&str; 4] = ["note", "exit", "cmd", "out_sha"];
 const LEASE_KEYS: [&str; 3] = ["lease", "action", "resources"];
 const LEASE_ACTIONS: [&str; 5] = ["acquire", "release", "expire", "dead", "abandon"];
 const AUDIT_KEYS: [&str; 3] = ["event", "subject", "detail"];
-const LANDING_KEYS: [&str; 13] = ["ev", "branch", "sha", "target", "selectors", "replaces", "req", "verdict", "status", "detail", "evidence", "reason", "what"];
+const LANDING_KEYS: [&str; 14] = ["ev", "branch", "sha", "target", "selectors", "replaces", "req", "verdict", "status", "detail", "evidence", "reason", "what", "standing"];
 pub const BODY_BYTES: usize = 64 * 1024;
 const NOTES_PER_SENDER: usize = 200;
 
@@ -177,6 +177,9 @@ fn identity(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<
     }
     if map.get("retired").is_some_and(|r| !r.is_boolean()) {
         return reject("retired is true or false");
+    }
+    if !["", "done", "revoked", "forged"].contains(&line(&map, "retired_reason", 16)?) {
+        return reject("a retired session ended done, revoked or forged");
     }
     Ok((who, map))
 }

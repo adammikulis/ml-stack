@@ -113,16 +113,16 @@ def test_only_landing_level_models_may_request_or_review_and_main_is_never_named
         landing.request(world.who["alice"], {"branch": "low", "sha": "abc", "selectors": ["t"]})
 
 
-def test_a_reviewer_who_is_gone_before_landing_leaves_the_request_waiting(world):
+def test_a_reviewer_revoked_before_landing_leaves_the_request_waiting(world):
     kid = world.node.member("kid", model="claude-opus-5-5", parent=world.members["bob"])
     sha = world.branch("gone", mod(8))
     rid = world.ask("alice", "gone", sha)
     landing.review(world.node.session(kid), rid, sha, "accept")
     assert world.status(rid) == "queued"
-    world.who["bob"].retire(kid.name)
+    world.who["bob"].retire(kid.name, "revoked")
     before = world.origin_head()
     assert world.runner.once()["status"] == "idle"
-    assert world.status(rid) == "needs-review" and "no live independent accept" in world.detail(rid)
+    assert world.status(rid) == "needs-review" and "no independent accept that still stands" in world.detail(rid)
     assert world.origin_head() == before
 
 

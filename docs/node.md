@@ -122,11 +122,11 @@ Request `{"v":1, "id":…, "method":…, "board":…, "token":…, "params":{…
 | `register` | board | `model, harness, session` (token = parent) | `{name, token, created, parent, origin}` |
 | `whoami` | board, token | `model, harness` (claim what you run on) | `{name, board, target, identity}` |
 | `session_lookup` | board | `harness, session` | `{name}` (denied when none is registered) |
-| `agents` | board, token | `retired` | `{agents: [{name, parent, family, model, model_state, harness, retired, seen_ms}]}` |
-| `retire` | board, token | `target` (empty = yourself) | `{name, retired, by, tokens_revoked, leases_released}` |
+| `agents` | board, token | `retired` | `{agents: [{name, parent, family, model, model_state, harness, retired, retired_reason, seen_ms}]}` |
+| `retire` | board, token | `target` (empty = yourself), `reason` (`done`, the default, `revoked` or `forged`) | `{name, retired, reason, by, tokens_revoked, leases_released}` |
 | `post` | board, token | `kind` (message or note), `idem`, `fields` | `{id, seq, sender, status}` |
 | `read` | board, token | `since` (cursor map), `kind`, `channel`, `by` (sender), `limit`, `inbox`, `with` | `{entries, cursor}` |
-| `claim`, `release`, `claims` | board, token | `kind, key, ttl_s, pid` / `kind, key` / `kind` | `{changed, claim}` / `{kind, key, released}` / `{claims}` |
+| `claim`, `release`, `claims` | board, token | `kind, key, ttl_s, pid, local` / `kind, key` / `kind` | `{changed, claim}` / `{kind, key, released}` / `{claims}` |
 | `notes` | board, token | `ref, query, kind, all, limit` | `{notes}` |
 | `note_verify` | board, token | `note, exit, out_sha` | `{notes: [the note]}` |
 | `link`, `unlink`, `links` | board, token | `to, channels, mode` / `id` | the link |
@@ -171,12 +171,17 @@ changes the claim. Each change is an identity entry. Registering a session that 
 that parent's token, or under another parent, is `denied`, and so is registering a retired one.
 `retire` revokes every token of the session, ends its leases (written to the board), marks the
 identity retired and writes an `audit` entry. A subagent retires itself; a parent (any ancestor)
-retires a descendant; a main session never retires itself.
+retires a descendant; a main session never retires itself. The end has a reason, recorded on the identity and in the
+audit entry: `done` (an ordinary end, such as a worker whose work is finished) or, given only by a parent and never
+by a session about itself, `revoked` or `forged` (an end for cause, which the landing runner holds against the work
+the session asked for or reviewed).
 
 **Claims** are leases of one `claim` resource taken without waiting. A branch claim is held under the
 board's name, so two boards may claim the same branch name; ports, servers, paths and installs are the
 device's. `claims` lists the claims of the caller's board with the owner. A holder's `pid` and `ttl_s`
-behave as for any lease (dead process or expiry drops it).
+behave as for any lease (dead process or expiry drops it). A claim taken with `local` waits only for this device's
+sessions: a branch or area claim another device holds on the board does not keep it from being granted (the landing
+runner's claim is one).
 
 **Notes** carry `nkind` (decision, rule, fact, question), `title`, `body`, `source`, `tags`,
 `supersedes` (references to older notes, a bare number for a note of this device or the full id; a
@@ -198,6 +203,10 @@ the sender is the token's session and live on this board; a branch or target is 
 reviewer is not the requester or an ancestor or descendant of it and names the exact SHA; `land_state` and
 `land_beat` need the holder of the `branch` claim of the request's target (the runner); pause, resume and a
 cancel of another's request need that holder or a session with no parent that holds the grant `land_control`.
+The node stamps what the runner later needs on each `request` and `review` entry as `standing`: the sender's name,
+parent, every ancestor, model and model state at that moment (never taken from the caller). A worker that asks and
+then ends is therefore still landable; `land_queue` shows the stamp, and `foreign_claims` lists the `branch` claims
+of other devices on a branch this device lands onto as "foreign, ignored".
 A model's tier is not the node's to judge, so `landing.eligible` in Python bars the lowest tier and an
 unlisted model from requesting or reviewing, and the runner re-derives standing before it lands.
 

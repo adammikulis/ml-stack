@@ -283,7 +283,7 @@ impl Shards {
         let name = format!("shard-{}", &spec.id[..8]);
         let count = (node.leases.cfg.cpu_slots / 2).max(1);
         let request = Request { board: POOL_BOARD.into(), name: name.clone(), resources: vec![Resource::CpuSlots { device: LOCAL.into(), count }],
-            class: Class::Background, estimate_s: Some(spec.timeout_s), ttl_s: Some(spec.timeout_s + GRACE_S + 300), pid: 0, remote: true, wait: false };
+            class: Class::Background, estimate_s: Some(spec.timeout_s), ttl_s: Some(spec.timeout_s + GRACE_S + 300), pid: 0, remote: true, local: false, wait: false };
         rpc::tick(node, &[POOL_BOARD])?;
         let (now, id) = (node.leases.now(), format!("l{}", random_hex(8)?));
         let id = node.leases.table.enqueue(&node.leases.cfg, now, &request, id)?;

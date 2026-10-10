@@ -82,7 +82,7 @@ still knows nothing of the board; `scripts/land_board.py` is the only bridge.
 ### One pass of the runner
 
 1. Claim the runner role; stop when paused.
-2. For each waiting request, re-derive standing from the registry (below) and re-check the tip
+2. For each waiting request, re-check its stamped standing (below) and the tip
    against the requested SHA. A request that fails is settled (`refused`) or left waiting
    (`needs-review`) with the reason, and its requester gets a message.
 3. Batch up to eight remaining requests, oldest first, and run `scripts/land run --entries`: one
@@ -110,11 +110,13 @@ pool. Every other `landing` entry is kept on the board and shown by `land-queue`
 "foreign, ignored", with the device's name, so a device that merely joined the pool cannot make this device's
 runner land anything. The list is empty by default; `land-trust DEVICE` (a session with no parent that holds the
 grant `land_trust`, audited on the board) adds a device by fingerprint and `land-trust DEVICE --revoke` removes
-it; putting the device out of the pool ends its standing at once. The runner still re-derives the requester's
-and the reviewers' standing from this device's own registrations at landing time, so a listed device's request
-lands here only once multi-device identity exists; today the list makes its entries count in the queue.
-(Foreign `branch` claims are a separate mechanism: a claim on `<dev>` held by another device still keeps this
-device's runner from starting.)
+it; putting the device out of the pool ends its standing at once. The runner still re-checks the stamped standing of the requester and the reviewers at landing time (below),
+which names sessions of this device's own registry, so a listed device's request lands here only once multi-device
+identity exists; today the list makes its entries count in the queue.
+The runner's `branch <dev>` claim is held among this device's sessions only (a `local` claim): a claim on `<dev>`
+that a session of another device holds does not keep this device's runner from starting. `land-queue` and
+`digest --status` list such a claim as "claim on branch <dev> held by NAME on DEVICE: foreign, ignored", as for a
+foreign landing entry, so a device that joined the pool cannot stop landing here by holding the branch.
 
 ### Eligibility, review and brakes
 
@@ -124,8 +126,22 @@ device's runner from starting.)
   its own work; it is not independent of its parent.
 - A request needs an independent accept recorded at its exact SHA by another landing-level identity
   that is neither the requester nor a delegate or parent of it. Without it the request is
-  `needs-review` and the runner will not land it. The runner re-derives requester and reviewer
-  standing at landing time (a revoked reviewer no longer counts; any standing reject blocks).
+  `needs-review` and the runner will not land it.
+- Standing is stamped when it is earned, not looked up when it is needed. The node writes, on each request and
+  review entry, the sender's name, parent, ancestors and model (not what the caller says). A worker
+  normally asks for landing and ends (its session is retired as `done`), so the runner never asks whether the
+  requester is still registered. At landing time it asks three things only: was the requester at the landing level
+  when it asked (the stamp), was it ended for cause since (`revoked` or `forged`: the request is `refused` with
+  "the requester NAME was revoked after it asked"), and does each accepting reviewer's stamp hold (landing level,
+  independent of the requester's stamped lineage, not ended for cause since). A reviewer that ended normally still
+  counts; one ended for cause does not; any standing reject from a reviewer that counts blocks.
+- The reviewer path. The requester's ancestors and descendants never accept it: the lead that spawned a worker
+  does not review the worker's request. The lead launches a reviewer subagent, a session it spawned that is not in
+  the requester's lineage (a sibling of the worker, or any unrelated session), which reviews the exact SHA with
+  `poolhouse-workspace land-review REQUEST SHA --verdict accept` and may end afterwards. A sibling is independent
+  of the requester because neither is the other or an ancestor of the other; the parent they share is no part of
+  the check. A session of the requester's own lineage, the requester itself, and a model below the landing level
+  are refused.
 - Pause and resume: the runner or a session with no parent (a subagent may not). Cancel: the requester or those. A cancel of a
   running request stops the gate and queues the others again. A new request for the same branch
   supersedes the older one (a new SHA means a new review).

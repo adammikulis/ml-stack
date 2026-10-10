@@ -55,6 +55,9 @@ pub struct Ident {
     pub model_state: ModelState,
     pub harness: String,
     pub retired: bool,
+    /// Why a retired session ended: empty or ``done`` for an ordinary end, ``revoked`` or ``forged`` for a cause.
+    #[serde(default)]
+    pub retired_reason: String,
     /// Wall milliseconds of the last request this session made (written at most every 30 s).
     pub seen_ms: u64,
 }
@@ -133,11 +136,12 @@ impl Registry {
         self.save()
     }
 
-    /// Mark ``name`` retired; true when it was not already.
-    pub fn retire(&mut self, name: &str) -> Result<bool> {
+    /// Mark ``name`` retired for ``reason`` (``done``, ``revoked`` or ``forged``); true when it was not already.
+    pub fn retire(&mut self, name: &str, reason: &str) -> Result<bool> {
         let ident = self.names.get_mut(name).ok_or_else(|| Error::Denied("no such session".into()))?;
         let fresh = !ident.retired;
         ident.retired = true;
+        ident.retired_reason = reason.into();
         self.save()?;
         Ok(fresh)
     }
@@ -202,7 +206,7 @@ impl Registry {
         let state = if model.is_empty() { ModelState::Unknown } else { state };
         self.names.insert(name.clone(), Ident {
             digest: full, family: word.into(), parent: parent.into(), model, model_state: state, harness: clean(harness, 64)?,
-            retired: false, seen_ms: now_ms,
+            retired: false, retired_reason: String::new(), seen_ms: now_ms,
         });
         self.save()?;
         Ok((name, true))

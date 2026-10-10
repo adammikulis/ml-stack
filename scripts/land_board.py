@@ -96,6 +96,10 @@ class Runner:
 
     def vet(self, req: dict) -> bool:
         """Whether ``req`` may be landed now; otherwise it is settled or left waiting with a reason."""
+        ended = landing.refusal(self.s, req)
+        if ended:
+            self.settle(req, "refused", ended)
+            return False
         reason = landing.standing(self.s, req)
         if reason:
             if not req.get("evidence", {}).get("seen"):
@@ -202,7 +206,7 @@ class Runner:
         if not self.lock.acquire():
             return {"status": "runner-held", "owner": f"another runner process ({recover.holder(self.root)})"}
         try:
-            self.s.claim(*landing.runner_claim(self.target), ttl_s=landing.RUNNER_TTL_S, pid=os.getpid())
+            self.s.claim(*landing.runner_claim(self.target), ttl_s=landing.RUNNER_TTL_S, pid=os.getpid(), local=True)
         except Conflict as held:
             return {"status": "runner-held", "owner": str(held).rpartition(" is held by ")[2]}
         queue = landing.fold(self.s)
