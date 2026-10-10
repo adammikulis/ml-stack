@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from poolhouse import home, keystore, legacy, migrate_paths
+from poolhouse import home, keystore, legacy, migrate_paths, migrate_scan
 from poolhouse.command import Group, flag
 from poolhouse.files import CrossDevice, promote, read_json, sha256_file
 from poolhouse.log import say, warn
@@ -229,15 +229,18 @@ def _path_roots(account: Path, dry: bool) -> list[Path]:
     return [(old if dry and old.is_dir() else new) for old, new in _pairs(account) if old.is_dir() or new.is_dir()]
 
 
-def _paths_step(account: Path, dry: bool, log: list[str]) -> None:
+def _paths_step(account: Path, dry: bool, log: list[str], deep: bool = False) -> None:
     """Repoint what still names the old directories under the new ones; list what it cannot repoint."""
     pairs, roots = _pairs(account), _path_roots(account, dry)
-    found = migrate_paths.scan(roots, pairs, planning=dry)
+    found = migrate_paths.scan(roots, pairs, planning=dry, budget=migrate_scan.Budget.of(deep, say))
     plists = sorted((account / "Library" / "LaunchAgents").glob("com.ml-stack.*"))
     found.report += plists
-    said = f"paths: {found.counts()}"
+    said = f"paths: {found.counts()} (scanned in {found.elapsed:.1f}s)"
     log.append(said)
     say(said)
+    if found.stopped:
+        log.append(found.stopped)
+        warn(found.stopped)
     for path in found.report[:20]:
         say(f"paths: names an old path, not changed: {path}")
     if len(found.report) > 20:
@@ -246,16 +249,17 @@ def _paths_step(account: Path, dry: bool, log: list[str]) -> None:
         log += migrate_paths.apply(found, pairs, _new_state(account) / migrate_paths.BACKUPS)
 
 
-def verify(account: Path) -> int:
+def verify(account: Path, deep: bool = False) -> int:
     """List what is still wrong under the new directories; 0 when nothing is, 1 when something is."""
-    bad = migrate_paths.verify(_path_roots(account, False), _pairs(account))
+    bad = migrate_paths.verify(_path_roots(account, False), _pairs(account), deep=deep, say=say)
     for line in bad:
         warn(f"verify: {line}")
     say("verify: the new directories hold no old path" if not bad else f"verify: {len(bad)} problems")
     return 1 if bad else 0
 
 
-def run(account: Path, *, dry: bool = False, ring: Callable[[], keystore.Keystore] = keystore.default) -> int:
+def run(account: Path, *, dry: bool = False, ring: Callable[[], keystore.Keystore] = keystore.default,
+        deep: bool = False) -> int:
     """Do the plan, or only list it. Returns 0 when it is done or there was nothing to do, 1 when a process
     of the old name is alive, 2 when a step failed, 3 when both names of a directory exist."""
     steps = plan(account)
@@ -271,7 +275,7 @@ def run(account: Path, *, dry: bool = False, ring: Callable[[], keystore.Keystor
     try:
         code = _steps(account, steps, dry, ring, log)
         if code == 0:
-            _paths_step(account, dry, log)
+            _paths_step(account, dry, log, deep)
     except (OSError, keystore.KeystoreError) as exc:
         warn(f"migrate stopped: {exc}")
         log.append(f"stopped: {exc}")
@@ -295,15 +299,17 @@ ACCOUNT = flag("--account", default="", help="the account's home directory (defa
 
 
 def _go(args: argparse.Namespace) -> int:
-    return run(Path(args.account) if args.account else home.user_home(), dry=args.cmd == "plan")
+    return run(Path(args.account) if args.account else home.user_home(), dry=args.cmd == "plan", deep=args.deep)
 
 
+DEEP = flag("--deep", action="store_true",
+            help="read every file under the state and cache directories (no time limit; a progress line every 5 s)")
 GROUP = Group("poolhouse migrate", "Move the state, cache, keychain key and project files of the old name, once.")
-GROUP.add("plan", _go, help="what would move, and what is running that stops it", options=[ACCOUNT])
-GROUP.add("run", _go, help="move it, once, and write migrate.log", options=[ACCOUNT])
-GROUP.add("verify", lambda args: verify(Path(args.account) if args.account else home.user_home()),
+GROUP.add("plan", _go, help="what would move, and what is running that stops it", options=[ACCOUNT, DEEP])
+GROUP.add("run", _go, help="move it, once, and write migrate.log", options=[ACCOUNT, DEEP])
+GROUP.add("verify", lambda args: verify(Path(args.account) if args.account else home.user_home(), args.deep),
           help="list any dangling symlink or old-path venv file left under the new directories",
-          options=[ACCOUNT])
+          options=[ACCOUNT, DEEP])
 
 main = GROUP.run
 

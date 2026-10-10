@@ -15,22 +15,20 @@ Running it again finds nothing and changes nothing.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from poolhouse.files import promote, writing
+from poolhouse.migrate_scan import BACKUPS, Budget, candidates
 
 __all__ = ["BACKUPS", "Findings", "apply", "scan", "verify"]
 
 MAX_TEXT = 1 << 20
 """A file larger than this is never read: it is a model, a database or a log, not a script or a setting."""
 SNIFF = 8192
-BACKUPS = "migrate-backup"
-SKIP_DIRS = frozenset({".git", BACKUPS})
-SKIP_FILES = frozenset({"migrate.log"})
 SKIP_SUFFIXES = frozenset({".gguf", ".safetensors", ".bin", ".pt", ".npy", ".npz", ".so", ".dylib", ".pyc",
                            ".db", ".sqlite", ".lbug", ".wal", ".zip", ".gz", ".png", ".jpg"})
 SCRIPT_DIRS = frozenset({"bin", "Scripts"})
@@ -52,6 +50,11 @@ class Findings:
     """Symlinks into an old directory with no new target to point at."""
     dangling: list[Path] = field(default_factory=list)
     """Symlinks whose target does not exist."""
+    skipped: list[Path] = field(default_factory=list)
+    """Directories the time budget left unread."""
+    elapsed: float = 0.0
+    stopped: str = ""
+    """The message about what a tripped budget left unread; empty when nothing was left."""
 
     def counts(self) -> str:
         return (f"{len(self.repoint)} symlinks to repoint, {len(self.rewrite)} venv files to rewrite, "
@@ -112,23 +115,30 @@ def _link(path: Path, pairs: Pairs, found: Findings, planning: bool) -> None:
         found.dangling.append(path)
 
 
-def scan(roots: list[Path], pairs: Pairs, *, planning: bool = False) -> Findings:
-    """Everything under ``roots`` that names the old side of a ``(old, new)`` pair. ``planning`` is for roots
-    that are still the old directories: a new target is taken to exist when the old one does."""
+def _classify(kind: str, path: Path, root: Path, olds: list[Path], found: Findings) -> None:
+    """File one candidate: a venv file or a settings file that names an old path is rewritten or reported."""
+    if kind == "file" and _skipped_package_file(path):
+        return
+    if kind != "link" and _names_old(path, olds):
+        rewrite = kind == "venv" or (kind == "file" and _rewritable(path, root))
+        (found.rewrite if rewrite else found.report).append(path)
+
+
+def scan(roots: list[Path], pairs: Pairs, *, planning: bool = False, budget: Budget | None = None) -> Findings:
+    """What under ``roots`` names the old side of a ``(old, new)`` pair, read only where a path can live (see
+    ``migrate_scan``) and for the time ``budget`` allows (60 s by default); a ``deep`` budget reads every file,
+    without a time limit, and says where it is every five seconds. ``planning`` is for roots that are still the old directories: a new target
+    is taken to exist when the old one does."""
     found = Findings()
     olds = [old for old, _new in pairs]
+    clock = budget or Budget.of(False)
     for root in roots:
-        for here, dirs, files in os.walk(root):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-            for name in sorted(dirs + files):
-                if (Path(here) / name).is_symlink():
-                    _link(Path(here) / name, pairs, found, planning)
-            for name in sorted(files):
-                path = Path(here) / name
-                if path.is_symlink() or name in SKIP_FILES or _skipped_package_file(path):
-                    continue
-                if _names_old(path, olds):
-                    (found.rewrite if _rewritable(path, root) else found.report).append(path)
+        for kind, path in candidates(root, clock):
+            if kind == "link":
+                _link(path, pairs, found, planning)
+            else:
+                _classify(kind, path, root, olds, found)
+    found.skipped, found.elapsed, found.stopped = clock.skipped, clock.elapsed(), clock.message()
     return found
 
 
@@ -169,9 +179,10 @@ def apply(found: Findings, pairs: Pairs, vault: Path) -> list[str]:
     return log
 
 
-def verify(roots: list[Path], pairs: Pairs) -> list[str]:
+def verify(roots: list[Path], pairs: Pairs, *, deep: bool = False, say: Callable[[str], None] | None = None,
+           ) -> list[str]:
     """What is still wrong under the new directories: each line names the file and the problem."""
-    found = scan(roots, pairs)
+    found = scan(roots, pairs, budget=Budget.of(deep, say))
     bad = [f"dangling symlink {p}" for p in found.dangling + found.stuck]
     bad += [f"symlink {p} still points into an old directory" for p, _t in found.repoint]
     bad += [f"old path in {p}" for p in found.rewrite]

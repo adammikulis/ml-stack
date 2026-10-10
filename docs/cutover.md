@@ -83,6 +83,12 @@ install's command prefix (`ml-stack`) and the new one (`poolhouse`).
    still named the old directories (originals kept under `~/.poolhouse/migrate-backup`, every change in
    `migrate.log`) and lists any other file that names an old path without changing it. A second run is a no-op.
 
+   The path scan does not walk the state directory (models, llama.cpp sources, logs and bundles hold millions of
+   files and no paths). It reads symlinks to a depth of four, each venv's `bin`, `pyvenv.cfg` and top-level
+   `*.pth`, and the settings files at the state root, in its config directories and in connected checkouts. It
+   stops after 60 seconds and says which directories it left; it prints how long it took. `--deep` on `plan`,
+   `run` or `verify` reads every file with no time limit and a progress line every 5 seconds.
+
    `run` renames `~/.ml-stack` to `~/.poolhouse`, `~/.cache/ml_stack` to `~/.cache/poolhouse`, moves the
    Keychain master key to the service `poolhouse` (macOS may ask for the login keychain password once) and
    renames `.ml-stack-project.json` in each connected checkout. It writes `~/.poolhouse/migrate.log`.
