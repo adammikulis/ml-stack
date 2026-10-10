@@ -1,8 +1,8 @@
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index 851a47b..d0b411b 100644
+index c5043a4a8..8a2415b17 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
-@@ -810,7 +810,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+@@ -882,7 +882,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
  
                  result.push_back(id);
  
@@ -12,9 +12,9 @@ index 851a47b..d0b411b 100644
                      drafting[seq_id] = false;
                      n_drafting--;
                      continue;
-@@ -1691,7 +1692,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
- 
-                 result.push_back(id);
+@@ -1762,7 +1763,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+                     dp.result_q->emplace_back(cur_p->data, cur_p->data + cur_p->size);
+                 }
  
 -                if (params.n_max <= (int) result.size()) {
 +                if ((params.n_max <= (int) result.size()) ||
@@ -23,10 +23,10 @@ index 851a47b..d0b411b 100644
                      n_drafting--;
                      continue;
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index f547735..44679cb 100644
+index 9a9c0c90d..bd4364bac 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
-@@ -496,6 +496,8 @@ struct server_slot {
+@@ -530,6 +530,8 @@ struct server_slot {
              n_draft_max = std::min(n_draft_max, n_remaining() - 1);
          }
  
@@ -36,7 +36,7 @@ index f547735..44679cb 100644
  
          return n_draft_max;
 diff --git a/tools/server/server-schema.cpp b/tools/server/server-schema.cpp
-index 64b9251..c9bb2c0 100644
+index 54e126aa0..fa32343dc 100644
 --- a/tools/server/server-schema.cpp
 +++ b/tools/server/server-schema.cpp
 @@ -194,16 +194,16 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &

@@ -13,6 +13,7 @@ from poolhouse.httpguard import Refused
 from poolhouse.log import say
 from poolhouse.net import git as netgit
 from poolhouse.serve.binary import is_windows
+from poolhouse.serve.build_patches import check_patches, verified_upstream
 from poolhouse.serve.build_paths import (
     BuildFailed,
     builds_dir,
@@ -38,34 +39,46 @@ def _git(*args: str, cwd: Path | None = None, url: str = "") -> subprocess.Compl
         raise BuildFailed(str(exc)) from exc
 
 
-def _sync_source(source: Path) -> None:
+def _fetch_master(source: Path) -> None:
     """Only the tip of master, not its history -- llama.cpp's full history is a large,
     slow clone that buys nothing here, the same reason ``ensure_converter`` elsewhere in
     this codebase already clones ``--depth 1``. Measured the way it was found: a first run
-    against a bare repo was still cloning several minutes in and past 190MB."""
+    against a bare repo was still cloning several minutes in and past 190MB. An existing
+    checkout only gets new objects: its files and HEAD stay as they were until
+    `_land_master` or `_checkout_commit` moves them, after the patches are known to apply."""
     if (source / ".git").is_dir():
         say(f"  fetching {REPO_URL} into {source}")
         _git("fetch", "--depth", "1", "origin", "master", cwd=source, url=REPO_URL)
-        _git("checkout", "master", cwd=source)
-        _git("reset", "--hard", "origin/master", cwd=source)
     else:
         say(f"  cloning {REPO_URL} into {source} (--depth 1)")
         source.parent.mkdir(parents=True, exist_ok=True)
         _git("clone", "--depth", "1", "--branch", "master", REPO_URL, str(source), url=REPO_URL)
 
 
-def _checkout_commit(source: Path, commit: str, url: str = REPO_URL) -> None:
+def _land_master(source: Path) -> None:
+    _git("checkout", "master", cwd=source)
+    _git("reset", "--hard", "origin/master", cwd=source)
+
+
+def _fetch_commit(source: Path, commit: str, url: str = REPO_URL) -> None:
     """A shallow clone has only master's tip, so a specific commit is fetched by name
     before it can be checked out -- GitHub serves an arbitrary reachable commit SHA this
     way without needing the rest of history either."""
-    say(f"  fetching and checking out {commit}")
+    say(f"  fetching {commit}")
     _git("fetch", "--depth", "1", "origin", commit, cwd=source, url=url)
+
+
+def _checkout_commit(source: Path, commit: str, url: str = REPO_URL) -> None:
+    _fetch_commit(source, commit, url)
     _git("checkout", "FETCH_HEAD", cwd=source)
 
 
+def _short_commit(source: Path, rev: str = "HEAD") -> str:
+    return _git("rev-parse", "--short", rev, cwd=source).stdout.strip()
 
-def _short_commit(source: Path) -> str:
-    return _git("rev-parse", "--short", "HEAD", cwd=source).stdout.strip()
+
+def _full_commit(source: Path, rev: str) -> str:
+    return _git("rev-parse", rev, cwd=source).stdout.strip()
 
 
 # -- patches carried on top of upstream ----------------------------------------------
@@ -160,14 +173,33 @@ def _install_source_build(build_dir: Path, dest: Path, commit: str, *,
     return binary
 
 
+def _wanted_commit(args) -> str:
+    """The upstream commit to build: the one named, else the newest the patches are verified
+    against, else (``--upstream-head``, or nothing verified) master's tip, which is ``""``."""
+    if args.commit:
+        return args.commit
+    if getattr(args, "upstream_head", False):
+        say("  --upstream-head: building upstream's head, which the patches may not apply to")
+        return ""
+    pinned = verified_upstream()
+    if pinned:
+        say(f"  building {pinned[:9]}, the upstream commit the patches were last verified "
+            "against (--upstream-head builds master's tip instead)")
+    return pinned
+
+
 def build_from_source(args) -> tuple[Path, str]:
     source = Path(args.source).expanduser() if args.source else src_dir()
+    want = _wanted_commit(args)
     if not args.source:
-        _sync_source(source)
-    if args.commit:
-        _checkout_commit(source, args.commit)
+        _fetch_master(source)
+    if want:
+        _fetch_commit(source, want)
+        rev = "FETCH_HEAD"
+    else:
+        rev = "HEAD" if args.source else "origin/master"
 
-    commit = _short_commit(source)
+    commit = _short_commit(source, rev)
     stamp = patch_stamp()
     tag = f"{commit}-{stamp}" if stamp else commit
     dest = builds_dir() / tag
@@ -175,6 +207,11 @@ def build_from_source(args) -> tuple[Path, str]:
         say(f"{tag} is already built at {dest} -- pass --force to rebuild")
         return dest, tag
 
+    check_patches(source, _full_commit(source, rev), _git)
+    if want:
+        _git("checkout", "FETCH_HEAD", cwd=source)
+    elif not args.source:
+        _land_master(source)
     applied = _apply_patches(source)
     jobs = args.jobs or (os.cpu_count() or 4)
     say(f"configuring {tag} ({', '.join(cmake_flags()) or 'CPU only'})")
@@ -200,6 +237,7 @@ def build_from_source_named(args) -> tuple[Path, str]:
         say(f"{args.name}-{commit} is already built at {dest} -- pass --force to rebuild")
         return dest, commit
 
+    check_patches(source, _full_commit(source, "HEAD"), _git)
     applied = _apply_patches(source)
     jobs = args.jobs or (os.cpu_count() or 4)
     say(f"configuring {args.name}-{commit} ({', '.join(cmake_flags()) or 'CPU only'})")

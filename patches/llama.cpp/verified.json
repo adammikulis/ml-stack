@@ -1,0 +1,6 @@
+{
+  "upstream": "https://github.com/ggml-org/llama.cpp",
+  "commit": "aa94f2086147cd4bfbcff818ce998dffce5fcb39",
+  "patches": "pc5b6dbc",
+  "verified": "2026-10-10"
+}

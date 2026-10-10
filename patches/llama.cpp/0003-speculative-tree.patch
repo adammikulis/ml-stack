@@ -1,8 +1,8 @@
 diff --git a/common/arg.cpp b/common/arg.cpp
-index 79405b5..9559cc4 100644
+index 7c1b81e0f..d1943cd4a 100644
 --- a/common/arg.cpp
 +++ b/common/arg.cpp
-@@ -4146,6 +4146,16 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+@@ -4166,6 +4166,16 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
              params.speculative.draft.n_max = value;
          }
      ).set_spec().set_examples({LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_LOOKUP, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_SPEC_DRAFT_N_MAX"));
@@ -20,10 +20,10 @@ index 79405b5..9559cc4 100644
          {"--spec-draft-n-min"}, "N",
          string_format("minimum number of draft tokens to use for speculative decoding (default: %d)", params.speculative.draft.n_min),
 diff --git a/common/common.h b/common/common.h
-index 4e9448b..4f72828 100644
+index d89f803af..f775e5783 100644
 --- a/common/common.h
 +++ b/common/common.h
-@@ -373,6 +373,10 @@ struct common_params_speculative {
+@@ -378,6 +378,10 @@ struct common_params_speculative {
      double synth_len = -1.0;
      std::vector<double> synth_rates;
  
@@ -34,7 +34,7 @@ index 4e9448b..4f72828 100644
      // used by Simple, MTP, Eagle3, etc. - all methods that require some kind of draft model
      common_params_speculative_draft draft;
  
-@@ -396,7 +400,7 @@ struct common_params_speculative {
+@@ -401,7 +405,7 @@ struct common_params_speculative {
              return t == COMMON_SPECULATIVE_TYPE_DRAFT_MTP || t == COMMON_SPECULATIVE_TYPE_DRAFT_EAGLE3 || t == COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH || t == COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK;
          });
  
@@ -44,7 +44,7 @@ index 4e9448b..4f72828 100644
  };
  
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index d0b411b..8d55d24 100644
+index 8a2415b17..adf8ade47 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
 @@ -13,6 +13,7 @@
@@ -55,7 +55,7 @@ index d0b411b..8d55d24 100644
  #include <cassert>
  #include <cmath>
  #include <cstring>
-@@ -171,6 +172,11 @@ struct common_speculative_impl {
+@@ -210,6 +211,11 @@ struct common_speculative_impl {
  
      virtual void accept(llama_seq_id seq_id, uint16_t n_accepted, bool is_other) = 0;
  
@@ -67,7 +67,7 @@ index d0b411b..8d55d24 100644
      // (optional) serialize/restore per-seq internal state (e.g. eagle3's deferred boundary).
      virtual bool get_state(llama_seq_id /*seq_id*/, std::vector<uint8_t> & /*data*/) const { return false; }
      virtual void set_state(llama_seq_id /*seq_id*/, const std::vector<uint8_t> & /*data*/) {}
-@@ -1358,6 +1364,18 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1426,6 +1432,18 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
      std::vector<int>                i_last;
      std::vector<std::vector<float>> chain_h;
  
@@ -86,9 +86,9 @@ index d0b411b..8d55d24 100644
      common_speculative_impl_draft_mtp(const common_params_speculative & params, uint32_t n_seq)
          : common_speculative_impl(COMMON_SPECULATIVE_TYPE_DRAFT_MTP, n_seq, params.draft.n_max)
          , params(params.draft)
-@@ -1387,6 +1405,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
-         // TODO: fix, how to call without malloc
-         batch.token = (llama_token *) malloc(sizeof(llama_token) * n_b);
+@@ -1451,6 +1469,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+ 
+         batch = common_batch(ctx_dft);
  
 +        tree_width = params.tree_width;
 +        trees.assign(n_seq, {});
@@ -96,7 +96,7 @@ index d0b411b..8d55d24 100644
          smpls.resize(n_seq);
          for (auto & s : smpls) {
              common_params_sampling sparams;
-@@ -1398,7 +1419,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1462,7 +1483,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
  
          // offload draft sampling to the backend
          backend_chains.assign(n_seq, nullptr);
@@ -105,7 +105,7 @@ index d0b411b..8d55d24 100644
              for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
                  llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
                  llama_sampler_chain_add(chain, llama_sampler_init_top_k(10));
-@@ -1510,8 +1531,24 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1568,8 +1589,24 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
  
          const size_t row_bytes = (size_t) n_embd * sizeof(float);
  
@@ -128,10 +128,10 @@ index d0b411b..8d55d24 100644
          // if kv is shared with target (e.g Gemma4), then we can skip this catch-up decode
 -        if (!is_mem_shared) {
 +        if (!is_mem_shared && !is_tree) {
-             common_batch_clear(batch);
+             batch.clear();
  
-             for (int k = 0; k < n_tokens; ++k) {
-@@ -1587,14 +1624,148 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+             // pair each token with the tgt embedding shifted right by one position, and
+@@ -1643,14 +1680,148 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
                  std::memcpy(verify_h[seq_id].data() + (size_t) i * n_embd, h, row_bytes);
              }
  
@@ -183,19 +183,19 @@ index d0b411b..8d55d24 100644
 +            int32_t n_sess = 0;
 +
 +            while (budget > 0 && !frontier.empty()) {
-+                common_batch_clear(batch);
++                batch.clear();
 +                std::vector<int32_t> sess_parent;
 +                for (size_t k = 0; k < frontier.size(); ++k) {
 +                    const int32_t f = frontier[k];
-+                    common_batch_add(batch, tok[f], dp.n_past + depth[f], { seq_id }, true);
++                    const int32_t idx = batch.add(tok[f], dp.pos0 + depth[f], seq_id, true);
 +                    const float * h = f == 0 ? pending_h[seq_id].data() : h_out[par[f]].data();
-+                    std::memcpy(batch.embd + k * n_embd, h, row_bytes);
++                    batch.set_embd_state(idx, { h, 1, (size_t) n_embd });
 +                    sess_parent.push_back(f == 0 ? -1 : sess[par[f]]);
 +                    sess[f] = n_sess + (int32_t) k;
 +                }
 +
 +                llama_set_tree(ctx_dft, sess_parent.data(), (int32_t) sess_parent.size());
-+                if (llama_decode(ctx_dft, batch) != 0) {
++                if (llama_process(ctx_dft, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
 +                    SPC_ERR("llama_decode(ctx_dft) failed for a tree of %zu nodes\n", tok.size());
 +                    break;
 +                }
@@ -268,7 +268,7 @@ index d0b411b..8d55d24 100644
 +
 +            trees[seq_id] = {};
 +            if (!result.empty()) {
-+                trees[seq_id] = { tok, par, dp.n_past, false };
++                trees[seq_id] = { tok, par, dp.pos0, false };
 +            }
 +        }
 +    }
@@ -281,8 +281,8 @@ index d0b411b..8d55d24 100644
 +
          auto & ctx_dft = params.ctx_dft;
  
-         common_batch_clear(batch);
-@@ -1760,6 +1931,34 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+         batch.clear();
+@@ -1831,6 +2002,34 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
          const size_t row_bytes = (size_t) n_embd * sizeof(float);
          std::memcpy(pending_h[seq_id].data(), verify_h[seq_id].data() + (size_t) i_h * n_embd, row_bytes);
      }
@@ -299,14 +299,14 @@ index d0b411b..8d55d24 100644
 +        const auto & rows = verify_h[seq_id];
 +
 +        // the head reads (token, hidden state of the token before it) along the kept path
-+        common_batch_clear(batch);
++        batch.clear();
 +        for (size_t t = 0; t < path.size(); ++t) {
-+            common_batch_add(batch, tr.tokens[path[t]], tr.n_past + (llama_pos) t, { seq_id }, false);
++            const int32_t idx = batch.add(tr.tokens[path[t]], tr.n_past + (llama_pos) t, seq_id, false);
 +            const float * h = t == 0 ? pending_h[seq_id].data() : rows.data() + (size_t) path[t - 1] * n_embd;
-+            std::memcpy(batch.embd + t * n_embd, h, row_bytes);
++            batch.set_embd_state(idx, { h, 1, (size_t) n_embd });
 +        }
 +
-+        if (llama_decode(params.ctx_dft, batch) != 0) {
++        if (llama_process(params.ctx_dft, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
 +            SPC_ERR("llama_decode(ctx_dft) failed catching up %zu kept tokens\n", path.size());
 +        }
 +
@@ -317,7 +317,7 @@ index d0b411b..8d55d24 100644
  };
  
  // state of self-speculation (simple implementation, not ngram-map)
-@@ -1769,12 +1968,15 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
+@@ -1840,12 +2039,15 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
      // shared across all sequences
      common_ngram_simple_config config;
  
@@ -333,7 +333,7 @@ index d0b411b..8d55d24 100644
      {
          SPC_TRC("%s", "adding speculative implementation 'ngram-simple'\n");
          SPC_TRC("- size_n=%d, size_m=%d, min_hits=%d\n",
-@@ -1799,7 +2001,76 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
+@@ -1870,7 +2072,76 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
                  continue;
              }
  
@@ -411,9 +411,9 @@ index d0b411b..8d55d24 100644
          }
      }
  
-@@ -2485,6 +2756,12 @@ common_params common_base_params_to_speculative(const common_params & params) {
-     result.n_outputs_max = params.n_parallel;
-     result.n_outputs_max_per_seq = 1;
+@@ -2570,6 +2841,12 @@ common_params common_base_params_to_speculative(const common_params & params) {
+     // the MoE cache is only used by the target context
+     result.moe_cache_size = 0;
  
 +    if (params.speculative.tree_width > 0) {
 +        // a tree draft decodes up to tree_width nodes of a depth at once
@@ -424,7 +424,7 @@ index d0b411b..8d55d24 100644
      // dflash/dspark decode the whole noise block in a single pass and sample every block position on the backend
      // TODO: refactor such properties to be announced by the speculative types
      //       something like `struct common_speculative_type_props common_speculative_type_get_props(...);`
-@@ -2802,6 +3079,10 @@ void common_speculative_draft(common_speculative * spec) {
+@@ -2887,6 +3164,10 @@ void common_speculative_draft(common_speculative * spec) {
          for (auto & dp : dparams) {
              GGML_ASSERT(!dp.drafting || dp.result->empty());
  
@@ -435,17 +435,17 @@ index d0b411b..8d55d24 100644
              if (dp.drafting) {
                  n_drafting++;
              }
-@@ -2838,6 +3119,9 @@ void common_speculative_draft(common_speculative * spec) {
-                     if (!result.empty() && (int) result.size() > dp.n_max) {
-                         SPC_DBG("truncating draft to %d tokens\n", dp.n_max);
-                         result.resize(dp.n_max);
+@@ -2928,6 +3209,9 @@ void common_speculative_draft(common_speculative * spec) {
+                         if (dp.result_q && !dp.result_q->empty()) {
+                             dp.result_q->resize(dp.n_max);
+                         }
 +                        if (dp.parents && !dp.parents->empty()) {
 +                            dp.parents->resize(dp.n_max);
 +                        }
                      }
                  }
  
-@@ -2910,6 +3194,45 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
+@@ -3000,6 +3284,45 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
      }
  }
  
@@ -492,13 +492,13 @@ index d0b411b..8d55d24 100644
  bool common_speculative_get_state(common_speculative * spec, llama_seq_id seq_id, std::vector<uint8_t> & data) {
      if (spec == nullptr) {
 diff --git a/common/speculative.h b/common/speculative.h
-index 2250589..f70cddd 100644
+index a59846829..2d5b8d794 100644
 --- a/common/speculative.h
 +++ b/common/speculative.h
-@@ -69,6 +69,10 @@ struct common_speculative_draft_params {
- 
-     // the generated draft from the last _draft() call
-     llama_tokens * result;
+@@ -79,6 +79,10 @@ struct common_speculative_draft_params {
+     // the target's temp and seed, read only when the drafter samples probabilistically
+     float    temp = 1.0f;
+     uint32_t seed = LLAMA_DEFAULT_SEED;
 +
 +    // when the draft is a tree: (*parents)[i] is the node result[i] hangs off, where node 0 is id_last
 +    // and node i + 1 is result[i]; left empty for a chain
@@ -506,7 +506,7 @@ index 2250589..f70cddd 100644
  };
  
  common_speculative_draft_params & common_speculative_get_draft_params(common_speculative * spec, llama_seq_id seq_id);
-@@ -85,6 +89,9 @@ void common_speculative_draft(common_speculative * spec);
+@@ -95,6 +99,9 @@ void common_speculative_draft(common_speculative * spec);
  // informs the speculative context that n_accepted tokens were accepted by the target model
  void common_speculative_accept(common_speculative * spec, llama_seq_id, uint16_t n_accepted);
  
@@ -517,7 +517,7 @@ index 2250589..f70cddd 100644
  bool common_speculative_get_state(common_speculative * spec, llama_seq_id seq_id, std::vector<uint8_t> & data);
  void common_speculative_set_state(common_speculative * spec, llama_seq_id seq_id, const std::vector<uint8_t> & data);
 diff --git a/examples/CMakeLists.txt b/examples/CMakeLists.txt
-index 39f802d..75de5ad 100644
+index 39f802d25..75de5ad05 100644
 --- a/examples/CMakeLists.txt
 +++ b/examples/CMakeLists.txt
 @@ -31,6 +31,7 @@ else()
@@ -530,7 +530,7 @@ index 39f802d..75de5ad 100644
      add_subdirectory(diffusion)
 diff --git a/examples/tree-verify/CMakeLists.txt b/examples/tree-verify/CMakeLists.txt
 new file mode 100644
-index 0000000..b526de5
+index 000000000..b526de59d
 --- /dev/null
 +++ b/examples/tree-verify/CMakeLists.txt
 @@ -0,0 +1,5 @@
@@ -541,7 +541,7 @@ index 0000000..b526de5
 +target_compile_features(${TARGET} PRIVATE cxx_std_17)
 diff --git a/examples/tree-verify/tree-verify.cpp b/examples/tree-verify/tree-verify.cpp
 new file mode 100644
-index 0000000..0808b40
+index 000000000..0808b40e1
 --- /dev/null
 +++ b/examples/tree-verify/tree-verify.cpp
 @@ -0,0 +1,174 @@
@@ -720,10 +720,10 @@ index 0000000..0808b40
 +    return first_diff < 0 ? 0 : 3;
 +}
 diff --git a/src/llama-batch.cpp b/src/llama-batch.cpp
-index 2b98a55..134b3f9 100644
+index 3c4b52008..cc4de4a42 100644
 --- a/src/llama-batch.cpp
 +++ b/src/llama-batch.cpp
-@@ -744,6 +744,8 @@ void llama_batch_allocr::clear() {
+@@ -859,6 +859,8 @@ void llama_batch_allocr::clear() {
      seq_set_map.clear();
  
      std::fill(seq_idx.begin(), seq_idx.end(), -1);
@@ -732,7 +732,7 @@ index 2b98a55..134b3f9 100644
  }
  
  llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, uint32_t n_seqs, bool equal_seqs) {
-@@ -834,6 +836,17 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
+@@ -978,6 +980,17 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
          /*.data         =*/ std::move(udata),
      };
  
@@ -751,13 +751,13 @@ index 2b98a55..134b3f9 100644
          LLAMA_LOG_DEBUG("%s: added ubatch to split:\n", __func__);
  
 diff --git a/src/llama-batch.h b/src/llama-batch.h
-index a3d1889..f59e3a9 100644
+index 8882c9941..3980705c0 100644
 --- a/src/llama-batch.h
 +++ b/src/llama-batch.h
-@@ -60,12 +60,17 @@ struct llama_ubatch {
-         std::vector<llama_seq_id>   seq_id_unq;
-         std::vector<int32_t>        seq_idx;
-         std::vector<int8_t>         output;
+@@ -74,12 +74,17 @@ struct llama_ubatch {
+         std::vector<int8_t>         type;
+         std::vector<int32_t>        batch_idxs;  // original batch index for each token
+         std::vector<int32_t>        decision_order;
 +        std::vector<int32_t>        parent;
  
          std::vector<llama_seq_id> seq_id_data;
@@ -771,8 +771,8 @@ index a3d1889..f59e3a9 100644
 +    int32_t * parent = nullptr; // [n_tokens]
  };
  
- // a helper for sanitizing, fulfilling and splitting a batch
-@@ -110,6 +115,9 @@ public:
+ // crash if a mixed ubatch reaches code that expects only tokens or only embd
+@@ -188,6 +193,9 @@ public:
      // sequence-set-wise split - each ubatch contains a single sequence-set
      llama_ubatch split_seq(uint32_t n_ubatch);
  
@@ -783,27 +783,27 @@ index a3d1889..f59e3a9 100644
      // TODO: support embeddings if needed in the future
      llama_ubatch ubatch_reserve(uint32_t n_seq_tokens, uint32_t n_seqs);
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index f286bd1..fed9313 100644
+index 7e6974431..e283b9b06 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
-@@ -1645,6 +1645,9 @@ int llama_context::decode(const llama_batch & batch_inp) {
-     // so accept either present rather than requiring exactly one.
-     GGML_ASSERT(batch_inp.token || batch_inp.embd);
+@@ -1726,6 +1726,9 @@ static bool needs_raw_logits(const llama_ubatch & ubatch, const std::map<llama_s
+ }
  
+ int llama_context::decode(const llama_batch_ext & batch_inp) {
 +    const std::vector<int32_t> tree = std::move(tree_parent);
 +    tree_parent.clear();
 +
      if (!memory) {
          LLAMA_LOG_DEBUG("%s: cannot decode batches with this context (calling encode() instead)\n", __func__);
          return encode(batch_inp);
-@@ -1706,6 +1709,15 @@ int llama_context::decode(const llama_batch & batch_inp) {
+@@ -1786,6 +1789,15 @@ int llama_context::decode(const llama_batch_ext & batch_inp) {
          return -1;
      }
  
 +    if (!tree.empty()) {
-+        if ((int32_t) tree.size() != batch_inp.n_tokens || (uint32_t) batch_inp.n_tokens > cparams.n_ubatch) {
-+            LLAMA_LOG_ERROR("%s: a draft tree of %zu parents needs a batch of that many tokens within n_ubatch = %u (got %d)\n",
-+                    __func__, tree.size(), cparams.n_ubatch, batch_inp.n_tokens);
++        if (tree.size() != batch_inp.tokens.size() || (uint32_t) batch_inp.tokens.size() > cparams.n_ubatch) {
++            LLAMA_LOG_ERROR("%s: a draft tree of %zu parents needs a batch of that many tokens within n_ubatch = %u (got %zu)\n",
++                    __func__, tree.size(), cparams.n_ubatch, batch_inp.tokens.size());
 +            return -1;
 +        }
 +        balloc->tree_parent = tree.data();
@@ -812,7 +812,7 @@ index f286bd1..fed9313 100644
      const uint32_t n_tokens_all  = balloc->get_n_tokens();
      const uint32_t n_outputs_all = balloc->get_n_outputs();
  
-@@ -3886,6 +3898,23 @@ void llama_set_nextn_layer_offset(llama_context * ctx, int32_t offset) {
+@@ -4139,6 +4151,23 @@ void llama_set_nextn_layer_offset(llama_context * ctx, int32_t offset) {
      ctx->set_nextn_layer_offset(offset);
  }
  
@@ -837,10 +837,10 @@ index f286bd1..fed9313 100644
      if (!ctx) {
          return nullptr;
 diff --git a/src/llama-context.h b/src/llama-context.h
-index bf91daa..11fe2d4 100644
+index 69bc01c19..789d9f0ea 100644
 --- a/src/llama-context.h
 +++ b/src/llama-context.h
-@@ -116,6 +116,7 @@ struct llama_context {
+@@ -121,6 +121,7 @@ struct llama_context {
      void set_embeddings_nextn(bool value, bool masked);
      void set_embeddings_layer_inp(uint32_t lid, bool enable);
      void set_nextn_layer_offset(int32_t offset);
@@ -848,10 +848,10 @@ index bf91daa..11fe2d4 100644
      void set_causal_attn(bool value);
      void set_warmup(bool value);
  
-@@ -330,6 +331,9 @@ private:
-     // reuse the batch_allocr to avoid unnecessary memory allocations
+@@ -347,6 +348,9 @@ private:
      std::unique_ptr<llama_batch_allocr> balloc;
  
+     uint32_t n_input_tensors = 0; // number of tensors marked as input during the last graph reserve
 +    // draft-tree parents for the next decode, empty for a plain batch
 +    std::vector<int32_t> tree_parent;
 +
@@ -859,10 +859,10 @@ index bf91daa..11fe2d4 100644
  
      std::vector<int32_t> output_ids; // map batch token positions to ids of the logits and embd buffers
 diff --git a/src/llama-ext.h b/src/llama-ext.h
-index 92a759b..f50922f 100644
+index fcc78f47e..fd58d8a61 100644
 --- a/src/llama-ext.h
 +++ b/src/llama-ext.h
-@@ -116,6 +116,20 @@ LLAMA_API float * llama_get_embeddings_layer_inp(struct llama_context * ctx, uin
+@@ -130,6 +130,20 @@ LLAMA_API float * llama_get_embeddings_layer_inp(struct llama_context * ctx, uin
  
  LLAMA_API llama_context * llama_get_ctx_other(struct llama_context * ctx);
  
@@ -884,10 +884,10 @@ index 92a759b..f50922f 100644
  // model/context data extraction
  //
 diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
-index 72db486..5ead990 100644
+index b22b95e6d..cec46e37d 100644
 --- a/src/llama-graph.cpp
 +++ b/src/llama-graph.cpp
-@@ -342,6 +342,18 @@ void llm_graph_input_rs::set_input(const llama_ubatch * ubatch) {
+@@ -372,6 +372,18 @@ void llm_graph_input_rs::set_input(const llama_ubatch * ubatch) {
      }
  }
  
@@ -907,10 +907,10 @@ index 72db486..5ead990 100644
      const auto * mctx = static_cast<const llama_memory_recurrent_context *>(params.mctx);
  
 diff --git a/src/llama-graph.h b/src/llama-graph.h
-index b388e02..180c976 100644
+index 06bb8c472..96b4621be 100644
 --- a/src/llama-graph.h
 +++ b/src/llama-graph.h
-@@ -281,6 +281,24 @@ public:
+@@ -293,6 +293,24 @@ public:
      int32_t rs_z;
  };
  
@@ -935,7 +935,7 @@ index b388e02..180c976 100644
  class llm_graph_input_cross_embd : public llm_graph_input_i {
  public:
      llm_graph_input_cross_embd(
-@@ -843,6 +861,10 @@ struct llm_graph_params {
+@@ -860,6 +878,10 @@ struct llm_graph_params {
              return false;
          }
  
@@ -947,10 +947,10 @@ index b388e02..180c976 100644
              return false;
          }
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 3e4a4d5..448a0b3 100644
+index 463510caa..1f4584b8a 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
-@@ -367,6 +367,10 @@ llama_kv_cache::llama_kv_cache(
+@@ -385,6 +385,10 @@ llama_kv_cache::llama_kv_cache(
  }
  
  void llama_kv_cache::clear(bool data) {
@@ -961,7 +961,7 @@ index 3e4a4d5..448a0b3 100644
      for (uint32_t s = 0; s < n_stream; ++s) {
          v_cells[s].reset();
          v_heads[s] = 0;
-@@ -396,6 +400,14 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+@@ -414,6 +418,14 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
          p1 = std::numeric_limits<llama_pos>::max();
      }
  
@@ -976,7 +976,7 @@ index 3e4a4d5..448a0b3 100644
      if (seq_id >= 0) {
          auto & cells = v_cells[seq_to_stream[seq_id]];
          auto & head  = v_heads[seq_to_stream[seq_id]];
-@@ -448,6 +460,98 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+@@ -466,6 +478,98 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
      return true;
  }
  
@@ -1075,7 +1075,7 @@ index 3e4a4d5..448a0b3 100644
  void llama_kv_cache::seq_cp(llama_seq_id seq_id_src, llama_seq_id seq_id_dst, llama_pos p0, llama_pos p1) {
      // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
      if (other) {
-@@ -1772,6 +1876,39 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
+@@ -1795,6 +1899,39 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
          set_input_kq_mask_impl<float>(args, (float *) dst->data, causal_attn);
      }
  
@@ -1115,7 +1115,7 @@ index 3e4a4d5..448a0b3 100644
      //const int64_t t_end = ggml_time_us();
  
      //LLAMA_LOG_ERROR("%s: kq mask time: %0.3f ms\n", __func__, (t_end - t_start)/1000.0);
-@@ -2715,6 +2852,7 @@ bool llama_kv_cache_context::apply() {
+@@ -2864,6 +3001,7 @@ bool llama_kv_cache_context::apply() {
      }
  
      kv->apply_ubatch(sinfos[i_cur], ubatches[i_cur]);
@@ -1124,7 +1124,7 @@ index 3e4a4d5..448a0b3 100644
  
      return true;
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index c4d8699..4c76f94 100644
+index 9bfb8f231..277f34297 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -141,6 +141,8 @@ public:
@@ -1147,9 +1147,9 @@ index c4d8699..4c76f94 100644
 +    uint32_t tree_size(llama_seq_id seq_id) const;
 +
      uint32_t get_size()     const;
+     uint32_t get_n_seq_max() const;
      uint32_t get_n_stream() const;
- 
-@@ -247,6 +255,17 @@ private:
+@@ -254,6 +262,17 @@ private:
      const llama_model & model;
      const llama_hparams & hparams;
  
@@ -1168,7 +1168,7 @@ index c4d8699..4c76f94 100644
          // layer index in the model
          // note: can be different from the layer index in the KV cache
 diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
-index 42c7381..b1d8845 100644
+index 62f12de95..11b23974e 100644
 --- a/src/llama-memory-hybrid.cpp
 +++ b/src/llama-memory-hybrid.cpp
 @@ -149,6 +149,10 @@ bool llama_memory_hybrid::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1
@@ -1183,7 +1183,7 @@ index 42c7381..b1d8845 100644
      mem_attn->seq_cp(seq_id_src, seq_id_dst, p0, p1);
      mem_recr->seq_cp(seq_id_src, seq_id_dst, p0, p1);
 diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
-index 484eafb..ee13c9f 100644
+index 484eafb74..ee13c9fe9 100644
 --- a/src/llama-memory-hybrid.h
 +++ b/src/llama-memory-hybrid.h
 @@ -66,6 +66,8 @@ public:
@@ -1196,7 +1196,7 @@ index 484eafb..ee13c9f 100644
      llama_pos seq_pos_max(llama_seq_id seq_id) const override;
  
 diff --git a/src/llama-memory-recurrent.cpp b/src/llama-memory-recurrent.cpp
-index 57919ac..6c3d5df 100644
+index 2893d819e..6867edb90 100644
 --- a/src/llama-memory-recurrent.cpp
 +++ b/src/llama-memory-recurrent.cpp
 @@ -34,6 +34,7 @@ llama_memory_recurrent::llama_memory_recurrent(
@@ -1207,7 +1207,7 @@ index 57919ac..6c3d5df 100644
  
      cells.clear();
      cells.resize(mem_size);
-@@ -156,6 +157,10 @@ void llama_memory_recurrent::clear(bool data) {
+@@ -163,6 +164,10 @@ void llama_memory_recurrent::clear(bool data) {
      }
  
      std::fill(rs_idx.begin(), rs_idx.end(), 0);
@@ -1218,7 +1218,7 @@ index 57919ac..6c3d5df 100644
  }
  
  bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
-@@ -174,6 +179,15 @@ bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos
+@@ -181,6 +186,15 @@ bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos
          return false;
      }
  
@@ -1234,7 +1234,7 @@ index 57919ac..6c3d5df 100644
      const bool rm_all = p0 == 0 && p1 == std::numeric_limits<llama_pos>::max();
      if (rm_all) {
          set_rs_idx(seq_id, 0);
-@@ -403,6 +417,54 @@ llama_pos llama_memory_recurrent::seq_pos_max(llama_seq_id seq_id) const {
+@@ -419,6 +433,54 @@ llama_pos llama_memory_recurrent::seq_pos_max(llama_seq_id seq_id) const {
      return result;
  }
  
@@ -1289,7 +1289,7 @@ index 57919ac..6c3d5df 100644
  void llama_memory_recurrent::set_rs_idx(llama_seq_id seq_id, uint32_t idx) {
      if (seq_id < 0) {
          std::fill(rs_idx.begin(), rs_idx.end(), 0);
-@@ -656,7 +718,7 @@ bool llama_memory_recurrent::find_slot(const llama_ubatch & ubatch) {
+@@ -672,7 +734,7 @@ bool llama_memory_recurrent::find_slot(const llama_ubatch & ubatch) {
          const int32_t cell_id = s + min;
          auto & cell = cells[cell_id];
  
@@ -1298,7 +1298,7 @@ index 57919ac..6c3d5df 100644
              // What should happen when the pos backtracks or skips a value?
              // Clearing the state mid-batch would require special-casing which isn't done.
              LLAMA_LOG_WARN("%s: non-consecutive token position %d after %d for sequence %d with %u new tokens\n",
-@@ -1261,6 +1323,7 @@ bool llama_memory_recurrent_context::apply() {
+@@ -1323,6 +1385,7 @@ bool llama_memory_recurrent_context::apply() {
      }
  
      mem->find_slot(ubatches[i_next]);
@@ -1307,7 +1307,7 @@ index 57919ac..6c3d5df 100644
      return true;
  }
 diff --git a/src/llama-memory-recurrent.h b/src/llama-memory-recurrent.h
-index 4abb3f5..e16ca83 100644
+index 08489a4be..7ff307837 100644
 --- a/src/llama-memory-recurrent.h
 +++ b/src/llama-memory-recurrent.h
 @@ -49,6 +49,8 @@ public:
@@ -1333,7 +1333,7 @@ index 4abb3f5..e16ca83 100644
      uint32_t n = 0;
  
 diff --git a/src/llama-memory.h b/src/llama-memory.h
-index db82539..1217468 100644
+index db8253966..12174680e 100644
 --- a/src/llama-memory.h
 +++ b/src/llama-memory.h
 @@ -113,6 +113,12 @@ struct llama_memory_i {
@@ -1350,7 +1350,7 @@ index db82539..1217468 100644
      virtual llama_pos seq_pos_max(llama_seq_id seq_id) const = 0;
  
 diff --git a/src/models/delta-net-base.cpp b/src/models/delta-net-base.cpp
-index ad66126..eebc160 100644
+index ad6612647..eebc1601b 100644
 --- a/src/models/delta-net-base.cpp
 +++ b/src/models/delta-net-base.cpp
 @@ -446,6 +446,53 @@ std::pair<ggml_tensor *, ggml_tensor *> llm_build_delta_net_base::build_delta_ne
@@ -1492,10 +1492,10 @@ index ad66126..eebc160 100644
          auto attn_out = build_delta_net(q, k, v, g, b, s, il);
          ggml_tensor * output    = attn_out.first;
 diff --git a/src/models/models.h b/src/models/models.h
-index 9b87a40..fb46bc6 100644
+index d6ddf9d16..71130f98b 100644
 --- a/src/models/models.h
 +++ b/src/models/models.h
-@@ -69,6 +69,10 @@ struct llm_build_delta_net_base : public llm_graph_context {
+@@ -76,6 +76,10 @@ struct llm_build_delta_net_base : public llm_graph_context {
                  ggml_tensor * s,
                          int   il);
  
@@ -1507,10 +1507,10 @@ index 9b87a40..fb46bc6 100644
      // qkv_mixed: (qkv_dim, n_seq_tokens, n_seqs); returns conv_input: (kernel_size + n_seq_tokens - 1, channels, n_seqs)
      ggml_tensor * build_conv_state(
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 5799d8b..0e19c2a 100644
+index 95a4a3a27..dc8cde78e 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
-@@ -14,6 +14,7 @@
+@@ -15,6 +15,7 @@
  #include "log.h"
  #include "sampling.h"
  #include "speculative.h"
@@ -1518,15 +1518,15 @@ index 5799d8b..0e19c2a 100644
  #include "mtmd.h"
  #include "mtmd-helper.h"
  
-@@ -252,6 +253,7 @@ struct server_slot {
-     common_speculative * spec;
+@@ -261,6 +262,7 @@ struct server_slot {
  
-     llama_tokens spec_draft;
+     // draft candidates per token in spec_draft; only draft-simple and draft-mtp fill it
+     std::vector<std::vector<llama_token_data>> spec_draft_q;
 +    std::vector<int32_t> spec_parents; // a tree draft: the node each draft token hangs off (0 = sampled); empty for a chain
      llama_tokens spec_prompt;
      std::vector<int32_t> spec_i_batch;
      common_prompt_checkpoint spec_ckpt;
-@@ -381,6 +383,7 @@ struct server_slot {
+@@ -390,6 +392,7 @@ struct server_slot {
  
          if (can_speculate()) {
              spec_draft.clear();
@@ -1534,7 +1534,7 @@ index 5799d8b..0e19c2a 100644
              spec_i_batch.clear();
              spec_ckpt.clear();
          }
-@@ -529,11 +532,20 @@ struct server_slot {
+@@ -567,11 +570,20 @@ struct server_slot {
                  spec_i_batch.push_back(batch.size() + i + 1);
              }
  
@@ -1559,7 +1559,7 @@ index 5799d8b..0e19c2a 100644
              }
          }
  
-@@ -1261,6 +1273,18 @@ private:
+@@ -1394,6 +1406,18 @@ private:
              slots.emplace_back();
          }
  
@@ -1578,15 +1578,15 @@ index 5799d8b..0e19c2a 100644
          // try speculative decoding
          if (ctx_tgt_seq_rm_type != COMMON_CONTEXT_SEQ_RM_TYPE_NO) {
              try {
-@@ -3011,6 +3035,7 @@ private:
-                             /* .id_last  = */ slot.sampled,
-                             /* .prompt   = */ &slot.spec_prompt,
-                             /* .result   = */ &slot.spec_draft,
+@@ -3396,6 +3420,7 @@ private:
+                             /* .result_q = */ spec_reject ? &slot.spec_draft_q : nullptr,
+                             /* .temp     = */ slot.task->params.sampling.temp,
+                             /* .seed     = */ slot.task->params.sampling.seed,
 +                            /* .parents  = */ &slot.spec_parents,
                          };
  
                          drafting.push_back(&slot);
-@@ -3693,11 +3718,28 @@ private:
+@@ -4205,11 +4230,28 @@ private:
              has_output |= batch.tokens[i].output;
          }
  
@@ -1596,9 +1596,9 @@ index 5799d8b..0e19c2a 100644
 +                continue;
 +            }
 +            const int32_t first = slot.spec_i_batch.front();
-+            if (first != off || (int32_t) slot.spec_i_batch.size() != batch_view.n_tokens) {
++            if (first != off || (int32_t) slot.spec_i_batch.size() != batch.view.size()) {
 +                throw std::runtime_error(string_format("a draft tree of %zu nodes at batch index %d is not the whole sub-batch [%d, %d)",
-+                        slot.spec_i_batch.size(), first, off, off + batch_view.n_tokens));
++                        slot.spec_i_batch.size(), first, off, off + batch.view.size()));
 +            }
 +            tree_parents.push_back(-1);
 +            tree_parents.insert(tree_parents.end(), slot.spec_parents.begin(), slot.spec_parents.end());
@@ -1612,10 +1612,10 @@ index 5799d8b..0e19c2a 100644
 +            if (!tree_parents.empty()) {
 +                llama_set_tree(ctx_tgt, tree_parents.data(), (int32_t) tree_parents.size());
 +            }
-             ret = llama_decode(ctx_tgt, batch_view);
+             ret = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, batch.view.get());
              if (ret == 0 && has_output) {
                  llama_synchronize(ctx_tgt);
-@@ -3926,6 +3968,44 @@ private:
+@@ -4447,6 +4489,44 @@ private:
  
              GGML_ASSERT(n_draft > 0);
  

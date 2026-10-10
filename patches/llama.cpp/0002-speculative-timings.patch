@@ -1,8 +1,8 @@
 diff --git a/tools/server/server-common.cpp b/tools/server/server-common.cpp
-index c30955e..fd10942 100644
+index 5f77d43d0..0ee357cbd 100644
 --- a/tools/server/server-common.cpp
 +++ b/tools/server/server-common.cpp
-@@ -79,9 +79,14 @@ json server_slot_stats::to_json() const {
+@@ -96,9 +96,14 @@ json server_slot_stats::to_json() const {
          {"predicted_per_second",   n_gen_tps()},
      };
  
@@ -18,10 +18,10 @@ index c30955e..fd10942 100644
  
      return base;
 diff --git a/tools/server/server-common.h b/tools/server/server-common.h
-index 6c681a2..40e6b83 100644
+index 5bd2ed57a..ff239d6c9 100644
 --- a/tools/server/server-common.h
 +++ b/tools/server/server-common.h
-@@ -360,6 +360,11 @@ struct server_slot_stats {
+@@ -403,6 +403,11 @@ struct server_slot_stats {
      uint64_t n_draft_accepted    = 0;
      uint64_t n_draft_verif_steps = 0;
  
@@ -34,10 +34,10 @@ index 6c681a2..40e6b83 100644
      // note: must be signed - they are subtracted before the later ones are set
      int64_t t_start       = 0;
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 44679cb..5799d8b 100644
+index bd4364bac..95a4a3a27 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
-@@ -678,6 +678,10 @@ struct server_slot {
+@@ -716,6 +716,10 @@ struct server_slot {
              SLT_INF(*this,
                      "draft acceptance = %0.5f (%5d accepted / %5d generated), mean len = %5.2f\n",
                      draft_ratio, n_draft_accepted, n_draft_total, mean_acc_len);
@@ -48,7 +48,7 @@ index 44679cb..5799d8b 100644
              SLT_TRC(*this,
                      "     acc per pos = (%s)\n", acceptance_rates_per_pos.c_str());
          }
-@@ -3017,9 +3021,18 @@ private:
+@@ -3402,9 +3406,18 @@ private:
  
          // generate the actual drafts (if any)
          if (!drafting.empty()) {
@@ -67,7 +67,7 @@ index 44679cb..5799d8b 100644
          }
  
          // make checkpoints if needed
-@@ -3619,6 +3632,36 @@ private:
+@@ -4131,6 +4144,36 @@ private:
  
      // returns true = success ; false = retry with smaller batch size
      // throw std::runtime_error on fatal error
@@ -101,21 +101,21 @@ index 44679cb..5799d8b 100644
 +        }
 +    }
 +
-     bool decode(int32_t & n_batch, int32_t off, llama_batch & batch_view) {
+     bool decode(int32_t & n_batch, int32_t off) {
          SRV_DBG("n_batch (effective) = %d, off = %d\n", n_batch, off);
  
-@@ -3653,12 +3696,14 @@ private:
+@@ -4165,12 +4208,14 @@ private:
          // yield to the queue, so we can still handle metrics tasks while decoding
          // note: the sync is done here too, so that the wait is also covered by the yield
          int ret = 0;
 +        const int64_t t_start = ggml_time_us();
          queue_tasks.yield_to_queue([&]() {
-             ret = llama_decode(ctx_tgt, batch_view);
+             ret = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, batch.view.get());
              if (ret == 0 && has_output) {
                  llama_synchronize(ctx_tgt);
              }
          });
-+        charge_verify(off, batch_view.n_tokens, ggml_time_us() - t_start);
++        charge_verify(off, batch.view.size(), ggml_time_us() - t_start);
  
          if (ret != 0) {
              {

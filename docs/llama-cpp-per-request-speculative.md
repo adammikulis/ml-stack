@@ -4,6 +4,15 @@ A patch for `ggml-org/llama.cpp`, carried in `patches/llama.cpp/` and applied by
 `poolhouse-serve build --from source`. Not sent upstream; this note is what a pull request
 would say.
 
+`patches/llama.cpp/verified.json` names the upstream commit the whole patch set (this one,
+`0002-speculative-timings.patch` and `0003-speculative-tree.patch`) was last checked to apply
+to. `poolhouse-serve build --from source` builds that commit unless `--commit SHA` names another
+or `--upstream-head` asks for master's tip, and it applies the patches into a throwaway
+worktree first: a set that does not apply fails the build, prints the rebase commands, and
+leaves `src` and `current` as they were. After rebasing, set `commit` and `patches` in the
+manifest; `tests/test_serve_build_verified.py` fails when the patches changed and the manifest
+did not.
+
 ## What it enables
 
 `llama-server` binds draft depth when the server starts (`--spec-draft-n-max`). One served

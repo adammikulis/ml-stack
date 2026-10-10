@@ -489,7 +489,11 @@ OPTIONS_BUILD = [
               "GitHub release with an asset for this machine. Default: source when a "
               "compiler is on PATH, release otherwise"),
     flag("--commit", default="", metavar="SHA",
-         help="build this commit instead of master's tip (--from source only)"),
+         help="build this commit instead of the newest one the llama.cpp patches are "
+              "verified against (--from source only)"),
+    flag("--upstream-head", action="store_true",
+         help="build master's tip instead of the newest verified commit; the patches may "
+              "not apply to it (--from source only)"),
     flag("--jobs", type=int, default=0, metavar="N",
          help="parallel compile jobs (default: every core)"),
     flag("--source", default="", metavar="DIR",
