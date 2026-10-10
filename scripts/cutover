@@ -72,6 +72,9 @@ if [ "$1 $2" = "migrate run" ]; then
   [ -f "$D/migrate.rc" ] && { echo "migrate: a step failed"; exit "$(cat "$D/migrate.rc")"; }
   [ -d "$HOME/.ml-stack" ] && mv "$HOME/.ml-stack" "$HOME/.poolhouse" && echo moved > "$HOME/.poolhouse/migrate.log"
 fi
+if [ "$1 $2" = "migrate verify" ] && [ -f "$D/verify.rc" ]; then
+  echo "verify: dangling symlink $HOME/.poolhouse/llama.cpp/current"; exit "$(cat "$D/verify.rc")"
+fi
 exit 0'
     make_stub python3 '
 case "$*" in
@@ -146,7 +149,7 @@ show_plan() {
             3) d="stop the old build: land runner, node, supervisors, com.ml-stack.* launchd labels, the app; then verify no process of the old name" ;;
             4) d="remove a stray ~/.poolhouse that holds only activity and sentinel" ;;
             5) d="$PY -m pip install -e . then pip uninstall -y ml-stack" ;;
-            6) d="poolhouse migrate plan, then poolhouse migrate run" ;;
+            6) d="poolhouse migrate plan, poolhouse migrate run, then poolhouse migrate verify" ;;
             7) d="poolhouse runtime ensure, node build, scripts/land up, poolhouse-doctor" ;;
         esac
         say "  step $n [$flag] $d"
@@ -255,7 +258,10 @@ step_migrate() {
     poolhouse migrate plan || stopped 6 migrate "poolhouse migrate plan failed; run it by hand and read why"
     poolhouse migrate run
     rc=$?
-    [ $rc -eq 0 ] && return 0
+    if [ $rc -eq 0 ]; then
+        poolhouse migrate verify || stopped 6 migrate "poolhouse migrate verify found a dangling symlink or an old path under ~/.poolhouse or ~/.cache/poolhouse (listed above); fix those, then run poolhouse migrate run again"
+        return 0
+    fi
     case $rc in
         1) hint="the old build is still alive: stop what migrate plan lists" ;;
         3) hint="both ~/.ml-stack and ~/.poolhouse exist: merge or remove one as the message says" ;;

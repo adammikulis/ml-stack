@@ -2,6 +2,7 @@
 
     poolhouse-migrate plan            what would move, and what is running that stops it
     poolhouse-migrate run             move it, once, and write migrate.log
+    poolhouse-migrate verify          list any dangling symlink or old-path venv file left under the new dirs
 
 Moves ``~/.ml-stack``, ``~/.cache/ml_stack``, the keychain master key and a checkout's old project file to the
 new names; no import and no other command does. It refuses while a process of the old name is alive and when
@@ -21,7 +22,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from poolhouse import home, keystore, legacy
+from poolhouse import home, keystore, legacy, migrate_paths
 from poolhouse.command import Group, flag
 from poolhouse.files import CrossDevice, promote, read_json, sha256_file
 from poolhouse.log import say, warn
@@ -212,6 +213,48 @@ def _steps(account: Path, steps: list, dry: bool, ring: Callable[[], keystore.Ke
     return code
 
 
+def _new_cache(account: Path) -> Path:
+    named = os.environ.get(home.CACHE_ENV)
+    return home.expand(named) if named else account / ".cache" / home.CACHE_NAME
+
+
+def _pairs(account: Path) -> list[tuple[Path, Path]]:
+    """``(old, new)`` for the state directory and the cache directory."""
+    return [(account / legacy.STATE_DIR, _new_state(account)),
+            (account / ".cache" / legacy.CACHE_DIR, _new_cache(account))]
+
+
+def _path_roots(account: Path, dry: bool) -> list[Path]:
+    """Where paths are looked for: the new directories, or before the move the old ones that will become them."""
+    return [(old if dry and old.is_dir() else new) for old, new in _pairs(account) if old.is_dir() or new.is_dir()]
+
+
+def _paths_step(account: Path, dry: bool, log: list[str]) -> None:
+    """Repoint what still names the old directories under the new ones; list what it cannot repoint."""
+    pairs, roots = _pairs(account), _path_roots(account, dry)
+    found = migrate_paths.scan(roots, pairs, planning=dry)
+    plists = sorted((account / "Library" / "LaunchAgents").glob("com.ml-stack.*"))
+    found.report += plists
+    said = f"paths: {found.counts()}"
+    log.append(said)
+    say(said)
+    for path in found.report[:20]:
+        say(f"paths: names an old path, not changed: {path}")
+    if len(found.report) > 20:
+        say(f"paths: ... and {len(found.report) - 20} more files (migrate.log lists them all)")
+    if not dry:
+        log += migrate_paths.apply(found, pairs, _new_state(account) / migrate_paths.BACKUPS)
+
+
+def verify(account: Path) -> int:
+    """List what is still wrong under the new directories; 0 when nothing is, 1 when something is."""
+    bad = migrate_paths.verify(_path_roots(account, False), _pairs(account))
+    for line in bad:
+        warn(f"verify: {line}")
+    say("verify: the new directories hold no old path" if not bad else f"verify: {len(bad)} problems")
+    return 1 if bad else 0
+
+
 def run(account: Path, *, dry: bool = False, ring: Callable[[], keystore.Keystore] = keystore.default) -> int:
     """Do the plan, or only list it. Returns 0 when it is done or there was nothing to do, 1 when a process
     of the old name is alive, 2 when a step failed, 3 when both names of a directory exist."""
@@ -227,6 +270,8 @@ def run(account: Path, *, dry: bool = False, ring: Callable[[], keystore.Keystor
     code = 2
     try:
         code = _steps(account, steps, dry, ring, log)
+        if code == 0:
+            _paths_step(account, dry, log)
     except (OSError, keystore.KeystoreError) as exc:
         warn(f"migrate stopped: {exc}")
         log.append(f"stopped: {exc}")
@@ -256,6 +301,9 @@ def _go(args: argparse.Namespace) -> int:
 GROUP = Group("poolhouse migrate", "Move the state, cache, keychain key and project files of the old name, once.")
 GROUP.add("plan", _go, help="what would move, and what is running that stops it", options=[ACCOUNT])
 GROUP.add("run", _go, help="move it, once, and write migrate.log", options=[ACCOUNT])
+GROUP.add("verify", lambda args: verify(Path(args.account) if args.account else home.user_home()),
+          help="list any dangling symlink or old-path venv file left under the new directories",
+          options=[ACCOUNT])
 
 main = GROUP.run
 

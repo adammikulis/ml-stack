@@ -17,7 +17,7 @@ step idempotent and recorded in `.git/cutover.state`: 1 `git pull --ff-only`; 2 
 `docs/rename-protected.patch` (skipped when applied; if it cannot apply it says why and stops); 3 stop the old
 build and verify `pgrep -fl 'ml-stack|ml_stack|poolside-node'` is empty (it prints what is left and stops);
 4 remove a stray `~/.poolhouse` that holds only `activity` and `sentinel` (anything else is refused); 5 install
-the new package and uninstall `ml-stack`; 6 `poolhouse migrate plan` and `run`; 7 `poolhouse runtime ensure`,
+the new package and uninstall `ml-stack`; 6 `poolhouse migrate plan`, `run` and `verify`; 7 `poolhouse runtime ensure`,
 `node build`, `scripts/land up`, `poolhouse-doctor` (on Windows `poolhouse device-setup --yes`, one UAC prompt).
 It ends with `READY`, or with the step that failed, the fix, `scripts/cutover --resume` and the rollback line.
 Tests drive it with `--dry-run-in DIR` (a fake HOME and stub commands under DIR; tests/test_cutover.py).
@@ -76,7 +76,12 @@ install's command prefix (`ml-stack`) and the new one (`poolhouse`).
    ```
    poolhouse migrate plan      # what moves; lists any process still of the old name
    poolhouse migrate run       # exit 0 done, 1 old build alive, 2 a step failed, 3 both names exist
+   poolhouse migrate verify    # exit 1 lists any dangling symlink or old-path venv file under the new directories
    ```
+
+   `run` also repoints symlinks and rewrites venv scripts (`pyvenv.cfg`, `activate*`, shebangs, `*.pth`) that
+   still named the old directories (originals kept under `~/.poolhouse/migrate-backup`, every change in
+   `migrate.log`) and lists any other file that names an old path without changing it. A second run is a no-op.
 
    `run` renames `~/.ml-stack` to `~/.poolhouse`, `~/.cache/ml_stack` to `~/.cache/poolhouse`, moves the
    Keychain master key to the service `poolhouse` (macOS may ask for the login keychain password once) and

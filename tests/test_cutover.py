@@ -102,7 +102,8 @@ def test_a_full_run_does_every_step_in_order_and_ends_ready(machine):
     order = [line for line in machine.calls() if line.split()[0] in ("python3", "poolhouse", "land", "poolhouse-doctor")]
     heads = [" ".join(line.split()[:3]) for line in order]
     assert heads == ["python3 -c import", "python3 -m ml_stack.node_launch", "python3 -m pip", "python3 -m pip", "python3 -m pip", "python3 -m pip",
-                     "poolhouse migrate plan", "poolhouse migrate run", "poolhouse runtime ensure",
+                     "poolhouse migrate plan", "poolhouse migrate run", "poolhouse migrate verify",
+                     "poolhouse runtime ensure",
                      "poolhouse node build", "land up", "poolhouse-doctor"]
     assert git(machine.repo, "log", "-1", "--format=%s").strip() == COMMIT
     assert "POOLHOUSE_WINDOW_POSITION" in (machine.repo / ".claude" / "settings.json").read_text()
@@ -205,6 +206,17 @@ def test_resume_after_a_failure_at_step_6_repeats_only_the_rest(machine):
     assert resumed.stdout.count("done earlier, skipped") == 5
     assert len(machine.called("python3 -m pip install")) == 1
     assert machine.state() == ["1", "2", "3", "4", "5", "6", "7"]
+
+
+def test_a_failing_verify_stops_at_step_6_with_the_problem_and_resume_repeats_it(machine):
+    (machine.dir / "verify.rc").write_text("1")
+    failed = machine.run("--yes")
+    assert failed.returncode == 1
+    assert "STOPPED at step 6" in failed.stdout and "dangling symlink" in failed.stdout
+    assert "poolhouse migrate verify found" in failed.stdout and "scripts/cutover --resume" in failed.stdout
+    assert machine.state() == ["1", "2", "3", "4", "5"] and machine.called("poolhouse runtime") == []
+    (machine.dir / "verify.rc").unlink()
+    assert machine.run("--resume").returncode == 0 and machine.state() == ["1", "2", "3", "4", "5", "6", "7"]
 
 
 def test_a_failing_doctor_stops_at_step_7_and_names_the_resume_command(machine):
