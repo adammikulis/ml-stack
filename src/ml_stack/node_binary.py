@@ -11,8 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ml_stack.platform import is_windows
 from ml_stack.files import read_json, write_json, writing
+from ml_stack.platform import is_windows
 from ml_stack.runtime_store import MARK
 
 DIRECTORY = "node"
