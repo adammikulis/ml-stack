@@ -65,35 +65,35 @@ def repo(tmp_path, home):
 
 class TestNoDataFiles:
     def test_a_pure_rename_of_a_data_file_inside_a_data_directory_passes(self, repo):
-        repo.write("src/poolhouse/data/fit.json", "{}")
+        repo.write("src/ml_stack/data/fit.json", "{}")
         repo.commit()
-        repo.move("src/poolhouse/data/fit.json", "src/poolhouse/data/fit.json")
+        repo.move("src/ml_stack/data/fit.json", "src/poolhouse/data/fit.json")
         assert repo.hook("no-data-files").returncode == 0
 
     def test_a_pure_rename_with_an_edit_passes(self, repo):
-        repo.write("src/poolhouse/data/fit.json", ''.join(f'{{"key{i}": {i}}}\n' for i in range(30)))
+        repo.write("src/ml_stack/data/fit.json", ''.join(f'{{"key{i}": {i}}}\n' for i in range(30)))
         repo.commit()
-        repo.move("src/poolhouse/data/fit.json", "src/poolhouse/data/fit.json")
+        repo.move("src/ml_stack/data/fit.json", "src/poolhouse/data/fit.json")
         repo.write("src/poolhouse/data/fit.json", ''.join(f'{{"key{i}": {i}}}\n' for i in range(30)) + '{"more": 1}\n')
         assert repo.hook("no-data-files").returncode == 0
 
     def test_a_rename_that_grows_the_file_over_the_limit_is_refused(self, repo):
-        repo.write("src/poolhouse/data/fit.json", "x" * 100)
+        repo.write("src/ml_stack/data/fit.json", "x" * 100)
         repo.commit()
-        repo.move("src/poolhouse/data/fit.json", "src/poolhouse/data/fit.json")
+        repo.move("src/ml_stack/data/fit.json", "src/poolhouse/data/fit.json")
         repo.write("src/poolhouse/data/fit.json", "x" * 100 + "y" * ((1 << 20) + 1))
         done = repo.hook("no-data-files")
         assert done.returncode == 1 and "byte limit" in done.stderr
 
     def test_a_rename_into_a_data_extension_is_refused(self, repo):
-        repo.write("src/poolhouse/data/fit.json", "{}")
+        repo.write("src/ml_stack/data/fit.json", "{}")
         repo.commit()
-        repo.move("src/poolhouse/data/fit.json", "src/poolhouse/data/fit.csv")
+        repo.move("src/ml_stack/data/fit.json", "src/poolhouse/data/fit.csv")
         done = repo.hook("no-data-files")
         assert done.returncode == 1 and ".csv" in done.stderr
 
     def test_a_new_data_file_is_refused(self, repo):
-        repo.write("src/poolhouse/data/new.json", "{}")
+        repo.write("datasets/new.json", "{}")
         assert repo.hook("no-data-files").returncode == 1
 
     def test_a_data_file_moved_into_a_data_directory_from_elsewhere_is_refused(self, repo):
@@ -104,25 +104,25 @@ class TestNoDataFiles:
         assert done.returncode == 1 and "data directory" in done.stderr
 
     def test_a_copy_is_not_a_rename(self, repo):
-        repo.write("src/poolhouse/data/fit.json", '{"a": 1}\n' * 20)
+        repo.write("src/ml_stack/data/fit.json", '{"a": 1}\n' * 20)
         repo.commit()
-        repo.write("src/poolhouse/data/fit.json", '{"a": 1}\n' * 20)
+        repo.write("datasets/fit.json", '{"a": 1}\n' * 20)
         assert repo.hook("no-data-files").returncode == 1
 
     def test_a_pushed_range_of_pure_renames_passes_and_one_with_a_new_data_file_does_not(self, repo):
-        repo.write("src/poolhouse/data/fit.json", "{}")
+        repo.write("src/ml_stack/data/fit.json", "{}")
         base = repo.commit()
-        repo.move("src/poolhouse/data/fit.json", "src/poolhouse/data/fit.json")
+        repo.move("src/ml_stack/data/fit.json", "src/poolhouse/data/fit.json")
         tip = repo.commit("rename")
         assert repo.hook("no-data-files", "--range", base, tip).returncode == 0
-        repo.write("src/poolhouse/data/added.json", "{}")
+        repo.write("datasets/added.json", '{"fresh": 1}\n' * 5)
         worse = repo.commit("adds")
         assert repo.hook("no-data-files", "--range", base, worse).returncode == 1
 
     def test_a_range_with_no_known_base_reads_each_commit_against_its_parent(self, repo):
-        repo.write("src/poolhouse/data/fit.json", "{}")
+        repo.write("src/ml_stack/data/fit.json", "{}")
         repo.commit()
-        repo.move("src/poolhouse/data/fit.json", "src/poolhouse/data/fit.json")
+        repo.move("src/ml_stack/data/fit.json", "src/poolhouse/data/fit.json")
         tip = repo.commit("rename")
         assert repo.hook("no-data-files", "--range", "0" * 40, tip).returncode == 0
         repo.move("src/poolhouse/data/fit.json", "data/fit.json")
@@ -139,18 +139,18 @@ class TestBudgets:
     def start(self, repo):
         repo.write("pyproject.toml", (REPO / "pyproject.toml").read_text(encoding="utf-8"))
         repo.write("budgets.json", '{"broad-excepts": 9}\n')
-        repo.write("src/poolhouse/a.py", SITE)
+        repo.write("src/ml_stack/a.py", SITE)
         repo.commit("base")
 
     def test_a_pure_rename_adds_no_site(self, repo):
         self.start(repo)
-        repo.move("src/poolhouse/a.py", "src/poolhouse/a.py")
+        repo.move("src/ml_stack/a.py", "src/poolhouse/a.py")
         done = repo.hook("budgets")
         assert done.returncode == 0, done.stderr
 
     def test_a_rename_that_adds_a_site_is_refused(self, repo):
         self.start(repo)
-        repo.move("src/poolhouse/a.py", "src/poolhouse/a.py")
+        repo.move("src/ml_stack/a.py", "src/poolhouse/a.py")
         repo.write("src/poolhouse/a.py", SITE + "\n\n" + SITE.replace("def g", "def h"))
         done = repo.hook("budgets")
         assert done.returncode == 1 and "gains 1 site" in done.stderr
@@ -175,7 +175,7 @@ class TestBudgets:
     def test_a_pure_rename_leaves_budgets_only_fall_quiet_and_a_raised_number_still_stops_it(self, repo):
         self.start(repo)
         shutil.copytree(REPO / "scripts" / "gates", repo.root / "scripts" / "gates")
-        repo.move("src/poolhouse/a.py", "src/poolhouse/a.py")
+        repo.move("src/ml_stack/a.py", "src/poolhouse/a.py")
         assert repo.hook("budgets-only-fall").returncode == 0
         repo.write("budgets.json", '{"broad-excepts": 10}\n')
         assert repo.hook("budgets-only-fall").returncode == 1
@@ -301,20 +301,20 @@ class TestNameCheckSeesRenames:
     BODY = "".join(f"line {i} of the module\n" for i in range(30))
 
     def test_a_pure_rename_adds_no_line(self, repo):
-        repo.write("src/poolhouse/m.py", self.BODY)
+        repo.write("src/ml_stack/m.py", self.BODY)
         repo.commit()
-        repo.move("src/poolhouse/m.py", "src/poolhouse/m.py")
+        repo.move("src/ml_stack/m.py", "src/poolhouse/m.py")
         assert self.lines(repo) == set()
 
     def test_a_rename_adds_only_the_lines_it_changed(self, repo):
-        repo.write("src/poolhouse/m.py", self.BODY)
+        repo.write("src/ml_stack/m.py", self.BODY)
         repo.commit()
-        repo.move("src/poolhouse/m.py", "src/poolhouse/m.py")
+        repo.move("src/ml_stack/m.py", "src/poolhouse/m.py")
         repo.write("src/poolhouse/m.py", self.BODY + "an added line\n")
         assert self.lines(repo) == {31}
 
     def test_a_new_file_and_a_copy_add_every_line(self, repo):
-        repo.write("src/poolhouse/m.py", self.BODY)
+        repo.write("src/ml_stack/m.py", self.BODY)
         repo.commit()
         repo.write("src/poolhouse/m.py", self.BODY)
         assert self.lines(repo) == set(range(1, 31))
