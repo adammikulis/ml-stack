@@ -1,0 +1,308 @@
+#!/bin/sh
+# Cut this machine over from ml-stack to Poolhouse in one command (docs/cutover.md has the manual steps).
+#
+#   scripts/cutover --plan        print what it will do and what is running; change nothing
+#   scripts/cutover               show the plan, ask one yes/no, then do it
+#   scripts/cutover --yes         the same without the question
+#   scripts/cutover --resume      continue after a stop (no question; finished steps are skipped)
+#   scripts/cutover --dry-run-in DIR   run against a fake HOME and stub commands under DIR (tests)
+#
+# POSIX sh using only git, python3, pip, pgrep and launchctl/systemctl/schtasks where present. It runs
+# before the new package is installed, so it imports neither poolhouse nor ml_stack. State lives in
+# <git dir>/cutover.state, one finished step per line; every step is idempotent.
+# On Windows it runs under the WSL or Git-Bash shell; the Windows-native steps are schtasks calls and
+# python -m calls guarded by the platform check below.
+
+if [ -z "${CUTOVER_ROOT:-}" ]; then
+    # Run from a copy: step 1 pulls, and a shell reading a file that changes under it misbehaves.
+    here=$(cd "$(dirname "$0")/.." && pwd)
+    copy=$(mktemp "${TMPDIR:-/tmp}/cutover.XXXXXX") || exit 1
+    cp "$0" "$copy" && CUTOVER_ROOT=$here exec sh "$copy" "$@"
+    exit 1
+fi
+case "$0" in */cutover.??????) trap 'rm -f "$0"' EXIT ;; esac
+
+ROOT=$CUTOVER_ROOT
+PATTERN='ml-stack|ml_stack|poolside-node'
+MODE=ask
+DRY=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --plan) MODE=plan ;;
+        --yes) MODE=yes ;;
+        --resume) MODE=yes ;;
+        --dry-run-in) shift; DRY=${1:?--dry-run-in needs a directory} ;;
+        -h|--help) sed -n '2,9p' "$ROOT/scripts/cutover" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "cutover: unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+say() { printf '%s\n' "$*"; }
+log_call() { [ -n "$DRY" ] && printf '%s\n' "$*" >> "$DRY/calls.log"; return 0; }
+
+platform() {
+    if [ -n "${CUTOVER_PLATFORM:-}" ]; then echo "$CUTOVER_PLATFORM"; return; fi
+    case "$(uname -s)" in
+        Darwin) echo macos ;;
+        MINGW*|MSYS*|CYGWIN*) echo windows ;;
+        *) if grep -qi microsoft /proc/version 2>/dev/null; then echo windows; else echo linux; fi ;;
+    esac
+}
+
+make_stub() {
+    [ -e "$DRY/bin/$1" ] && return 0
+    printf '#!/bin/sh\nD=%s\nprintf "%%s\\n" "%s $*" >> "$D/calls.log"\n%s\n' "$DRY" "$1" "$2" > "$DRY/bin/$1"
+    chmod +x "$DRY/bin/$1"
+}
+
+setup_dry_run() {
+    mkdir -p "$DRY/bin" "$DRY/home"
+    DRY=$(cd "$DRY" && pwd)
+    HOME=$DRY/home; export HOME
+    PATH=$DRY/bin:$PATH; export PATH
+    : >> "$DRY/calls.log"
+    make_stub pgrep '[ -s "$D/procs" ] && cat "$D/procs" && exit 0; exit 1'
+    make_stub launchctl 'if [ "$1" = list ]; then cat "$D/launchd" 2>/dev/null; fi; exit 0'
+    make_stub osascript 'exit 0'
+    make_stub land 'exit 0'
+    make_stub poolhouse-doctor '[ -f "$D/doctor.rc" ] && exit "$(cat "$D/doctor.rc")"; exit 0'
+    make_stub poolhouse '
+if [ "$1 $2" = "migrate run" ]; then
+  [ -f "$D/migrate.rc" ] && { echo "migrate: a step failed"; exit "$(cat "$D/migrate.rc")"; }
+  [ -d "$HOME/.ml-stack" ] && mv "$HOME/.ml-stack" "$HOME/.poolhouse" && echo moved > "$HOME/.poolhouse/migrate.log"
+fi
+exit 0'
+    make_stub python3 '
+case "$*" in
+  "-m pip show "*) grep -qx "$4" "$D/installed" 2>/dev/null; exit $? ;;
+  "-m pip install"*) echo poolhouse >> "$D/installed"; exit 0 ;;
+  "-m pip uninstall"*) grep -vx ml-stack "$D/installed" > "$D/installed.new"; mv "$D/installed.new" "$D/installed"; exit 0 ;;
+  "-m ml_stack.node_launch stop") [ -f "$D/stubborn" ] || { grep -v node_launch "$D/procs" > "$D/procs.new"; mv "$D/procs.new" "$D/procs"; }; exit 0 ;;
+  "-c import ml_stack") exit 0 ;;
+esac
+exit 0'
+    LAND=$DRY/bin/land
+    POLLS=1
+}
+
+# ---------------------------------------------------------------- state
+
+GIT_DIR=$(git -C "$ROOT" rev-parse --git-dir 2>/dev/null) || { say "cutover: $ROOT is not a git checkout"; exit 1; }
+case "$GIT_DIR" in /*) ;; *) GIT_DIR=$ROOT/$GIT_DIR ;; esac
+STATE=$GIT_DIR/cutover.state
+LAND=$ROOT/scripts/land
+POLLS=20
+[ -n "$DRY" ] && setup_dry_run
+PY=python3
+command -v python3 >/dev/null 2>&1 || PY=python
+PLATFORM=$(platform)
+PATCH=$ROOT/docs/rename-protected.patch
+GUARDED=".claude/settings.json scripts/hooks/claude-bash-guard scripts/hooks/claude-edit-guard scripts/hooks/person-consume scripts/hooks/rules_loader.py src/poolhouse/workspace/person_*.py"
+COMMIT_MSG="chore: the guards, hook settings and person-record code take the Poolhouse names"
+ROLLBACK="rollback: docs/cutover.md, Rolling back (mv ~/.poolhouse ~/.ml-stack; mv ~/.cache/poolhouse ~/.cache/ml_stack; reinstall the old package from the commit before the rename)"
+STEPS="1:pull 2:patch 3:stop-old-build 4:stray-poolhouse 5:install 6:migrate 7:restart"
+
+is_done() { [ -f "$STATE" ] && grep -qx "$1" "$STATE"; }
+mark() { echo "$1" >> "$STATE"; }
+git_r() { git -C "$ROOT" "$@"; }
+
+ancestors() {
+    p=$$; out=" $$ "
+    while [ "${p:-0}" -gt 1 ] 2>/dev/null; do
+        p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+        [ -n "$p" ] || break
+        out="$out$p "
+    done
+    echo "$out"
+}
+
+# Processes of the old name, minus this script and the shells that started it.
+live_procs() {
+    anc=$(ancestors)
+    pgrep -fl "$PATTERN" 2>/dev/null | grep -v 'scripts/cutover' | awk -v skip="$anc" 'index(skip, " " $1 " ") == 0'
+}
+
+terminate() {
+    if [ -n "$DRY" ]; then log_call "kill -TERM $1"; else kill -TERM "$1" 2>/dev/null; fi
+}
+
+patch_applied() { git_r apply --reverse --check "$PATCH" >/dev/null 2>&1; }
+
+home_poolhouse_entries() { [ -d "$HOME/.poolhouse" ] && ls -A "$HOME/.poolhouse"; }
+
+# ---------------------------------------------------------------- plan
+
+show_plan() {
+    say "cutover plan for $ROOT ($PLATFORM)"
+    say "  HOME $HOME"
+    say "  branch $(git_r branch --show-current)"
+    for s in $STEPS; do
+        n=${s%%:*}
+        if is_done "$n"; then flag='done'; else flag='todo'; fi
+        case "$n" in
+            1) d="git pull --ff-only" ;;
+            2) if patch_applied; then d="apply docs/rename-protected.patch (already applied, skipped)"; else d="apply docs/rename-protected.patch and commit it"; fi ;;
+            3) d="stop the old build: land runner, node, supervisors, com.ml-stack.* launchd labels, the app; then verify no process of the old name" ;;
+            4) d="remove a stray ~/.poolhouse that holds only activity and sentinel" ;;
+            5) d="$PY -m pip install -e . then pip uninstall -y ml-stack" ;;
+            6) d="poolhouse migrate plan, then poolhouse migrate run" ;;
+            7) d="poolhouse runtime ensure, node build, scripts/land up, poolhouse-doctor" ;;
+        esac
+        say "  step $n [$flag] $d"
+    done
+    procs=$(live_procs)
+    if [ -n "$procs" ]; then say "running now (step 3 stops these):"; say "$procs"; else say "running now: no process of the old name"; fi
+    entries=$(home_poolhouse_entries)
+    [ -n "$entries" ] && say "~/.poolhouse holds: $(echo $entries)"
+    return 0
+}
+
+# ---------------------------------------------------------------- steps
+
+stopped() {
+    say ""
+    say "STOPPED at step $1 ($2): $3"
+    say "fix it, then resume with: scripts/cutover --resume"
+    say "$ROLLBACK"
+    exit 1
+}
+
+step_pull() {
+    branch=$(git_r branch --show-current)
+    [ -n "$branch" ] || stopped 1 pull "the checkout is on a detached HEAD; check out the development branch"
+    out=$(git_r pull --ff-only 2>&1) || { say "$out"; stopped 1 pull "git pull --ff-only on $branch failed (local commits, changes or no upstream)"; }
+    say "$out"
+}
+
+step_patch() {
+    if patch_applied; then
+        say "the protected-file patch is already applied"
+    else
+        out=$(git_r apply --check "$PATCH" 2>&1) || { say "$out"; stopped 2 patch "docs/rename-protected.patch does not apply to this checkout (is it on the landed rename?)"; }
+        git_r apply "$PATCH" || stopped 2 patch "git apply failed"
+        say "applied docs/rename-protected.patch"
+    fi
+    pending=$(cd "$ROOT" && git status --porcelain -- $GUARDED | cut -c4-)
+    if [ -n "$pending" ]; then
+        (cd "$ROOT" && printf '%s\n' "$pending" | xargs git add --) || stopped 2 patch "git add failed"
+        git_r commit -m "$COMMIT_MSG" >/dev/null || stopped 2 patch "git commit failed (a hook refused it; read its message above)"
+        say "committed the patch"
+    fi
+}
+
+step_stop() {
+    if [ "$PLATFORM" = macos ]; then
+        for app in Poolhouse Poolside; do
+            if pgrep -f "$app.app" >/dev/null 2>&1; then osascript -e "tell application \"$app\" to quit" >/dev/null 2>&1; fi
+        done
+        for label in $(launchctl list 2>/dev/null | awk '{print $3}' | grep '^com\.ml-stack\.'); do
+            launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1
+            say "unloaded $label"
+        done
+    fi
+    if [ "$PLATFORM" = windows ]; then
+        for task in com.ml-stack.traind.login com.ml-stack.traind.system; do
+            if schtasks.exe /Query /TN "$task" >/dev/null 2>&1; then
+                schtasks.exe /End /TN "$task" >/dev/null 2>&1; schtasks.exe /Delete /TN "$task" /F >/dev/null 2>&1
+                say "removed task $task"
+            fi
+        done
+    fi
+    if "$PY" -c 'import ml_stack' >/dev/null 2>&1; then "$PY" -m ml_stack.node_launch stop >/dev/null 2>&1; fi
+    for pid in $(pgrep -f 'scripts/land (serve|supervise)|ml_stack[./]node|ml_stack[./]traind|poolside-node' 2>/dev/null | grep -v 'scripts/cutover' | awk '{print $1}'); do
+        case "$(ancestors)" in *" $pid "*) continue ;; esac
+        terminate "$pid"
+    done
+    waited=0
+    while [ $waited -lt "$POLLS" ] && [ -n "$(live_procs)" ]; do sleep 0.5; waited=$((waited + 1)); done
+    left=$(live_procs)
+    if [ -n "$left" ]; then
+        say "still running under the old name:"; say "$left"
+        stopped 3 stop-old-build "stop those (their owners quit agents; ml-stack-serve down MODEL for a served model), then check: pgrep -fl '$PATTERN'"
+    fi
+    say "no process of the old name is running"
+}
+
+step_stray() {
+    entries=$(home_poolhouse_entries)
+    if [ -z "$entries" ] || [ ! -e "$HOME/.ml-stack" ]; then
+        say "no stray ~/.poolhouse to remove"; return 0
+    fi
+    say "~/.poolhouse next to ~/.ml-stack holds: $(echo $entries)"
+    for e in $entries; do
+        case "$e" in activity|sentinel) ;; *) stopped 4 stray-poolhouse "~/.poolhouse holds '$e', which is not a known stub (activity, sentinel); merge or remove it by hand" ;; esac
+    done
+    for e in $entries; do rm -rf "${HOME:?}/.poolhouse/$e"; done
+    rmdir "$HOME/.poolhouse" || stopped 4 stray-poolhouse "~/.poolhouse could not be removed"
+    say "removed the stray ~/.poolhouse"
+}
+
+step_install() {
+    if "$PY" -m pip show poolhouse >/dev/null 2>&1 && ! "$PY" -m pip show ml-stack >/dev/null 2>&1; then
+        say "poolhouse is installed and ml-stack is gone"; return 0
+    fi
+    (cd "$ROOT" && "$PY" -m pip install -e .) || stopped 5 install "$PY -m pip install -e . failed (read the error above)"
+    if "$PY" -m pip show ml-stack >/dev/null 2>&1; then
+        "$PY" -m pip uninstall -y ml-stack || stopped 5 install "$PY -m pip uninstall -y ml-stack failed"
+    fi
+}
+
+step_migrate() {
+    if [ ! -e "$HOME/.ml-stack" ] && [ -f "$HOME/.poolhouse/migrate.log" ]; then
+        say "already migrated (~/.poolhouse/migrate.log)"; return 0
+    fi
+    poolhouse migrate plan || stopped 6 migrate "poolhouse migrate plan failed; run it by hand and read why"
+    poolhouse migrate run
+    rc=$?
+    [ $rc -eq 0 ] && return 0
+    case $rc in
+        1) hint="the old build is still alive: stop what migrate plan lists" ;;
+        3) hint="both ~/.ml-stack and ~/.poolhouse exist: merge or remove one as the message says" ;;
+        *) hint="a move failed (on Windows a directory in use cannot be renamed: close its holder); ~/.poolhouse/migrate.log lists what moved" ;;
+    esac
+    stopped 6 migrate "poolhouse migrate run exited $rc: $hint"
+}
+
+step_restart() {
+    poolhouse runtime ensure --checkout "$ROOT" || stopped 7 restart "poolhouse runtime ensure --checkout $ROOT failed"
+    if [ "$PLATFORM" = windows ]; then
+        poolhouse device-setup --yes || stopped 7 restart "poolhouse device-setup --yes failed (approve the one UAC prompt at the machine)"
+    else
+        [ "$PLATFORM" = macos ] && { poolhouse node build || stopped 7 restart "poolhouse node build failed"; }
+        "$LAND" up || stopped 7 restart "scripts/land up failed"
+    fi
+    poolhouse-doctor || stopped 7 restart "poolhouse-doctor reported a problem; read its output"
+}
+
+run_step() {
+    n=$1; name=$2; fn=$3
+    if is_done "$n"; then say "step $n $name: done earlier, skipped"; return 0; fi
+    say "step $n: $name"
+    "$fn"
+    mark "$n"
+}
+
+# ---------------------------------------------------------------- main
+
+show_plan
+[ "$MODE" = plan ] && exit 0
+if [ "$MODE" = ask ]; then
+    printf 'Run these steps now? [y/N] '
+    read -r answer
+    case "$answer" in y|Y|yes|YES) ;; *) say "nothing changed"; exit 1 ;; esac
+fi
+
+run_step 1 pull step_pull
+run_step 2 patch step_patch
+run_step 3 stop-old-build step_stop
+run_step 4 stray-poolhouse step_stray
+run_step 5 install step_install
+run_step 6 migrate step_migrate
+run_step 7 restart step_restart
+
+say ""
+say "READY"
+say "still by hand (docs/cutover.md): install the login units again (python -m poolhouse.fleet.autostart prepare, then install --manifest PATH) and delete the old com.ml-stack.* plists."
+say "$ROLLBACK"
+exit 0

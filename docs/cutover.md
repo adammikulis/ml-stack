@@ -1,5 +1,30 @@
 # Cutover to Poolhouse
 
+## The one command
+
+On each machine (this Mac, and the Windows device from its WSL or Git-Bash shell), once the rename has
+landed on the branch the checkout follows:
+
+```
+cd ~/Documents/repos/ml-stack
+scripts/cutover --plan     # what it will do and what is running; changes nothing
+scripts/cutover            # shows the plan, asks one yes/no, then does it
+```
+
+`--yes` skips the question. It is POSIX shell using only git, python3, pip, pgrep and
+launchctl/schtasks where present, so it works before the new package is installed. It does, in order, each
+step idempotent and recorded in `.git/cutover.state`: 1 `git pull --ff-only`; 2 apply and commit
+`docs/rename-protected.patch` (skipped when applied; if it cannot apply it says why and stops); 3 stop the old
+build and verify `pgrep -fl 'ml-stack|ml_stack|poolside-node'` is empty (it prints what is left and stops);
+4 remove a stray `~/.poolhouse` that holds only `activity` and `sentinel` (anything else is refused); 5 install
+the new package and uninstall `ml-stack`; 6 `poolhouse migrate plan` and `run`; 7 `poolhouse runtime ensure`,
+`node build`, `scripts/land up`, `poolhouse-doctor` (on Windows `poolhouse device-setup --yes`, one UAC prompt).
+It ends with `READY`, or with the step that failed, the fix, `scripts/cutover --resume` and the rollback line.
+Tests drive it with `--dry-run-in DIR` (a fake HOME and stub commands under DIR; tests/test_cutover.py).
+Still by hand afterwards: the login units again and the old `com.ml-stack.*` plists (step 6 below).
+
+The manual steps below are the reference for what the script does.
+
 The order matters: the new code must be installed before anything is restarted, and the old build must
 be stopped before `poolhouse migrate run`, which refuses while a process of the old name is alive. Nothing
 else moves live state. Run each step as the person who owns the machine. `NAME` below is the old
