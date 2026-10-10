@@ -19,8 +19,8 @@ def hub_cache() -> Path:
 
 
 def default_roots(root: Path | str) -> list[Path]:
-    """Where model files live: every folder `places` names, the store's own under ``root``
-    first, in search order."""
+    """Where model files live: every folder `places` names, in search order. The Hugging Face
+    hub cache is where poolhouse keeps its own downloads; ``root`` no longer holds models."""
     return [hub.hub_cache() if p.label == "huggingface" else p.path
             for p in places.places(state=home.expand(root))]
 

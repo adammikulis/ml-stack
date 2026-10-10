@@ -144,21 +144,26 @@ def test_a_file_from_a_paired_device_is_pinned_with_its_peer(tmp_path, pipe):
     assert pin.origin == "peer:desk" and pin.source == "pull" and pin.sha256 == SHA(body)
 
 
-def test_hub_pull_pins_every_shard(monkeypatch):
+def test_hub_pull_pins_every_shard(monkeypatch, tmp_path):
     shard = lambda seed: (b"GGUF" + struct.pack("<IQQ", 3, 0, 0) + bytes([seed]) * 4096)  # noqa: E731
     repos = {"maker/big-GGUF": {"Q4/big-00001-of-00002.gguf": shard(1),
                                 "Q4/big-00002-of-00002.gguf": shard(2)}}
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
-    monkeypatch.setenv("HF_HOME", "/nonexistent-hf-home")
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hub"))
     monkeypatch.setattr(http, "check", lambda url: url)
     with fake_hub(repos) as hub_:
         hub_.point(monkeypatch)
         first = hub.pull("hf:maker/big-GGUF/Q4/big-00001-of-00002.gguf", peers=False)
     held = pins()
     for name, body in repos["maker/big-GGUF"].items():
-        pin = held[str(first.parent.parent / name)]
+        link = first.parent.parent / name
+        assert link.is_symlink()
+        pin = held[str(link.resolve())]
         assert pin.source == "pull" and pin.sha256 == SHA(body) and pin.digest_from == "expected"
+        # the file served is the snapshot link, and it finds the pull's pin instead of pinning anew
+        assert sentinel.default().manifest.pin_of(link) == pin
+        assert load(link) == "" and held == pins()
 
 
 # -- signed manifests at load --------------------------------------------------------------

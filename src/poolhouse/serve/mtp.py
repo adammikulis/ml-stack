@@ -147,7 +147,7 @@ def provenance(model: Path, head: Path) -> str:
     if not repo and (there in (here, here.parent)
                      or (there.name.lower() == "mtp" and there.parent in (here, here.parent))):
         return ""
-    pin = sentinel.default().manifest.pins().get(str(head))
+    pin = sentinel.default().manifest.pin_of(head)
     if pin is not None and pin.source and pin.source != "first-use":
         return ""
     return (f"{head.name} comes from a different repository than the model and nothing "

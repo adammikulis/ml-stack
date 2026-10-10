@@ -62,7 +62,7 @@ def asker(base_url: str) -> Callable[[str], str]:
 def _key(node: Sentinel, model: str) -> str:
     """The baseline key: the model, and its pin when it has one, so a replaced file starts a
     new baseline instead of being judged by the old one."""
-    pin = node.manifest.pins().get(str(Path(model).expanduser()))
+    pin = node.manifest.pin_of(model)
     return f"{model}@{pin.sha256[:16]}" if pin else model
 
 

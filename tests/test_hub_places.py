@@ -27,7 +27,7 @@ def test_macos_folders():
     assert got["huggingface"] == ["/h/.cache/huggingface/hub"]
     assert got["lmstudio"] == ["/h/.lmstudio/models", "/h/.cache/lm-studio/models"]
     assert got["ollama"] == ["/h/.ollama/models"]
-    assert got["poolhouse"] == ["/h/.poolhouse/models"]
+    assert "poolhouse" not in got
     assert "/h/Library/Application Support/Jan/data/llamacpp/models" in got["jan"]
 
 

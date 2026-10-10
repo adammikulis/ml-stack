@@ -1,7 +1,7 @@
 {
- "surfaces": 867,
+ "surfaces": 868,
  "by_status": {
-  "covered": 539,
+  "covered": 540,
   "partial": 196,
   "uncovered": 52,
   "n/a": 80,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 83,
+   "covered": 84,
    "partial": 0,
    "uncovered": 48,
    "n/a": 0,
@@ -7124,6 +7124,18 @@
    "status": "uncovered",
    "tests": [],
    "note": "a crafted model-repository listing, card, document, mailbox, WAV or archive reaches the reader; only tests/test_hub_modelfile.py attacks one"
+  },
+  {
+   "id": "parser:hub/hfstore.py",
+   "kind": "parser",
+   "source": "hub/hfstore.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_hub_cache_store.py::test_a_planted_ref_is_not_followed_out_of_the_cache"
+   ],
+   "note": "refs/main is read back from a cache any tool can write; anything but a commit id is ignored, so a planted path never leaves the snapshots folder"
   },
   {
    "id": "parser:hub/listing.py",

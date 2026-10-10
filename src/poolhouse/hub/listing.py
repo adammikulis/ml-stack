@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from poolhouse import home, hub
+from poolhouse import hub
 from poolhouse.hub import remote
 from poolhouse.hub.naming import _SHARD, _precision
 from poolhouse.hub.transfer import pull
@@ -153,7 +153,7 @@ def build_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str,
 
 
 def fetch(reference: str, *, peers: bool | None = None) -> Path:
-    """Download an `hf:` reference into poolhouse's model store, without serving it.
+    """Download an `hf:` reference into the Hugging Face hub cache, without serving it.
 
     A sharded model's *every* shard comes down, not only the one named: the file given is
     one member of a build, and a server started against a partial download fails at the far
@@ -166,9 +166,9 @@ def fetch(reference: str, *, peers: bool | None = None) -> Path:
         raise ValueError(f"{reference!r} should look like hf:owner/repo/file.gguf")
     repo, name = parts
     try:
-        pull(f"hf:{repo}/{name}", peers=peers)
+        got = pull(f"hf:{repo}/{name}", peers=peers)
     except remote.NotFound as exc:
         raise ValueError(str(exc)) from exc
     except remote.RemoteError as exc:
         raise OSError(str(exc)) from exc
-    return home.state("models", *repo.split("/")) / name
+    return got.parent / name.rsplit("/", 1)[-1]

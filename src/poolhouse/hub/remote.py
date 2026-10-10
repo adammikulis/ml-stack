@@ -96,6 +96,8 @@ class RemoteFile:
     path: str
     size: int
     sha256: str = ""
+    oid: str = ""
+    """The git blob id, which names a small file that is not LFS in the Hub cache."""
 
     @property
     def name(self) -> str:
@@ -142,8 +144,22 @@ def listing(repo: str, revision: str = "main", auth: str | None = None) -> list[
         if isinstance(row, dict) and row.get("type") == "file":
             lfs = row.get("lfs") if isinstance(row.get("lfs"), dict) else {}
             out.append(RemoteFile(str(row["path"]), int(lfs.get("size") or row.get("size") or 0),
-                                  str(lfs.get("oid") or "")))
+                                  str(lfs.get("oid") or ""), str(row.get("oid") or "")))
     return out
+
+
+def commit(repo: str, revision: str = "main", auth: str | None = None) -> str:
+    """The 40-character commit a revision of a repository resolves to, as the Hub cache names it."""
+    if re.fullmatch(r"[a-f0-9]{40}", revision):
+        return revision
+    quoted = urllib.parse.quote(repo, safe="/")
+    rev = urllib.parse.quote(revision, safe="")
+    got = _get(f"{endpoint()}/api/models/{quoted}/revision/{rev}",
+               auth=token() if auth is None else auth, repo=repo)
+    sha = got.get("sha") if isinstance(got, dict) else None
+    if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{40}", sha):
+        raise RemoteError(f"{endpoint()} did not name a commit for {repo}@{revision}")
+    return sha
 
 
 def members(files: list[RemoteFile], ref: Ref) -> list[RemoteFile]:
