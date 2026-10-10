@@ -1,10 +1,10 @@
 {
- "surfaces": 865,
+ "surfaces": 867,
  "by_status": {
-  "covered": 538,
+  "covered": 539,
   "partial": 196,
   "uncovered": 53,
-  "n/a": 78,
+  "n/a": 79,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 7,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 29,
+   "n/a": 30,
    "unmapped": 0
   },
   "context": {
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 82,
+   "covered": 83,
    "partial": 59,
    "uncovered": 0,
    "n/a": 2,
@@ -606,6 +606,16 @@
    "id": "cli:ml-stack-decide",
    "kind": "cli",
    "source": "ml_stack.decide_cli:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
+   "id": "cli:ml-stack-device-setup",
+   "kind": "cli",
+   "source": "ml_stack.device_setup:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -11963,6 +11973,19 @@
     "tests/test_redteam_gym_worker.py::test_worker_spawn_keeps_hostile_configuration_inside_json"
    ],
    "note": "actual worker launch through the process wrapper receives hostile configuration as one JSON argument without a shell"
+  },
+  {
+   "id": "spawn:redact/added.py:_renamed_from",
+   "kind": "spawn",
+   "source": "redact/added.py:_renamed_from",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_hooks_rename_aware.py::test_a_hostile_renamed_path_reaches_git_as_one_argument",
+    "tests/test_hooks_rename_aware.py::test_many_renames_are_read_in_one_pass_and_each_is_paired"
+   ],
+   "note": "git is spawned with argv only and no shell; the diff is read as NUL-separated fields, so an option-shaped, spaced, quoted, newline or command-shaped path is one literal field and a rename count only lengthens the loop"
   },
   {
    "id": "spawn:redact/added.py:added_lines",

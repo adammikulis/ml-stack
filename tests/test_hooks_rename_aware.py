@@ -328,3 +328,32 @@ class TestNameCheckSeesRenames:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         assert module.FLAG == added.SIMILARITY
+
+
+HOSTILE = ["--output=evil.py", "-p.py", "a b.py", "line\nbreak.py", "q'uote\"s.py", "$(touch pwned).py"]
+
+
+@pytest.mark.parametrize("name", HOSTILE)
+def test_a_hostile_renamed_path_reaches_git_as_one_argument(repo, name):
+    from ml_stack.redact.added import added_lines
+
+    body = "".join(f"line {i} of the module\n" for i in range(30))
+    repo.write(f"old/{name}", body)
+    repo.commit()
+    repo.move(f"old/{name}", f"new/{name}")
+    assert added_lines(str(repo.root), f"new/{name}") == set()
+    repo.write(f"new/{name}", body + "added\n")
+    assert added_lines(str(repo.root), f"new/{name}") == {31}
+    assert not list(repo.root.glob("evil.py")) and not list(repo.root.glob("pwned*"))
+
+
+def test_many_renames_are_read_in_one_pass_and_each_is_paired(repo):
+    from ml_stack.redact.added import added_lines
+
+    for i in range(300):
+        repo.write(f"old/m{i}.py", "".join(f"line {i}.{j}\n" for j in range(12)))
+    repo.commit()
+    for i in range(300):
+        repo.move(f"old/m{i}.py", f"new/m{i}.py")
+    assert added_lines(str(repo.root), "new/m299.py") == set()
+    assert added_lines(str(repo.root), "new/m0.py") == set()
