@@ -28,10 +28,11 @@ import land_entries
 import land_git as lg
 import land_recover as recover
 
+from poolhouse.board import place, session
+from poolhouse.board.client import Client, Conflict, Denied, NodeError
+from poolhouse.board.session import Native, Session
 from poolhouse.devbranch import development_branch
 from poolhouse.workspace import landing
-from poolhouse.workspace.claims import Conflict
-from poolhouse.workspace.identity import Denied
 
 HERE = Path(__file__).resolve().parent
 MAX_BATCH = 8
@@ -42,15 +43,14 @@ KILL_GRACE_S = 60.0
 RETRY = ("stuck", "timeout", "error", "unverified")
 # what a request's own step can raise: git, the filesystem, the board, a missing key
 STEP_ERRORS = (RuntimeError, ValueError, OSError, LookupError, TypeError, AttributeError,
-               subprocess.SubprocessError, Denied, Conflict)
+               subprocess.SubprocessError, NodeError, Denied, Conflict)
 
 
 @dataclass
 class Runner:
-    """A landing runner for one checkout, acting as the authenticated identity ``token``."""
+    """A landing runner for one checkout, acting as the session ``s`` on the checkout's board."""
 
-    ws: object
-    token: str
+    s: Session
     root: Path
     target: str = ""
     remote: str = "origin"
@@ -66,16 +66,16 @@ class Runner:
         self.lock = recover.RunnerLock(self.root)
 
     def say(self, text: str, **fields: object) -> None:
-        """One audit row for a runner step."""
-        self.ws.audit("land.run", self.ws.auth(self.token).id, step=text, **fields)
+        """One progress mark on the board for a runner step."""
+        landing.beat(self.s, " ".join([text, *(f"{k}={v}" for k, v in fields.items())]))
 
     def tell(self, req: dict, text: str, kind: str = "status") -> None:
         """A direct message to the requester of ``req``, by name."""
-        self.ws.send(self.token, req["by"], kind, f"{req['id']} {req['branch']}: {text}"[:1500])
+        self.s.post(req["by"], kind, f"{req['id']} {req['branch']}: {text}"[:1500])
 
     def settle(self, req: dict, status: str, detail: str, **evidence: object) -> None:
         """Record the new state of ``req`` and tell its requester."""
-        landing.transition(self.ws, self.token, req["id"], status, detail, **evidence)
+        landing.transition(self.s, req["id"], status, detail, **evidence)
         self.tell(req, f"{status}: {detail}", "handoff" if status in ("failed", "needs-human", "refused") else "status")
 
     def guard(self, req: dict, what: str, step):
@@ -96,10 +96,10 @@ class Runner:
 
     def vet(self, req: dict) -> bool:
         """Whether ``req`` may be landed now; otherwise it is settled or left waiting with a reason."""
-        reason = landing.standing(self.ws, req)
+        reason = landing.standing(self.s, req)
         if reason:
             if not req.get("evidence", {}).get("seen"):
-                landing.transition(self.ws, self.token, req["id"], "needs-review", reason, seen=True)
+                landing.transition(self.s, req["id"], "needs-review", reason, seen=True)
                 self.tell(req, f"waiting: {reason}")
             return False
         if recover.present(self.root, req["sha"], self.target):
@@ -110,14 +110,12 @@ class Runner:
         except ValueError as error:
             self.settle(req, "refused", str(error))
             return False
-        if req["target"] != self.target:
-            self.settle(req, "refused", f"this runner lands {self.target}, not {req['target']}")
-            return False
         return True
 
     def screen(self, queue: landing.Queue) -> list[dict]:
         """The requests that may be landed now; each other one is settled or left waiting."""
-        return [r for r in queue.waiting() if self.guard(r, "screening it", lambda r=r: self.vet(r)) is True]
+        mine = [r for r in queue.waiting() if r["target"] == self.target]
+        return [r for r in mine if self.guard(r, "screening it", lambda r=r: self.vet(r)) is True]
 
     def limit(self, batch: list[dict]) -> float:
         """The longest a gate may run for ``batch``: one request has its own, shorter limit."""
@@ -145,9 +143,9 @@ class Runner:
             now = time.monotonic()
             if now - marked > 10:
                 marked = now
-                landing.beat(self.ws, self.token, lines[-1] if lines else "starting")
-                self.ws.heartbeat(self.token)
-                if any(r["status"] == "cancelled" for r in landing.fold(self.ws).requests.values() if r["id"] in ids):
+                landing.beat(self.s, lines[-1] if lines else "starting")
+                self.s.renew_claims(landing.RUNNER_TTL_S)
+                if any(r["status"] == "cancelled" for r in landing.fold(self.s).requests.values() if r["id"] in ids):
                     stop = "cancelled"
             if now - mark[0] > self.stall_s:
                 stop = "stuck"
@@ -193,34 +191,35 @@ class Runner:
     def close(self) -> None:
         """Give up the branch claim and the runner lock."""
         try:
-            self.ws.release(self.token, *landing.runner_claim(self.ws, self.target))
+            self.s.release(*landing.runner_claim(self.target))
         except STEP_ERRORS as error:
             print(f"land: claim not released: {error}", file=sys.stderr, flush=True)
         self.lock.release()
 
     def once(self) -> dict:
         """One pass over the queue; a summary of what happened."""
-        who = self.ws.auth(self.token).id
+        who = self.s.name
         if not self.lock.acquire():
             return {"status": "runner-held", "owner": f"another runner process ({recover.holder(self.root)})"}
         try:
-            self.ws.claim(self.token, *landing.runner_claim(self.ws, self.target), pid=os.getpid())
+            self.s.claim(*landing.runner_claim(self.target), ttl_s=landing.RUNNER_TTL_S, pid=os.getpid())
         except Conflict as held:
-            return {"status": "runner-held", "owner": held.owner}
-        if landing.fold(self.ws).paused:
-            return {"status": "paused", "by": landing.fold(self.ws).paused_by}
+            return {"status": "runner-held", "owner": str(held).rpartition(" is held by ")[2]}
+        queue = landing.fold(self.s)
+        if queue.paused:
+            return {"status": "paused", "by": queue.paused_by}
         self.resume()
-        batch = self.screen(landing.fold(self.ws))[:MAX_BATCH]
+        batch = self.screen(landing.fold(self.s))[:MAX_BATCH]
         if not batch:
             return {"status": "idle"}
         self.say("batch", ids=[r["id"] for r in batch])
         batch = [r for r in batch if self.guard(r, "starting it", lambda r=r: landing.transition(
-            self.ws, self.token, r["id"], "running", f"in a batch of {len(batch)}") or True)]
+            self.s, r["id"], "running", f"in a batch of {len(batch)}") or True)]
         try:
             return self.drive(batch, who) if batch else {"status": "idle"}
         finally:
             recover.sweep(self.root)
-            self.ws.heartbeat(self.token)
+            self.s.renew_claims(landing.RUNNER_TTL_S)
 
     def resume(self) -> None:
         """Settle what a crashed pass left: remove its trees, then settle each request by its SHA.
@@ -232,7 +231,7 @@ class Runner:
         if gone:
             self.say("swept", trees=gone)
         held = []
-        for req in landing.fold(self.ws).requests.values():
+        for req in landing.fold(self.s).requests.values():
             if req["status"] == "running":
                 self.guard(req, "resuming it", lambda r=req: self.resume_one(r, held))
             elif req["status"] == "landed-unpushed":
@@ -248,7 +247,7 @@ class Runner:
         if recover.on_target(self.root, req["sha"], self.target):
             held.append(req)
         else:
-            landing.transition(self.ws, self.token, req["id"], "queued", "the runner restarted mid-batch; queued again")
+            landing.transition(self.s, req["id"], "queued", "the runner restarted mid-batch; queued again")
 
     def after_push(self, req: dict, problem: str) -> None:
         """Settle a request found on the development branch after a restart."""
@@ -265,7 +264,7 @@ class Runner:
         out = self.attempt(batch, who)
         if out["status"] not in RETRY:
             return out
-        live = [r for r in batch if landing.fold(self.ws).requests[r["id"]]["status"] == "running"]
+        live = [r for r in batch if landing.fold(self.s).requests[r["id"]]["status"] == "running"]
         if len(live) > 1:
             self.say("split", why=out["status"], ids=[r["id"] for r in live])
             return self.singly(live, who, out["status"])
@@ -288,7 +287,7 @@ class Runner:
         """Run each request alone so the one that fails is the only one that does."""
         results = []
         for req in live:
-            if landing.fold(self.ws).requests[req["id"]]["status"] != "running":
+            if landing.fold(self.s).requests[req["id"]]["status"] != "running":
                 continue
             out = self.attempt([req], who)
             if out["status"] in RETRY:
@@ -309,7 +308,7 @@ class Runner:
             base = ", ".join(out.get("baseline", [])) or "none"
             why = f"the gate was red on this request alone; red on {self.target} too: {base}; {out.get('detail', '')}"
         self.guard(req, "giving it up", lambda: self.settle(req, "failed" if status == "unverified" else "needs-human", why))
-        self.ws.announce(self.token, "blocked", f"landing could not land {req['branch']} ({status})")
+        self.s.post("#announcements", "blocked", f"landing could not land {req['branch']} ({status})", subject="blocked")
 
     def run_batch(self, batch: list[dict], who: str) -> dict:
         """Merge, gate, land and push one batch, then report to every requester."""
@@ -337,10 +336,10 @@ class Runner:
 
     def cancelled(self, batch: list[dict]) -> dict:
         """A cancelled batch: keep the cancelled out and queue the rest again."""
-        now = landing.fold(self.ws)
+        now = landing.fold(self.s)
         for req in batch:
             if now.requests[req["id"]]["status"] != "cancelled":
-                landing.transition(self.ws, self.token, req["id"], "queued", "its batch was cancelled; queued again")
+                landing.transition(self.s, req["id"], "queued", "its batch was cancelled; queued again")
         return {"status": "cancelled", "batch": [r["id"] for r in batch]}
 
     def report_ejected(self, batch: list[dict], summary: dict) -> None:
@@ -366,12 +365,12 @@ class Runner:
         for req in batch:
             if req["branch"] in summary.get("merged", []):
                 if "moved since" in reason:
-                    landing.transition(self.ws, self.token, req["id"], "queued", f"{reason}; queued again")
+                    landing.transition(self.s, req["id"], "queued", f"{reason}; queued again")
                 else:
                     self.guard(req, "reporting it", lambda r=req: self.settle(
                         r, "needs-human", f"verified but not fast-forwarded: {reason or fin}"))
-        self.ws.announce(self.token, "blocked", f"landing verified a batch but could not fast-forward {self.target}: "
-                         f"{reason or 'see land finish'}")
+        self.s.post("#announcements", "blocked", f"landing verified a batch but could not fast-forward {self.target}: "
+                    f"{reason or 'see land finish'}"[:200], subject="blocked")
         return {"status": "blocked", "reason": reason, "batch": [r["id"] for r in batch]}
 
     def landed(self, batch: list[dict], summary: dict, who: str) -> dict:
@@ -382,25 +381,29 @@ class Runner:
         for req in batch:
             if req["branch"] in merged or recover.present(self.root, req["sha"], self.target):
                 self.guard(req, "reporting it", lambda r=req: self.after_push(r, problem))
-            elif landing.fold(self.ws).requests[req["id"]]["status"] == "running":
-                landing.transition(self.ws, self.token, req["id"], "queued", "not merged in this batch; queued again")
+            elif landing.fold(self.s).requests[req["id"]]["status"] == "running":
+                landing.transition(self.s, req["id"], "queued", "not merged in this batch; queued again")
         text = f"landed {len(merged)} on {self.target} at {head[:12]}"
-        self.ws.announce(self.token, "milestone" if not problem else "blocked",
-                         text if not problem else f"{text} but the push failed: {problem}")
+        kind = "milestone" if not problem else "blocked"
+        self.s.post("#announcements", kind, (text if not problem else f"{text} but the push failed: {problem}")[:200],
+                    subject=kind)
         self.say("landed", head=head, pushed=not problem, by=who)
         return {"status": "landed" if not problem else "landed-unpushed", "head": head, "merged": merged,
                 "push": problem}
 
 
-def serve(root: Path, target: str, flags: dict) -> int:
-    """Run passes as the identity in this environment until interrupted, or one pass with ``once``."""
-    from poolhouse.workspace import Workspace, tokens
+def runner_session(root: Path, target: str) -> Session:
+    """The board session of this checkout's runner: registered once under a name of its own, its token kept
+    in the client's private credentials."""
+    client = Client()
+    board = place.resolve(client, root)
+    made = session.register(client, board, Native("", "land-runner", f"{root}:{target}"))
+    return Session(client, board, made.token, made.name)
 
-    ws = Workspace()
-    token = tokens.resolve(ws.base)
-    if not token:
-        raise ValueError("land serve acts as an authenticated workspace identity; no token found")
-    runner = Runner(ws, token, root, target, flags["remote"], flags["stall_minutes"] * 60.0,
+
+def serve(root: Path, target: str, flags: dict) -> int:
+    """Run passes as the runner's own session until interrupted, or one pass with ``once``."""
+    runner = Runner(runner_session(root, target), root, target, flags["remote"], flags["stall_minutes"] * 60.0,
                     request_s=flags["request_minutes"] * 60.0, batch_s=flags["batch_minutes"] * 60.0)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:

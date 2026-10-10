@@ -25,6 +25,7 @@ const VERIFY_KEYS: [&str; 4] = ["note", "exit", "cmd", "out_sha"];
 const LEASE_KEYS: [&str; 3] = ["lease", "action", "resources"];
 const LEASE_ACTIONS: [&str; 5] = ["acquire", "release", "expire", "dead", "abandon"];
 const AUDIT_KEYS: [&str; 3] = ["event", "subject", "detail"];
+const LANDING_KEYS: [&str; 13] = ["ev", "branch", "sha", "target", "selectors", "replaces", "req", "verdict", "status", "detail", "evidence", "reason", "what"];
 pub const BODY_BYTES: usize = 64 * 1024;
 const NOTES_PER_SENDER: usize = 200;
 
@@ -68,6 +69,7 @@ pub fn channel_of(kind: Kind, fields: &Map<String, Value>) -> String {
         },
         Kind::Note | Kind::Verify => "#notes".into(),
         Kind::Lease => "#leases".into(),
+        Kind::Landing => "#landing".into(),
         Kind::Identity => "#identity".into(),
         Kind::Audit => "#audit".into(),
         _ => "#other".into(),
@@ -214,6 +216,13 @@ fn audit(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<Str
     Ok((who, map))
 }
 
+fn landing(row: &Row, ctx: &mut Context, foreign: bool) -> Result<(String, Map<String, Value>)> {
+    let map = only(&row.body, &LANDING_KEYS)?;
+    let who = sender(row, None, ctx, foreign)?;
+    crate::landing::check(&map)?;
+    Ok((who, map))
+}
+
 fn entry(row: &Row, ctx: &mut Context) -> Result<Entry> {
     let foreign = row.origin != ctx.own_origin;
     let (who, fields) = match row.kind {
@@ -223,6 +232,7 @@ fn entry(row: &Row, ctx: &mut Context) -> Result<Entry> {
         Kind::Verify => verify(row, ctx, foreign)?,
         Kind::Audit => audit(row, ctx, foreign)?,
         Kind::Lease => lease(row, ctx, foreign)?,
+        Kind::Landing => landing(row, ctx, foreign)?,
         _ => return reject("this kind of entry is not accepted yet"),
     };
     Ok(Entry {

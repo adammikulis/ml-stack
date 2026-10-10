@@ -50,9 +50,9 @@ row before), `hlc` (wall ms, counter, origin), `kind`, `actor`, `idem`, `body`, 
 Bodies hold integers, text, booleans, arrays and objects; fractions are refused so the hash never
 depends on a float format.
 
-Kinds: `message`, `note`, `verify`, `identity`, `lease` and `audit` are folded into the view now; `task`,
-`landing_request` and `reputation_event` are in the schema so a later log still parses, and a
-foreign entry of those kinds is not shown yet. `head` is a signature row, never shown.
+Kinds: `message`, `note`, `verify`, `identity`, `lease`, `audit` and `landing` are folded into the view now; `task`
+and `reputation_event` are in the schema so a later log still parses, and a foreign entry of those kinds
+is not shown yet. `head` is a signature row, never shown.
 
 - **Crash safety.** Append is one write plus `fsync`; it returns when the row is on disk. On open, a
   last line without its newline was never acknowledged and is cut off (a torn write from `kill -9`);
@@ -186,6 +186,24 @@ verified note cannot be superseded), `verify_cmd` and `ttl_days`. `notes` folds 
 never runs `verify_cmd`: a client does and records `exit` and the SHA-256 of the output with
 `note_verify`, and the entry stores the command the note carries. Recording one is the grant
 `note_verify`.
+
+**The landing queue** is the `landing` entries of the board (channel `#landing`), one kind with an `ev` field:
+`request` (branch, full 40-character `sha`, `target`, up to 64 `selectors`, `replaces`), `review` (`req`, `sha`,
+`verdict`), `cancel`, `pause`, `resume`, `state` (`req`, `status`, `detail`, a few short `evidence` facts) and
+`beat` (`what`). `land_queue` folds them: a new request for a branch supersedes an open older one, a review
+by the same session replaces its earlier one, a request is `queued` while an accept stands and no reject does,
+a terminal request moves only to `landed` from `landed-unpushed`. A request is named `land-N` (N the
+sequence number of its entry on this device, the full entry id from another). The node checks what only it can:
+the sender is the token's session and live on this board; a branch or target is never `main` or `master`; a
+reviewer is not the requester or an ancestor or descendant of it and names the exact SHA; `land_state` and
+`land_beat` need the holder of the `branch` claim of the request's target (the runner); pause, resume and a
+cancel of another's request need that holder or a session with no parent that holds the grant `land_control`.
+A model's tier is not the node's to judge, so `landing.eligible` in Python bars the lowest tier and an
+unlisted model from requesting or reviewing, and the runner re-derives standing before it lands.
+
+**Stubs.** Two checks wait for the trust ledger and are stubs that allow: the grants (`Grants::allows`, used by
+`note_verify`, the pool actions and `land_control`) and model verification (no session is ever `verified`,
+so `landing.eligible` reads a listed model id as claimed).
 
 The Rust client (`client::Client`, `client::ensure_running`) finds a dead socket, takes
 `start.lock` (single-flight, so callers queue and the second finds the first's node), spawns
@@ -456,7 +474,7 @@ Tests that need a socket path short enough for macOS use `kit::short_dir()`; `ki
 - Python lease clients (the serve broker, `gate.py` tickets, `testslots` permits, fleet `JobRunner` slots,
   `lock.only_one` and `claims.py` calling the lease methods, and their own admission code deleted), a local
   holder yielding when the board shows a peer's earlier acquire of a pool-wide claim, leases on a remote
-  device, the rest of the entry kinds (`task`, `landing_request`,
+  device, the rest of the entry kinds (`task`,
   `reputation_event`), content screening and quarantine of foreign text (still in Python), owner-only
   grants (the `Grants` stub allows every registered session; links and project sources have the same
   gap), rebuilding the graph index from entries.

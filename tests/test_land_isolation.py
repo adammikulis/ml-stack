@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from land_support import DEV, Project, git
-from test_land_board import World, mod
+from land_world import World, mod
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -24,25 +24,17 @@ import land_git as lg
 import land_recover as recover
 import land_run
 
-from poolhouse.workspace import landing
+pytest_plugins = ["node_kit"]
 
 
 @pytest.fixture
-def world(monkeypatch, tmp_path):
-    return World(monkeypatch, tmp_path)
+def world(monkeypatch, tmp_path, workspace_node):
+    return World(monkeypatch, tmp_path, workspace_node)
 
 
 def plus(n: int, **extra: str) -> dict[str, str]:
     """A mapped module and its test, plus extra files."""
     return {**mod(n), **extra}
-
-
-def texts(world: World, who: str) -> list[str]:
-    return [m["text"] for m in world.ws.inbox(world.tokens[who])]
-
-
-def detail(world: World, rid: str) -> str:
-    return landing.fold(world.ws).requests[rid]["detail"]
 
 
 def on_origin(world: World, path: str) -> bool:
@@ -56,10 +48,10 @@ def test_moved_tip_and_wrong_sha_are_refused_alone(world):
     Project.write(world.proj.base / "stale", "src/poolhouse/extra.py", "X = 1\n")
     Project.commit(world.proj.base / "stale", "feat: moved")
     world.runner.once()
-    assert world.status(stale) == "refused" and "request it again" in detail(world, stale)
+    assert world.status(stale) == "refused" and "request it again" in world.detail(stale)
     assert world.status(good) == "landed" and on_origin(world, "src/poolhouse/m22.py")
     assert world.status(wrong) == "needs-review"
-    assert not any("refused" in t for t in texts(world, "bob"))
+    assert not any("refused" in t for t in world.texts("bob"))
 
 
 def test_conflict_ejects_only_the_conflicting_request_and_names_the_requester(world):
@@ -71,7 +63,7 @@ def test_conflict_ejects_only_the_conflicting_request_and_names_the_requester(wo
     assert states == {"landed", "needs-human"} and world.status(other) == "landed"
     loser = first if world.status(first) == "needs-human" else second
     who = "alice" if loser == first else "bob"
-    assert any("needs-human" in t and "merge conflict" in t for t in texts(world, who))
+    assert any("needs-human" in t and "merge conflict" in t for t in world.texts(who))
 
 
 def test_red_test_ejects_the_culprit_with_its_test_name_and_the_rest_lands(world):
@@ -80,11 +72,11 @@ def test_red_test_ejects_the_culprit_with_its_test_name_and_the_rest_lands(world
     two, _ = world.ready("g2", plus(26))
     result = world.runner.once()
     assert result["status"] == "landed", result
-    assert world.status(bad) == "failed" and "tests/test_m25.py" in detail(world, bad)
+    assert world.status(bad) == "failed" and "tests/test_m25.py" in world.detail(bad)
     assert world.status(one) == world.status(two) == "landed"
     assert on_origin(world, "src/poolhouse/m24.py") and not on_origin(world, "src/poolhouse/m25.py")
-    assert any("failed" in t and "tests/test_m25.py" in t for t in texts(world, "bob"))
-    assert not any("failed" in t for t in texts(world, "alice"))
+    assert any("failed" in t and "tests/test_m25.py" in t for t in world.texts("bob"))
+    assert not any("failed" in t for t in world.texts("alice"))
 
 
 def test_red_gate_on_the_combined_tree_is_bisected_to_each_culprit(world):
@@ -95,7 +87,7 @@ def test_red_gate_on_the_combined_tree_is_bisected_to_each_culprit(world):
     assert result["status"] == "landed", result
     assert world.status(ok) == "landed"
     assert world.status(bad1) == world.status(bad2) == "failed"
-    assert "gate" in detail(world, bad1) and not on_origin(world, "BAD_GATE_1")
+    assert "gate" in world.detail(bad1) and not on_origin(world, "BAD_GATE_1")
 
 
 def test_a_failure_only_the_pair_causes_blames_the_later_merge(world):
@@ -114,7 +106,7 @@ def test_a_hanging_request_is_stopped_alone_and_the_rest_lands(world):
     result = world.make_runner(stall_s=4.0).once()
     assert result["status"] == "split", result
     assert world.status(one) == world.status(two) == "landed"
-    assert world.status(hang) == "needs-human" and "no progress" in detail(world, hang)
+    assert world.status(hang) == "needs-human" and "no progress" in world.detail(hang)
     assert on_origin(world, "src/poolhouse/m33.py") and not on_origin(world, "HANG_GATE")
     assert not list(world.proj.base.glob("*-land-*"))
 
@@ -123,6 +115,7 @@ def test_a_gate_past_its_limit_is_timed_out_and_a_request_has_a_shorter_limit(wo
     runner = world.make_runner(stall_s=99.0, request_s=1.0, batch_s=3.0)
     sleeper = [sys.executable, "-c", "import time; time.sleep(30)"]
     one, two = {"id": "a"}, {"id": "b"}
+    world.lead.claim("branch", DEV)
     assert runner.stream(sleeper, [one])[2] == "timeout"
     assert runner.stream(sleeper, [one, two])[2] == "timeout"
     assert runner.limit([one]) < runner.limit([one, two])
@@ -169,9 +162,9 @@ def test_an_exception_for_one_request_settles_that_request_and_the_loop_continue
     monkeypatch.setattr(land_entries, "check", check)
     result = world.runner.once()
     assert result["status"] == "landed", result
-    assert world.status(kaboom) == "needs-human" and "disk on fire" in detail(world, kaboom)
+    assert world.status(kaboom) == "needs-human" and "disk on fire" in world.detail(kaboom)
     assert world.status(fine) == "landed"
-    assert any("disk on fire" in t for t in texts(world, "alice"))
+    assert any("disk on fire" in t for t in world.texts("alice"))
 
 
 class Crash(BaseException):
@@ -237,13 +230,17 @@ def test_a_crash_before_the_fast_forward_cleans_up_and_lands_once(world, monkeyp
 
 
 def test_a_dead_runners_claim_is_taken_over_and_a_live_one_is_not(world):
-    rival = world.kit.agent("rival-lander", "lead")
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    rival = world.runner_session("rival-lander")
+    dead = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    rival.claim("branch", DEV, pid=dead.pid)
+    probe = world.make_runner()
+    assert probe.once()["status"] == "runner-held", "a live holder is not displaced"
+    probe.lock.release()
+    dead.kill()
     dead.wait()
-    world.ws.claim(rival, "branch", DEV, pid=dead.pid)
     assert world.runner.once()["status"] == "idle"
     world.runner.close()
-    world.ws.claim(rival, "branch", DEV, pid=os.getpid())
+    rival.claim("branch", DEV, pid=os.getpid())
     assert world.make_runner().once()["status"] == "runner-held"
 
 
@@ -262,7 +259,7 @@ def test_a_request_already_on_the_development_branch_is_not_landed_again(world):
     git(world.proj.root, "push", "-q", "origin", DEV)
     head = world.local_head()
     world.runner.once()
-    assert world.status(rid) == "landed" and "already holds" in detail(world, rid)
+    assert world.status(rid) == "landed" and "already holds" in world.detail(rid)
     assert world.local_head() == head and not [c for c in world.proj.calls() if c.startswith("gate")]
 
 
@@ -314,10 +311,10 @@ def test_a_rejected_push_that_conflicts_is_reported_not_dropped_and_not_repeated
     assert world.status(rid) == "landed-unpushed"
     batch_head = world.local_head()
     assert world.origin_head() != batch_head and not lg.dirty(world.proj.root)
-    sent = len(texts(world, "alice"))
-    assert any("push failed" in t for t in texts(world, "alice"))
+    sent = len(world.texts("alice"))
+    assert any("push failed" in t for t in world.texts("alice"))
     assert runner.once()["status"] == "idle"
-    assert len(texts(world, "alice")) == sent and world.local_head() == batch_head
+    assert len(world.texts("alice")) == sent and world.local_head() == batch_head
 
 
 def test_a_rejected_push_whose_merged_tree_is_red_goes_back_to_the_batch_head(world):

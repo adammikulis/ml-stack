@@ -44,7 +44,7 @@ def git(cwd: Path, *args: str) -> str:
 class Project:
     """A repository with a target branch, sibling worktrees for branches and a land runner."""
 
-    def __init__(self, base: Path) -> None:
+    def __init__(self, base: Path, home: Path | None = None) -> None:
         self.base = base
         self.root = base / "proj"
         self.root.mkdir()
@@ -59,7 +59,7 @@ class Project:
         self.write(self.root, "docs/a.md", "a\n")
         self.commit(self.root, "chore: seed")
         self.log = base / "calls.log"
-        self.env = {**os.environ, "POOLHOUSE_HOME": str(base / "home"), "DEV_TEST_SLOTS_DIR": str(base / "slots"),
+        self.env = {**os.environ, "POOLHOUSE_HOME": str(home or base / "home"), "DEV_TEST_SLOTS_DIR": str(base / "slots"),
                     "LAND_FAKE_LOG": str(self.log), "POOLHOUSE_DEV_BRANCH": DEV, "POOLHOUSE_NO_REAL_KEYSTORE": "1",
                     "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
                     "POOLHOUSE_TEST_KEYRING": str(base / "keyring.json"),

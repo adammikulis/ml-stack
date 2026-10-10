@@ -1,80 +1,29 @@
-"""The board-fed landing runner over real git repositories, a bare origin and the real board."""
+"""The board-fed landing runner over real git repositories, a bare origin and a real node."""
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
 from land_support import DEV, Project, git
-from workspace_kit import Kit, clean_env, cli
+from land_world import SLOW_TEST, World, mod
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import land_board
 
-from poolhouse.workspace import landing
-from poolhouse.workspace.identity import Denied
+from poolhouse.board import session
+from poolhouse.board.client import Denied, Invalid
+from poolhouse.workspace import landing, limits
 
-PERSON = {"terminal": (True, True), "env": {}}
-SLOW_TEST = "import time\ntime.sleep(60)\n"
-
-
-class World:
-    """A board with a lead runner, a requester, a reviewer and a repository with a bare origin."""
-
-    def __init__(self, monkeypatch, tmp_path: Path) -> None:
-        monkeypatch.setenv("POOLHOUSE_DEV_BRANCH", DEV)
-        self.kit = Kit(clean_env(monkeypatch, tmp_path))
-        self.ws = self.kit.ws
-        (tmp_path / "git").mkdir()
-        self.proj = Project(tmp_path / "git")
-        self.origin = tmp_path / "origin.git"
-        git(tmp_path, "init", "-q", "--bare", str(self.origin))
-        git(self.proj.root, "remote", "add", "origin", str(self.origin))
-        git(self.proj.root, "push", "-q", "origin", DEV)
-        self.tokens = {name: self.kit.agent(name) for name in ("alice", "bob", "carol", "haiku")}
-        for name, model in (("alice", "claude-sonnet-5-5"), ("bob", "claude-sonnet-5-5"),
-                            ("carol", "claude-opus-5-5"), ("haiku", "claude-haiku-5-5")):
-            self.ws.set_model(name, model, **PERSON)
-        self.lead = self.kit.agent("lander", "lead")
-        self.runner = self.make_runner()
-
-    def make_runner(self, **options) -> land_board.Runner:
-        return land_board.Runner(self.ws, self.lead, self.proj.root, env=self.proj.env, poll_s=0.1, **options)
-
-    def branch(self, name: str, files: dict[str, str]) -> str:
-        self.proj.branch(name, files)
-        return git(self.proj.root, "rev-parse", name)
-
-    def ask(self, who: str, name: str, sha: str) -> str:
-        return landing.request(self.ws, self.tokens[who], {"branch": name, "sha": sha,
-                                                           "selectors": ["tests/test_mod.py"]})["id"]
-
-    def ready(self, name: str, files: dict[str, str], who: str = "alice") -> tuple[str, str]:
-        """A branch requested by ``who`` and accepted by carol; its request id and sha."""
-        sha = self.branch(name, files)
-        rid = self.ask(who, name, sha)
-        landing.review(self.ws, self.tokens["carol"], rid, sha, "accept")
-        return rid, sha
-
-    def status(self, rid: str) -> str:
-        return landing.fold(self.ws).requests[rid]["status"]
-
-    def origin_head(self) -> str:
-        return git(self.origin, "rev-parse", DEV)
-
-    def local_head(self) -> str:
-        return git(self.proj.root, "rev-parse", DEV)
+pytest_plugins = ["node_kit"]
 
 
 @pytest.fixture
-def world(monkeypatch, tmp_path):
-    return World(monkeypatch, tmp_path)
-
-
-def mod(n: int, extra: str = "") -> dict[str, str]:
-    return {f"src/poolhouse/m{n}.py": f"VALUE = {n}\n", f"tests/test_m{n}.py": f"import poolhouse.m{n}\n{extra}"}
+def world(monkeypatch, tmp_path, workspace_node):
+    return World(monkeypatch, tmp_path, workspace_node)
 
 
 def test_two_requests_land_in_queue_order_as_one_batch_and_push_only_origin_development(world):
@@ -88,21 +37,19 @@ def test_two_requests_land_in_queue_order_as_one_batch_and_push_only_origin_deve
     assert git(world.origin, "branch", "--list").split() == [DEV]
     assert [c for c in world.proj.calls() if c.startswith("gate")] == ["gate"]
     assert not (world.proj.base / "a").exists() and not (world.proj.base / "b").exists()
-    inbox = world.ws.inbox(world.tokens["alice"])
-    assert any("landed" in m["text"] for m in inbox)
+    assert any("landed" in t for t in world.texts("alice"))
 
 
 def test_conflicting_pair_reports_needs_human_and_lands_the_other(world):
     one, _ = world.ready("x", {"src/poolhouse/mod.py": "VALUE = 2\n"})
     two, _ = world.ready("y", {"src/poolhouse/mod.py": "VALUE = 3\n"}, who="bob")
     result = world.runner.once()
-    states = {world.status(one), world.status(two)}
-    assert states == {"landed", "needs-human"}, result
-    stuck = next(r for r in landing.fold(world.ws).requests.values() if r["status"] == "needs-human")
+    assert {world.status(one), world.status(two)} == {"landed", "needs-human"}, result
+    stuck = next(r for r in world.requests().values() if r["status"] == "needs-human")
     assert "merge conflict" in stuck["detail"]
     assert world.origin_head() == world.local_head()
-    mine = world.ws.inbox(world.tokens[stuck["by"]])
-    assert any("needs-human" in m["text"] for m in mine)
+    who = "alice" if stuck["id"] == one else "bob"
+    assert any("needs-human" in t for t in world.texts(who))
 
 
 def test_red_gate_does_not_push_and_names_the_failing_test(world):
@@ -111,8 +58,7 @@ def test_red_gate_does_not_push_and_names_the_failing_test(world):
     result = world.runner.once()
     assert result["status"] != "landed"
     assert world.status(rid) == "failed"
-    detail = landing.fold(world.ws).requests[rid]["detail"]
-    assert "tests/test_m3.py" in detail and f"clean {DEV}" in detail
+    assert "tests/test_m3.py" in world.detail(rid) and f"clean {DEV}" in world.detail(rid)
     assert world.origin_head() == before_origin and world.local_head() == before_local
 
 
@@ -123,7 +69,7 @@ def test_moved_branch_tip_is_refused_not_landed(world):
     before = world.origin_head()
     world.runner.once()
     assert world.status(rid) == "refused"
-    assert "request it again" in landing.fold(world.ws).requests[rid]["detail"]
+    assert "request it again" in world.detail(rid)
     assert world.origin_head() == before and world.local_head() == before
 
 
@@ -132,11 +78,10 @@ def test_unreviewed_request_is_marked_needs_review_and_never_lands(world):
     rid = world.ask("alice", "raw", sha)
     before = world.origin_head()
     assert world.runner.once()["status"] == "idle"
-    req = landing.fold(world.ws).requests[rid]
-    assert req["status"] == "needs-review" and "review" in req["detail"]
+    assert world.status(rid) == "needs-review" and "review" in world.detail(rid)
     assert world.origin_head() == before
     with pytest.raises(Denied):
-        landing.review(world.ws, world.tokens["alice"], rid, sha, "accept")
+        landing.review(world.who["alice"], rid, sha, "accept")
     assert world.runner.once()["status"] == "idle"
     assert world.status(rid) == "needs-review"
 
@@ -144,49 +89,63 @@ def test_unreviewed_request_is_marked_needs_review_and_never_lands(world):
 def test_review_must_name_the_exact_sha_and_a_rejection_blocks(world):
     sha = world.branch("rev", mod(6))
     rid = world.ask("alice", "rev", sha)
-    with pytest.raises(ValueError, match="exact commit"):
-        landing.review(world.ws, world.tokens["carol"], rid, "0" * 40, "accept")
-    landing.review(world.ws, world.tokens["carol"], rid, sha, "accept")
-    landing.review(world.ws, world.tokens["bob"], rid, sha, "reject")
+    with pytest.raises(Invalid, match="exact commit"):
+        landing.review(world.who["carol"], rid, "0" * 40, "accept")
+    landing.review(world.who["carol"], rid, sha, "accept")
+    landing.review(world.who["bob"], rid, sha, "reject")
     world.runner.once()
     assert world.status(rid) == "needs-review"
 
 
-def test_only_landing_level_identities_may_request(world):
+def test_only_landing_level_models_may_request_or_review_and_main_is_never_named(world):
     sha = world.branch("low", mod(7))
-    with pytest.raises(Denied):
+    with pytest.raises(Denied, match="lowest model tier"):
         world.ask("haiku", "low", sha)
-    child = world.ws.delegate(world.tokens["alice"], "helper")
-    with pytest.raises(Denied):
-        landing.request(world.ws, child, {"branch": "low", "sha": sha, "selectors": ["t"]})
+    rid = world.ask("alice", "low", sha)
+    with pytest.raises(Denied, match="lowest model tier"):
+        landing.review(world.who["haiku"], rid, sha, "accept")
     for bad in ("main", "master"):
-        with pytest.raises(ValueError):
-            landing.request(world.ws, world.tokens["alice"], {"branch": bad, "sha": sha, "selectors": ["t"]})
-    with pytest.raises(ValueError):
-        landing.request(world.ws, world.tokens["alice"], {"branch": "low", "sha": sha, "selectors": ["t"],
-                                                          "target": "main"})
-    with pytest.raises(ValueError):
-        landing.request(world.ws, world.tokens["alice"], {"branch": "low", "sha": "abc", "selectors": ["t"]})
+        with pytest.raises(Invalid):
+            landing.request(world.who["alice"], {"branch": bad, "sha": sha, "selectors": ["t"]})
+    with pytest.raises(Invalid):
+        landing.request(world.who["alice"], {"branch": "low", "sha": sha, "selectors": ["t"], "target": "main"})
+    with pytest.raises(Invalid):
+        landing.request(world.who["alice"], {"branch": "low", "sha": "abc", "selectors": ["t"]})
 
 
-def test_pause_and_resume_gate_the_runner_and_only_controllers_may(world):
+def test_a_reviewer_who_is_gone_before_landing_leaves_the_request_waiting(world):
+    kid = world.node.member("kid", model="claude-opus-5-5", parent=world.members["bob"])
+    sha = world.branch("gone", mod(8))
+    rid = world.ask("alice", "gone", sha)
+    landing.review(world.node.session(kid), rid, sha, "accept")
+    assert world.status(rid) == "queued"
+    world.who["bob"].retire(kid.name)
+    before = world.origin_head()
+    assert world.runner.once()["status"] == "idle"
+    assert world.status(rid) == "needs-review" and "no live independent accept" in world.detail(rid)
+    assert world.origin_head() == before
+
+
+def test_pause_and_resume_gate_the_runner_and_a_helper_may_not(world):
     rid, _ = world.ready("p", mod(8))
+    helper = world.node.session(world.node.member("helper", parent=world.members["bob"]))
     with pytest.raises(Denied):
-        landing.brake(world.ws, world.tokens["bob"], True)
-    landing.brake(world.ws, world.lead, True, "checking something")
+        landing.brake(helper, True)
+    landing.brake(world.who["carol"], True, "checking something")
     assert world.runner.once()["status"] == "paused"
     assert world.status(rid) == "queued"
-    assert "PAUSED" in "\n".join(landing.status_lines(world.ws))
-    landing.brake(world.ws, world.kit.owner, False)
+    assert "PAUSED by" in "\n".join(landing.status_lines(world.who["bob"], limits.root()))
+    landing.brake(world.who["bob"], False)
     assert world.runner.once()["status"] == "landed"
     assert world.status(rid) == "landed"
 
 
-def test_cancel_by_requester_or_controller_only(world):
+def test_cancel_by_the_requester_or_a_session_that_steers_but_not_by_a_helper_of_another(world):
     rid, _ = world.ready("c", mod(9))
+    helper = world.node.session(world.node.member("helper", parent=world.members["bob"]))
     with pytest.raises(Denied):
-        landing.cancel(world.ws, world.tokens["bob"], rid)
-    landing.cancel(world.ws, world.tokens["alice"], rid)
+        landing.cancel(helper, rid)
+    landing.cancel(world.who["alice"], rid)
     before = world.origin_head()
     assert world.runner.once()["status"] == "idle"
     assert world.status(rid) == "cancelled" and world.origin_head() == before
@@ -201,6 +160,14 @@ def test_new_request_for_a_branch_supersedes_the_old_one(world):
     assert world.status(new) == "needs-review"
 
 
+def test_a_request_for_another_target_is_left_to_the_runner_of_that_target(world):
+    sha = world.branch("elsewhere", mod(14))
+    rid = landing.request(world.who["alice"], {"branch": "elsewhere", "sha": sha, "selectors": ["t"], "target": "other"})["id"]
+    landing.review(world.who["carol"], rid, sha, "accept")
+    assert world.runner.once()["status"] == "idle"
+    assert world.status(rid) == "queued"
+
+
 def test_runner_never_pushes_main_or_a_missing_remote(world):
     with pytest.raises(ValueError, match="never touches main"):
         world.make_runner(target="main").push()
@@ -213,9 +180,11 @@ def test_runner_never_pushes_main_or_a_missing_remote(world):
 
 def test_second_runner_is_refused_while_the_claim_is_held(world):
     world.runner.once()
-    other = world.kit.agent("other-lander", "lead")
-    rival = land_board.Runner(world.ws, other, world.proj.root, env=world.proj.env)
-    assert rival.once()["status"] == "runner-held"
+    rival = land_board.Runner(world.runner_session("other-lander"), world.proj.root, env=world.proj.env)
+    assert rival.once()["status"] == "runner-held", "the process lock is held"
+    world.runner.lock.release()
+    held = rival.once()
+    assert held["status"] == "runner-held" and held["owner"] == world.lead.name, "then the branch claim is"
 
 
 def test_stuck_gate_is_aborted_reported_and_not_pushed(world):
@@ -224,35 +193,46 @@ def test_stuck_gate_is_aborted_reported_and_not_pushed(world):
     git(world.proj.root, "push", "-q", "origin", DEV)
     rid, _ = world.ready("slow", mod(11))
     before = world.origin_head()
-    runner = world.make_runner(stall_s=1.0)
-    result = runner.once()
+    result = world.make_runner(stall_s=1.0).once()
     assert result["status"] == "stuck"
-    req = landing.fold(world.ws).requests[rid]
-    assert req["status"] == "needs-human" and "no progress" in req["detail"]
+    assert world.status(rid) == "needs-human" and "no progress" in world.detail(rid)
     assert world.origin_head() == before
-    announced = [r for r in world.ws.bus.log.rows() if r.get("to") == "#announcements" and r.get("type") == "blocked"]
-    assert any("stuck" in r["body"] for r in announced)
+    assert any("stuck" in t for t in world.announced("blocked"))
 
 
 def test_cli_request_and_queue(world):
     sha = world.branch("cli", mod(12))
-    token = world.tokens["alice"]
-    done = cli(world.kit.base, token, "land-request", "cli", sha, "--test", "tests/test_m12.py",
-               "--replaces", "nothing", "--json")
+    env = {"POOLHOUSE_DEV_BRANCH": DEV}
+    done = world.node.cli("land-request", "cli", sha, "--test", "tests/test_m12.py", "--replaces", "nothing", "--json",
+                          who=world.members["alice"], env=env, cwd=world.proj.root)
     assert done.returncode == 0, done.stderr
-    shown = cli(world.kit.base, token, "land-queue", "--json")
+    shown = world.node.cli("land-queue", "--json", who=world.members["bob"], env=env, cwd=world.proj.root)
     assert "cli@" in shown.stdout and "needs-review" in shown.stdout
-    refused = cli(world.kit.base, world.tokens["haiku"], "land-request", "cli", sha, "--test", "t")
-    assert refused.returncode != 0
+    refused = world.node.cli("land-request", "cli", sha, "--test", "t", "--json", who=world.members["haiku"], env=env,
+                             cwd=world.proj.root)
+    assert refused.returncode == 3 and "lowest model tier" in json.loads(refused.stdout)["error"]
+    other = world.node.cli("land-review", json.loads(done.stdout)["id"], sha, "--json", who=world.members["carol"], env=env,
+                           cwd=world.proj.root)
+    assert other.returncode == 0, other.stderr
+    assert world.status(json.loads(done.stdout)["id"]) == "queued"
 
 
 def test_unset_development_branch_is_the_branch_the_primary_checkout_is_on(world, monkeypatch):
     monkeypatch.delenv("POOLHOUSE_DEV_BRANCH")
     git(world.proj.root, "checkout", "-q", "-b", "9.9dev")
-    runner = land_board.Runner(world.ws, world.lead, world.proj.root, env=world.proj.env)
+    runner = land_board.Runner(world.lead, world.proj.root, env=world.proj.env)
     assert runner.target == "9.9dev"
-    assert landing.runner_claim(world.ws, runner.target) == ("branch", "9.9dev")
+    assert landing.runner_claim(runner.target) == ("branch", "9.9dev")
     sha = world.branch("onnine", mod(40))
     monkeypatch.chdir(world.proj.root)
-    rid = landing.request(world.ws, world.tokens["alice"], {"branch": "onnine", "sha": sha, "selectors": ["t"]})["id"]
-    assert landing.fold(world.ws).requests[rid]["target"] == "9.9dev"
+    rid = landing.request(world.who["alice"], {"branch": "onnine", "sha": sha, "selectors": ["t"]})["id"]
+    assert world.requests()[rid]["target"] == "9.9dev"
+
+
+def test_the_runner_registers_itself_and_keeps_its_token_in_the_client_credentials(world):
+    made = land_board.runner_session(world.proj.root, DEV)
+    again = land_board.runner_session(world.proj.root, DEV)
+    assert made.name == again.name and made.name not in {m.name for m in world.members.values()}
+    assert (world.node.state / "client" / world.node.board / f"{made.name}.token").exists()
+    assert session.find("land-runner", f"{world.proj.root}:{DEV}", client=world.node.client) == made.name
+    assert made.whoami().harness == "land-runner"

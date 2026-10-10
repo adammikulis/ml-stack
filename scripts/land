@@ -62,9 +62,9 @@ def show_plan(plan: land_plan.Plan) -> dict:
 
 def supervise_command(args: argparse.Namespace, root: Path) -> int:
     """The supervisor commands; they act on this workspace's runner, not on a branch."""
-    from poolhouse.workspace import Workspace
+    from poolhouse.workspace import limits
 
-    base = Workspace().base
+    base = limits.root()
     flags = {"interval": args.interval, "stall_minutes": args.stall_minutes, "remote": args.remote,
              "target": args.target, "request_minutes": args.request_minutes, "batch_minutes": args.batch_minutes}
     if args.command == "supervise":

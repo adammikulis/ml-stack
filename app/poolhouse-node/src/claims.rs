@@ -88,7 +88,7 @@ fn claim(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> R
     }
     let got = rpc::call(node, "lease_acquire", board, token, &ask)?;
     if got["state"] == "busy" {
-        let who = got["blockers"].as_array().and_then(|b| b.first()).and_then(|b| b["holder"].as_str()).unwrap_or("another session of yours");
+        let who = got["blockers"].as_array().and_then(|b| b.first()).and_then(|b| b["holder"].as_str()).map_or("another session of yours", |h| h.rsplit('/').next().unwrap_or(h));
         return Err(Error::Denied(format!("{kind} {key} is held by {who}")));
     }
     let l = node.leases.table.find(got["id"].as_str().unwrap_or("")).cloned().ok_or_else(|| Error::Invalid("the claim ended at once".into()))?;
@@ -137,6 +137,28 @@ fn claims(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> 
         }
     }
     Ok(json!({"claims": out}))
+}
+
+/// The session of ``board`` holding the claim ``kind`` ``key``, if any does.
+pub fn owner(node: &mut Node, board: &str, kind: &str, key: &str) -> Result<Option<String>> {
+    let name = held_as(kind, board, key);
+    rpc::tick(node, &[board])?;
+    Ok(node.leases.table.leases.iter().find(|l| l.state == State::Held && l.board == board && mine(l, kind, &name)).map(|l| l.name.clone()))
+}
+
+/// The key of a branch claim ``actor`` holds on ``board``, if it holds one.
+pub fn owned_branch(node: &mut Node, board: &str, actor: &str) -> Result<Option<String>> {
+    rpc::tick(node, &[board])?;
+    for l in node.leases.table.leases.iter().filter(|l| l.state == State::Held && l.board == board && l.name == actor) {
+        for r in &l.resources {
+            if let Resource::Claim { kind, name } = r {
+                if kind == "branch" {
+                    return Ok(Some(shown_as(kind, board, name).to_string()));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 pub fn call(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<String, Value>) -> Result<Value> {

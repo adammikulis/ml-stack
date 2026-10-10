@@ -60,17 +60,19 @@ and the next heartbeat starts it.
 The queue lives on the board and a runner lands from it. Phase 1 (`scripts/land plan|run|finish`)
 still knows nothing of the board; `scripts/land_board.py` is the only bridge.
 
-- `src/poolhouse/workspace/landing.py`: one hash-chained log, `landing.jsonl`, in the workspace.
-  Rows are stamped with the authenticated identity; the queue is a fold of the log. Requests,
-  independent reviews, cancels, pause and resume, runner states and progress beats are all rows,
-  and each also writes an audit row.
+- The queue is the board's `landing` entries (docs/node.md, "The landing queue"), written by the node, which
+  stamps each with the session behind the token and checks independence and the runner's claim.
+  `src/poolhouse/workspace/landing.py` is the client side: the folded `Queue`, the model-tier bar and the
+  runner's standing check. Requests, independent reviews, cancels, pause and resume, runner states and
+  progress beats are all entries, and each but a beat also writes an audit entry.
 - Commands (`src/poolhouse/workspace/landing_cli.py`): `land-request BRANCH SHA --test SELECTOR ...
   --replaces TEXT`, `land-review REQUEST SHA --verdict accept|reject`, `land-cancel`, `land-pause`,
   `land-resume`, `land-queue`. `digest --status` also prints the queue, the runner holder and the
   age and text of the last gate step.
 - Runner: `scripts/land serve [--once] [--interval S] [--stall-minutes 20] [--remote origin]`, run by
   the coordinator (or any lead) on any device that has the checkout. It is a process, not a unit:
-  the runner takes the `branch <dev>` claim (the claim task integration also takes, so the two
+  it registers on the checkout's board as a session of its own (harness `land-runner`, its token kept in
+  the client's private credentials), takes the `branch <dev>` claim (the claim task integration also takes, so the two
   never land at once), and a second runner is told who holds it. An always-on form may use the
   autostart prepare flow later; none is installed.
 - `scripts/land run --entries FILE` (JSON list of `{branch, tip}`, `scripts/land_entries.py`) refuses
@@ -102,15 +104,15 @@ still knows nothing of the board; `scripts/land_board.py` is the only bridge.
 
 ### Eligibility, review and brakes
 
-- Only a landing-level identity may request: a person, a lead, or a top-level (not delegated) agent
-  with a live token, the right to send and a verified model above the lowest tier (the coordinator
-  bar). A delegated helper, a lowest-tier model and an unverified model are refused. `main` and
-  `master` are never a branch or target.
+- Only a landing-level session may request or review: a live session of the board whose model is listed and
+  above the lowest tier (a listed id counts as claimed until the node can verify models). A lowest-tier or
+  unlisted model is refused. `main` and `master` are never a branch or target. A subagent may request
+  its own work; it is not independent of its parent.
 - A request needs an independent accept recorded at its exact SHA by another landing-level identity
   that is neither the requester nor a delegate or parent of it. Without it the request is
   `needs-review` and the runner will not land it. The runner re-derives requester and reviewer
   standing at landing time (a revoked reviewer no longer counts; any standing reject blocks).
-- Pause and resume: a person, a lead or the runner. Cancel: the requester or those. A cancel of a
+- Pause and resume: the runner or a session with no parent (a subagent may not). Cancel: the requester or those. A cancel of a
   running request stops the gate and queues the others again. A new request for the same branch
   supersedes the older one (a new SHA means a new review).
 - Stuck gate: no output from `scripts/land run` for `--stall-minutes` (default 20) announces

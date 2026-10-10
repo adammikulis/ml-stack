@@ -14,7 +14,7 @@ pub const GENESIS: &str = "00000000000000000000000000000000000000000000000000000
 pub const MAX_ROW_BYTES: usize = 128 * 1024;
 const MAX_DEPTH: usize = 16;
 
-/// What an entry is. Only message, note, verify, identity, lease and audit are folded so far; the others
+/// What an entry is. Only message, note, verify, identity, lease, audit and landing are folded so far; the others
 /// are part of the schema so a log written later still parses.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -24,7 +24,8 @@ pub enum Kind {
     /// The result of running a note's command: its exit code and the hash of its output.
     Verify,
     Task,
-    LandingRequest,
+    /// A step of the landing queue: a request, a review, a cancel, a brake, a runner state or beat.
+    Landing,
     Identity,
     Audit,
     ReputationEvent,

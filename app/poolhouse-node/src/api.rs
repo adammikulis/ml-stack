@@ -29,7 +29,7 @@ fn params_for(method: &str) -> Option<&'static [&'static str]> {
         "project_list" => &[],
         "project_resolve" => &["path"],
         m => return crate::poolapi::params(m).or_else(|| crate::lease::rpc::params_for(m)).or_else(|| crate::sessions::params_for(m))
-            .or_else(|| crate::claims::params_for(m)).or_else(|| crate::notes::params_for(m)),
+            .or_else(|| crate::claims::params_for(m)).or_else(|| crate::landing::params_for(m)).or_else(|| crate::notes::params_for(m)),
     })
 }
 
@@ -170,6 +170,7 @@ fn dispatch(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<Str
         m if crate::lease::rpc::METHODS.contains(&m) => crate::lease::rpc::call(node, m, board, token, p),
         m if crate::sessions::METHODS.contains(&m) => crate::sessions::call(node, m, board, token, p),
         m if crate::claims::METHODS.contains(&m) => crate::claims::call(node, m, board, token, p),
+        m if crate::landing::METHODS.contains(&m) => crate::landing::call(node, m, board, token, p),
         m if crate::notes::METHODS.contains(&m) => crate::notes::call(node, m, board, token, p),
         "links" => node.access(token, board, false).map(|_| json!(node.links.all().iter().filter(|l| l.from == board || l.to == board).collect::<Vec<_>>())),
         "shutdown" => node.access(token, board, false).map(|_| {

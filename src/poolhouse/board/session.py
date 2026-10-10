@@ -137,29 +137,30 @@ class Session:
     named: str = ""
     clock: Callable[[], float] = time.time
 
-    def _call(self, method: str, **params: Any) -> Any:
+    def call(self, method: str, **params: Any) -> Any:
+        """One node method as this session."""
         return self.client.call(method, self.board, self.token, **params)
 
     @property
     def name(self) -> str:
         """The name the node gives this token."""
         if not self.named:
-            self.named = str(self._call("whoami")["name"])
+            self.named = str(self.call("whoami")["name"])
         return self.named
 
     def whoami(self, model: str = "", harness: str = "") -> Agent:
         """Who the token is; ``model`` and ``harness`` record what the session says it runs on."""
         params = {k: v for k, v in (("model", model), ("harness", harness)) if v}
-        got = self._call("whoami", **params)
+        got = self.call("whoami", **params)
         self.named = got["name"]
         return _agent(got["identity"])
 
     def agents(self, retired: bool = False) -> list[Agent]:
-        return [_agent(a) for a in self._call("agents", retired=retired)["agents"]]
+        return [_agent(a) for a in self.call("agents", retired=retired)["agents"]]
 
     def retire(self, target: str = "") -> dict[str, Any]:
         """End ``target`` (default this session): its tokens, leases and name."""
-        return dict(self._call("retire", target=target))
+        return dict(self.call("retire", target=target))
 
     def register(self, native: Native) -> Registration:
         """Register a native session as a subagent of this token's owner."""
@@ -170,7 +171,7 @@ class Session:
         fields = {"type": kind, "to": to, "body": body, "subject": subject}
         if reply_id:
             fields["reply_id"] = reply_id
-        return dict(self._call("post", kind="message", fields=fields))
+        return dict(self.call("post", kind="message", fields=fields))
 
     def read(self, since: dict[str, int] | None = None, **filters: Any) -> Page:
         """Entries after ``since``; the page's cursor is the ``since`` of the next read of this question.
@@ -180,26 +181,26 @@ class Session:
         params = {("with" if k == "conversation" else k): v for k, v in filters.items() if v}
         if since:
             params["since"] = since
-        got = self._call("read", **params)
+        got = self.call("read", **params)
         return Page([_entry(e) for e in got["entries"]], got["cursor"])
 
     def note_add(self, kind: str, title: str, body: str, **extra: Any) -> dict[str, Any]:
         """Write a note; ``extra`` may hold ``source``, ``tags``, ``supersedes`` (note references),
         ``verify_cmd`` and ``ttl_days``."""
-        return dict(self._call("post", kind="note", fields={"nkind": kind, "title": title, "body": body, **extra}))
+        return dict(self.call("post", kind="note", fields={"nkind": kind, "title": title, "body": body, **extra}))
 
     def notes(self, ref: str = "", query: str = "", kind: str = "", everything: bool = False, limit: int = 10) -> list[Note]:
         params = {k: v for k, v in (("ref", ref), ("query", query), ("kind", kind), ("all", everything)) if v}
-        return [_note(n) for n in self._call("notes", limit=limit, **params)["notes"]]
+        return [_note(n) for n in self.call("notes", limit=limit, **params)["notes"]]
 
     def note_verify(self, ref: str, exit_code: int, out_sha: str) -> Note:
-        return _note(self._call("note_verify", note=ref, exit=exit_code, out_sha=out_sha)["notes"][0])
+        return _note(self.call("note_verify", note=ref, exit=exit_code, out_sha=out_sha)["notes"][0])
 
     def claim(self, kind: str, key: str, ttl_s: int = 0, pid: int = 0) -> Claim:
         """Take a claim; `Conflict` when another session holds it."""
         params = {k: v for k, v in (("ttl_s", ttl_s), ("pid", pid)) if v}
         try:
-            got = self._call("claim", kind=kind, key=key, **params)
+            got = self.call("claim", kind=kind, key=key, **params)
         except Denied as err:
             if " is held by " in str(err):
                 raise Conflict(err.code, str(err)) from None
@@ -207,16 +208,16 @@ class Session:
         return _claim(got["claim"], got["changed"])
 
     def release(self, kind: str, key: str) -> bool:
-        return bool(self._call("release", kind=kind, key=key)["released"])
+        return bool(self.call("release", kind=kind, key=key)["released"])
 
     def claims(self, kind: str = "") -> list[Claim]:
-        return [_claim(c) for c in self._call("claims", **({"kind": kind} if kind else {}))["claims"]]
+        return [_claim(c) for c in self.call("claims", **({"kind": kind} if kind else {}))["claims"]]
 
     def renew_claims(self, ttl_s: int) -> list[Claim]:
         """Extend every claim this session holds by ``ttl_s``."""
         mine = [c for c in self.claims() if c.owner == self.name]
         for c in mine:
-            self._call("lease_renew", id=c.lease, ttl_s=ttl_s)
+            self.call("lease_renew", id=c.lease, ttl_s=ttl_s)
         return mine
 
     def cursor(self, question: str) -> dict[str, int]:
