@@ -1,10 +1,10 @@
 """Request-bound person authority for browser workspaces."""
 
-from ml_stack.fleet.session import parse_cookie
-from ml_stack.workspace import boardroute
-from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import HUMAN, Denied, Identity
-from ml_stack.workspace.service import Workspace
+from poolhouse.fleet.session import parse_cookie
+from poolhouse.workspace import boardroute
+from poolhouse.workspace.chain import held
+from poolhouse.workspace.identity import HUMAN, Denied, Identity
+from poolhouse.workspace.service import Workspace
 
 
 class SetupRequired(Denied):
@@ -33,8 +33,8 @@ class SessionWorkspace(Workspace):
             raise Denied('a live local person session is required')
         if not self._session.credentialed:
             ui.record('person.refused', reason='uncredentialed-session', source=request.client_ip)
-            raise Denied('this session was not opened with a credential; open ml-stack from its own '
-                         'window, or run: ml-stack peers open')
+            raise Denied('this session was not opened with a credential; open poolhouse from its own '
+                         'window, or run: poolhouse peers open')
         headers = {key.lower(): value for key, value in request.handler.headers.items()}
         if boardroute._checked(request.method, headers,
                                request.handler.server.server_address[1], writes=True):

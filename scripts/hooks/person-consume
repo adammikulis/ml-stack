@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from ml_stack.workspace import person_release
+from poolhouse.workspace import person_release
 
 
 def main(argv: list[str]) -> int:

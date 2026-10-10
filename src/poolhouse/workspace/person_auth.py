@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from ml_stack.sentinel.events import EventLog
-from ml_stack.workspace import person_ancestry, person_record, person_store
+from poolhouse.sentinel.events import EventLog
+from poolhouse.workspace import person_ancestry, person_record, person_store
 
 __all__ = ["Identity", "NotAuthorized", "consume", "live", "session_of_ancestry"]
 

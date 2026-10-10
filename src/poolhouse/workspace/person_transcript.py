@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from poolhouse import home
 
 __all__ = ["PINNED_VERSIONS", "Turn", "claude_projects", "path_problem", "wait_for_turn"]
 

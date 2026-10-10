@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Refuse an edit under src/ml_stack that writes a routine the tree already has, or
+"""Refuse an edit under src/poolhouse that writes a routine the tree already has, or
 leaves a file over its line limit.
 
 Claude Code runs this before every Write, Edit, MultiEdit and NotebookEdit. A target inside
-the primary checkout is refused first (src/ml_stack/worktreerules.py). An exit code of 2 blocks
+the primary checkout is refused first (src/poolhouse/worktreerules.py). An exit code of 2 blocks
 the edit and hands the message back; a rule that is a suggestion rather than a certainty
-prints on stdout and lets the edit through. MLSTACK_GUARD=off disables it for a session.
+prints on stdout and lets the edit through. POOLHOUSE_GUARD=off disables it for a session.
 
 Wire it in as a PreToolUse hook on Write|Edit|MultiEdit in a project's
 `.claude/settings.json`:
@@ -37,23 +37,23 @@ MAX_PARAMS = 8
 
 # (what it calls, the pattern, the module that owns it, what to use instead)
 OWNED = [
-    ("urllib.request.urlopen", r"urllib\.request\.urlopen", "src/ml_stack/client/http.py",
-     "use `ml_stack.http.request_json` -- it carries the timeout, the JSON decode "
+    ("urllib.request.urlopen", r"urllib\.request\.urlopen", "src/poolhouse/client/http.py",
+     "use `poolhouse.http.request_json` -- it carries the timeout, the JSON decode "
      "and the error type this tree already agrees on."),
-    ("psutil.process_iter", r"psutil\.process_iter", "src/ml_stack/serve/process.py",
-     "use the helpers in `ml_stack.serve.process`; a fresh process scan is the seventh "
+    ("psutil.process_iter", r"psutil\.process_iter", "src/poolhouse/serve/process.py",
+     "use the helpers in `poolhouse.serve.process`; a fresh process scan is the seventh "
      "copy of one loop."),
 ]
 
 
 def cache_path(root: Path) -> Path:
     """Where this tree's function index is kept."""
-    home = Path(os.environ.get("MLSTACK_GUARD_CACHE") or "~/.ml-stack/guard").expanduser()
+    home = Path(os.environ.get("POOLHOUSE_GUARD_CACHE") or "~/.poolhouse/guard").expanduser()
     return home / (hashlib.sha256(str(root).encode()).hexdigest()[:16] + ".json")
 
 
 def tree_key(root: Path, dup) -> str:
-    """A fingerprint of src/ml_stack: the commit it sits on and what has been edited since."""
+    """A fingerprint of src/poolhouse: the commit it sits on and what has been edited since."""
     try:
         head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                               capture_output=True, text=True, timeout=5).stdout.strip()
@@ -161,16 +161,16 @@ def docstring_lines(node) -> int:
 
 def refuse(message: str, hard: bool = False) -> int:
     tail = ("no switch opens this rule" if hard else
-            "If this is genuinely the right code, say so and a person can write it, or set MLSTACK_GUARD=off")
-    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. {tail}.)", file=sys.stderr)
+            "If this is genuinely the right code, say so and a person can write it, or set POOLHOUSE_GUARD=off")
+    print(f"blocked: {message}\n\n(poolhouse scripts/hooks/claude-edit-guard. {tail}.)", file=sys.stderr)
     return BLOCKED
 
 
 def library_root(path: Path) -> Path | None:
-    """The checkout a src/ml_stack file sits in."""
+    """The checkout a src/poolhouse file sits in."""
     parts = path.parts
     for i in range(len(parts) - 1):
-        if parts[i] == "src" and parts[i + 1] == "ml_stack":
+        if parts[i] == "src" and parts[i + 1] == "poolhouse":
             return Path(*parts[:i]) if i else Path("/")
     return None
 
@@ -204,7 +204,7 @@ def too_long(here: str, current: str, proposed: str,
 def load_duplicates():
     """The duplicate detector from scripts/gates, loaded without importing the package."""
     where = Path(__file__).resolve().parent.parent / "gates" / "duplicates.py"
-    spec = importlib.util.spec_from_file_location("_ml_stack_duplicates", where)
+    spec = importlib.util.spec_from_file_location("_poolhouse_duplicates", where)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -241,14 +241,14 @@ def check(tool: str, given: dict) -> int:
             return refuse(f"`{called}` belongs to {owner}: {instead}")
 
     if re.search(r"\bos\.(replace|rename)\s*\(", fresh) and re.search(r"json|\.json", fresh) \
-            and here not in ("src/ml_stack/files.py", "src/ml_stack/jsonl/__init__.py"):
-        return refuse("a JSON file is written through `ml_stack.files.write_json`, which "
+            and here not in ("src/poolhouse/files.py", "src/poolhouse/jsonl/__init__.py"):
+        return refuse("a JSON file is written through `poolhouse.files.write_json`, which "
                       "already does the temp file and the atomic os.replace.")
 
     if re.search(r"(Path\.home\(\)|expanduser\(\))", fresh) \
-            and here != "src/ml_stack/home.py":
-        return refuse("a home directory is resolved in `ml_stack.home`: `state(...)` for "
-                      "`~/.ml-stack`, `cache(...)` for `~/.cache/ml_stack`, `user_home()` "
+            and here != "src/poolhouse/home.py":
+        return refuse("a home directory is resolved in `poolhouse.home`: `state(...)` for "
+                      "`~/.poolhouse`, `cache(...)` for `~/.cache/poolhouse`, `user_home()` "
                       "for the account's own, `expand(...)` for a path somebody named.")
 
     try:
@@ -287,14 +287,14 @@ def check(tool: str, given: dict) -> int:
 
     if "ArgumentParser(" in fresh and "ArgumentParser(" not in current and current:
         advisory.append(f"{here} is gaining an ArgumentParser it did not have. A command "
-                        f"belongs in its package's cli module, reached from ml_stack.cli.")
+                        f"belongs in its package's cli module, reached from poolhouse.cli.")
 
     for note in advisory:
         print(f"note: {note}")
     return ALLOWED
 
 
-PERSON_STORE = re.compile(r"(^|/)\.ml-stack/person(/|$)")
+PERSON_STORE = re.compile(r"(^|/)\.poolhouse/person(/|$)")
 """The person record: statements, authorizations and the key that seals them."""
 
 
@@ -304,12 +304,12 @@ def in_person_store(path: str) -> bool:
     if not path:
         return False
     real = Path(path).resolve()
-    root = (Path(os.environ.get("ML_STACK_HOME") or "~/.ml-stack") / "person").expanduser().resolve()
+    root = (Path(os.environ.get("POOLHOUSE_HOME") or "~/.poolhouse") / "person").expanduser().resolve()
     return real == root or root in real.parents or any(PERSON_STORE.search(p) for p in (path, str(real)))
 
 
 PROTECTED = re.compile(
-    r"(^|/)(src/ml_stack/workspace/person_\w+\.py|scripts/hooks/(claude-user-prompt|person-consume|claude-bash-guard"
+    r"(^|/)(src/poolhouse/workspace/person_\w+\.py|scripts/hooks/(claude-user-prompt|person-consume|claude-bash-guard"
     r"|claude-edit-guard|pre-push|rules_loader\.py)|\.claude/settings(\.local)?\.json)$")
 """The code and settings that make the person record: only a person at a terminal changes them."""
 

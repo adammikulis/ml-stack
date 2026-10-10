@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
-from ml_stack.lock import Busy, only_one
-from ml_stack.sentinel.events import EventLog
+from poolhouse import home
+from poolhouse.lock import Busy, only_one
+from poolhouse.sentinel.events import EventLog
 
 __all__ = ["ATTESTATION", "DEFAULT_MINUTES", "MAX_MINUTES", "VERSION", "Authorization", "Unreadable",
            "authorizations", "bound_sessions", "consume_lock", "directory", "open_log", "records"]

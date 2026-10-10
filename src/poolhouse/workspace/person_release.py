@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from ml_stack.sentinel.events import EventLog
-from ml_stack.workspace import person_ancestry, person_auth, person_store, person_targets
+from poolhouse.sentinel.events import EventLog
+from poolhouse.workspace import person_ancestry, person_auth, person_store, person_targets
 
 __all__ = ["KIND", "Facts", "approved", "check_push", "echo_for", "facts", "options", "question", "run", "target"]
 

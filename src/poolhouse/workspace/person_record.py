@@ -8,10 +8,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ml_stack.sentinel.events import EventLog
-from ml_stack.sentinel.redaction import redact
-from ml_stack.workspace import person_store
-from ml_stack.workspace.person_store import ATTESTATION, VERSION
+from poolhouse.sentinel.events import EventLog
+from poolhouse.sentinel.redaction import redact
+from poolhouse.workspace import person_store
+from poolhouse.workspace.person_store import ATTESTATION, VERSION
 
 __all__ = ["EXCERPT_CHARS", "SOURCE", "Grant", "Heard", "expire_session", "mark_used", "prompt_hash", "record_answer",
            "record_authorization", "record_binding", "record_statement", "revoke_session"]

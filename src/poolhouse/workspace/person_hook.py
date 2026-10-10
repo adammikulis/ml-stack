@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ml_stack.sentinel.events import EventLog
-from ml_stack.workspace import (
+from poolhouse.sentinel.events import EventLog
+from poolhouse.workspace import (
     person_ancestry,
     person_intent,
     person_record,
@@ -30,7 +30,7 @@ def valid_session(value: Any) -> bool:
 def attended(environ: dict[str, str] | None = None) -> bool:
     """Whether a person is at the session: false for non-interactive runs."""
     env = os.environ if environ is None else environ
-    return not env.get("ML_STACK_NONINTERACTIVE") and env.get("CLAUDE_CODE_SESSION_ATTENDED", "true").lower() not in (
+    return not env.get("POOLHOUSE_NONINTERACTIVE") and env.get("CLAUDE_CODE_SESSION_ATTENDED", "true").lower() not in (
         "0", "false", "no")
 
 
@@ -60,7 +60,7 @@ def on_prompt(event: dict[str, Any], log: EventLog | None = None) -> dict[str, A
     if not (isinstance(prompt, str) and isinstance(path, str) and isinstance(prompt_id, str) and prompt_id):
         return None
     session = event["session_id"]
-    if person_transcript.path_problem(path, session, os.environ.get("ML_STACK_SESSION_ID", "")):
+    if person_transcript.path_problem(path, session, os.environ.get("POOLHOUSE_SESSION_ID", "")):
         return None
     turn = person_transcript.wait_for_turn(path, prompt_id, session, prompt)
     if not turn.human:

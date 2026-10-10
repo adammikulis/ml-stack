@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ml_stack.workspace import person_store
+from poolhouse.workspace import person_store
 
 __all__ = ["listing"]
 

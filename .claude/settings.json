@@ -103,6 +103,6 @@
     ]
   },
   "env": {
-    "ML_STACK_WINDOW_POSITION": "3460,20"
+    "POOLHOUSE_WINDOW_POSITION": "3460,20"
   }
 }
