@@ -38,6 +38,13 @@ def _git(*args: str) -> str:
     return done.stdout
 
 
+def merging() -> bool:
+    """Whether the index holds a merge in progress."""
+    done = subprocess.run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                          capture_output=True, text=True, check=False)
+    return done.returncode == 0 and bool(done.stdout.strip())
+
+
 def breaks(path: str, size: int, packaged: bool = True) -> dict[str, str]:
     """Each rule a path breaks, by a key that names the rule (and the extension for that rule).
 
@@ -114,8 +121,14 @@ def candidates(argv: list[str]) -> list[tuple[str, str, tuple[str, str] | None]]
     if argv:
         raise SystemExit(__doc__)
     diff = _git("diff", "--cached", "--name-status", "-z", renames.FLAG, "--diff-filter=ACMR")
-    return [(new, f":{new}", (old, f"HEAD:{old}") if status == "R" else None)
-            for status, old, new in renames.pairs(diff)]
+    found = [(new, f":{new}", (old, f"HEAD:{old}") if status == "R" else None)
+             for status, old, new in renames.pairs(diff)]
+    if merging():
+        # a merge adds only what differs from both parents: the other parent's commits were checked
+        # when they were made, and a file taken whole from it is its content, not this merge's
+        theirs = set(_git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z", "MERGE_HEAD").split("\0"))
+        found = [entry for entry in found if entry[0] in theirs]
+    return found
 
 
 def main(argv: list[str]) -> int:

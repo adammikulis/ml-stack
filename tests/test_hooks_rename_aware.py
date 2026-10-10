@@ -254,3 +254,77 @@ def test_a_def_swap_without_a_hunk_of_its_own_is_not_excused_as_a_rename() -> No
     swap = "-def test_a():\n+def test_b():\n"
     assert hook.weakened(head + swap, lambda p: "")
     assert not hook.weakened(head + "@@ -1 +1 @@\n" + swap, lambda p: "")
+
+
+class TestMerges:
+    def sides(self, repo, path, base_text, side_text, extra=None):
+        """A merge in progress whose other parent changed ``path`` and whose own side changed another file."""
+        shutil.copytree(REPO / "scripts" / "gates", repo.root / "scripts" / "gates")
+        repo.write(path, base_text)
+        repo.write("other.txt", "one\n")
+        repo.commit("base")
+        repo.git("checkout", "-qb", "side")
+        repo.write(path, side_text)
+        for name, text in (extra or {}).items():
+            repo.write(name, text)
+        repo.commit("side")
+        repo.git("checkout", "-q", "0.3dev")
+        repo.write("other.txt", "two\n")
+        repo.commit("ours")
+        repo.git("merge", "--no-commit", "--no-ff", "side")
+
+    def test_a_data_file_the_other_parent_added_is_not_this_merges(self, repo):
+        self.sides(repo, "notes.txt", "a\n", "b\n", {"data/side.json": "{}"})
+        assert repo.hook("no-data-files").returncode == 0
+
+    def test_a_data_file_the_merge_adds_itself_is_refused(self, repo):
+        self.sides(repo, "notes.txt", "a\n", "b\n")
+        repo.write("data/mine.json", "{}")
+        assert repo.hook("no-data-files").returncode == 1
+
+    def test_a_number_the_other_parent_raised_is_not_this_merges(self, repo):
+        self.sides(repo, "budgets.json", '{"broad-excepts": 5}\n', '{"broad-excepts": 6}\n')
+        assert repo.hook("budgets-only-fall").returncode == 0
+
+    def test_a_number_the_merge_raises_past_both_parents_is_refused(self, repo):
+        self.sides(repo, "budgets.json", '{"broad-excepts": 5}\n', '{"broad-excepts": 6}\n')
+        repo.write("budgets.json", '{"broad-excepts": 7}\n')
+        assert repo.hook("budgets-only-fall").returncode == 1
+
+
+class TestNameCheckSeesRenames:
+    def lines(self, repo):
+        from ml_stack.redact.added import added_lines
+
+        return added_lines(str(repo.root), "src/poolhouse/m.py")
+
+    BODY = "".join(f"line {i} of the module\n" for i in range(30))
+
+    def test_a_pure_rename_adds_no_line(self, repo):
+        repo.write("src/ml_stack/m.py", self.BODY)
+        repo.commit()
+        repo.move("src/ml_stack/m.py", "src/poolhouse/m.py")
+        assert self.lines(repo) == set()
+
+    def test_a_rename_adds_only_the_lines_it_changed(self, repo):
+        repo.write("src/ml_stack/m.py", self.BODY)
+        repo.commit()
+        repo.move("src/ml_stack/m.py", "src/poolhouse/m.py")
+        repo.write("src/poolhouse/m.py", self.BODY + "an added line\n")
+        assert self.lines(repo) == {31}
+
+    def test_a_new_file_and_a_copy_add_every_line(self, repo):
+        repo.write("src/ml_stack/m.py", self.BODY)
+        repo.commit()
+        repo.write("src/poolhouse/m.py", self.BODY)
+        assert self.lines(repo) == set(range(1, 31))
+
+    def test_every_check_reads_renames_at_the_same_similarity(self):
+        import importlib.util
+
+        from ml_stack.redact import added
+
+        spec = importlib.util.spec_from_file_location("_renames_flag", HOOKS / "renames.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert module.FLAG == added.SIMILARITY
