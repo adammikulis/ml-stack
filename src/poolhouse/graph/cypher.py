@@ -20,9 +20,9 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from poolhouse.graph.snapshots import DISAGREEING
-
 __all__ = ["CypherStore", "GraphStoreUnavailable", "census", "literal", "store_memory"]
+
+DISAGREEING = " disagreeing"
 
 
 class GraphStoreUnavailable(RuntimeError):
@@ -289,7 +289,7 @@ class CypherStore:
 def census(path: str | Path) -> dict[str, int]:
     """Open a store read-only on a fresh handle and take its census.
 
-    Only a fresh open sees what reached the disk, so this is what a snapshot is verified by.
+    Only a fresh open sees what reached the disk.
     """
     with CypherStore(path, read_only=True) as store:
         return store.census()

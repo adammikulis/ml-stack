@@ -1,9 +1,9 @@
 {
- "surfaces": 868,
+ "surfaces": 867,
  "by_status": {
   "covered": 539,
   "partial": 196,
-  "uncovered": 53,
+  "uncovered": 52,
   "n/a": 80,
   "unmapped": 0
  },
@@ -81,7 +81,7 @@
   "parser": {
    "covered": 83,
    "partial": 0,
-   "uncovered": 49,
+   "uncovered": 48,
    "n/a": 0,
    "unmapped": 0
   },
@@ -6980,16 +6980,6 @@
    "id": "parser:graph/serve.py",
    "kind": "parser",
    "source": "graph/serve.py",
-   "trust": "files, pages and archives from outside",
-   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
-   "status": "uncovered",
-   "tests": [],
-   "note": "files the product wrote for itself (stores, caches, snapshots, case files) are read back; a hand-edited or planted file is not tried"
-  },
-  {
-   "id": "parser:graph/snapshots.py",
-   "kind": "parser",
-   "source": "graph/snapshots.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "uncovered",

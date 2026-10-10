@@ -971,26 +971,6 @@ def _():
     return "10 of 10 refused; the store is intact"
 
 
-@check("Graphs", "a snapshot is verified by reopening it, and a restore is undoable")
-def _():
-    import pytest
-    pytest.importorskip("ladybug")
-    from poolhouse.graph import GraphStore, count_store, roll_back, snapshot
-    from poolhouse.graph.snapshots import snapshots
-    path = TMP / "snap" / "g"
-    with GraphStore(path) as store:
-        store.write({"nodes": [{"id": f"n{i}", "kind": "t", "label": str(i), "mentions": 1,
-                                "attrs": {}} for i in range(6)], "edges": []})
-    kept = snapshot(path, reason="verifying the release")
-    with GraphStore(path) as store:
-        store.drop([f"n{i}" for i in range(6)], force=True)
-    assert count_store(path)["nodes"] == 0
-    roll_back(kept.path)
-    assert count_store(path)["nodes"] == 6
-    assert any("before restoring" in r.reason for r in snapshots(path))
-    return f"{kept.method}, restored 6 nodes"
-
-
 @check("Graphs", "finding things fuses characters, words and meaning")
 def _():
     from poolhouse.graph.search import hybrid, lexical, rrf

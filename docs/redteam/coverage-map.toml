@@ -11,7 +11,7 @@
 # tests    `path` or `path::test_name`; the gate fails when either is gone.
 
 [ratchet]
-uncovered = 53
+uncovered = 52
 partial = 196
 
 [[group]]

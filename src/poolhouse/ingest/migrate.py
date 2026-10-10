@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from poolhouse.files import promote
-from poolhouse.graph.rebuild import count_store, roll_back, snapshot
+from poolhouse.graph.rebuild import count_store
 from poolhouse.graph.store import GraphStore
 from poolhouse.ingest.progress import Progress
 from poolhouse.ingest.reads import _read_json, _write_json, reads_beside
@@ -54,8 +54,9 @@ def migrate(out: str | Path, *, say: Callable[[str], None] = say) -> int:
 
     The nodes, the ``read_from`` edges that name them, every unit document's provenance,
     the progress file and the reads files beside the store; a store file named ``shelf``
-    and its files move to ``sources``. A verified copy of the store is taken first and put
-    back if the store does not read back whole afterwards. A store that already speaks of
+    and its files move to ``sources``. The store is rewritten in one transaction and read back
+    whole before it commits; when it does not, the transaction rolls back and the progress and
+    reads files are put back. A store that already speaks of
     sources is left alone.
     """
     where = Path(out).expanduser()
@@ -72,32 +73,22 @@ def migrate(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     before = count_store(where)
     kept = {path: path.read_bytes() for path in
             [Progress.beside(where), *reads_beside(where)] if path.is_file()}
-    snap = snapshot(where, reason="before book: node ids became source:")
-    say(f"copied the store to {Path(snap.path).name}")
     try:
-        with GraphStore(where) as store:
+        with GraphStore(where) as store, store.transaction():
             changed = _rewrite(store)
-        changed["progress"] = _rewrite_progress(Progress.beside(where))
-        changed["rows"] = sum(_rewrite_reads(path) for path in reads_beside(where))
+            changed["progress"] = _rewrite_progress(Progress.beside(where))
+            changed["rows"] = sum(_rewrite_reads(path) for path in reads_beside(where))
+            _require_sound(store, before)
         after = count_store(where)
-        with GraphStore(where, read_only=True) as store:
-            findings = store.check()
-            left = sorted(str(n["id"]) for n in store.nodes()
-                          if str(n["id"]).startswith(OLD_PREFIX) or n.get("kind") == "book")
         if after != before:
             raise NotSound(f"{before} went in and {after} came back")
-        if findings:
-            raise NotSound(f"{len(findings)} finding(s), e.g. {findings[0]!r}")
-        if left:
-            raise NotSound(f"{len(left)} node(s) still named books, e.g. {left[0]}")
     except BaseException as why:
         for path, raw in kept.items():
             path.write_bytes(raw)
-        roll_back(snap.path)
         if isinstance(why, (KeyboardInterrupt, SystemExit)):
             raise
         say(f"the migration did not verify: {why}")
-        say(f"{out} is as it was, put back from {Path(snap.path).name}")
+        say(f"{out} is as it was: the rewrite is one transaction and was rolled back")
         return 1
     say(f"{out}: {changed['nodes']} node(s) renamed, {changed['edges']} edge(s) moved, "
         f"{changed['docs']} document(s), {changed['rows']} reads row(s) and "
@@ -112,6 +103,20 @@ def migrate(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     say(f"moved {where.name} and its {len(moves) - 1} file(s) beside it to "
         f"{moves[0][1].name}")
     return 0
+
+
+def _require_sound(store: Any, before: Mapping[str, int]) -> None:
+    """Raise ``NotSound`` unless the store, read inside the open transaction, is whole."""
+    now = store.counts()
+    if now != before:
+        raise NotSound(f"{before} went in and {now} came back")
+    findings = store.check()
+    if findings:
+        raise NotSound(f"{len(findings)} finding(s), e.g. {findings[0]!r}")
+    left = sorted(str(n["id"]) for n in store.nodes()
+                  if str(n["id"]).startswith(OLD_PREFIX) or n.get("kind") == "book")
+    if left:
+        raise NotSound(f"{len(left)} node(s) still named books, e.g. {left[0]}")
 
 
 def _rewrite(store: Any) -> dict[str, int]:

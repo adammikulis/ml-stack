@@ -6,7 +6,6 @@ from __future__ import annotations
 import pytest
 
 from poolhouse.graph.cypher import CypherStore, census, literal
-from poolhouse.graph.snapshots import take
 
 
 def a_people_store(path):
@@ -78,12 +77,6 @@ def test_a_relation_that_reads_differently_backwards_is_counted(tmp_path):
 
     with Skewed(path, read_only=True) as db:
         assert db.census()["Knows disagreeing"] == 1
-
-
-def test_a_snapshot_verified_by_census_carries_every_table(tmp_path):
-    path = a_people_store(tmp_path / "p.lbug")
-    kept = take(path, reason="before a change", count=census)
-    assert kept.counts == census(path) == census(kept.path)
 
 
 def test_a_statement_that_will_not_prepare_raises_with_the_engines_reason(tmp_path):
