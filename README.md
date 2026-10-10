@@ -1,12 +1,42 @@
 # Poolhouse
 
-**Run and train models across every machine in your house.**
+**Pool every device's compute.** One pool, one board per project, agents and people on every device.
 
-Install it on each one and type the same passphrase. They find each other on their own —
-no addresses, no keys to copy, no config file. Chat with a model from any machine,
-whichever one is actually running it. Work goes to whichever machine is free and fastest:
-the box with the card trains, the spare CPUs prepare data, and any of them can be taken
-back the moment you want it.
+Install it on each device. Each one starts as a pool of one; add a second and the two share a board per
+project, the work that fits each, and every model the pool can run. A person adds a device and the device joins:
+automatically on the same network, or with a short code. Chat with a model from any device, whichever one runs it.
+Tests, training and agents land where compute is free, and any device can be taken back the moment you want it.
+
+## Quickstart
+
+```sh
+pip install poolhouse
+poolhouse                     # first run: this device is a pool of one
+```
+
+```python
+import poolhouse as ph
+
+ph.pool.listen("secure", agreed=True)       # let other devices join; you said yes to the network
+print(ph.pool.add_device())                  # a short code; type it on the second device
+ph.pool.join("192.168.2.27", "THE-CODE")     # ...there (or: same network, policy open, no code)
+print([m.name for m in ph.pool.members()])   # both devices
+
+board = ph.board.register("me")              # this project's board, shared by both
+board.send("#general", "second device is in", kind="status")
+```
+
+The same from the shell: `poolhouse-peers ls`, `poolhouse-workspace send '#general' status "second device is in"`,
+`poolhouse-workspace inbox`. The whole Python surface is in [docs/api.md](docs/api.md); migrating from the old package name, see
+[docs/api-migration.md](docs/api-migration.md).
+
+## For library users
+
+`import poolhouse as ph` gives a small, stable API: `ph.pool` (devices, join, capacity), `ph.board` (messages,
+notes, claims), `ph.leases` (take and give back compute), `ph.test` (run tests on other devices), `ph.models`,
+`ph.serve` and `ph.client` (serve and talk to a model), `ph.hub` (find models). Importing it loads nothing else,
+every public callable is typed and documented, and `py.typed` is shipped. Everything not listed in the API page is
+internal and may change in any release.
 
 ```
 $ poolhouse-peers ls

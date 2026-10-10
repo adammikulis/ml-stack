@@ -25,7 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from poolhouse import home, hub, jobs
+from poolhouse import errors, home, hub, jobs
 from poolhouse.files import read_json, write_json
 from poolhouse.lock import only_one
 from poolhouse.platform import stop_pid
@@ -52,7 +52,7 @@ _STOPS: dict[str, threading.Event] = {}
 """Holders running as threads of this process (when the broker does too), by hold id."""
 
 
-class Refusal(Exception):
+class Refusal(errors.Error):
     """The lease will not be granted; ``lines`` are what a person is told, one per line."""
 
     def __init__(self, *lines: str) -> None:

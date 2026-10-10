@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from poolhouse import node_health, node_launch
+from poolhouse import errors, node_health, node_launch
 from poolhouse.board import session as board_session
 from poolhouse.board.client import NodeError
 from poolhouse.fleet import shard_tree
@@ -22,7 +22,7 @@ CHUNK = 256 << 10
 POLL_S = 2.0
 
 
-class ShardError(RuntimeError):
+class ShardError(RuntimeError, errors.Error):
     """A shard that could not be sent or did not finish; the message says why."""
 
 

@@ -19,7 +19,7 @@ ROOT = REPO / "src" / "poolhouse"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("activity", "agent_dependency", "agent_hooks", "asking", "authority", "backend", "briefing", "checks", "command", "command_capture", "contracts", "credentials", "data",
-              "entities", "extraction", "files", "files_windows", "gate", "geo",
+              "entities", "errors", "extraction", "files", "files_windows", "gate", "geo",
               "home", "hook_bootstrap", "hook_diagnostics", "hookcheck", "http", "http_cancel", "httpguard", "installed", "interventions", "features", "jobs", "jsonl", "keystore", "keystore_guard", "legacy", "limits",
               "runtime", "runtime_launchers",
               "lock", "log", "macauth", "sealing",
@@ -32,7 +32,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
                "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "migrate", "migrate_paths", "migrate_scan", "memory", "reputation", "inbox", "roles", "rules",
-               "surface", "testfarm", "testing", "train", "walk", "web", "workspace", "pi", "features_cli", "board", "node_app", "device_host", "device_setup", "node_binary", "node_build", "node_join", "node_join_check", "node_launch", "node_permission", "node_signing", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
+               "surface", "api", "testfarm", "testing", "train", "walk", "web", "workspace", "pi", "features_cli", "board", "node_app", "device_host", "device_setup", "node_binary", "node_build", "node_join", "node_join_check", "node_launch", "node_permission", "node_signing", "node_supervise", "runtime_board", "runtime_cli", "runtime_coalesce", "runtime_deploy", "runtime_host", "runtime_stale", "runtime_store", "runtime_trust")),
     ("dev", ("redteam",)),
 )
 

@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from poolhouse import jobs, node_binary, node_pool, node_supervise, runtime, win32
+from poolhouse import errors, jobs, node_binary, node_pool, node_supervise, runtime, win32
 from poolhouse.command import Group, flag
 from poolhouse.home import state as state_root
 from poolhouse.lock import Busy, held_by, only_one, pid_alive
@@ -37,7 +37,7 @@ LAN_ENV = "POOLHOUSE_NODE_LAN"
 test under a temporary home never opens a node on the network; nothing decides this by looking at a path."""
 
 
-class NodeUnavailable(OSError):
+class NodeUnavailable(OSError, errors.NotRunning):
     """The node could not be started or did not answer in time."""
 
 

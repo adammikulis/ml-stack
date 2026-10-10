@@ -37,6 +37,7 @@ from poolhouse.serve.ports import (
 )
 from poolhouse.serve.process import kill_pid, kill_process_tree, pid_exists
 from poolhouse.serve.profile import Profile, profile_for, profiles
+from poolhouse.serve.public import Served, down, status, up
 from poolhouse.serve.serving import (
     Config,
     Serving,
@@ -62,6 +63,7 @@ __all__ = [
     "LlamaServerBackend",
     "Measuring",
     "Profile",
+    "Served",
     "ServerBackend",
     "ServerFailed",
     "ServerInfo",
@@ -72,6 +74,7 @@ __all__ = [
     "SlotGuardRefused",
     "Talking",
     "child_env",
+    "down",
     "draft_for",
     "find_binary",
     "free_port",
@@ -96,8 +99,10 @@ __all__ = [
     "server_pids_on_port",
     "serving_mismatch",
     "slot",
+    "status",
     "stop_all_servers",
     "tail",
     "trained_context",
+    "up",
     "wait_until_free",
 ]

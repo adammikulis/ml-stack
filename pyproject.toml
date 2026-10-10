@@ -5,7 +5,8 @@ build-backend = "hatchling.build"
 [project]
 name = "poolhouse"
 version = "0.2.2"  # x-release-please-version
-description = "Train and run models across every machine on your network."
+description = "Pool every device's compute. One pool, one board per project, agents and people on every device."
+keywords = ["pool", "devices", "compute", "board", "agents", "llama.cpp", "local-llm", "distributed", "lan"]
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "a member" }]
@@ -20,6 +21,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
@@ -147,6 +150,8 @@ wsl-dev = [
 [project.urls]
 Homepage = "https://github.com/adammikulis/poolhouse"
 Repository = "https://github.com/adammikulis/poolhouse"
+Documentation = "https://github.com/adammikulis/poolhouse/blob/main/docs/api.md"
+Issues = "https://github.com/adammikulis/poolhouse/issues"
 Changelog = "https://github.com/adammikulis/poolhouse/blob/main/CHANGELOG.md"
 
 [project.scripts]

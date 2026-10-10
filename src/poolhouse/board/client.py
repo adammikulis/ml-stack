@@ -6,14 +6,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from poolhouse import node_launch
+from poolhouse import errors, node_launch
 from poolhouse.node_health import API_VERSION, MAX_FRAME, exchange
 
 __all__ = ["Client", "Conflict", "Denied", "Invalid", "NodeError", "Quota"]
 
 
 
-class NodeError(Exception):
+class NodeError(errors.Error):
     """The node refused a request; ``code`` is its word for why."""
 
     def __init__(self, code: str, message: str) -> None:
@@ -21,7 +21,7 @@ class NodeError(Exception):
         self.code = code
 
 
-class Denied(NodeError):
+class Denied(NodeError, errors.Denied):
     """The caller may not do that."""
 
 
@@ -33,7 +33,7 @@ class Quota(NodeError):
     """Something past what the node keeps."""
 
 
-class Conflict(Denied):
+class Conflict(Denied, errors.Conflict):
     """Another session holds what a claim asked for."""
 
 
