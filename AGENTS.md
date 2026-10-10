@@ -254,6 +254,17 @@ checkout.
 Replace only owned processes at a coordinated safe boundary, preserving their identity and
 setup; do not interrupt another process's active work.
 
+**Every agent runs the latest build, automatically.** On every device, the newest merged development
+build is installed without anyone asking for it: a session start refreshes the runtime, a push or merge
+that lands refreshes it, the `runtime-ensure` login unit refreshes it in the background, and a
+device that joins a pool takes the pool's build before it takes work. A person never runs an install
+or an update by hand, and an agent never waits for one: it reports a stale build as a defect and runs
+`poolhouse runtime ensure` itself. A device on an older build than the pool is out of the pool's
+protocol (signing labels and wire operations change between builds), so a stale device is brought up
+to date before anything else, and a brief or a doc never says "update first" as a step for the owner.
+The owner's pyenv install, launchers and running node are replaced at the coordinated safe boundary
+above, never mid-run.
+
 ### Landing
 
 `main` is the release branch: a commit that arrives there is a commit queued to publish. Work
