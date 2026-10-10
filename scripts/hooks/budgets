@@ -18,8 +18,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
 
 import gates  # noqa: E402
+import renames  # noqa: E402
 
 ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 BUDGETS = ROOT / "budgets.json"
@@ -32,19 +34,24 @@ def _git(*args: str) -> str:
     return done.stdout if done.returncode == 0 else ""
 
 
-def staged() -> list[str]:
-    """The .py files this commit adds, changes, renames or deletes."""
-    out = _git("diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z")
-    return [name for name in out.split("\0") if name.endswith(".py")]
+def staged() -> dict[str, str]:
+    """``{path: where its old content is}`` for the .py files this commit adds, changes, renames or deletes.
+
+    A renamed file's old content is at its old path, so its sites are counted against that and not
+    against nothing. A copy is an addition.
+    """
+    out = _git("diff", "--cached", "--name-status", "-z", renames.FLAG, "--diff-filter=ACMRD")
+    return {new: old if status == "R" and old.endswith(".py") else new
+            for status, old, new in renames.pairs(out) if new.endswith(".py")}
 
 
 CONFIG = "pyproject.toml"
 
 
-def plant(base: Path, names: list[str], revision: str) -> None:
-    """Write each file's content at the given revision under base."""
+def plant(base: Path, names: list[str], revision: str, origin: dict[str, str] | None = None) -> None:
+    """Write each file's content at the given revision under base, read from its old path if it has one."""
     for name in names:
-        text = _git("show", f"{revision}:{name}")
+        text = _git("show", f"{revision}:{(origin or {}).get(name, name)}")
         if not text:
             continue
         target = base / name
@@ -71,7 +78,8 @@ def main() -> int:
         # (the landing gate) counts every metric over the whole tree; re-counting the
         # whole merge here took 65 s for a 675-file merge (docs/test-time.md)
         return 0
-    names = staged()
+    origin = staged()
+    names = list(origin)
     if not names:
         return 0
 
@@ -83,7 +91,7 @@ def main() -> int:
         old_root.mkdir()
         plant(new_root, [*names, CONFIG], "")
         if has_head:
-            plant(old_root, [*names, CONFIG], "HEAD")
+            plant(old_root, [*names, CONFIG], "HEAD", origin)
         for base in (new_root, old_root):
             if not (base / CONFIG).exists():
                 (base / CONFIG).write_text((ROOT / CONFIG).read_text(encoding="utf-8"),

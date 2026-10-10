@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import renames  # noqa: E402
 
 ZERO = "0" * 40
 MAX_BYTES = 1 << 20
@@ -34,45 +38,92 @@ def _git(*args: str) -> str:
     return done.stdout
 
 
-def why_refused(path: str, size: int) -> str | None:
-    """The rule a path breaks, or None."""
+def breaks(path: str, size: int, packaged: bool = True) -> dict[str, str]:
+    """Each rule a path breaks, by a key that names the rule (and the extension for that rule).
+
+    ``packaged`` lets the shipped package resources through; a rename's old path is read without
+    it, to see what the file already was.
+    """
     pure = PurePosixPath(path)
-    if path in SHIPPED:
-        return None
+    out: dict[str, str] = {}
+    if packaged and path in SHIPPED:
+        return out
     if pure.suffix.lower() in EXTENSIONS:
-        return f"a {pure.suffix} file is data or weights"
+        out[f"extension {pure.suffix.lower()}"] = f"a {pure.suffix} file is data or weights"
     if size > MAX_BYTES:
-        return f"{size} bytes is over the {MAX_BYTES}-byte limit for a tracked file"
-    if not path.startswith(PACKAGE_DATA) and DATA_DIRS.intersection(p.lower() for p in pure.parts[:-1]):
-        return "it is under a data directory"
-    return None
+        out["size"] = f"{size} bytes is over the {MAX_BYTES}-byte limit for a tracked file"
+    if not (packaged and path.startswith(PACKAGE_DATA)) and DATA_DIRS.intersection(
+            p.lower() for p in pure.parts[:-1]):
+        out["directory"] = "it is under a data directory"
+    return out
 
 
-def candidates(argv: list[str]) -> list[tuple[str, str]]:
-    """``(path, object)`` pairs to check, the object naming the content git would publish."""
+def why_refused(path: str, size: int, old: tuple[str, int] | None = None) -> str | None:
+    """The rule a path breaks, or None.
+
+    ``old`` is the ``(path, size)`` a rename came from: a rule the old path already broke, as it was
+    tracked, is not broken again by moving the file.
+    """
+    found = breaks(path, size)
+    if old is not None:
+        found = {k: v for k, v in found.items() if k not in breaks(*old, packaged=False)}
+    return next(iter(found.values()), None)
+
+
+def origins(base: str, tip: str) -> dict[str, tuple[str, str] | None]:
+    """``new path -> (old path, old object)`` for each rename in ``base..tip``, None for the rest.
+
+    A path that one change adds and another renames is judged as an addition.
+    """
+    out: dict[str, tuple[str, str] | None] = {}
+    diff = _git("diff", "--name-status", "-z", renames.FLAG, "--diff-filter=ACMR", base, tip)
+    for status, old, new in renames.pairs(diff):
+        origin = (old, f"{base}:{old}") if status == "R" else None
+        out[new] = origin if new not in out else out[new] and origin
+    return out
+
+
+def unpushed_origins(tip: str) -> dict[str, tuple[str, str] | None]:
+    """The renames in each commit ``--remotes`` does not hold, each read against its own parent."""
+    out: dict[str, tuple[str, str] | None] = {}
+    for commit in _git("rev-list", "--reverse", "--no-merges", tip, "--not", "--remotes").split():
+        if not _git("rev-list", "--parents", "-n1", commit).split()[1:]:
+            continue
+        for name, origin in origins(f"{commit}^", commit).items():
+            out[name] = origin if name not in out else out[name] and origin
+    return out
+
+
+def candidates(argv: list[str]) -> list[tuple[str, str, tuple[str, str] | None]]:
+    """``(path, object, origin)`` to check: the object names the content git would publish and the
+    origin is the ``(old path, old object)`` a rename came from, else None."""
     if argv[:1] == ["--tracked"]:
-        return [(name, f":{name}") for name in _git("ls-files", "-z").split("\0") if name]
+        return [(name, f":{name}", None) for name in _git("ls-files", "-z").split("\0") if name]
     if argv[:1] == ["--range"] and len(argv) == 3:
         base, tip = argv[1], argv[2]
         known = base != ZERO and subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"],
                                                capture_output=True, check=False).returncode == 0
         if not known:
             names = _git("log", "--format=", "--name-only", "--no-renames", tip, "--not", "--remotes")
+            moved = unpushed_origins(tip)
         else:
             names = _git("diff", "--name-only", "--no-renames", base, tip)
+            moved = origins(base, tip)
         at_tip = set(_git("ls-tree", "-r", "--name-only", tip).splitlines())
-        return [(n, f"{tip}:{n}") for n in sorted(set(names.splitlines()) & at_tip)]
+        return [(n, f"{tip}:{n}", moved.get(n)) for n in sorted(set(names.splitlines()) & at_tip)]
     if argv:
         raise SystemExit(__doc__)
-    names = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z").split("\0")
-    return [(n, f":{n}") for n in names if n]
+    diff = _git("diff", "--cached", "--name-status", "-z", renames.FLAG, "--diff-filter=ACMR")
+    return [(new, f":{new}", (old, f"HEAD:{old}") if status == "R" else None)
+            for status, old, new in renames.pairs(diff)]
 
 
 def main(argv: list[str]) -> int:
     """Print every refused path and return 1 when there is one."""
     refused = []
-    for path, obj in candidates(argv):
-        reason = why_refused(path, int(_git("cat-file", "-s", obj).strip()))
+    for path, obj, origin in candidates(argv):
+        old = None if origin is None else (origin[0], int(_git("cat-file", "-s", origin[1]).strip()))
+        reason = why_refused(path, int(_git("cat-file", "-s", obj).strip()), old)
         if reason:
             refused.append(f"  {path}: {reason}")
     if not refused:
