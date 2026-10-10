@@ -106,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
         if code != 0:
             return 0
         before, after = numbers("HEAD"), numbers("")
+        if _git("rev-parse", "-q", "--verify", "MERGE_HEAD")[1].strip():
+            # a merge may carry the other parent's numbers: its commits were judged against their own base
+            theirs = numbers("MERGE_HEAD")
+            before = {k: max(v, theirs.get(k, v)) for k, v in before.items()}
     try:
         strict = gates.hard()
     except Exception:

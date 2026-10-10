@@ -19,6 +19,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import renames  # noqa: E402
+
 NAMES = ("test_redteam_*", "test_*guard*", "test_*auth*")
 SIGN = re.compile(r"^Reviewed-by-second:\s*\S", re.M)
 ASSERT = re.compile(r"^\s*(assert\b|self\.assert\w*\(|with pytest\.raises\b|pytest\.raises\()")
@@ -51,8 +55,51 @@ def split(diff: str) -> dict[str, tuple[list[str], list[str]]]:
     return files
 
 
-def check(path: str, removed: list[str], added: list[str]) -> list[str]:
-    """The ways this file's change weakens it."""
+def moved(diff: str) -> dict[str, str]:
+    """``new path -> old path`` for each file the diff renames."""
+    out: dict[str, str] = {}
+    old = ""
+    for line in diff.splitlines():
+        if line.startswith("rename from "):
+            old = line[len("rename from "):]
+        elif line.startswith("rename to "):
+            out[line[len("rename to "):]] = old
+    return out
+
+
+def swapped(diff: str) -> dict[str, set[str]]:
+    """Per renamed file, the test names a hunk replaced by as many other test names and nothing else
+    that is a test: the function was renamed with its body untouched, not removed."""
+    renamed = set(moved(diff))
+    out: dict[str, set[str]] = {}
+    path = ""
+    gone: list[str] = []
+    came: list[str] = []
+    hunk = False
+
+    def settle() -> None:
+        if path in renamed and gone and len(gone) == len(came):
+            out.setdefault(path, set()).update(gone)
+        gone.clear()
+        came.clear()
+
+    for line in diff.splitlines():
+        if line.startswith(("diff --git ", "@@")):
+            settle()
+            hunk = line.startswith("@@")
+            if line.startswith("diff --git "):
+                path = line.rpartition(" b/")[2]
+        elif hunk and line.startswith("-") and (m := DEF.match(line[1:])):
+            gone.append(m.group(1))
+        elif hunk and line.startswith("+") and (m := DEF.match(line[1:])):
+            came.append(m.group(1))
+    settle()
+    return out
+
+
+def check(path: str, removed: list[str], added: list[str],
+          renamed_tests: frozenset[str] | set[str] = frozenset()) -> list[str]:
+    """The ways this file's change weakens it; ``renamed_tests`` are removed names that came back renamed."""
     out = []
     gone = sum(bool(ASSERT.match(x)) for x in removed)
     came = sum(bool(ASSERT.match(x)) for x in added)
@@ -62,7 +109,7 @@ def check(path: str, removed: list[str], added: list[str]) -> list[str]:
                    + (" (replaced by pass)" if passed else ""))
     old = {m.group(1) for x in removed if (m := DEF.match(x))}
     new = {m.group(1) for x in added if (m := DEF.match(x))}
-    for name in sorted(old - new):
+    for name in sorted(old - new - set(renamed_tests)):
         out.append(f"{path}: test function {name} removed")
     for line in added:
         if SKIP.search(line):
@@ -87,6 +134,7 @@ def merge_own(diff: str) -> str:
         return diff
     theirs_diff = split(run("diff", "--cached", "-U0", "--no-renames", "MERGE_HEAD", "--", "tests"))
     out = []
+    origin = moved(diff)
     for path, (removed, added) in split(diff).items():
         theirs = run("rev-parse", "-q", "--verify", f"MERGE_HEAD:{path}").strip()
         if theirs and theirs == run("rev-parse", f":{path}").strip():
@@ -94,7 +142,10 @@ def merge_own(diff: str) -> str:
         if path in theirs_diff:
             removed = list((Counter(removed) & Counter(theirs_diff[path][0])).elements())
             added = list((Counter(added) & Counter(theirs_diff[path][1])).elements())
-        out.append(f"diff --git a/{path} b/{path}\n")
+        was = origin.get(path, path)
+        out.append(f"diff --git a/{was} b/{path}\n")
+        if was != path:
+            out.append(f"rename from {was}\nrename to {path}\n")
         out.extend(f"-{x}\n" for x in removed)
         out.extend(f"+{x}\n" for x in added)
     return "".join(out)
@@ -103,9 +154,13 @@ def merge_own(diff: str) -> str:
 def weakened(diff: str, read) -> list[str]:
     """Every weakening in a zero-context diff; read(path) is the file as it was before."""
     out = []
+    origin = moved(diff)
+    swaps = swapped(diff)
     for path, (removed, added) in split(diff).items():
-        if guarded(path, read(path) + "\n".join(added)):
-            out.extend(check(path, removed, added))
+        old = origin.get(path, path)
+        text = read(old) + "\n".join(added)
+        if guarded(path, text) or guarded(old, text):
+            out.extend(check(path, removed, added, swaps.get(path, set())))
     return out
 
 
@@ -116,11 +171,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--against", default="")
     args = parser.parse_args(argv)
     if args.against:
-        diff = run("diff", "-U0", "--no-renames", f"{args.against}...HEAD", "--", "tests")
+        diff = run("diff", "-U0", renames.FLAG, f"{args.against}...HEAD", "--", "tests")
         message = run("log", "--format=%B", f"{args.against}..HEAD")
         base = args.against
     else:
-        diff = merge_own(run("diff", "--cached", "-U0", "--no-renames", "--", "tests"))
+        diff = merge_own(run("diff", "--cached", "-U0", renames.FLAG, "--", "tests"))
         message = Path(args.message).read_text(encoding="utf-8") if args.message else ""
         base = "HEAD"
     found = weakened(diff, lambda p: run("show", f"{base}:{p}"))

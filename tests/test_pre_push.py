@@ -99,8 +99,11 @@ def test_a_new_promote_snapshot_branch_goes_through(checkout):
 
 
 def test_a_promote_branch_that_already_exists_is_not_rewritten(checkout):
-    sha = git(checkout, "rev-parse", "HEAD")
-    assert push(checkout, "promote/x", base=sha, CLAUDECODE="1").returncode != 0
+    git(checkout, "checkout", "-q", "-b", "elsewhere")
+    elsewhere = commit(checkout, "elsewhere.txt", "x\n")
+    git(checkout, "checkout", "-q", "0.9dev")
+    commit(checkout, "mine.txt", "x\n")
+    assert push(checkout, "promote/x", base=elsewhere, CLAUDECODE="1").returncode != 0
 
 
 def test_the_refusal_names_the_promotion_pull_request(checkout):

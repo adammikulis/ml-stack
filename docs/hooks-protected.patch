@@ -1,0 +1,24 @@
+--- a/scripts/hooks/pre-push
++++ b/scripts/hooks/pre-push
+@@ -4,8 +4,9 @@
+ # a person's terminal is neither. The development branch is the one the primary checkout is on,
+ # and `main` is never it. An agent's push of `main` is allowed only as one fast-forward to a
+ # commit the person approved through the approval question (person-consume); tags, forced
+-# pushes and deletions are never allowed. A new branch named promote/* passes: it is the snapshot a promotion
+-# pull request is opened from.
++# pushes and deletions are never allowed. A branch named promote/* passes, new or moved forward: it is the
++# snapshot a promotion pull request is opened from, and a fast-forward of it publishes nothing (a rewrite of
++# one is a force, which is never allowed). Releasing `main` still waits on the person's approval.
+ # A dirty tree or a half-finished operation does not change the commits being pushed, so they
+ # are reported and never block: other agents leave files in the primary checkout.
+ if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+@@ -45,7 +46,8 @@
+         refused="$refused $remote_ref"
+     elif [ "$remote_ref" = refs/heads/main ]; then
+         pushes_main=yes
+-    elif [ -n "$dev" ] && [ "$remote_sha" = "$zero" ] && [ "${remote_ref#refs/heads/promote/}" != "$remote_ref" ]; then
++    elif [ -n "$dev" ] && [ "${remote_ref#refs/heads/promote/}" != "$remote_ref" ] \
++        && { [ "$remote_sha" = "$zero" ] || git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; }; then
+         continue
+     elif [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ]; then
+         refused="$refused $remote_ref"

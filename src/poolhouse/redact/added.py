@@ -10,15 +10,34 @@ import subprocess
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", re.M)
 
 
+SIMILARITY = "-M50%"
+"""How alike two files must be for git to call one a rename of the other: the figure
+scripts/hooks/renames.py uses, so every check reads the same pairs. A copy is never a rename."""
+
+
+def _renamed_from(root: str | None, span: list[str], path: str) -> list[str]:
+    """The path ``path`` was renamed from in ``span``, as a list that is empty when it was not."""
+    done = subprocess.run(["git", "diff", "--name-status", "-z", SIMILARITY, *span], cwd=root or None,
+                          capture_output=True, text=True, errors="replace", check=False)
+    fields = done.stdout.split("\0")
+    at = 0
+    while at < len(fields) and fields[at]:
+        width = 3 if fields[at][0] in "RC" else 2
+        if fields[at][0] == "R" and fields[at + 2] == path:
+            return [fields[at + 1]]
+        at += width
+    return []
+
+
 def added_lines(root: str | None, path: str, against: str | None = None) -> set[int]:
     """The 1-based line numbers of ``path`` that the staged change adds, or, with ``against``, that
     ``HEAD`` adds over that revision. A new file adds every line. A pure deletion adds none."""
     if against and against.startswith("-"):
         raise ValueError(f"not a revision: {against!r}")
-    command = (["diff", "-U0", "--no-renames", f"{against}...HEAD", "--", path] if against
-               else ["diff", "--cached", "-U0", "--no-renames", "--", path])
-    done = subprocess.run(["git", *command], cwd=root or None, capture_output=True, text=True,
-                          errors="replace", check=False)
+    span = [f"{against}...HEAD"] if against else ["--cached"]
+    paths = [path, *_renamed_from(root, span, path)]
+    done = subprocess.run(["git", "diff", "-U0", SIMILARITY, *span, "--", *paths], cwd=root or None,
+                          capture_output=True, text=True, errors="replace", check=False)
     lines: set[int] = set()
     for start, count in HUNK.findall(done.stdout):
         first, length = int(start), 1 if count == "" else int(count)

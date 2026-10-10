@@ -1110,6 +1110,14 @@ tests = ["tests/test_no_real_names.py::test_a_revision_that_is_an_option_is_refu
 note = "a hostile path stays one literal git argument and a revision that is an option is refused before git runs"
 
 [[group]]
+match = ["spawn:redact/added.py:_renamed_from"]
+status = "covered"
+count = 1
+tests = ["tests/test_hooks_rename_aware.py::test_a_hostile_renamed_path_reaches_git_as_one_argument",
+         "tests/test_hooks_rename_aware.py::test_many_renames_are_read_in_one_pass_and_each_is_paired"]
+note = "git is spawned with argv only and no shell; the diff is read as NUL-separated fields, so an option-shaped, spaced, quoted, newline or command-shaped path is one literal field and a rename count only lengthens the loop"
+
+[[group]]
 match = ["spawn:node_binary.py:build"]
 status = "covered"
 tests = ["tests/test_node_binary_build.py::test_a_hostile_source_path_reaches_cargo_as_a_directory_and_nothing_else",

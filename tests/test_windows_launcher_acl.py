@@ -6,7 +6,6 @@ import pytest
 
 
 def _grant(path, mask):
-    import ntsecuritycon
     import win32security
     everyone = win32security.ConvertStringSidToSid("S-1-1-0")
     descriptor = win32security.GetNamedSecurityInfo(str(path), win32security.SE_FILE_OBJECT, win32security.DACL_SECURITY_INFORMATION)
