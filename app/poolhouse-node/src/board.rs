@@ -287,6 +287,12 @@ impl Board {
         Ok(bound == origin)
     }
 
+    /// The fingerprint (hash of the public key) of the device whose key verified the log of ``origin``, if one did.
+    pub fn writer_fingerprint(&self, origin: &str) -> Option<String> {
+        let public = unhex(&self.state.t.keys.get(origin)?.public)?;
+        Some(crate::fsutil::sha256_hex(&public))
+    }
+
     /// Whether the device ``fingerprint`` is the writer of ``origin``.
     pub fn owns(&self, fingerprint: &str, origin: &str) -> bool {
         !fingerprint.is_empty() && self.state.t.peers.get(fingerprint).is_some_and(|o| o == origin)

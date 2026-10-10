@@ -10,7 +10,7 @@ use crate::fold::Entry;
 use crate::node::Node;
 use crate::row::{is_line, Kind};
 
-pub const METHODS: [&str; 7] = ["land_request", "land_review", "land_cancel", "land_brake", "land_state", "land_beat", "land_queue"];
+pub const METHODS: [&str; 8] = ["land_request", "land_review", "land_cancel", "land_brake", "land_state", "land_beat", "land_queue", "land_trust"];
 const EVENTS: [&str; 7] = ["request", "review", "cancel", "pause", "resume", "state", "beat"];
 const OPEN: [&str; 3] = ["queued", "needs-review", "running"];
 const STATES: [&str; 9] = ["queued", "needs-review", "running", "landed", "landed-unpushed", "failed", "needs-human", "refused", "cancelled"];
@@ -19,6 +19,9 @@ const MAX_SELECTORS: usize = 64;
 const MAX_TEXT: usize = 400;
 /// The grant a session needs, besides having no parent, to pause, resume or cancel for others.
 pub const CONTROL: &str = "land_control";
+/// The grant a session needs, besides having no parent, to name another device whose landing entries count.
+pub const TRUST: &str = "land_trust";
+const MOST_IGNORED: usize = 50;
 
 pub fn params_for(method: &str) -> Option<&'static [&'static str]> {
     Some(match method {
@@ -29,6 +32,7 @@ pub fn params_for(method: &str) -> Option<&'static [&'static str]> {
         "land_state" => &["req", "status", "detail", "evidence"],
         "land_beat" => &["what"],
         "land_queue" => &[],
+        "land_trust" => &["device", "trusted"],
         _ => return None,
     })
 }
@@ -120,6 +124,9 @@ struct Queue {
     paused: bool,
     paused_by: String,
     beat: Option<(String, String, u64)>,
+    /// The latest entries of devices this device does not trust, kept in the view and counted for nothing.
+    ignored: Vec<Value>,
+    ignored_total: usize,
 }
 
 fn field(e: &Entry, key: &str) -> String {
@@ -127,6 +134,14 @@ fn field(e: &Entry, key: &str) -> String {
 }
 
 impl Queue {
+    fn ignore(&mut self, e: &Entry, device: &str) {
+        self.ignored_total += 1;
+        if self.ignored.len() == MOST_IGNORED {
+            self.ignored.remove(0);
+        }
+        self.ignored.push(json!({"entry": e.id, "ev": field(e, "ev"), "by": e.sender, "device": device, "ts_ms": e.hlc.0}));
+    }
+
     fn apply(&mut self, e: &Entry, own: &str) {
         let ev = field(e, "ev");
         if ev == "request" {
@@ -183,9 +198,14 @@ fn fold(node: &mut Node, board: &str) -> Result<(Queue, String, u64)> {
     let entries = node.view(board)?;
     let host = node.host(board)?;
     let (own, now) = (host.board.origin().to_string(), host.board.now_ms());
+    let writers = crate::landtrust::writers(node, board)?;
     let mut queue = Queue::default();
     for e in entries.iter().filter(|e| e.kind == Kind::Landing) {
-        queue.apply(e, &own);
+        if e.origin == own || writers.trusted.contains(&e.origin) {
+            queue.apply(e, &own);
+        } else {
+            queue.ignore(e, writers.shown.get(&e.origin).map_or("an unknown device", String::as_str));
+        }
     }
     Ok((queue, own, now))
 }
@@ -341,7 +361,33 @@ fn queue(node: &mut Node, board: &str, token: &str) -> Result<Value> {
     }
     let (queue, _, now) = fold(node, board)?;
     let beat = queue.beat.as_ref().map(|(by, what, at)| json!({"by": by, "what": what, "age_s": now.saturating_sub(*at) / 1000}));
-    Ok(json!({"requests": queue.reqs.iter().map(show).collect::<Vec<_>>(), "paused": queue.paused, "paused_by": queue.paused_by, "beat": beat}))
+    let trusted: Vec<String> = node.land_trust.devices(&node.members.id).into_iter().collect();
+    Ok(json!({"requests": queue.reqs.iter().map(show).collect::<Vec<_>>(), "paused": queue.paused, "paused_by": queue.paused_by, "beat": beat,
+              "foreign": {"total": queue.ignored_total, "latest": queue.ignored, "status": "foreign, ignored"}, "trusted_devices": trusted}))
+}
+
+/// Name a device whose landing entries this device counts, or stop counting them: a session with no parent
+/// that holds the grant ``land_trust``, recorded on the board.
+fn trust(node: &mut Node, board: &str, token: &str, p: &Map<String, Value>) -> Result<Value> {
+    let actor = member(node, token, board)?;
+    let holder = node.tokens.resolve(token).cloned().ok_or_else(|| Error::Denied("the token is not known".into()))?;
+    if !node.host(board)?.names.get(&actor).is_some_and(|i| i.parent.is_empty()) || !node.grants.allows(&holder, TRUST) {
+        return Err(Error::Denied("only a session with no parent that holds the grant land_trust names the devices whose landing entries count".into()));
+    }
+    let on = p.get("trusted").and_then(Value::as_bool).ok_or_else(|| Error::Invalid("trusted is true or false".into()))?;
+    let fingerprint = text(p, "device");
+    let device = node.members.get(fingerprint).cloned();
+    if on && !device.as_ref().is_some_and(|d| d.status == crate::membership::Status::Active) {
+        return Err(Error::Invalid("only an active member of this pool is trusted to land".into()));
+    }
+    if fingerprint == node.cert.fingerprint() {
+        return Err(Error::Invalid("this device's own entries always count".into()));
+    }
+    let pool = node.members.id.clone();
+    let changed = node.land_trust.set(&pool, fingerprint, on)?;
+    let name = device.map(|d| d.name).unwrap_or_default();
+    audit(node, board, &actor, if on { "land.trust" } else { "land.untrust" }, fingerprint, &name)?;
+    Ok(json!({"device": fingerprint, "trusted": on, "changed": changed}))
 }
 
 pub fn call(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<String, Value>) -> Result<Value> {
@@ -352,6 +398,7 @@ pub fn call(node: &mut Node, method: &str, board: &str, token: &str, p: &Map<Str
         "land_brake" => brake(node, board, token, p),
         "land_state" => state(node, board, token, p),
         "land_beat" => beat(node, board, token, p),
+        "land_trust" => trust(node, board, token, p),
         _ => queue(node, board, token),
     }
 }

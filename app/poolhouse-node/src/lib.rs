@@ -16,6 +16,7 @@ pub mod fsutil;
 pub mod grants;
 pub mod identity;
 pub mod landing;
+pub mod landtrust;
 pub mod lease;
 pub mod links;
 pub mod log;

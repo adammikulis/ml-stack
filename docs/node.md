@@ -201,8 +201,22 @@ cancel of another's request need that holder or a session with no parent that ho
 A model's tier is not the node's to judge, so `landing.eligible` in Python bars the lowest tier and an
 unlisted model from requesting or reviewing, and the runner re-derives standing before it lands.
 
+Landing authority is this device's own. The fold counts a `landing` entry only when this device wrote it or the
+device that wrote it is on this device's landing list and still an active member of the pool; every other entry
+stays on the board (it replicates like any row) and `land_queue` lists it under `foreign` as "foreign, ignored"
+with the device's name and the count, so a device that joined the pool (by pairing or by auto-enrolment under
+`open`) cannot post a request, a review or a runner state that this device acts on. The writer of an origin is
+the device whose key verified its log (`Board::writer_fingerprint`), matched to the pool record now, so the
+list follows revocation. The list (`<state>/land_trust.json`, kept per pool, empty by default, never
+replicated) is changed by `land_trust` (`device` the certificate fingerprint, `trusted` a boolean): the caller
+is a session with no parent holding the grant `land_trust`, the device must be an active member and not this
+one, and the change is an audit entry (`land.trust`, `land.untrust`). Even for a listed device the runner
+re-derives the standing of the requester and every reviewer from this device's own registrations at landing
+time, so a request from a session registered only on another device does not land here yet.
+
 **Stubs.** Two checks wait for the trust ledger and are stubs that allow: the grants (`Grants::allows`, used by
-`note_verify`, the pool actions and `land_control`) and model verification (no session is ever `verified`,
+`note_verify`, the pool actions, `land_trust` and `land_control`, so until the ledger exists every session with no
+parent holds `land_trust` and `land_control` on this device) and model verification (no session is ever `verified`,
 so `landing.eligible` reads a listed model id as claimed).
 
 The Rust client (`client::Client`, `client::ensure_running`) finds a dead socket, takes

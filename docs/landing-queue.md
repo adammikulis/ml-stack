@@ -102,6 +102,20 @@ still knows nothing of the board; `scripts/land_board.py` is the only bridge.
    `needs-human`, `status` otherwise); an announcement marks a landing (`milestone`), a batch not
    landed or a stuck gate (`blocked`).
 
+### Whose entries count
+
+Landing authority is this device's own. A request, review, brake or runner state counts only when this device
+wrote it, or when it came from a device on this device's landing list that is still an active member of the
+pool. Every other `landing` entry is kept on the board and shown by `land-queue` and `digest --status` as
+"foreign, ignored", with the device's name, so a device that merely joined the pool cannot make this device's
+runner land anything. The list is empty by default; `land-trust DEVICE` (a session with no parent that holds the
+grant `land_trust`, audited on the board) adds a device by fingerprint and `land-trust DEVICE --revoke` removes
+it; putting the device out of the pool ends its standing at once. The runner still re-derives the requester's
+and the reviewers' standing from this device's own registrations at landing time, so a listed device's request
+lands here only once multi-device identity exists; today the list makes its entries count in the queue.
+(Foreign `branch` claims are a separate mechanism: a claim on `<dev>` held by another device still keeps this
+device's runner from starting.)
+
 ### Eligibility, review and brakes
 
 - Only a landing-level session may request or review: a live session of the board whose model is listed and
