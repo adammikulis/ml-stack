@@ -29,12 +29,12 @@ from pathlib import Path
 from typing import Any
 
 from poolhouse.files import promote
-from poolhouse.graph.snapshots import WAL_SUFFIX
 from poolhouse.lock import pid_alive, release, take
 
 logger = logging.getLogger(__name__)
 
 # a parked reader holds memory, so an idle one is closed; reopening is cheap
+WAL_SUFFIX = ".wal"
 READER_IDLE_TTL_S = 30.0
 WRITE_LEASE_TIMEOUT_S = 30.0
 READ_TIMEOUT_S = 30.0
@@ -331,8 +331,8 @@ class ReaderCache:
         """The exclusive turn, and a writable handle, for the length of the block.
 
         Re-entrant within a thread: a lease inside a lease on the same store is the same
-        handle. ``before`` runs inside the lock and before the store is opened — where a
-        snapshot goes, so that what is about to change is recoverable.
+        handle. ``before`` runs inside the lock and before the store is opened — where
+        whatever must happen first goes.
         """
         key = Path(path).expanduser()
         leases = _mine("leases")

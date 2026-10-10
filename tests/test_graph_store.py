@@ -140,28 +140,6 @@ def test_read_counts_the_nodes_and_edges_it_hands_back(tmp_path):
     assert len(back["edges"]) == 2
 
 
-def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
-    """The real thing this exists for: a rebuild that goes wrong is not the end of the graph."""
-    from poolhouse.graph.rebuild import count_store, roll_back, snapshot
-
-    path = tmp_path / "g"
-    with GraphStore(path) as store:
-        store.write(GRAPH)
-    assert count_store(path) == {"nodes": 5, "edges": 3, "docs": 0}
-
-    kept = snapshot(path, reason="before a rebuild")
-    assert (kept.counts["Node"], kept.counts["Edge"], kept.counts["Edge disagreeing"]) == (5, 3, 0)
-
-    with GraphStore(path) as store:      # the rebuild goes wrong, and insists
-        store.drop([n["id"] for n in GRAPH["nodes"]], force=True)
-    assert count_store(path)["nodes"] == 0
-
-    roll_back(kept.path)
-    assert count_store(path) == {"nodes": 5, "edges": 3, "docs": 0}
-    with GraphStore(path) as store:
-        assert {n["id"] for n in store.nodes()} == {n["id"] for n in GRAPH["nodes"]}
-
-
 def test_a_node_can_be_found_by_what_it_means(tmp_path):
     """The writer only writes. Retrieval reads read-only, and cannot build the index itself,
     so an embedding written without one would be invisible for ever."""
@@ -238,7 +216,7 @@ def test_a_write_that_would_take_most_of_the_store_is_refused(tmp_path):
     assert count_store(path)["nodes"] == 10, "it went ahead anyway"
 
     # and when it really is meant
-    replace(path, {"nodes": [], "edges": []}, force=True, keep_copy=False)
+    replace(path, {"nodes": [], "edges": []}, force=True)
     assert count_store(path)["nodes"] == 0
 
 
@@ -252,17 +230,17 @@ def test_an_ordinary_rebuild_still_goes_through(tmp_path):
     assert count_store(path)["nodes"] == 9
 
 
-def test_a_write_that_takes_a_tenth_leaves_a_copy_behind(tmp_path):
-    from poolhouse.graph.rebuild import replace
-    from poolhouse.graph.snapshots import snapshots
+def test_a_rebuild_that_drops_nodes_runs_with_no_snapshot_dir_and_makes_none(tmp_path):
+    from poolhouse.graph.rebuild import count_store, replace
 
     path = a_store_of(tmp_path, 10)
+    before = sorted(p.name for p in tmp_path.iterdir())
     keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 1, "attrs": {}}
             for i in range(8)]
-    replace(path, {"nodes": keep, "edges": []})
-    kept = snapshots(path)
-    assert kept and kept[0].counts["Node"] == 10
-    assert "before dropping 2 of 10" in kept[0].reason
+    assert replace(path, {"nodes": keep, "edges": []}) == {"nodes": 8, "edges": 0}
+    assert count_store(path)["nodes"] == 8
+    assert sorted(p.name for p in tmp_path.iterdir()) == before, "it left a copy behind"
+    assert not (tmp_path / "_backups").exists()
 
 
 def test_dropping_most_of_a_store_by_hand_is_refused_too(tmp_path):

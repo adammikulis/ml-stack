@@ -25,7 +25,7 @@ EXTENSIONS = frozenset({
 })
 DATA_DIRS = frozenset({
     "data", "datasets", "graphs", "state", "checkpoints", "weights", "runs", "var",
-    "exports", "dumps", "_backups", "scrapes", "messages", "patients",
+    "exports", "dumps", "scrapes", "messages", "patients",
 })
 PACKAGE_DATA = ("src/poolhouse/data/", "src/poolhouse/spec/data/")
 SHIPPED = frozenset({"src/poolhouse/spec/data/draft_vocab.npy"})

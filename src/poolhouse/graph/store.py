@@ -423,7 +423,7 @@ class GraphStore(CypherStore):
         return [n["id"] for n in rows[0]["walked"]]
 
     def counts(self) -> dict[str, int]:
-        """What is in here. What a snapshot is verified against."""
+        """What is in here: the counts a rebuild or a migration is verified against."""
         out = {}
         for name, cypher in (("nodes", "MATCH (n:Node) RETURN count(n) AS c"),
                              ("edges", "MATCH (:Node)-[e:Edge]->(:Node) RETURN count(e) AS c"),

@@ -19,8 +19,6 @@ _EXPORTS = {
     "LockError": ("poolhouse.graph.access", "LockError"),
     "NotADAG": ("poolhouse.graph.dag", "NotADAG"),
     "QUERY": ("poolhouse.client.embed", "QUERY"),
-    "Snapshot": ("poolhouse.graph.snapshots", "Snapshot"),
-    "SnapshotError": ("poolhouse.graph.snapshots", "SnapshotError"),
     "StoreNeedsUpgrade": ("poolhouse.graph.store", "StoreNeedsUpgrade"),
     "TASK": ("poolhouse.client.embed", "TASK"),
     "WouldLoseTooMuch": ("poolhouse.graph.store", "WouldLoseTooMuch"),
@@ -50,7 +48,6 @@ _EXPORTS = {
     "points": ("poolhouse.graph.places", "points"),
     "propagate": ("poolhouse.graph.message", "propagate"),
     "proposing": ("poolhouse.graph.propose", "proposing"),
-    "prune": ("poolhouse.graph.snapshots", "prune"),
     "quotes": ("poolhouse.graph.looking", "quotes"),
     "reading": ("poolhouse.graph.access", "reading"),
     "release_all": ("poolhouse.graph.access", "release_all"),
@@ -60,16 +57,11 @@ _EXPORTS = {
     "require_topological_order": ("poolhouse.graph.dag", "require_topological_order"),
     "resolvent_sweep": ("poolhouse.graph.dag", "resolvent_sweep"),
     "resting_on": ("poolhouse.graph.drift", "resting_on"),
-    "restore": ("poolhouse.graph.snapshots", "restore"),
-    "roll_back": ("poolhouse.graph.rebuild", "roll_back"),
     "rrf": ("poolhouse.graph.search", "rrf"),
     "scatter_mean": ("poolhouse.graph.message", "scatter_mean"),
     "scatter_sum": ("poolhouse.graph.message", "scatter_sum"),
     "smooth": ("poolhouse.graph.vectors", "smooth"),
-    "snapshot": ("poolhouse.graph.rebuild", "snapshot"),
-    "snapshots": ("poolhouse.graph.snapshots", "snapshots"),
     "superseded": ("poolhouse.graph.drift", "superseded"),
-    "take": ("poolhouse.graph.snapshots", "take"),
     "tensors": ("poolhouse.graph.tensors", "tensors"),
     "tools_for": ("poolhouse.graph.propose", "tools_for"),
     "topological_order": ("poolhouse.graph.dag", "topological_order"),
@@ -92,8 +84,6 @@ GraphStore: Any
 GraphStoreUnavailable: Any
 LockError: Any
 NotADAG: Any
-Snapshot: Any
-SnapshotError: Any
 StoreNeedsUpgrade: Any
 WouldLoseTooMuch: Any
 apply: Any
@@ -122,7 +112,6 @@ places_in: Any
 points: Any
 propagate: Any
 proposing: Any
-prune: Any
 quotes: Any
 reading: Any
 release_all: Any
@@ -132,16 +121,11 @@ replace: Any
 require_topological_order: Any
 resolvent_sweep: Any
 resting_on: Any
-restore: Any
-roll_back: Any
 rrf: Any
 scatter_mean: Any
 scatter_sum: Any
 smooth: Any
-snapshot: Any
-snapshots: Any
 superseded: Any
-take: Any
 tensors: Any
 tools_for: Any
 topological_order: Any
@@ -164,8 +148,6 @@ __all__ = [
     "GraphStoreUnavailable",
     "LockError",
     "NotADAG",
-    "Snapshot",
-    "SnapshotError",
     "StoreNeedsUpgrade",
     "WouldLoseTooMuch",
     "apply",
@@ -194,7 +176,6 @@ __all__ = [
     "points",
     "propagate",
     "proposing",
-    "prune",
     "quotes",
     "reading",
     "release_all",
@@ -204,16 +185,11 @@ __all__ = [
     "require_topological_order",
     "resolvent_sweep",
     "resting_on",
-    "restore",
-    "roll_back",
     "rrf",
     "scatter_mean",
     "scatter_sum",
     "smooth",
-    "snapshot",
-    "snapshots",
     "superseded",
-    "take",
     "tensors",
     "tools_for",
     "topological_order",

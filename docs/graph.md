@@ -186,8 +186,8 @@ and the ones that change the machine refuse a request that came through a proxy.
 
 **A store cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty
 graph, and an empty graph looks exactly like "remove everything". `replace` refuses a write
-that would take most of a store, and leaves a verified snapshot when it would take a tenth.
-`snapshot` and `roll_back` are there directly, and a restore saves what is there first.
+that would take most of a store. The store is a derived index of the board's entries, so what
+a wrong write loses is rebuilt from them, not restored from a copy.
 
 **A store checks itself.** Every `put_doc` reads its document back by key and raises
 `StoreMismatch` when what comes back is not what went in; a node is read back by id the same

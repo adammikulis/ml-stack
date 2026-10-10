@@ -324,11 +324,8 @@ graph as a whole — what it counts, when it was built — is kept beside it.
 **It cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty graph,
 and an empty graph looks exactly like "remove everything" to anything that trusts it. A write
 that would take most of a store raises rather than runs, and says what it thinks went wrong
-upstream. One that would take a tenth leaves a verified copy behind on the way past. Copies
-are verified by reopening them on a fresh handle and counting — a copy nobody opened is not a
-backup — and a restore saves what is there first, because restoring the wrong one must not be
-the second unrecoverable act of the day. On a filesystem with copy-on-write this costs
-milliseconds and no disk; everywhere else it says loudly that it is copying for real.
+upstream. The store is a derived index, so what a wrong
+write loses is rebuilt from the board's entries; no copy of it is kept.
 
 **Two processes cannot corrupt one.** The database's own lock already stops the second writer
 with an IO exception. What is added is the part it does not do: which process is in your way

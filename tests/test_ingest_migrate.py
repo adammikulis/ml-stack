@@ -208,7 +208,6 @@ def test_a_store_written_since_the_rename_is_left_alone(tmp_path):
     code, said = quiet(where)
 
     assert code == 0 and "nothing to migrate" in said
-    assert not (tmp_path / "_backups").exists(), "a store it will not touch is not copied"
 
 
 def test_the_migration_on_a_store_that_is_not_there_says_so(tmp_path):
@@ -220,8 +219,8 @@ def test_the_migration_on_a_store_that_is_not_there_says_so(tmp_path):
 
 
 def test_a_store_that_does_not_read_back_whole_is_put_back(tmp_path, monkeypatch):
-    """The verification is what the copy exists for: a store that fails it is restored,
-    with the files beside it, and nothing is left half-renamed."""
+    """A store that fails verification is rolled back with the files beside it, and nothing
+    is left half-renamed."""
     from poolhouse.graph.store import GraphStore
 
     where = an_old_store(tmp_path)
