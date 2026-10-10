@@ -4,9 +4,10 @@ scripts are rewritten, any other file naming the old path is only reported. Real
 from __future__ import annotations
 
 import stat
+import time
 from pathlib import Path
 
-from poolhouse import migrate, migrate_paths
+from poolhouse import migrate, migrate_paths, migrate_scan
 from tests import migrate_support
 
 account = migrate_support.account
@@ -143,3 +144,61 @@ def test_a_machine_the_old_code_already_moved_is_repaired_by_run(account, tmp_pa
 
 def test_the_command_group_lists_verify():
     assert "verify" in {command.name for command in migrate.GROUP.commands}
+
+
+def big_tree(account: Path, count: int = 200_000) -> Path:
+    """An old state directory with a huge pruned models directory, a dangling link and a venv."""
+    old = old_state(account)
+    models = old / "models" / "family"
+    models.mkdir(parents=True)
+    for i in range(count):
+        (models / f"{i}.x").write_text(str(old), encoding="utf-8")
+    (old / "gone").symlink_to(old / "builds" / "missing")
+    venv = old / "spec-venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text(f"home = {old}/spec-venv/bin\n")
+    (venv / "bin" / "tool").write_text(f"#!{old}/spec-venv/bin/python\n")
+    return old
+
+
+def test_the_default_scan_skips_a_huge_pruned_directory_and_still_finds_the_link_and_the_venv(account):
+    old = big_tree(account)
+    started = time.monotonic()
+    found = migrate_paths.scan([old], migrate._pairs(account), planning=True)
+    assert time.monotonic() - started < 1.0
+    assert [p.name for p in found.stuck] == ["gone"]
+    assert sorted(p.name for p in found.rewrite) == ["pyvenv.cfg", "tool"]
+    assert not found.report and not found.stopped
+
+
+def test_deep_reads_a_settings_file_the_default_scan_does_not_reach(account):
+    old = old_state(account)
+    nest = old / "deep" / "er" / "than" / "the" / "default"
+    nest.mkdir(parents=True)
+    (nest / "a.json").write_text(f'{{"p": "{old}/x"}}', encoding="utf-8")
+    pairs = migrate._pairs(account)
+    assert not migrate_paths.scan([old], pairs, planning=True).report
+    assert migrate_paths.scan([old], pairs, planning=True, budget=migrate_scan.Budget.of(True)).report == [nest / "a.json"]
+
+
+def test_deep_says_where_it_is_every_five_seconds(account):
+    old = old_state(account)
+    lines: list[str] = []
+    ticks = iter(range(0, 1000, 6))
+    clock = migrate_scan.Budget(None, lines.append, clock=lambda: next(ticks))
+    list(migrate_scan.candidates(old, clock))
+    assert lines and "entries seen, now in" in lines[0]
+
+
+def test_a_budget_of_zero_trips_and_names_what_it_left(account):
+    old = big_tree(account, 10)
+    found = migrate_paths.scan([old], migrate._pairs(account), planning=True, budget=migrate_scan.Budget(0))
+    assert found.skipped == [old] and str(old) in found.stopped and "--deep" in found.stopped
+    assert migrate_paths.scan([old], migrate._pairs(account), planning=True, budget=migrate_scan.Budget.of(True)).stopped == ""
+
+
+def test_plan_prints_the_elapsed_time_and_deep_is_a_flag_of_every_command(account, capsys):
+    build(account)
+    assert migrate.run(account, dry=True, ring=lambda: None) == 0
+    assert "scanned in" in capsys.readouterr().out
+    assert all(any("--deep" in o.flags for o in c.options) for c in migrate.GROUP.commands)
