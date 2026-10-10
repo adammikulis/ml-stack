@@ -145,9 +145,9 @@ wsl-dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/adammikulis/ml-stack"
-Repository = "https://github.com/adammikulis/ml-stack"
-Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/adammikulis/poolhouse"
+Repository = "https://github.com/adammikulis/poolhouse"
+Changelog = "https://github.com/adammikulis/poolhouse/blob/main/CHANGELOG.md"
 
 [project.scripts]
 poolhouse-gym = "poolhouse.gym.cli:main"

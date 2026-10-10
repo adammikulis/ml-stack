@@ -5,20 +5,20 @@ One script per platform, four modes. Re-running any of them upgrades in place.
 **macOS and Linux:**
 
 ```
-curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
-curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh -s -- --headless
-curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh -s -- --dev
-curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sudo sh -s -- --system
+curl -fsSL https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.sh | sh -s -- --headless
+curl -fsSL https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.sh | sh -s -- --dev
+curl -fsSL https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.sh | sudo sh -s -- --system
 ```
 
 **Windows**, in PowerShell. `iex` runs a piped script with no arguments, so the mode is an
 environment variable rather than a scriptblock incantation:
 
 ```
-irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
-$env:POOLHOUSE_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
-$env:POOLHOUSE_MODE="dev";      irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
-$env:POOLHOUSE_MODE="system";   irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex   # as administrator
+irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex
+$env:POOLHOUSE_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex
+$env:POOLHOUSE_MODE="dev";      irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex
+$env:POOLHOUSE_MODE="system";   irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex   # as administrator
 ```
 
 | | what it installs | what it downloads | how it updates itself |
@@ -94,7 +94,7 @@ Past the install, every step is a Poolhouse command rather than shell -- `poolho
 (into the one cache, every download checked against its sha256), `poolhouse-cluster join
 --persist`, and `poolhouse-doctor` at the end, whose lines it prints.
 
-**Or download it yourself** from the [latest release](https://github.com/adammikulis/ml-stack/releases/latest):
+**Or download it yourself** from the [latest release](https://github.com/adammikulis/poolhouse/releases/latest):
 
 | | |
 |---|---|
@@ -152,15 +152,15 @@ again -- against a wheel built in the same job, with no model and no network.
 **If you write Python**, on 3.12 and later (developed and tested on 3.13):
 
 ```
-pip install git+https://github.com/adammikulis/ml-stack
-pip install "poolhouse[train] @ git+https://github.com/adammikulis/ml-stack"
-pip install "poolhouse[all] @ git+https://github.com/adammikulis/ml-stack"
+pip install git+https://github.com/adammikulis/poolhouse
+pip install "poolhouse[train] @ git+https://github.com/adammikulis/poolhouse"
+pip install "poolhouse[all] @ git+https://github.com/adammikulis/poolhouse"
 ```
 
 The first is all of it and nothing else -- pure Python, over `packaging` and the standard
 library. `[train]` adds numpy and safetensors; `[all]` adds everything the rest of it can
 use. Every
-[release](https://github.com/adammikulis/ml-stack/releases/latest) carries the same wheel,
+[release](https://github.com/adammikulis/poolhouse/releases/latest) carries the same wheel,
 for a machine with no git: `pip install ./poolhouse-<version>-py3-none-any.whl`.
 
 Building from source needs `pip install build`, then:

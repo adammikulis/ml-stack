@@ -28,7 +28,7 @@ URL = "https://nominatim.openstreetmap.org/search"
 
 # Nominatim's usage policy asks that a client say who it is; a project passes its own,
 # with a way to reach whoever runs it, rather than shipping under this one
-USER_AGENT = "poolhouse/geo (https://github.com/adammikulis/ml-stack)"
+USER_AGENT = "poolhouse/geo (https://github.com/adammikulis/poolhouse)"
 
 # seconds between two Nominatim requests; its usage policy allows one a second
 PAUSE = 1.1

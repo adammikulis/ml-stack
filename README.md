@@ -110,7 +110,7 @@ window, and the daemon behind it.
 **macOS and Linux:**
 
 ```
-curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.sh | sh
 ```
 
 **Windows**, in PowerShell:
@@ -119,7 +119,7 @@ The application runs in Ubuntu on WSL and opens in your Windows browser.
 [Windows runtime setup](docs/windows-runtime.md) lists the Linux packages and GPU requirements.
 
 ```
-irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex
 ```
 
 Do the same on every machine you want to work with, typing the same passphrase. They find
@@ -129,10 +129,10 @@ each other on their own.
 drive from needs no CUDA, no MLX and no training stack:
 
 ```
-pip install git+https://github.com/adammikulis/ml-stack
+pip install git+https://github.com/adammikulis/poolhouse
 ```
 
-Every [release](https://github.com/adammikulis/ml-stack/releases/latest) carries the same
+Every [release](https://github.com/adammikulis/poolhouse/releases/latest) carries the same
 thing as a wheel, for a machine with no git.
 
 There are three other modes -- a machine with no screen, a machine that starts at boot

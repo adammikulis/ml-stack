@@ -5,7 +5,7 @@ HTTP. Both import nothing outside the standard library, `packaging` and `psutil`
 open no socket when imported. The package runs on Python 3.12 to 3.14; the app's own environment is 3.13.
 
 ```
-pip install "poolhouse @ git+https://github.com/adammikulis/ml-stack"
+pip install "poolhouse @ git+https://github.com/adammikulis/poolhouse"
 pip install -e /path/to/poolhouse               # a local checkout
 ```
 

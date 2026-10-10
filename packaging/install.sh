@@ -1,7 +1,7 @@
 #!/bin/sh
 # Network installer for poolhouse, in four modes. Re-running any of them upgrades in place.
 #
-#   curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --headless
 #   curl -fsSL .../install.sh | sh -s -- --dev
 #   curl -fsSL .../install.sh | sudo sh -s -- --system
@@ -27,7 +27,7 @@
 #                                  a `wheels` directory beside the zip is used by default
 set -eu
 
-REPO="${POOLHOUSE_REPO:-adammikulis/ml-stack}"
+REPO="${POOLHOUSE_REPO:-adammikulis/poolhouse}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 GIT_URL="https://github.com/$REPO"
 PYTHON="3.13"

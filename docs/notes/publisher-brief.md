@@ -3,7 +3,7 @@
 ## Decision (owner, 2026-10-04)
 "yes to auto-publish 0.2dev. start local then move to ci. scan gated pushes are fine." The owner
 does not want to be the person who publishes; the controls below replace that step. This
-authorises ONLY pushing the branch `0.2dev` to `origin` (public repo adammikulis/ml-stack) by the
+authorises ONLY pushing the branch `0.2dev` to `origin` (public repo adammikulis/poolhouse) by the
 publisher defined here. It does not authorise any agent to run `git push`, to push other refs,
 to tag, to create a GitHub release, to upload a package, or to set a version number. The owner
 sets the version and releases.

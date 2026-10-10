@@ -1,11 +1,11 @@
 # Network installer for poolhouse, in four modes. Re-running any of them upgrades in place.
 #
-#   irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex
 #
 # `iex` runs the script with no arguments, so a mode is chosen with the environment -- one
 # line, and no scriptblock incantation to get a switch past the pipe:
 #
-#   $env:POOLHOUSE_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+#   $env:POOLHOUSE_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/poolhouse/main/packaging/install.ps1 | iex
 #   $env:POOLHOUSE_MODE="dev";      irm ... | iex
 #   $env:POOLHOUSE_MODE="system";   irm ... | iex      (in a PowerShell opened as administrator)
 #
@@ -38,7 +38,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-$repo    = if ($env:POOLHOUSE_REPO) { $env:POOLHOUSE_REPO } else { "adammikulis/ml-stack" }
+$repo    = if ($env:POOLHOUSE_REPO) { $env:POOLHOUSE_REPO } else { "adammikulis/poolhouse" }
 $api     = "https://api.github.com/repos/$repo/releases/latest"
 $gitUrl  = "https://github.com/$repo"
 $python  = "3.13"

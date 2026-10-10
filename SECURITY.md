@@ -7,7 +7,7 @@ Poolhouse is pre-1.0. Only the latest release receives security fixes.
 ## Reporting a vulnerability
 
 Report privately through GitHub private vulnerability reporting:
-**Security tab > Report a vulnerability** (https://github.com/adammikulis/ml-stack/security/advisories/new).
+**Security tab > Report a vulnerability** (https://github.com/adammikulis/poolhouse/security/advisories/new).
 Please do not open a public issue or pull request for a vulnerability.
 
 Include the version, the machine type, what you did, what happened and what you expected. A proof of concept helps.

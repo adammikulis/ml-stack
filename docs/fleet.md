@@ -113,7 +113,7 @@ records without a mode are not imported. Explicit Production memberships retain 
 For explicit Production enrollment on a new machine:
 
 ```
-pip install git+https://github.com/adammikulis/ml-stack
+pip install git+https://github.com/adammikulis/poolhouse
 poolhouse-cluster join --group "Cedar lab" --mode prod --persist
 poolhouse-cluster status
 ```

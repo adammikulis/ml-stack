@@ -62,7 +62,7 @@ __all__ = [
 
 _LOG = logging.getLogger(__name__)
 
-REPO = "adammikulis/ml-stack"
+REPO = "adammikulis/poolhouse"
 GIT_URL = f"https://github.com/{REPO}"
 API = "https://api.github.com/repos/{repo}/releases/latest"
 TIMEOUT = 30.0
